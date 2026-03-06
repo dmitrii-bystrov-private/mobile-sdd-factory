@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gws:*)",
+      "Bash(glab:*)",
+      "Bash(jira:*)",
+      "Bash(jq:*)",
+      "Bash(grep:*)",
+      "Bash(echo:*)",
+      "Bash(date:*)"
+    ],
+    "deny": [
+      "Bash(rm:*)",
+      "Bash(glab mr merge:*)",
+      "Bash(glab mr close:*)",
+      "Bash(jira issue delete:*)"
+    ]
+  }
+}
