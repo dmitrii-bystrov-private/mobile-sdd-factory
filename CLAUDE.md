@@ -18,11 +18,13 @@ Auth: `glab auth login` (gitlab.com)
 
 Common commands:
 ```
-# My open MRs
-glab mr list --state opened --assignee @me
+# My open MRs (run from iOS or Android project dir)
+cd /Users/d.bystrov/Projects/Finom/finomcommon && glab mr list --assignee=@me
+cd /Users/d.bystrov/Projects/Finom/finom && glab mr list --assignee=@me
 
 # MRs awaiting my review
-glab mr list --state opened --reviewer @me
+cd /Users/d.bystrov/Projects/Finom/finomcommon && glab mr list --reviewer=@me
+cd /Users/d.bystrov/Projects/Finom/finom && glab mr list --reviewer=@me
 
 # View MR details + diff
 glab mr view <id>
@@ -32,7 +34,7 @@ glab mr diff <id>
 glab mr note list <id>
 
 # My open issues
-glab issue list --state opened --assignee @me
+glab issue list --assignee=@me
 
 # Pipeline status for current branch
 glab pipeline status
@@ -40,6 +42,8 @@ glab pipeline status
 # CI job logs
 glab pipeline ci view
 ```
+
+Note: `--state` flag does not exist in this version of glab. Run all glab commands from the relevant project directory (iOS or Android), not from the assistant directory.
 
 ### acli — Jira Cloud (issues, backlog, boards)
 Installed: `brew tap atlassian/homebrew-acli && brew install acli`
@@ -87,4 +91,3 @@ When asked to look at or work on a mobile project, use these paths as the workin
 
 ## Slash commands
 - `/standup`  — daily standup summary
-- `/review`   — MRs waiting for my attention
