@@ -13,14 +13,12 @@ check() {
 }
 
 check claude  "Install: npm install -g @anthropic-ai/claude-code"
-check gws     "Install: npm install -g @googleworkspace/cli"
 check glab    "Install: brew install glab"
 check acli    "Install: brew tap atlassian/homebrew-acli && brew install acli"
 check jq      "Install: brew install jq"
 
 echo ""
 echo "==> Auth setup (run these once if not done):"
-echo "  gws auth setup     # Google Workspace OAuth"
 echo "  glab auth login    # gitlab.com"
 echo "  acli jira auth login  # Atlassian account OAuth"
 echo ""

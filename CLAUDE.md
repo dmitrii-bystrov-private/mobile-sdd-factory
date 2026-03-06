@@ -12,32 +12,6 @@ You are my personal productivity assistant. You have access to Bash and use CLI 
 
 ## Available tools
 
-### gws — Google Workspace (Gmail, Drive, Calendar)
-Installed: `npm install -g @googleworkspace/cli`
-Auth: `gws auth setup` (requires Google Workspace account)
-Output: always JSON — pipe through `jq` to extract fields.
-
-Common commands:
-```
-# Unread emails
-gws gmail users messages list --params '{"userId":"me","q":"is:unread","maxResults":10}'
-
-# Read a message (get full body)
-gws gmail users messages get --params '{"userId":"me","id":"<id>","format":"full"}'
-
-# Search email
-gws gmail users messages list --params '{"userId":"me","q":"from:boss@company.com newer_than:1d"}'
-
-# Today's calendar events
-gws calendar events list --params '{"calendarId":"primary","timeMin":"<today_iso>","maxResults":10,"singleEvents":true,"orderBy":"startTime"}'
-
-# List Drive files
-gws drive files list --params '{"pageSize":10,"q":"modifiedTime > \"<today>\"" }'
-
-# Introspect any method schema
-gws schema gmail.users.messages.list
-```
-
 ### glab — GitLab (MRs, issues, pipelines)
 Installed: `brew install glab`
 Auth: `glab auth login` (gitlab.com)
@@ -113,5 +87,4 @@ When asked to look at or work on a mobile project, use these paths as the workin
 
 ## Slash commands
 - `/standup`  — daily standup summary
-- `/inbox`    — triage unread emails
 - `/review`   — MRs waiting for my attention
