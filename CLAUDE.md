@@ -67,29 +67,39 @@ glab pipeline status
 glab pipeline ci view
 ```
 
-### jira — Jira Cloud (issues, sprints, boards)
-Installed: `brew install jira-cli`
-Auth: `jira init` (jira.atlassian.net, API token from id.atlassian.com)
+### acli — Jira Cloud (issues, backlog, boards)
+Installed: `brew tap atlassian/homebrew-acli && brew install acli`
+Auth: `acli jira auth login` (requires Atlassian account)
+
+Saved filters:
+- `10494` — current backlog: in-progress + in-testing tasks
+- `10495` — tasks passed to testing
 
 Common commands:
 ```
-# My issues in current sprint
-jira issue list --assignee $(jira me) --sprint active
+# My backlog (in progress + in testing) — primary filter
+acli jira workitem search --filter 10494 --fields key,summary,status,priority
 
-# View issue
-jira issue view PROJ-123
+# Tasks in testing
+acli jira workitem search --filter 10495 --fields key,summary,status,priority
 
-# Issues assigned to me, by priority
-jira issue list --assignee $(jira me) --priority High,Critical
+# View a work item
+acli jira workitem view PROJ-123
 
-# Recent activity on an issue
-jira issue view PROJ-123 --comments
-
-# Current sprint info
-jira sprint list --current
+# View a work item in browser
+acli jira workitem view PROJ-123 --web
 
 # Search with JQL
-jira issue list --jql "assignee = currentUser() AND status != Done ORDER BY priority DESC"
+acli jira workitem search --jql "assignee = currentUser() AND status != Done ORDER BY priority DESC" --fields key,summary,status,priority
+
+# Create a work item
+acli jira workitem create --summary "Title" --project "PROJ" --type Task
+
+# Edit a work item
+acli jira workitem edit --key PROJ-123 --summary "Updated title"
+
+# List projects
+acli jira project list
 ```
 
 ## Mobile projects
