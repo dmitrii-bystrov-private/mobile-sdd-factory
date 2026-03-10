@@ -82,3 +82,9 @@ echo "=== Jira backlog ==="
 cat "$TMP/jira.txt"
 
 rm -rf "$TMP"
+
+# On Mondays — check for tool updates
+if [ "$(date +%u)" = "1" ]; then
+    echo ""
+    bash "$(dirname "$0")/check-updates.sh"
+fi
