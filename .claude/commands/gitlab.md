@@ -1,13 +1,17 @@
 Show MRs that need my attention.
 
-1. MRs where I am a reviewer:
-   `glab mr list --state opened --reviewer @me --output json | jq '[.[] | {id:.iid, title:.title, author:.author.username, created:.created_at, url:.web_url}]'`
+Run `bash gitlab.sh` — it fetches all data in parallel and filters out already approved MRs.
 
-2. My MRs without approval (stuck in review):
-   `glab mr list --state opened --assignee @me --output json | jq '[.[] | {id:.iid, title:.title, reviewers:[.reviewers[].username], url:.web_url}]'`
+Output format (pipe-separated): `platform|!id|title|author|date|stats`
 
-For each MR from step 1, show:
-- Title and URL
-- Author and creation date
+Produce a summary in the following format:
 
-Sort by date (oldest first).
+**На ревью** (oldest first, only unapproved):
+| Платформа | MR | Автор | Дата | Размер |
+|-----------|-----|-------|------|--------|
+
+**Мои MR без апрува:**
+| Платформа | MR | Ревьюеры |
+|-----------|-----|---------|
+
+Show plain titles, not markdown links. If a section is empty — say "нет".
