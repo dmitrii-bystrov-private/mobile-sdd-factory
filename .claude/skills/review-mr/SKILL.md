@@ -1,5 +1,8 @@
 ---
 description: Review a GitLab MR — fetch diff, load Jira context, read project rules, explore codebase with RAG tools, and produce a structured review
+
+TRIGGER when: user mentions an MR number or MR URL together with intent to review it — review, check, look at, go through, give feedback, or any similar phrasing in any language.
+DO NOT TRIGGER when: user only asks about MR status, pipeline, or whether an MR exists — without asking for a code review.
 ---
 
 Review a GitLab MR. Argument: MR ID (e.g. `/review-mr 3900`).

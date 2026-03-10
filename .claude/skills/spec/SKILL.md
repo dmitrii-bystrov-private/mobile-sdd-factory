@@ -1,5 +1,8 @@
 ---
 description: Prepare a technical specification for a Jira task — read the task, research the codebase, build an implementation plan, optionally decompose into subtasks, and write spec files for AI agents
+
+TRIGGER when: user mentions a Jira key (e.g. ANDR-12345, IOS-67890) together with intent to work on it — plan, implement, start, tackle, pick up, figure out, break down, spec out, or any similar phrasing in any language.
+DO NOT TRIGGER when: user only asks to view, check status, or discuss a task without intent to implement it.
 ---
 
 Prepare a technical specification for a Jira task. Argument: Jira key (e.g. `/spec ANDR-12345` or `/spec IOS-67890`).
@@ -154,10 +157,42 @@ Step-by-step implementation in recommended execution order:
 Before presenting results, go through `checklist.md` and verify each item.
 Surface only failed items — skip passing ones.
 
-### 8. Confirm and summarize
+### 8. Prepare git environment
+
+Run from `<project_dir>`:
+
+1. **Check current branch:**
+   ```
+   git branch --show-current
+   ```
+   If not on `master`, switch to master first:
+   ```
+   git checkout master
+   ```
+
+2. **Pull latest master:**
+   ```
+   git pull origin master
+   ```
+
+3. **Determine branch type** from the Jira task:
+   - Bug fix (task type is Bug, or summary contains "fix"/"bug") → `bugfix/<TASK-KEY>`
+   - Everything else → `feature/<TASK-KEY>`
+
+4. **Create and switch to the new branch:**
+   ```
+   git checkout -b feature/<TASK-KEY>
+   # or
+   git checkout -b bugfix/<TASK-KEY>
+   ```
+
+Do not commit anything. The branch is ready for the developer or AI agent to start implementation.
+
+### 9. Confirm and summarize
 
 After writing spec files, show the user:
 - List of files created with their paths
 - Brief summary of the implementation plan for each
+- Git branch created (e.g. `feature/ANDR-12345`)
 - Checklist findings (failed items only)
 - Any open questions or risks identified during research
