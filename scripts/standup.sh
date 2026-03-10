@@ -22,8 +22,17 @@ fetch_unapproved_review() {
     local encoded="$2"
     local out="$3"
 
-    local mrs
-    mrs=$(cd "$dir" && NO_COLOR=1 glab mr list --reviewer @me --output json 2>/dev/null)
+    local mrs err_file
+    err_file=$(mktemp)
+    mrs=$(cd "$dir" && NO_COLOR=1 glab mr list --reviewer @me --output json 2>"$err_file")
+
+    if [ -z "$mrs" ] || ! echo "$mrs" | jq -e . >/dev/null 2>&1; then
+        echo "ERROR: $(cat "$err_file")" > "$out"
+        rm -f "$err_file"
+        return
+    fi
+    rm -f "$err_file"
+
     local count
     count=$(echo "$mrs" | jq 'length')
 
