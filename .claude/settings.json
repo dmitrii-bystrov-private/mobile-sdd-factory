@@ -1,13 +1,20 @@
 {
   "permissions": {
     "allow": [
+      "Read(../Finom/finomcommon/workdir/**)",
+      "Write(../Finom/finomcommon/workdir/**)",
+      "Bash(rm ../Finom/finomcommon/workdir/**)",
+      "Read(../Finom/finom/workdir/**)",
+      "Write(../Finom/finom/workdir/**)",
+      "Bash(rm ../Finom/finom/workdir/**)",
       "Bash(gws:*)",
       "Bash(glab:*)",
       "Bash(acli:*)",
       "Bash(jq:*)",
       "Bash(grep:*)",
       "Bash(echo:*)",
-      "Bash(date:*)"
+      "Bash(date:*)",
+      "Bash(bash *.sh)"
     ],
     "deny": [
       "Bash(rm:*)",

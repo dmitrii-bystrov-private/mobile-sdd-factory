@@ -9,6 +9,5 @@ Show MRs that need my attention.
 For each MR from step 1, show:
 - Title and URL
 - Author and creation date
-- How many days it has been waiting in review
 
-Sort by date (oldest first). Flag with 🔴 if the MR has been open for more than 2 days.
+Sort by date (oldest first).

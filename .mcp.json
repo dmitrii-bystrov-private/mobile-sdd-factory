@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ios-rag": {
+      "type": "http",
+      "url": "https://mobile.finom.world/mcp/swift"
+    },
+    "android-rag": {
+      "type": "http",
+      "url": "https://mobile.finom.world/mcp/kotlin"
+    }
+  }
+}

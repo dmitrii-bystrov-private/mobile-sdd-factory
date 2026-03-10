@@ -1,7 +1,6 @@
-Compile my daily standup. Run the following steps in parallel:
+Compile my daily standup.
 
-1. **GitLab** — my open MRs (`glab mr list --state opened --assignee @me`) and MRs where I am a reviewer (`glab mr list --state opened --reviewer @me`)
-2. **Jira** — current backlog via saved filter 10494 (`acli jira workitem search --filter 10494 --fields key,summary,status,priority`)
+Run `bash standup.sh` — it fetches all data in parallel (GitLab iOS/Android + Jira).
 
 Produce a summary in the following format:
 
