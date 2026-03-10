@@ -57,20 +57,35 @@ Read these files to understand the coding standards before reviewing:
 
 Use **ios-rag** for iOS, **android-rag** for Android.
 
-For each meaningful changed file (skip generated files, version bumps, resource-only changes):
+**Important:** RAG indexes only the `master` branch. Entirely new files added in the MR are not indexed — RAG tools will return no results for them. Focus RAG exploration on **modified existing files**, not new ones.
+
+For each meaningful **modified existing** file (skip generated files, version bumps, resource-only changes):
 
 1. `search` — look up the main class/protocol/function being changed
 2. `graph_neighbors` — understand dependencies (`out`: what it uses, `in`: who uses it)
 3. `semantic_search` — if something is unclear, find related patterns in the codebase
 
+For MRs that are mostly new code, still use RAG on the modified existing files — these are often the most risky integration points (e.g. Activity lifecycle, shared presenters, feature mediator).
+
 Goal: understand the context well enough to evaluate correctness and architecture fit — not just syntax.
 
-### 5. Post comments (optional)
+### 5. Agree on comments and post
 
-If the user asks to post comments to GitLab, use `glab mr note`:
+After producing the review, go through findings with the user:
+- The user may want to skip, downgrade, or reword individual findings
+- Once the list is agreed, **show the full text of each comment** as it will appear in GitLab so the user can review wording before posting
+
+Once approved, post each comment individually using `glab mr note`:
 
 ```
 cd <project_dir> && glab mr note <id> -m "<comment text>"
+```
+
+**Always add a final closing comment** tagging the MR author:
+```
+@<author> thanks for the implementation — <one sentence on what looks good>.
+Left a few comments above, would appreciate a look.
+The two most important ones are <#N> and <#N>.
 ```
 
 **Do not attempt inline (positional) comments via the Discussions API** — GitLab silently ignores the position and falls back to a general comment without any error, even with correct SHAs and line numbers. The API requires `application/json` content-type which `glab api` does not support for nested parameters.
@@ -82,7 +97,7 @@ Instead, reference the location clearly in the comment body:
 
 **Notes:**
 - `glab api` does **not** support `--jq` flag — always pipe to `| jq` instead
-- Always confirm with the user before posting — comments are visible to the whole team
+- Never post comments without explicit user approval — they are visible to the whole team
 
 ### 6. Produce a structured review
 
