@@ -1,5 +1,9 @@
 {
   "mcpServers": {
+    "notion": {
+      "type": "http",
+      "url": "https://mcp.notion.com/mcp"
+    },
     "ios-rag": {
       "type": "http",
       "url": "https://mobile.finom.world/mcp/swift"
@@ -7,6 +11,10 @@
     "android-rag": {
       "type": "http",
       "url": "https://mobile.finom.world/mcp/kotlin"
+    },
+    "firebase": {
+      "command": "firebase",
+      "args": ["mcp", "--only", "crashlytics,core"]
     }
   }
 }

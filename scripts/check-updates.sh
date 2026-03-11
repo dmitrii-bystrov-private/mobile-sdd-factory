@@ -10,21 +10,29 @@ RESET="\033[0m"
 
 section() { echo -e "\n${BOLD}=== $1 ===${RESET}"; }
 
-# ── Brew tools (glab, acli) ──────────────────────────────────────────────────
+# ── Brew tools ───────────────────────────────────────────────────────────────
 section "Brew tools"
 
-for tool in glab acli; do
-    CURRENT=$(brew list --versions "$tool" 2>/dev/null | awk '{print $2}')
-    OUTDATED_LINE=$(brew outdated --verbose "$tool" 2>/dev/null || true)
+check_brew_tool() {
+    local tool=$1
+    local is_cask=${2:-false}
+    local cask_flag=""
+    [[ "$is_cask" == "true" ]] && cask_flag="--cask"
+
+    CURRENT=$(brew list --versions $cask_flag "$tool" 2>/dev/null | awk '{print $2}')
+    OUTDATED_LINE=$(brew outdated --verbose $cask_flag "$tool" 2>/dev/null || true)
     if [[ -n "$OUTDATED_LINE" ]]; then
         LATEST=$(echo "$OUTDATED_LINE" | awk '{print $NF}')
         echo -e "${YELLOW}$tool${RESET}: $CURRENT → ${BOLD}$LATEST${RESET}"
-        echo "  Changelog: $(brew info "$tool" --json | python3 -c "import sys,json; d=json.load(sys.stdin)[0]; print(d.get('urls',{}).get('homepage',''))" 2>/dev/null)"
-        echo "  Update: brew upgrade $tool"
+        echo "  Update: brew upgrade $cask_flag $tool"
     else
         echo -e "${GREEN}$tool${RESET}: $CURRENT (up to date)"
     fi
-done
+}
+
+check_brew_tool glab
+check_brew_tool acli
+check_brew_tool codex true
 
 # ── Claude Code ──────────────────────────────────────────────────────────────
 section "Claude Code CLI"
@@ -38,4 +46,20 @@ else
     echo -e "${YELLOW}claude${RESET}: $CURRENT → ${BOLD}$LATEST${RESET}"
     echo "  Changelog: https://github.com/anthropics/claude-code/releases/tag/$LATEST"
     echo "  Update: claude update"
+fi
+
+# ── npm global packages ───────────────────────────────────────────────────────
+section "npm global packages"
+
+OUTDATED=$(npm outdated -g --json 2>/dev/null || true)
+if [[ -z "$OUTDATED" || "$OUTDATED" == "{}" ]]; then
+    echo -e "${GREEN}All npm global packages are up to date${RESET}"
+else
+    echo "$OUTDATED" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for pkg, info in data.items():
+    print(f'\033[33m{pkg}\033[0m: {info[\"current\"]} → \033[1m{info[\"latest\"]}\033[0m')
+print('  Update: npm update -g')
+"
 fi
