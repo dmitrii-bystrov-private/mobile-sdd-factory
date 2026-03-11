@@ -7,6 +7,8 @@ DO NOT TRIGGER when: user only asks to view, check status, or discuss a task wit
 
 Prepare a technical specification for a Jira task. Argument: Jira key (e.g. `/spec ANDR-12345` or `/spec IOS-67890`).
 
+> **IMPORTANT: This skill produces a spec file only. Do NOT modify any project source files. Implementation is done by a separate coding agent reading the spec.**
+
 ## Steps
 
 ### 1. Load Jira task
@@ -23,14 +25,15 @@ Determine platform from the key prefix:
 
 If no argument is given, ask for the Jira key.
 
-### 2. Ask clarifying questions (if needed)
+### 2. Discuss the task with the user
 
-Before diving into codebase research, surface any ambiguities:
-- Unclear requirements or edge cases in the task description
-- Missing information about expected behavior
-- Conflicting signals between description and acceptance criteria
+**Always do this before any codebase research.** Present a brief summary of what you understood from Jira, then ask the user to clarify or add context:
 
-Present questions clearly and wait for answers before proceeding.
+- Summarize the task in 2–3 sentences in your own words
+- Ask if there are details, edge cases, or implementation ideas not captured in Jira
+- Ask if there are any constraints or decisions already made (e.g. "we already decided to use X approach")
+
+**Wait for the user's response before proceeding.** Do not load project rules or research the codebase until you have their input.
 
 ### 3. Load project rules
 
@@ -73,7 +76,10 @@ Estimate complexity based on research findings.
   ```
 - Always confirm before creating subtasks (mutating Jira)
 
-### 6. Write spec files
+### 6. Write spec files ← THIS IS THE ONLY DELIVERABLE
+
+The spec file is the end product of this skill. Once the spec is written, your job is done.
+Do not implement the changes — not even partially, not as a "preview". The coding agent will read the spec and do the implementation.
 
 For each task (or approved subtask), create a spec file:
 
@@ -159,20 +165,20 @@ Surface only failed items — skip passing ones.
 
 ### 8. Prepare git environment
 
-Run from `<project_dir>`:
+Use `git -C <project_dir>` for all git commands — do NOT use `cd && git` (triggers a security check).
 
 1. **Check current branch:**
    ```
-   git branch --show-current
+   git -C <project_dir> branch --show-current
    ```
    If not on `master`, switch to master first:
    ```
-   git checkout master
+   git -C <project_dir> checkout master
    ```
 
 2. **Pull latest master:**
    ```
-   git pull origin master
+   git -C <project_dir> pull origin master
    ```
 
 3. **Determine branch type** from the Jira task:
@@ -181,9 +187,9 @@ Run from `<project_dir>`:
 
 4. **Create and switch to the new branch:**
    ```
-   git checkout -b feature/<TASK-KEY>
+   git -C <project_dir> checkout -b feature/<TASK-KEY>
    # or
-   git checkout -b bugfix/<TASK-KEY>
+   git -C <project_dir> checkout -b bugfix/<TASK-KEY>
    ```
 
 Do not commit anything. The branch is ready for the developer or AI agent to start implementation.

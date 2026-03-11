@@ -48,7 +48,16 @@ fetch_unapproved_review() {
             | jq -r "[.approved_by[].user.username] | contains([\"$ME\"])")
 
         if [ "$approved" = "false" ]; then
-            echo "!$id $title ($branch)" >> "$out"
+            local my_comments
+            my_comments=$(cd "$dir" && NO_COLOR=1 glab api "projects/$encoded/merge_requests/$id/notes?per_page=100" 2>/dev/null \
+                | jq -r "[.[] | select(.author.username == \"$ME\" and (.system // false) == false)] | length")
+
+            local status_tag=""
+            if [ "${my_comments:-0}" -gt 0 ]; then
+                status_tag=" [commented, waiting author]"
+            fi
+
+            echo "!$id $title ($branch)$status_tag" >> "$out"
         fi
     done
 
