@@ -6,33 +6,6 @@
 
 ## Feature component initialization (DI)
 
-All feature components use the same pattern — mutable nullable var without synchronization. This is **intentional and standard** across the project (confirmed in 6+ components: PhotoViewer, Tags, Dashboard, Chat, Login, Cards).
+All feature components use a mutable nullable var without thread synchronization. This is **intentional and standard** across the project (confirmed in 6+ components: PhotoViewer, Tags, Dashboard, Chat, Login, Cards).
 
-```kotlin
-companion object {
-    private lateinit var getDependenciesCallback: () -> MyFeatureDependencies
-    private var localComponentStorage: ComponentStorage<MyFeatureComponent>? = null
-
-    val componentStorage: ComponentStorage<MyFeatureComponent>
-        get() {
-            if (localComponentStorage == null) init()
-            return localComponentStorage!!
-        }
-
-    fun createInitializer(getDependencies: () -> MyFeatureDependencies): () -> IMyFeature {
-        getDependenciesCallback = getDependencies
-        return { init() }
-    }
-
-    private fun init(): IMyFeature {
-        localComponentStorage = ComponentStorage(
-            rootComponent = DaggerMyFeatureComponent.builder()
-                // ...
-                .build()
-        )
-        return componentStorage.rootComponent
-    }
-}
-```
-
-No thread synchronization (`@Volatile`, `synchronized`) — do not flag this as an issue in code review.
+Do **not** flag missing `@Volatile` or `synchronized` in feature component `companion object` initializers as a review issue.

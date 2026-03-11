@@ -33,13 +33,7 @@
       "mcp__android-rag__search",
       "mcp__android-rag__semantic_search",
       "mcp__android-rag__read_file",
-      "mcp__android-rag__graph_neighbors",
-      "mcp__firebase__firebase_list_projects",
-      "mcp__firebase__firebase_read_resources",
-      "mcp__firebase__firebase_list_apps",
-      "mcp__firebase__firebase_update_environment",
-      "mcp__firebase__firebase_get_environment",
-      "mcp__firebase__crashlytics_get_report"
+      "mcp__android-rag__graph_neighbors"
     ],
     "deny": [
       "Bash(rm:*)",
@@ -51,5 +45,19 @@
       "enabled": true,
       "autoAllowBashIfSandboxed": true
     }
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate-spec.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }
