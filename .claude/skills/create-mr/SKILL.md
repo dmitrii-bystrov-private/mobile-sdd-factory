@@ -3,7 +3,6 @@ description: >
   Commit changes, push, and open a GitLab merge request to master.
   TRIGGER when the user asks to create/open/push an MR, merge request, or PR — or says "push and create MR", "open MR", "submit MR".
   DO NOT TRIGGER for reviewing MRs, checking MR status, or posting to Slack (that is /request-review).
-disable-model-invocation: true
 ---
 
 Commit staged changes, push the branch, and open a merge request on GitLab. Arguments: `$ARGUMENTS`
@@ -54,7 +53,7 @@ If the push fails (e.g. rejected), explain the error and suggest a fix. Do NOT f
 Extract a Jira key from the branch name if possible (e.g. `feature/ANDR-12345` → `ANDR-12345`).
 
 ```
-cd <project_dir> && glab mr create --fill --target-branch master --remove-source-branch
+cd <project_dir> && glab mr create --fill --title "<JIRA-KEY>: <summary>" --target-branch master --remove-source-branch --yes
 ```
 
 If `--fill` produces a poor title, override with `--title "<JIRA-KEY>: <summary>"`.

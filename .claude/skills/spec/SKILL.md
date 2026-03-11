@@ -45,9 +45,9 @@ Write a technical spec for Jira task <JIRA-KEY>.
 Task summary: <summary from Jira>
 Description: <description from Jira>
 Acceptance criteria: <criteria from Jira>
-Story points: <SP>
 Platform: <iOS/Android>
 Project directory: <project_dir>
+Spec output path: <project_dir>/workdir/<TASK-KEY>/spec.md
 
 User context: <any details, constraints, or decisions from the discussion in step 2>
 ```

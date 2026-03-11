@@ -61,7 +61,7 @@ Run sequentially:
 
 1. Post the comment:
 ```
-acli jira workitem comment --key <KEY> --body "<comment text>"
+acli jira workitem comment create --key <KEY> --body "<comment text>"
 ```
 
 2. Transition the task:

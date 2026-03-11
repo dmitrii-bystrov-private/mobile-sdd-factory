@@ -1,8 +1,6 @@
 ---
 name: implement
 description: Implement a task from its spec using the implementer subagent, then review the result
-disable-model-invocation: true
-
 TRIGGER when: user asks to implement, code, execute, or build a task that already has a spec — or says "implement" after running /spec.
 DO NOT TRIGGER when: user asks to create a spec (that is the /spec skill), or asks about implementation without intent to start coding.
 ---

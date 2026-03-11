@@ -41,25 +41,34 @@ Run from the appropriate project directory:
 From the output extract:
 - **title** — MR title (should already include Jira key, e.g. `IOS-11987: ...`)
 - **web_url** — base MR URL (append `/diffs` for the final link)
-- **diff stats** — typically shown as `N files changed, X insertions(+), Y deletions(-)`
+
+Then fetch diff stats via the GitLab API (replace `/` with `%2F` in the project path):
+```
+glab api projects/<encoded-project-path>/merge_requests/<id>/diffs \
+  | jq '[.[] | {a: .diff | split("\n") | map(select(startswith("+"))) | length, d: .diff | split("\n") | map(select(startswith("-"))) | length}] | {files: length, additions: map(.a) | add, deletions: map(.d) | add}'
+```
+
+Examples of encoded project paths:
+- Android: `M69%2Fmobile%2Fandroid%2Ffinom`
+- iOS: `M69%2Fmobile%2Fios%2Ffinomcommon`
 
 ## Step 3 — Format message
 
-Build the Slack message in this exact format:
+Build the Slack message in this exact format. Both links must use Slack's explicit `<URL>` or `<URL|text>` syntax — raw URLs cause Slack to auto-wrap them in `<>` and capture the next line as part of the link:
 ```
-<title>
-<web_url>/diffs
+<https://pnlfintech.atlassian.net/browse/<JIRA-KEY>|<JIRA-KEY>>: <summary>
+<https://<web_url>/diffs>
 <N> files +<additions> −<deletions>
 ```
 
 Example:
 ```
-IOS-11987: Improve build info screen to better distinguish Beta and Prod builds
-https://gitlab.com/M69/mobile/ios/finomcommon/-/merge_requests/2867/diffs
+<https://pnlfintech.atlassian.net/browse/IOS-11987|IOS-11987>: Improve build info screen to better distinguish Beta and Prod builds
+<https://gitlab.com/M69/mobile/ios/finomcommon/-/merge_requests/2867/diffs>
 3 files +19 −4
 ```
 
-If diff stats are unavailable, omit the third line.
+If diff stats are unavailable, use the URL alone on the second line.
 
 ## Step 4 — Preview and confirm
 
