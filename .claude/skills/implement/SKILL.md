@@ -91,13 +91,17 @@ Confirm the commit was created successfully.
 
 **If the task is a subtask:**
 
-Fetch all subtasks of the parent story and their statuses:
-```bash
-acli jira workitem search --jql "parent = <STORY-KEY>" --fields key,summary,status
-```
+1. Run the `send-to-test` skill to post a QA comment and transition the subtask to Ready for test:
+   ```
+   /send-to-test <TASK-KEY>
+   ```
 
-- If there are subtasks still in **To Do** or **In Progress** → list them and suggest: `/spec <NEXT-SUBTASK-KEY>`
-- If **all subtasks are Done / Ready for test / Resolved** → suggest: `/create-mr <STORY-KEY>`
+2. Fetch all subtasks of the parent story and their statuses:
+   ```bash
+   acli jira workitem search --jql "parent = <STORY-KEY>" --fields key,summary,status
+   ```
+   - If there are subtasks still in **To Do** or **In Progress** → list them and suggest: `/spec <NEXT-SUBTASK-KEY>`
+   - If **all subtasks are Done / Ready for test / Resolved** → suggest: `/create-mr <STORY-KEY>`
 
 **If the task is a story (no subtasks):**
 
