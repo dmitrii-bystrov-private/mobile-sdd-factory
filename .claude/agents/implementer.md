@@ -2,7 +2,12 @@
 name: implementer
 description: Implement a task from a spec file — read the spec, follow the plan step by step, and write code in the project
 model: sonnet
-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__ios-rag__search, mcp__ios-rag__semantic_search, mcp__ios-rag__read_file, mcp__ios-rag__graph_neighbors, mcp__android-rag__search, mcp__android-rag__semantic_search, mcp__android-rag__read_file, mcp__android-rag__graph_neighbors
+tools: Read, Write, Edit, Glob, Grep, Bash
+mcpServers:
+  - ios-rag
+  - android-rag
+permissionMode: bypassPermissions
+maxTurns: 80
 ---
 
 You are a senior mobile developer. Your job is to implement a task strictly following a provided spec file.

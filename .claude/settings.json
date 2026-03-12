@@ -1,32 +1,20 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Read(/Users/d.bystrov/Projects/Finom/finomcommon/**)",
-      "Glob(/Users/d.bystrov/Projects/Finom/finomcommon/**)",
-      "Grep(/Users/d.bystrov/Projects/Finom/finomcommon/**)",
-      "Edit(/Users/d.bystrov/Projects/Finom/finomcommon/**)",
-      "Write(/Users/d.bystrov/Projects/Finom/finomcommon/workdir/**)",
-      "Bash(mkdir -p /Users/d.bystrov/Projects/Finom/finomcommon/workdir/**)",
-      "Bash(rm /Users/d.bystrov/Projects/Finom/finomcommon/workdir/**)",
-      "Read(/Users/d.bystrov/Projects/Finom/finom/**)",
-      "Glob(/Users/d.bystrov/Projects/Finom/finom/**)",
-      "Grep(/Users/d.bystrov/Projects/Finom/finom/**)",
-      "Edit(/Users/d.bystrov/Projects/Finom/finom/**)",
-      "Write(/Users/d.bystrov/Projects/Finom/finom/workdir/**)",
-      "Bash(mkdir -p /Users/d.bystrov/Projects/Finom/finom/workdir/**)",
-      "Bash(rm /Users/d.bystrov/Projects/Finom/finom/workdir/**)",
       "Bash(glab *)",
       "Bash(acli *)",
       "Bash(git *)",
       "Bash(jq *)",
       "Bash(bash *)",
-      "Bash(cd *)",
       "Bash(chmod *)",
       "Bash(find *)",
       "Bash(brew *)",
       "Bash(npm *)",
       "Bash(curl *)",
       "Bash(python3 *)",
+      "Bash(mkdir *)",
+      "Bash(rm *)",
       "WebSearch",
       "mcp__ios-rag__search",
       "mcp__ios-rag__semantic_search",
@@ -38,15 +26,16 @@
       "mcp__android-rag__graph_neighbors"
     ],
     "deny": [
-      "Bash(rm *)",
+      "Bash(rm -rf *)",
+      "Bash(rm -r *)",
+      "Bash(git push --force *)",
       "Bash(glab mr merge *)",
       "Bash(glab mr close *)",
       "Bash(acli jira workitem delete *)"
-    ],
-    "sandbox": {
-      "enabled": true,
-      "autoAllowBashIfSandboxed": true
-    }
+    ]
+  },
+  "sandbox": {
+    "enabled": true
   },
   "hooks": {
     "PreToolUse": [

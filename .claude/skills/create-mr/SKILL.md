@@ -11,7 +11,7 @@ Commit staged changes, push the branch, and open a merge request on GitLab. Argu
 
 Identify the project from the current git branch or `$ARGUMENTS`:
 - If currently in a mobile project directory, use that
-- If a Jira key is provided: `IOS-` → `/Users/d.bystrov/Projects/Finom/finomcommon`, `ANDR-` → `/Users/d.bystrov/Projects/Finom/finom`
+- If a Jira key is provided: `IOS-` → `~/Projects/Finom/finomcommon`, `ANDR-` → `~/Projects/Finom/finom`
 - If ambiguous, ask
 
 Set `<project_dir>` accordingly.
@@ -52,11 +52,25 @@ If the push fails (e.g. rejected), explain the error and suggest a fix. Do NOT f
 
 Extract a Jira key from the branch name if possible (e.g. `feature/ANDR-12345` → `ANDR-12345`).
 
+Build the title: `<JIRA-KEY>: <task summary>` (use the Jira task summary if known, otherwise derive from commits).
+
+Build the description:
+- One-line summary of what was done
+- Jira link: `https://pnlfintech.atlassian.net/browse/<JIRA-KEY>` (if key is available)
+- List of key changes (files/components touched)
+
+Run:
 ```
-cd <project_dir> && glab mr create --fill --title "<JIRA-KEY>: <summary>" --target-branch master --remove-source-branch --yes
+cd <project_dir> && glab mr create \
+  --fill \
+  --title "<JIRA-KEY>: <summary>" \
+  --description "<description>" \
+  --target-branch master \
+  --remove-source-branch \
+  --yes
 ```
 
-If `--fill` produces a poor title, override with `--title "<JIRA-KEY>: <summary>"`.
+Note: `--fill` and `--title` must both be present — `--yes` alone without `--fill` will error.
 
 Show the created MR URL.
 

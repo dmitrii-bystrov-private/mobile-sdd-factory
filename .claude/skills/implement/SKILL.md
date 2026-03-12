@@ -12,8 +12,8 @@ Implement a Jira task from its spec file. Argument: Jira key (e.g. `/implement A
 ### 1. Locate the spec
 
 Determine the project directory from the task key prefix:
-- `IOS-XXXXX` → `/Users/d.bystrov/Projects/Finom/finomcommon`
-- `ANDR-XXXXX` → `/Users/d.bystrov/Projects/Finom/finom`
+- `IOS-XXXXX` → `~/Projects/Finom/finomcommon`
+- `ANDR-XXXXX` → `~/Projects/Finom/finom`
 
 Spec path: `<project_dir>/workdir/<TASK-KEY>/spec.md`
 

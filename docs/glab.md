@@ -6,12 +6,12 @@ Auth: `glab auth login` (gitlab.com)
 Common commands:
 ```
 # My open MRs (run from iOS or Android project dir)
-cd /Users/d.bystrov/Projects/Finom/finomcommon && glab mr list --assignee=@me
-cd /Users/d.bystrov/Projects/Finom/finom && glab mr list --assignee=@me
+cd ~/Projects/Finom/finomcommon && glab mr list --assignee=@me
+cd ~/Projects/Finom/finom && glab mr list --assignee=@me
 
 # MRs awaiting my review
-cd /Users/d.bystrov/Projects/Finom/finomcommon && glab mr list --reviewer=@me
-cd /Users/d.bystrov/Projects/Finom/finom && glab mr list --reviewer=@me
+cd ~/Projects/Finom/finomcommon && glab mr list --reviewer=@me
+cd ~/Projects/Finom/finom && glab mr list --reviewer=@me
 
 # View MR details + diff
 glab mr view <id>

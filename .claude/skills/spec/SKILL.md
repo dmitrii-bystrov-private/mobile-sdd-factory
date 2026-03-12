@@ -1,7 +1,7 @@
 ---
 description: Prepare a technical specification for a Jira task — read the task, discuss with the user, then delegate deep research and spec writing to an Opus subagent
 
-TRIGGER when: user mentions a Jira key (e.g. ANDR-12345, IOS-67890) together with intent to work on it — plan, implement, start, tackle, pick up, figure out, break down, spec out, or any similar phrasing in any language.
+TRIGGER when: user mentions a Jira key (e.g. ANDR-12345, IOS-67890) or a Jira URL (e.g. https://pnlfintech.atlassian.net/browse/IOS-12007) together with intent to work on it — plan, implement, start, tackle, pick up, figure out, break down, spec out, or any similar phrasing in any language.
 DO NOT TRIGGER when: user only asks to view, check status, or discuss a task without intent to implement it.
 ---
 
@@ -14,14 +14,14 @@ Prepare a technical specification for a Jira task. Argument: Jira key (e.g. `/sp
 ### 1. Load Jira task
 
 ```
-acli jira workitem view <JIRA-KEY>
+acli jira workitem view <JIRA-KEY> --fields '*all' --json
 ```
 
-Read: summary, description, acceptance criteria, story points, subtasks, linked issues.
+Read: summary, description, acceptance criteria, story points, subtasks, linked issues, and **comments** (discussions in comments often contain refined requirements or implementation decisions that supersede the original description).
 
 Determine platform from the key prefix:
-- `IOS-XXXXX` → iOS → `/Users/d.bystrov/Projects/Finom/finomcommon`
-- `ANDR-XXXXX` → Android → `/Users/d.bystrov/Projects/Finom/finom`
+- `IOS-XXXXX` → iOS → `~/Projects/Finom/finomcommon`
+- `ANDR-XXXXX` → Android → `~/Projects/Finom/finom`
 
 If no argument is given, ask for the Jira key.
 
@@ -45,6 +45,7 @@ Write a technical spec for Jira task <JIRA-KEY>.
 Task summary: <summary from Jira>
 Description: <description from Jira>
 Acceptance criteria: <criteria from Jira>
+Comments: <comments from Jira — may contain refined requirements or decisions that override the description>
 Platform: <iOS/Android>
 Project directory: <project_dir>
 Spec output path: <project_dir>/workdir/<TASK-KEY>/spec.md

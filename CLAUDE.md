@@ -24,8 +24,8 @@ You are my personal productivity assistant. You have access to Bash and use CLI 
 
 | Platform | Path |
 |----------|------|
-| iOS      | `/Users/d.bystrov/Projects/Finom/finomcommon` |
-| Android  | `/Users/d.bystrov/Projects/Finom/finom` |
+| iOS      | `~/Projects/Finom/finomcommon` |
+| Android  | `~/Projects/Finom/finom` |
 
 When asked to look at or work on a mobile project, use these paths as the working directory.
 

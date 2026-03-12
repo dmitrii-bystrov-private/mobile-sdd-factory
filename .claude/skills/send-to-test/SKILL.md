@@ -38,13 +38,13 @@ Also check what MR (if any) is referenced in the task or was mentioned by the us
 
 ## Step 3 — Draft the comment
 
-Write a short QA comment in English. Structure:
+Write a short QA comment in English as plain text (no markdown, no wiki markup — acli posts plain text and Jira does not render formatting). Structure:
 
 ```
-**What was done**
+What was done:
 <1–3 sentences in plain language, no technical jargon. What changed from the user's perspective.>
 
-**QA notes**
+QA notes:
 <What the tester should focus on. If there are side effects or adjacent areas touched — call them out.
 If the change is trivial, say so: "No edge cases expected — just verify the app launches and requests complete successfully.">
 ```

@@ -2,7 +2,12 @@
 name: spec-writer
 description: Research a codebase and write a technical spec for a Jira task. Receives task context from the orchestrating skill.
 model: opus
-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__ios-rag__search, mcp__ios-rag__semantic_search, mcp__ios-rag__read_file, mcp__ios-rag__graph_neighbors, mcp__android-rag__search, mcp__android-rag__semantic_search, mcp__android-rag__read_file, mcp__android-rag__graph_neighbors
+tools: Read, Write, Edit, Glob, Grep, Bash
+mcpServers:
+  - ios-rag
+  - android-rag
+permissionMode: bypassPermissions
+maxTurns: 100
 ---
 
 You are a senior mobile architect. Your job is to research a codebase and produce a high-quality technical spec for an AI coding agent.
@@ -140,8 +145,10 @@ Use `git -C <project_dir>` for all git commands.
 
 1. Check current branch — if not on `master`, switch to master first.
 2. Pull latest master.
-3. Determine branch type: Bug → `bugfix/<TASK-KEY>`, otherwise → `feature/<TASK-KEY>`.
-4. Create and switch to the new branch.
+3. For iOS only: run `pod install` to update CocoaPods dependencies after master pull.
+4. For iOS: run `mise exec -- tuist generate --no-open` to regenerate the Xcode project.
+5. Determine branch type: Bug → `bugfix/<TASK-KEY>`, otherwise → `feature/<TASK-KEY>`.
+6. Create and switch to the new branch.
 
 Do not commit anything.
 

@@ -1,20 +1,15 @@
 #!/usr/bin/env bash
-# Fetch standup data from GitLab and Jira in parallel
+# Fetch standup data from GitLab (sequential) and Jira
 
 ME="dapper.chita"
 
-IOS_DIR="/Users/d.bystrov/Projects/Finom/finomcommon"
+IOS_DIR=~"/Projects/Finom/finomcommon"
 IOS_PATH="M69%2Fmobile%2Fios%2Ffinomcommon"
 
-ANDROID_DIR="/Users/d.bystrov/Projects/Finom/finom"
+ANDROID_DIR=~"/Projects/Finom/finom"
 ANDROID_PATH="M69%2Fmobile%2Fandroid%2Ffinom"
 
 TMP=$(mktemp -d)
-
-# My MRs and Jira — no filtering needed
-(cd "$IOS_DIR" && NO_COLOR=1 glab mr list --assignee @me 2>&1) > "$TMP/ios_mine.txt" &
-(cd "$ANDROID_DIR" && NO_COLOR=1 glab mr list --assignee @me 2>&1) > "$TMP/andr_mine.txt" &
-acli jira workitem search --filter 10494 --fields key,summary,status,priority 2>&1 > "$TMP/jira.txt" &
 
 # Review MRs — filter out already approved
 fetch_unapproved_review() {
@@ -66,10 +61,14 @@ fetch_unapproved_review() {
     fi
 }
 
-fetch_unapproved_review "$IOS_DIR" "$IOS_PATH" "$TMP/ios_review.txt" &
-fetch_unapproved_review "$ANDROID_DIR" "$ANDROID_PATH" "$TMP/andr_review.txt" &
+# Run all glab calls sequentially to avoid keychain contention
+(cd "$IOS_DIR" && NO_COLOR=1 glab mr list --assignee @me 2>&1) > "$TMP/ios_mine.txt"
+fetch_unapproved_review "$IOS_DIR" "$IOS_PATH" "$TMP/ios_review.txt"
+(cd "$ANDROID_DIR" && NO_COLOR=1 glab mr list --assignee @me 2>&1) > "$TMP/andr_mine.txt"
+fetch_unapproved_review "$ANDROID_DIR" "$ANDROID_PATH" "$TMP/andr_review.txt"
 
-wait
+# Jira can run independently (different tool, no keychain conflict)
+acli jira workitem search --filter 10494 --fields key,summary,status,priority 2>&1 > "$TMP/jira.txt"
 
 echo "=== iOS MRs (mine) ==="
 cat "$TMP/ios_mine.txt"

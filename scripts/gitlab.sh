@@ -2,10 +2,10 @@
 
 ME="dapper.chita"
 
-IOS_DIR="/Users/d.bystrov/Projects/Finom/finomcommon"
+IOS_DIR=~"/Projects/Finom/finomcommon"
 IOS_PATH="M69%2Fmobile%2Fios%2Ffinomcommon"
 
-ANDROID_DIR="/Users/d.bystrov/Projects/Finom/finom"
+ANDROID_DIR=~"/Projects/Finom/finom"
 ANDROID_PATH="M69%2Fmobile%2Fandroid%2Ffinom"
 
 fetch_unapproved() {
