@@ -80,3 +80,9 @@ Use `slack_send_message` with the hardcoded channel ID. No search needed.
 
 On success, confirm: "✓ Отправлено в #<channel>"
 On error, show the error and suggest what to fix.
+
+## Step 6 — Offer to send to testing
+
+After successful Slack send, ask: "Передать задачу <JIRA-KEY> в тест?"
+
+If the user confirms, invoke the `send-to-test` skill with the Jira key.

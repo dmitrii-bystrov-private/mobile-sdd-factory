@@ -3,10 +3,10 @@
 
 ME="dapper.chita"
 
-IOS_DIR=~"/Projects/Finom/finomcommon"
+IOS_DIR="$HOME/Projects/Finom/finomcommon"
 IOS_PATH="M69%2Fmobile%2Fios%2Ffinomcommon"
 
-ANDROID_DIR=~"/Projects/Finom/finom"
+ANDROID_DIR="$HOME/Projects/Finom/finom"
 ANDROID_PATH="M69%2Fmobile%2Fandroid%2Ffinom"
 
 TMP=$(mktemp -d)

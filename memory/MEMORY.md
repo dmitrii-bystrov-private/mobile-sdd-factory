@@ -12,6 +12,10 @@ See: `android-patterns.md`
 
 - Always read Notion links via MCP tool, not WebFetch. See: `feedback-notion.md`
 
+## iOS/Android code verification
+
+- Always verify each finding against current code before fixing. See: `feedback-ios-android-verify.md`
+
 ## Standup preferences
 
 - Do NOT highlight or mention tasks with status "Waiting other platforms" — they require no action and are not relevant to daily standup.
