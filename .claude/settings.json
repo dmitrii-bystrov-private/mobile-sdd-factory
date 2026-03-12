@@ -23,7 +23,17 @@
       "mcp__android-rag__search",
       "mcp__android-rag__semantic_search",
       "mcp__android-rag__read_file",
-      "mcp__android-rag__graph_neighbors"
+      "mcp__android-rag__graph_neighbors",
+      "mcp__notion__notion-search",
+      "mcp__notion__notion-fetch",
+      "mcp__firebase__firebase_list_projects",
+      "mcp__firebase__firebase_read_resources",
+      "mcp__firebase__firebase_list_apps",
+      "mcp__firebase__firebase_update_environment",
+      "mcp__firebase__firebase_get_environment",
+      "mcp__firebase__crashlytics_get_report",
+      "mcp__claude_ai_Slack__slack_search_channels",
+      "mcp__claude_ai_Slack__slack_send_message"
     ],
     "deny": [
       "Bash(rm -rf *)",
@@ -32,11 +42,19 @@
       "Bash(glab mr merge *)",
       "Bash(glab mr close *)",
       "Bash(acli jira workitem delete *)"
+    ],
+    "defaultMode": "acceptEdits",
+    "additionalDirectories": [
+      "~/Projects/Finom/finomcommon",
+      "~/Projects/Finom/finom"
     ]
   },
-  "sandbox": {
-    "enabled": true
-  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "ios-rag",
+    "android-rag",
+    "notion"
+  ],
   "hooks": {
     "PreToolUse": [
       {
