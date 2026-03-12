@@ -55,7 +55,7 @@ If decomposition is needed, include the proposed subtask breakdown in your outpu
 
 ### 4. Write spec file
 
-Create the spec at: `<project_dir>/workdir/<TASK-KEY>/spec.md`
+Create the spec at the path explicitly given in the prompt.
 
 The spec is a self-contained technical brief for an AI coding agent. Write it in English.
 
@@ -139,20 +139,7 @@ Before finishing, verify the spec has:
 - [ ] All files to modify listed with reason
 - [ ] Acceptance criteria map to concrete steps in the plan
 
-### 6. Prepare git environment
-
-Use `git -C <project_dir>` for all git commands.
-
-1. Check current branch — if not on `master`, switch to master first.
-2. Pull latest master.
-3. For iOS only: run `pod install` to update CocoaPods dependencies after master pull.
-4. For iOS: run `mise exec -- tuist generate --no-open` to regenerate the Xcode project.
-5. Determine branch type: Bug → `bugfix/<TASK-KEY>`, otherwise → `feature/<TASK-KEY>`.
-6. Create and switch to the new branch.
-
-Do not commit anything.
-
-### 7. Return summary
+### 6. Return summary
 
 Output:
 - List of files created with paths

@@ -108,8 +108,13 @@ If it does **not** exist:
    ```bash
    git -C <project_dir> worktree add <workdir>/repo -b <branch-name>
    ```
+3. For iOS only: regenerate the Xcode project inside the worktree (tuist first, then pods):
+   ```bash
+   cd <workdir>/repo && mise trust && mise exec -- tuist generate --no-open
+   cd <workdir>/repo && pod install
+   ```
 
-If it already exists, skip creation.
+If it already exists, skip creation and regeneration.
 
 ### 3a. Discuss the task with the user
 
