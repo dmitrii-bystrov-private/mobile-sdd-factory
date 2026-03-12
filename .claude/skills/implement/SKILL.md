@@ -9,38 +9,35 @@ Implement a Jira task from its spec file. Argument: Jira key (e.g. `/implement A
 
 ## Steps
 
-### 1. Locate the spec
+### 1. Locate the spec and worktree
 
-Determine the project directory from the task key prefix:
-- `IOS-XXXXX` → `~/Projects/Finom/finomcommon`
-- `ANDR-XXXXX` → `~/Projects/Finom/finom`
+Set `<workdir>` = `~/Projects/Finom/workdir/<TASK-KEY>`.
 
-Spec path: `<project_dir>/workdir/<TASK-KEY>/spec.md`
+Read the spec file at `<workdir>/spec.md`. If it does not exist, tell the user and suggest running `/spec <TASK-KEY>` first.
 
-Read the spec file. If it does not exist, tell the user and suggest running `/spec <TASK-KEY>` first.
-
-### 2. Verify git branch
-
-```
-git -C <project_dir> branch --show-current
+Verify the worktree exists:
+```bash
+ls <workdir>/repo
 ```
 
-Confirm the branch matches the task (e.g. `feature/<TASK-KEY>` or `bugfix/<TASK-KEY>`). If not, ask the user before switching.
+If it does not exist, tell the user and suggest running `/spec <TASK-KEY>` first (spec creates the worktree).
 
-### 3. Launch the implementer agent
+The worktree at `<workdir>/repo` is the working directory for all implementation work — not the main project directory.
 
-Use the Agent tool to launch the `implementer` subagent with isolation set to `worktree`:
+### 2. Launch the implementer agent
+
+Use the Agent tool to launch the `implementer` subagent:
 
 ```
-Implement the task following the spec at <project_dir>/workdir/<TASK-KEY>/spec.md
+Implement the task following the spec at ~/Projects/Finom/workdir/<TASK-KEY>/spec.md
 
 Read the spec first, then follow the implementation plan step by step.
-Project directory: <project_dir>
+Project directory: ~/Projects/Finom/workdir/<TASK-KEY>/repo
 ```
 
 Wait for the agent to complete and capture its summary.
 
-### 4. Review the implementation
+### 3. Review the implementation
 
 After the agent finishes, review the changes yourself:
 
@@ -52,7 +49,7 @@ After the agent finishes, review the changes yourself:
    - No obvious bugs, missing imports, or broken logic
 3. Use RAG tools (ios-rag / android-rag) to cross-check patterns if needed.
 
-### 5. Handle issues
+### 4. Handle issues
 
 If you find problems:
 1. List each issue clearly.
@@ -62,12 +59,12 @@ If you find problems:
    1. <issue description + file + what to fix>
    2. ...
 
-   Spec file: <project_dir>/workdir/<TASK-KEY>/spec.md
-   Project directory: <project_dir>
+   Spec file: ~/Projects/Finom/workdir/<TASK-KEY>/spec.md
+   Project directory: ~/Projects/Finom/workdir/<TASK-KEY>/repo
    ```
 3. Review again after fixes. Repeat until satisfied.
 
-### 6. Report results
+### 5. Report results
 
 Present to the user:
 - Summary of what was implemented

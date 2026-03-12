@@ -7,12 +7,19 @@ description: >
 
 Commit staged changes, push the branch, and open a merge request on GitLab. Arguments: `$ARGUMENTS`
 
-## Step 1 — Determine project
+## Step 1 — Determine project and working directory
 
-Identify the project from the current git branch or `$ARGUMENTS`:
-- If currently in a mobile project directory, use that
-- If a Jira key is provided: `IOS-` → `~/Projects/Finom/finomcommon`, `ANDR-` → `~/Projects/Finom/finom`
-- If ambiguous, ask
+Identify the Jira key from `$ARGUMENTS` or the current branch name.
+
+If a Jira key is known, check for a worktree first:
+- Worktree path: `~/Projects/Finom/workdir/<TASK-KEY>/repo`
+- If it exists → use it as `<project_dir>`
+
+If no worktree found, fall back to the main project directory:
+- `IOS-` → `~/Projects/Finom/finomcommon`
+- `ANDR-` → `~/Projects/Finom/finom`
+
+If ambiguous, ask.
 
 Set `<project_dir>` accordingly.
 
@@ -40,7 +47,25 @@ If there are staged or unstaged changes:
 
 If all changes are already committed, skip this step.
 
-## Step 4 — Push
+## Step 4 — Run linter (Android only)
+
+**iOS: skip this step** — linting is not enforced at this stage.
+
+**Android:** run detekt and ktlint before pushing:
+
+```
+cd <project_dir> && ./gradlew detekt ktlint 2>&1 | tail -40
+```
+
+If either fails:
+1. Show the errors to the user
+2. Fix them (magic numbers → named constants, unused imports, formatting, etc.)
+3. Re-run to confirm both pass
+4. Commit the fixes
+
+Do NOT push if the linter fails.
+
+## Step 5 — Push
 
 ```
 git -C <project_dir> push -u origin <branch-name>
@@ -48,7 +73,7 @@ git -C <project_dir> push -u origin <branch-name>
 
 If the push fails (e.g. rejected), explain the error and suggest a fix. Do NOT force-push without explicit confirmation.
 
-## Step 5 — Create merge request
+## Step 6 — Create merge request
 
 Extract a Jira key from the branch name if possible (e.g. `feature/ANDR-12345` → `ANDR-12345`).
 
@@ -74,7 +99,7 @@ Note: `--fill` and `--title` must both be present — `--yes` alone without `--f
 
 Show the created MR URL.
 
-## Step 6 — Offer next steps
+## Step 7 — Offer next steps
 
 After the MR is created, ask:
 

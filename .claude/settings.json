@@ -46,7 +46,8 @@
     "defaultMode": "acceptEdits",
     "additionalDirectories": [
       "~/Projects/Finom/finomcommon",
-      "~/Projects/Finom/finom"
+      "~/Projects/Finom/finom",
+      "~/Projects/Finom/workdir"
     ]
   },
   "enableAllProjectMcpServers": true,

@@ -25,7 +25,37 @@ Determine platform from the key prefix:
 
 If no argument is given, ask for the Jira key.
 
-### 2. Discuss the task with the user
+### 2. Set up workdir and worktree
+
+Determine branch type from the Jira task type:
+- `Bug` → `bugfix/<TASK-KEY>`
+- anything else → `feature/<TASK-KEY>`
+
+Set `<workdir>` = `~/Projects/Finom/workdir/<TASK-KEY>`.
+
+```bash
+mkdir -p <workdir>
+```
+
+Check if worktree already exists:
+```bash
+git -C <project_dir> worktree list | grep <workdir>/repo
+```
+
+If it does **not** exist:
+1. Ensure the main repo is on master and up to date:
+   ```bash
+   git -C <project_dir> checkout master
+   git -C <project_dir> pull origin master
+   ```
+2. Create the worktree from the fresh master:
+   ```bash
+   git -C <project_dir> worktree add <workdir>/repo -b <branch-name>
+   ```
+
+If it already exists, skip creation.
+
+### 3. Discuss the task with the user
 
 **Always do this before launching the spec-writer agent.** Present a brief summary of what you understood from Jira, then ask the user to clarify or add context:
 
@@ -35,7 +65,7 @@ If no argument is given, ask for the Jira key.
 
 **Wait for the user's response before proceeding.**
 
-### 3. Launch the spec-writer agent
+### 4. Launch the spec-writer agent
 
 Use the Agent tool to launch the `spec-writer` subagent (runs on Opus) with all collected context:
 
@@ -48,14 +78,14 @@ Acceptance criteria: <criteria from Jira>
 Comments: <comments from Jira — may contain refined requirements or decisions that override the description>
 Platform: <iOS/Android>
 Project directory: <project_dir>
-Spec output path: <project_dir>/workdir/<TASK-KEY>/spec.md
+Spec output path: ~/Projects/Finom/workdir/<TASK-KEY>/spec.md
 
-User context: <any details, constraints, or decisions from the discussion in step 2>
+User context: <any details, constraints, or decisions from the discussion in step 3>
 ```
 
 Wait for the agent to complete.
 
-### 4. Handle decomposition (if proposed)
+### 5. Handle decomposition (if proposed)
 
 If the spec-writer agent recommends decomposition into subtasks:
 - Present the proposed breakdown to the user for approval
@@ -66,12 +96,12 @@ If the spec-writer agent recommends decomposition into subtasks:
 - Always confirm before creating subtasks (mutating Jira)
 - If multiple subtasks need individual specs, launch the spec-writer agent again for each
 
-### 5. Present results
+### 6. Present results
 
 Show the user:
-- List of spec files created with their paths
+- Spec file: `~/Projects/Finom/workdir/<TASK-KEY>/spec.md`
+- Worktree: `~/Projects/Finom/workdir/<TASK-KEY>/repo` on branch `<branch-name>`
 - Brief summary of the implementation plan
-- Git branch created (e.g. `feature/ANDR-12345`)
 - Checklist findings (failed items only, if any)
 - Any open questions or risks identified
 - Suggest next step: `/implement <JIRA-KEY>`

@@ -26,8 +26,13 @@ You are my personal productivity assistant. You have access to Bash and use CLI 
 |----------|------|
 | iOS      | `~/Projects/Finom/finomcommon` |
 | Android  | `~/Projects/Finom/finom` |
+| Workdir  | `~/Projects/Finom/workdir` |
 
 When asked to look at or work on a mobile project, use these paths as the working directory.
+
+Per-task work lives in `~/Projects/Finom/workdir/<TASK-KEY>/`:
+- `spec.md` — technical specification
+- `repo/` — git worktree with the task branch (e.g. `feature/ANDR-12345`)
 
 ## Scripts
 
