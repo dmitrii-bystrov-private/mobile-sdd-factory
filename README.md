@@ -82,6 +82,9 @@ Each story gets its own workdir:
 | `acli` | Jira Cloud CLI — tasks, transitions, comments |
 | `glab` | GitLab CLI — MRs, pipelines, reviews |
 | `ios-rag` / `android-rag` | MCP codebase semantic search |
+| Firebase MCP | Crashlytics — crash reports, issue tracking |
+| Notion MCP | Read Notion pages and databases |
+| Slack MCP | Send messages, post MR reviews, read channels |
 
 ## Mobile projects
 
