@@ -16,6 +16,10 @@ See: `android-patterns.md`
 
 - Always verify each finding against current code before fixing. See: `feedback-ios-android-verify.md`
 
+## NO credential workarounds
+
+**NEVER** search for tokens/passwords to bypass tool limitations. See: `feedback-no-credential-workarounds.md`
+
 ## Standup preferences
 
 - Do NOT highlight or mention tasks with status "Waiting other platforms" — they require no action and are not relevant to daily standup.
