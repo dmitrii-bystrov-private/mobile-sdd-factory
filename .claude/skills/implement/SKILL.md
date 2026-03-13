@@ -53,13 +53,12 @@ Wait for the agent to complete and capture its summary.
 
 After the agent finishes, review the changes yourself:
 
-1. **iOS only — regenerate Xcode project if new Swift files were created:**
-   If the implementer created new files (new directories, new screens, new extensions), run:
+1. **iOS only — always regenerate Xcode project after implementation:**
    ```bash
-   cd <workdir>/repo && mise exec -- tuist generate --no-open
-   cd <workdir>/repo && pod install
+   mise exec -- tuist generate --no-open --path <workdir>/repo
+   pod install --project-directory <workdir>/repo
    ```
-   "No such module 'UIKit'" diagnostics on new files mean the project was not regenerated — they are NOT false positives.
+   Run this unconditionally for any iOS task — SourceKit errors like "No such module" are caused by a stale project, not by bad code.
 
 2. Read the spec's acceptance criteria and implementation plan.
 3. Read each modified file and verify:

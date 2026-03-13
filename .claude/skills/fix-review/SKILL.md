@@ -121,12 +121,12 @@ Wait for the agent to complete.
 
 ### 4. Review the fixes
 
-1. **iOS only — regenerate Xcode project if new Swift files were created:**
-   If the agent created new files, run:
+1. **iOS only — always regenerate Xcode project after implementation:**
    ```bash
-   cd ~/Projects/Finom/workdir/<STORY-KEY>/repo && mise exec -- tuist generate --no-open
-   cd ~/Projects/Finom/workdir/<STORY-KEY>/repo && pod install
+   mise exec -- tuist generate --no-open --path ~/Projects/Finom/workdir/<STORY-KEY>/repo
+   pod install --project-directory ~/Projects/Finom/workdir/<STORY-KEY>/repo
    ```
+   Run this unconditionally for any iOS task — SourceKit errors like "No such module" are caused by a stale project, not by bad code.
 
 2. Read each modified file and verify:
    - Each QA issue is addressed
