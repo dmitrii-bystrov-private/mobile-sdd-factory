@@ -24,3 +24,6 @@ Produce a summary in the following format:
 - New crashes (SIGNAL_FRESH with >1 user): list them or write "нет"
 
 Be concise. Do not list every task — only what requires action today.
+
+**Filtering rules:**
+- Do NOT mention tasks with status "Waiting other platforms" — they require no action and are not relevant.

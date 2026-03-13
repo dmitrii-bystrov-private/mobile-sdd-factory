@@ -53,13 +53,21 @@ Wait for the agent to complete and capture its summary.
 
 After the agent finishes, review the changes yourself:
 
-1. Read the spec's acceptance criteria and implementation plan.
-2. Read each modified file and verify:
+1. **iOS only — regenerate Xcode project if new Swift files were created:**
+   If the implementer created new files (new directories, new screens, new extensions), run:
+   ```bash
+   cd <workdir>/repo && mise exec -- tuist generate --no-open
+   cd <workdir>/repo && pod install
+   ```
+   "No such module 'UIKit'" diagnostics on new files mean the project was not regenerated — they are NOT false positives.
+
+2. Read the spec's acceptance criteria and implementation plan.
+3. Read each modified file and verify:
    - Changes match what the spec describes
    - Code follows existing patterns referenced in the spec
    - No files outside the spec's scope were modified
    - No obvious bugs, missing imports, or broken logic
-3. Use RAG tools (ios-rag / android-rag) to cross-check patterns if needed.
+4. Use RAG tools (ios-rag / android-rag) to cross-check patterns if needed.
 
 ### 4. Handle issues
 

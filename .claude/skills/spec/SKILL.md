@@ -64,10 +64,15 @@ If `spec.md` **already exists** and the task is a **story with subtasks** → **
 
    Subtasks:
    ✓ IOS-XXXXX  Done/Ready for test/Resolved  — <summary>
-   ○ IOS-XXXXX  To Do                          — <summary>
+   ↩ IOS-XXXXX  Reopened                       — <summary>
    ○ IOS-XXXXX  To Do                          — <summary>
    ```
-3. Suggest the next To Do subtask: "Следующий шаг: `/spec <NEXT-SUBTASK-KEY>`"
+3. Suggest the next action based on subtask statuses — **priority order**:
+   - If any subtask is **Reopened** → "Следующий шаг: `/fix-review <REOPENED-KEY>`" (QA returned it with comments)
+   - Else if any subtask is **In Progress** → "Следующий шаг: `/implement <IN-PROGRESS-KEY>`"
+   - Else if any subtask is **To Do** and has a spec file → "Следующий шаг: `/implement <NEXT-KEY>`"
+   - Else if any subtask is **To Do** without a spec → "Следующий шаг: `/spec <NEXT-KEY>`"
+   - If all subtasks are Done/Ready for test/Resolved → "Все подзадачи завершены. Следующий шаг: `/create-mr <STORY-KEY>`"
 4. **Stop here** — do not re-run spec-writer for the story.
 
 If `spec.md` **already exists** and the task is a **story without subtasks**:
@@ -108,8 +113,9 @@ If it does **not** exist:
    ```bash
    git -C <project_dir> worktree add <workdir>/repo -b <branch-name>
    ```
-3. For iOS only: regenerate the Xcode project inside the worktree (tuist first, then pods):
+3. For iOS only: create a symlink for the SwiftFormat binary, then regenerate the Xcode project (tuist first, then pods):
    ```bash
+   ln -sf ~/Projects/Finom/finomcommon/swift_format <workdir>/repo/swift_format
    cd <workdir>/repo && mise trust && mise exec -- tuist generate --no-open
    cd <workdir>/repo && pod install
    ```

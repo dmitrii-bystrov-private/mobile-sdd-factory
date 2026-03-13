@@ -131,3 +131,7 @@ Go through `checklist.md` and mark each item. Only surface items that have findi
 - Preserve behavior unless explicitly required by the task
 - No architectural rewrites without explicit request
 - No unnecessary dependency additions
+
+**Android-specific: do NOT flag as issues**
+- `// todo ANDR-XXXXX description` comments — these reference a Jira task where the issue will be resolved. They are intentional and accepted.
+- Feature component `companion object` initializers with a mutable nullable var and no `@Volatile` or synchronization — this is the established project pattern (confirmed across PhotoViewer, Tags, Dashboard, Chat, Login, Cards, and others).

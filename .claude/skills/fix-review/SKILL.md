@@ -1,0 +1,114 @@
+---
+description: >
+  Fix QA review issues for a Reopened Jira task — read QA comments, fix in the existing worktree, commit, and send back to test.
+  TRIGGER when the user mentions a task was returned from QA, has QA comments to fix, or is in "Reopened" status and needs to be fixed.
+  Examples: "fix QA comments", "task was reopened", "fix review for IOS-12035".
+  DO NOT TRIGGER for implementing new tasks (use /implement), or for sending to test without prior QA feedback.
+---
+
+Fix QA review issues for a Jira task. Argument: Jira key (e.g. `/fix-review IOS-12035`).
+
+## Steps
+
+### 1. Load task and QA feedback
+
+Parse the task key from `$ARGUMENTS`. If missing, ask for it.
+
+Fetch the task:
+```bash
+acli jira workitem view <KEY> --fields '*all' --json
+```
+
+Read:
+- Task summary and description
+- All comments — QA feedback is written as regular comments, typically the most recent ones after the last "Ready for test" transition
+- Parent key (if subtask)
+
+Determine `<STORY-KEY>`:
+- If subtask → use parent key
+- If story → use task key itself
+
+Show the user a clean summary of the QA comments:
+```
+QA feedback on <KEY>:
+1. <issue from comment>
+2. <issue from comment>
+...
+```
+
+Ask: "Это все замечания, или есть что добавить?" — wait for confirmation or additions before proceeding.
+
+### 2. Locate the worktree and save QA feedback to file
+
+```bash
+ls ~/Projects/Finom/workdir/<STORY-KEY>/repo
+```
+
+If the worktree does not exist, tell the user and stop — the worktree must exist from the original implementation.
+
+Save the confirmed QA issues to `~/Projects/Finom/workdir/<STORY-KEY>/qa-<KEY>.md`:
+
+```markdown
+# QA Feedback for <KEY>
+
+Source: Jira comments (Reopened <date>)
+
+## Issues
+
+1. <issue>
+2. <issue>
+...
+
+## Status
+
+- [ ] <issue 1>
+- [ ] <issue 2>
+...
+```
+
+### 3. Launch the implementer agent
+
+```
+Fix QA review issues for <KEY>.
+
+QA feedback file: ~/Projects/Finom/workdir/<STORY-KEY>/qa-<KEY>.md
+Spec file (for context): ~/Projects/Finom/workdir/<STORY-KEY>/spec-<KEY>.md
+Project directory: ~/Projects/Finom/workdir/<STORY-KEY>/repo
+
+Read the QA feedback file first, then the spec to understand the original implementation.
+Fix only the issues listed in the QA feedback. Do not make unrelated changes.
+```
+
+Wait for the agent to complete.
+
+### 4. Review the fixes
+
+1. **iOS only — regenerate Xcode project if new Swift files were created:**
+   If the agent created new files, run:
+   ```bash
+   cd ~/Projects/Finom/workdir/<STORY-KEY>/repo && mise exec -- tuist generate --no-open
+   cd ~/Projects/Finom/workdir/<STORY-KEY>/repo && pod install
+   ```
+
+2. Read each modified file and verify:
+   - Each QA issue is addressed
+   - No unrelated changes were introduced
+   - No new obvious bugs
+
+If issues remain, launch the implementer again with specific fix instructions. Repeat until satisfied.
+
+### 5. Commit
+
+```bash
+git -C ~/Projects/Finom/workdir/<STORY-KEY>/repo add -A
+git -C ~/Projects/Finom/workdir/<STORY-KEY>/repo commit -m "<KEY>: Fix QA review issues"
+```
+
+### 6. Send back to test
+
+Run the `send-to-test` skill:
+```
+/send-to-test <KEY>
+```
+
+The QA comment should briefly describe what was fixed in response to the review.
