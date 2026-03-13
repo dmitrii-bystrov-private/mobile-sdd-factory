@@ -66,7 +66,45 @@ Source: Jira comments (Reopened <date>)
 ...
 ```
 
-### 3. Launch the implementer agent
+### 3. Assess complexity and decide on approach
+
+Review the confirmed QA issues and classify each one:
+- **Straightforward** — clear fix, no design decisions (e.g. wrong color, wrong text, missing constraint, simple layout fix)
+- **Non-trivial** — requires choosing an approach, touching multiple files, understanding a non-obvious pattern, or redesigning a part of the UI/logic
+
+If **any** issue is non-trivial, tell the user:
+```
+Есть нетривиальные замечания: <list them>. Запущу qa-spec-writer, чтобы подготовить детальный план перед имплементацией.
+```
+Then go to Step 3a. Otherwise go to Step 3b.
+
+### 3a. Non-trivial path — launch qa-spec-writer first
+
+Launch the `qa-spec-writer` agent:
+
+```
+Write a fix spec for QA review issues on <KEY>.
+
+QA feedback file: ~/Projects/Finom/workdir/<STORY-KEY>/qa-<KEY>.md
+Original spec file: ~/Projects/Finom/workdir/<STORY-KEY>/spec-<KEY>.md
+Project directory: ~/Projects/Finom/workdir/<STORY-KEY>/repo
+Output spec path: ~/Projects/Finom/workdir/<STORY-KEY>/spec-qa-<KEY>.md
+```
+
+Wait for the agent to complete. Show the user a brief summary of what the spec contains. Then launch the implementer agent:
+
+```
+Fix QA review issues for <KEY>.
+
+Fix spec: ~/Projects/Finom/workdir/<STORY-KEY>/spec-qa-<KEY>.md
+QA feedback file: ~/Projects/Finom/workdir/<STORY-KEY>/qa-<KEY>.md
+Project directory: ~/Projects/Finom/workdir/<STORY-KEY>/repo
+
+Read the fix spec first — it contains the full plan. Follow it step by step.
+Fix only the issues listed. Do not make unrelated changes.
+```
+
+### 3b. Straightforward path — launch the implementer directly
 
 ```
 Fix QA review issues for <KEY>.
