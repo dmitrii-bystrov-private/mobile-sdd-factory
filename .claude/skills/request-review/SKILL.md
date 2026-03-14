@@ -34,55 +34,33 @@ Extract the numeric MR ID from the URL if a full URL was given.
 
 ## Step 2 — Fetch MR details
 
-Run from the appropriate project directory:
-- iOS: `glab -C "$IOS_DIR" mr view <id>`
-- Android: `glab -C "$ANDROID_DIR" mr view <id>`
+Generate a Slack-ready message with the script:
 
-From the output extract:
-- **title** — MR title (should already include Jira key, e.g. `IOS-11987: ...`)
-- **web_url** — base MR URL (append `/diffs` for the final link)
+- iOS: `request-review.sh ios <id>`
+- Android: `request-review.sh android <id>`
 
-Then fetch diff stats via the GitLab API (replace `/` with `%2F` in the project path):
-```
-glab api projects/<encoded-project-path>/merge_requests/<id>/diffs \
-  | jq '[.[] | {a: .diff | split("\n") | map(select(startswith("+"))) | length, d: .diff | split("\n") | map(select(startswith("-"))) | length}] | {files: length, additions: map(.a) | add, deletions: map(.d) | add}'
-```
-
-Examples of encoded project paths:
-- Android: `M69%2Fmobile%2Fandroid%2Ffinom`
-- iOS: `M69%2Fmobile%2Fios%2Ffinomcommon`
+The script:
+- Fetches MR title + URL via `glab api`
+- Fetches diff stats (files/additions/deletions) if available
+- Prints the final Slack message in the required format
 
 ## Step 3 — Format message
 
-Build the Slack message in this exact format. Both links must use Slack's explicit `<URL>` or `<URL|text>` syntax — raw URLs cause Slack to auto-wrap them in `<>` and capture the next line as part of the link:
-```
-<https://pnlfintech.atlassian.net/browse/<JIRA-KEY>|<JIRA-KEY>>: <summary>
-<https://<web_url>/diffs>
-<N> files +<additions> −<deletions>
-```
-
-Example:
-```
-<https://pnlfintech.atlassian.net/browse/IOS-11987|IOS-11987>: Improve build info screen to better distinguish Beta and Prod builds
-<https://gitlab.com/M69/mobile/ios/finomcommon/-/merge_requests/2867/diffs>
-3 files +19 −4
-```
-
-If diff stats are unavailable, use the URL alone on the second line.
+Use the script output verbatim (it already uses Slack-safe `<URL>` / `<URL|text>` formatting).
 
 ## Step 4 — Preview and confirm
 
-Show the formatted message and the target channel. Ask: "Отправить в #<channel>?" — wait for explicit confirmation.
+Show the formatted message and the target channel. Ask: "Send to #<channel>?" — wait for explicit confirmation.
 
 ## Step 5 — Send to Slack
 
 Use `slack_send_message` with the hardcoded channel ID. No search needed.
 
-On success, confirm: "✓ Отправлено в #<channel>"
+On success, confirm: "✓ Sent to #<channel>"
 On error, show the error and suggest what to fix.
 
 ## Step 6 — Offer to send to testing
 
-After successful Slack send, ask: "Передать задачу <JIRA-KEY> в тест?"
+After successful Slack send, ask: "Send <JIRA-KEY> to testing?"
 
 If the user confirms, invoke the `send-to-test` skill with the Jira key.

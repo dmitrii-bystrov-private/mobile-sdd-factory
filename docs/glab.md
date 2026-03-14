@@ -6,12 +6,12 @@ Auth: `glab auth login` (gitlab.com)
 Common commands:
 ```
 # My open MRs (run from iOS or Android project dir)
-glab -C "$IOS_DIR" mr list --assignee=@me
-glab -C "$ANDROID_DIR" mr list --assignee=@me
+cd "$IOS_DIR" && glab mr list --assignee=@me
+cd "$ANDROID_DIR" && glab mr list --assignee=@me
 
 # MRs awaiting my review
-glab -C "$IOS_DIR" mr list --reviewer=@me
-glab -C "$ANDROID_DIR" mr list --reviewer=@me
+cd "$IOS_DIR" && glab mr list --reviewer=@me
+cd "$ANDROID_DIR" && glab mr list --reviewer=@me
 
 # View MR details + diff
 glab mr view <id>
