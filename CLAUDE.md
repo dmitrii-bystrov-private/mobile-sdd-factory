@@ -36,15 +36,3 @@ When asked to look at or work on a mobile project, use these paths from ENV as t
 Per-task work lives in `$SDD_WORKDIR/<TASK-KEY>/`:
 - `spec.md` — technical specification
 - `repo/` — git worktree with the task branch (e.g. `feature/ANDR-12345`)
-
-## Scripts
-
-All automation scripts live in the `scripts/` directory of this project.
-This directory is added to `$PATH` in `~/.zshrc`, so scripts can be called by name from anywhere:
-```
-bash standup.sh
-```
-
-## Slash commands
-- `/standup`  — daily standup summary
-- `/gitlab`   — MRs waiting for my attention

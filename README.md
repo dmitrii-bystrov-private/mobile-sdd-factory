@@ -26,6 +26,10 @@ memory/              # persistent memory across sessions
 CLAUDE.md            # assistant rules and configuration
 ```
 
+## Scripts
+
+Standalone shell helpers live in `scripts/`. See `scripts/README.md`.
+
 ## Workflow
 
 ### Working on a task
