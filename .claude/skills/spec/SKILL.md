@@ -32,8 +32,8 @@ acli jira workitem view <JIRA-KEY> --fields '*all' --json
 Read: summary, description, acceptance criteria, story points, subtasks, linked issues, and **comments** (discussions in comments often contain refined requirements or implementation decisions that supersede the original description).
 
 Determine platform from the key prefix:
-- `IOS-XXXXX` → iOS → `~/Projects/Finom/finomcommon`
-- `ANDR-XXXXX` → Android → `~/Projects/Finom/finom`
+- `IOS-XXXXX` → iOS → `$IOS_DIR`
+- `ANDR-XXXXX` → Android → `$ANDROID_DIR`
 
 If no argument is given, ask for the Jira key.
 
@@ -48,7 +48,7 @@ If no argument is given, ask for the Jira key.
 Before doing anything else, check if work on this task has already started:
 
 ```bash
-ls ~/Projects/Finom/workdir/<STORY-KEY>/spec.md 2>/dev/null
+ls "$SDD_WORKDIR/<STORY-KEY>/spec.md" 2>/dev/null
 ```
 
 If `spec.md` **already exists** and the task is a **story with subtasks** → **Resume mode**:
@@ -92,7 +92,7 @@ Determine branch type from the Jira task type:
 - `Bug` → `bugfix/<TASK-KEY>`
 - anything else → `feature/<TASK-KEY>`
 
-Set `<workdir>` = `~/Projects/Finom/workdir/<TASK-KEY>`.
+Set `<workdir>` = `$SDD_WORKDIR/<TASK-KEY>`.
 
 ```bash
 mkdir -p <workdir>
@@ -115,7 +115,7 @@ If it does **not** exist:
    ```
 3. For iOS only: create a symlink for the SwiftFormat binary, then regenerate the Xcode project (tuist first, then pods):
    ```bash
-   ln -sf ~/Projects/Finom/finomcommon/swift_format <workdir>/repo/swift_format
+   ln -sf "$IOS_DIR/swift_format" <workdir>/repo/swift_format
    cd <workdir>/repo && mise trust && mise exec -- tuist generate --no-open
    cd <workdir>/repo && pod install
    ```
@@ -147,10 +147,10 @@ Project directory: <project_dir>
 User context: <details from discussion>
 
 Output two files:
-1. ~/Projects/Finom/workdir/<TASK-KEY>/spec.md
+1. $SDD_WORKDIR/<TASK-KEY>/spec.md
    High-level: goals, architecture overview, key decisions, risks.
 
-2. ~/Projects/Finom/workdir/<TASK-KEY>/spec-<TASK-KEY>.md
+2. $SDD_WORKDIR/<TASK-KEY>/spec-<TASK-KEY>.md
    Detailed implementation plan: exact files to create/modify, step-by-step changes,
    acceptance criteria checklist, code patterns to follow.
 ```
@@ -196,7 +196,7 @@ Project directory: <project_dir>
 User context: <details from discussion>
 
 Output one file:
-~/Projects/Finom/workdir/<TASK-KEY>/spec.md
+$SDD_WORKDIR/<TASK-KEY>/spec.md
 Content: goals, architecture overview, key decisions, how subtasks relate to each other, risks.
 Do NOT write detailed per-subtask specs — those are written separately per subtask.
 ```
@@ -238,7 +238,7 @@ Show the user:
 
 Load the parent story key from the subtask's `parent` field.
 
-Set `<workdir>` = `~/Projects/Finom/workdir/<STORY-KEY>` (parent's workdir, not the subtask's).
+Set `<workdir>` = `$SDD_WORKDIR/<STORY-KEY>` (parent's workdir, not the subtask's).
 
 Verify the worktree exists:
 ```bash
@@ -276,7 +276,7 @@ Project directory: <workdir>/repo
 User context: <details from discussion>
 
 Output one file:
-~/Projects/Finom/workdir/<STORY-KEY>/spec-<SUBTASK-KEY>.md
+$SDD_WORKDIR/<STORY-KEY>/spec-<SUBTASK-KEY>.md
 Content: exact files to create/modify, step-by-step changes, acceptance criteria checklist,
 code patterns to follow, how this subtask fits into the overall story.
 ```

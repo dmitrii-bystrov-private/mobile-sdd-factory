@@ -1,77 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
-    "allow": [
-      "Bash(glab *)",
-      "Bash(acli *)",
-      "Bash(git *)",
-      "Bash(jq *)",
-      "Bash(bash *)",
-      "Bash(chmod *)",
-      "Bash(find *)",
-      "Bash(brew *)",
-      "Bash(npm *)",
-      "Bash(mise *)",
-      "Bash(pod *)",
-      "Bash(ls *)",
-      "Bash(echo *)",
-      "Bash(curl *)",
-      "Bash(python3 *)",
-      "Bash(mkdir *)",
-      "Bash(rm *)",
-      "WebSearch",
-      "mcp__ios-rag__search",
-      "mcp__ios-rag__semantic_search",
-      "mcp__ios-rag__read_file",
-      "mcp__ios-rag__graph_neighbors",
-      "mcp__android-rag__search",
-      "mcp__android-rag__semantic_search",
-      "mcp__android-rag__read_file",
-      "mcp__android-rag__graph_neighbors",
-      "mcp__notion__notion-search",
-      "mcp__notion__notion-fetch",
-      "mcp__firebase__firebase_list_projects",
-      "mcp__firebase__firebase_read_resources",
-      "mcp__firebase__firebase_list_apps",
-      "mcp__firebase__firebase_update_environment",
-      "mcp__firebase__firebase_get_environment",
-      "mcp__firebase__crashlytics_get_report",
-      "mcp__claude_ai_Slack__slack_search_channels",
-      "mcp__claude_ai_Slack__slack_send_message"
-    ],
-    "deny": [
-      "Bash(rm -rf *)",
-      "Bash(rm -r *)",
-      "Bash(git push --force *)",
-      "Bash(glab mr merge *)",
-      "Bash(glab mr close *)",
-      "Bash(acli jira workitem delete *)"
-    ],
-    "defaultMode": "acceptEdits",
-    "additionalDirectories": [
-      "~/Projects/Finom/finomcommon",
-      "~/Projects/Finom/finom",
-      "~/Projects/Finom/workdir"
-    ]
+    "defaultMode": "default"
   },
-  "enableAllProjectMcpServers": true,
-  "enabledMcpjsonServers": [
-    "ios-rag",
-    "android-rag",
-    "notion"
-  ],
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate-spec.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  }
+  "enableAllProjectMcpServers": true
 }

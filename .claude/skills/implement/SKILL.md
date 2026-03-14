@@ -18,8 +18,8 @@ Load the task from Jira to check if it is a subtask:
 acli jira workitem view <TASK-KEY> --json
 ```
 
-- If it is a **subtask**: `<workdir>` = `~/Projects/Finom/workdir/<STORY-KEY>` (parent's workdir), spec file = `<workdir>/spec-<TASK-KEY>.md`
-- If it is a **story**: `<workdir>` = `~/Projects/Finom/workdir/<TASK-KEY>`, spec file = `<workdir>/spec-<TASK-KEY>.md`
+- If it is a **subtask**: `<workdir>` = `$SDD_WORKDIR/<STORY-KEY>` (parent's workdir), spec file = `<workdir>/spec-<TASK-KEY>.md`
+- If it is a **story**: `<workdir>` = `$SDD_WORKDIR/<TASK-KEY>`, spec file = `<workdir>/spec-<TASK-KEY>.md`
 
 Read the spec file. If it does not exist, tell the user and suggest running `/spec <TASK-KEY>` first.
 
@@ -55,7 +55,7 @@ After the agent finishes, review the changes yourself:
 
 1. **iOS only — always regenerate Xcode project after implementation:**
    ```bash
-   mise exec -- tuist generate --no-open --path <workdir>/repo
+   cd <workdir>/repo && mise exec -- tuist generate --no-open
    pod install --project-directory <workdir>/repo
    ```
    Run this unconditionally for any iOS task — SourceKit errors like "No such module" are caused by a stale project, not by bad code.

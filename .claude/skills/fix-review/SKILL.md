@@ -41,12 +41,12 @@ Ask: "Это все замечания, или есть что добавить?
 ### 2. Locate the worktree and save QA feedback to file
 
 ```bash
-ls ~/Projects/Finom/workdir/<STORY-KEY>/repo
+ls "$SDD_WORKDIR/<STORY-KEY>/repo"
 ```
 
 If the worktree does not exist, tell the user and stop — the worktree must exist from the original implementation.
 
-Save the confirmed QA issues to `~/Projects/Finom/workdir/<STORY-KEY>/qa-<KEY>.md`:
+Save the confirmed QA issues to `$SDD_WORKDIR/<STORY-KEY>/qa-<KEY>.md`:
 
 ```markdown
 # QA Feedback for <KEY>
@@ -85,10 +85,10 @@ Launch the `qa-spec-writer` agent:
 ```
 Write a fix spec for QA review issues on <KEY>.
 
-QA feedback file: ~/Projects/Finom/workdir/<STORY-KEY>/qa-<KEY>.md
-Original spec file: ~/Projects/Finom/workdir/<STORY-KEY>/spec-<KEY>.md
-Project directory: ~/Projects/Finom/workdir/<STORY-KEY>/repo
-Output spec path: ~/Projects/Finom/workdir/<STORY-KEY>/spec-qa-<KEY>.md
+QA feedback file: $SDD_WORKDIR/<STORY-KEY>/qa-<KEY>.md
+Original spec file: $SDD_WORKDIR/<STORY-KEY>/spec-<KEY>.md
+Project directory: $SDD_WORKDIR/<STORY-KEY>/repo
+Output spec path: $SDD_WORKDIR/<STORY-KEY>/spec-qa-<KEY>.md
 ```
 
 Wait for the agent to complete. Show the user a brief summary of what the spec contains. Then launch the implementer agent:
@@ -96,9 +96,9 @@ Wait for the agent to complete. Show the user a brief summary of what the spec c
 ```
 Fix QA review issues for <KEY>.
 
-Fix spec: ~/Projects/Finom/workdir/<STORY-KEY>/spec-qa-<KEY>.md
-QA feedback file: ~/Projects/Finom/workdir/<STORY-KEY>/qa-<KEY>.md
-Project directory: ~/Projects/Finom/workdir/<STORY-KEY>/repo
+Fix spec: $SDD_WORKDIR/<STORY-KEY>/spec-qa-<KEY>.md
+QA feedback file: $SDD_WORKDIR/<STORY-KEY>/qa-<KEY>.md
+Project directory: $SDD_WORKDIR/<STORY-KEY>/repo
 
 Read the fix spec first — it contains the full plan. Follow it step by step.
 Fix only the issues listed. Do not make unrelated changes.
@@ -109,9 +109,9 @@ Fix only the issues listed. Do not make unrelated changes.
 ```
 Fix QA review issues for <KEY>.
 
-QA feedback file: ~/Projects/Finom/workdir/<STORY-KEY>/qa-<KEY>.md
-Spec file (for context): ~/Projects/Finom/workdir/<STORY-KEY>/spec-<KEY>.md
-Project directory: ~/Projects/Finom/workdir/<STORY-KEY>/repo
+QA feedback file: $SDD_WORKDIR/<STORY-KEY>/qa-<KEY>.md
+Spec file (for context): $SDD_WORKDIR/<STORY-KEY>/spec-<KEY>.md
+Project directory: $SDD_WORKDIR/<STORY-KEY>/repo
 
 Read the QA feedback file first, then the spec to understand the original implementation.
 Fix only the issues listed in the QA feedback. Do not make unrelated changes.
@@ -123,8 +123,8 @@ Wait for the agent to complete.
 
 1. **iOS only — always regenerate Xcode project after implementation:**
    ```bash
-   mise exec -- tuist generate --no-open --path ~/Projects/Finom/workdir/<STORY-KEY>/repo
-   pod install --project-directory ~/Projects/Finom/workdir/<STORY-KEY>/repo
+   mise exec -- tuist generate --no-open --path "$SDD_WORKDIR/<STORY-KEY>/repo"
+   pod install --project-directory "$SDD_WORKDIR/<STORY-KEY>/repo"
    ```
    Run this unconditionally for any iOS task — SourceKit errors like "No such module" are caused by a stale project, not by bad code.
 
@@ -138,8 +138,8 @@ If issues remain, launch the implementer again with specific fix instructions. R
 ### 5. Commit
 
 ```bash
-git -C ~/Projects/Finom/workdir/<STORY-KEY>/repo add -A
-git -C ~/Projects/Finom/workdir/<STORY-KEY>/repo commit -m "<KEY>: Fix QA review issues"
+git -C "$SDD_WORKDIR/<STORY-KEY>/repo" add -A
+git -C "$SDD_WORKDIR/<STORY-KEY>/repo" commit -m "<KEY>: Fix QA review issues"
 ```
 
 ### 6. Send back to test

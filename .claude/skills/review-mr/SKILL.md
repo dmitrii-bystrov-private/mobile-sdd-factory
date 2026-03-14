@@ -12,8 +12,8 @@ Review a GitLab MR. Argument: MR ID (e.g. `/review-mr 3900`).
 ### 1. Determine platform and project directory
 
 MR titles follow the pattern `[JIRA-KEY]: [title]`:
-- `IOS-XXXXX` → iOS → `~/Projects/Finom/finomcommon`
-- `ANDR-XXXXX` → Android → `~/Projects/Finom/finom`
+- `IOS-XXXXX` → iOS → `$IOS_DIR`
+- `ANDR-XXXXX` → Android → `$ANDROID_DIR`
 
 If no argument is given, ask for the MR ID and platform.
 
@@ -37,13 +37,13 @@ Read: summary, description, acceptance criteria, story points.
 
 Read these files to understand the coding standards before reviewing:
 
-**iOS** (`~/Projects/Finom/finomcommon`):
+**iOS** (`$IOS_DIR`):
 - `.claude/CLAUDE.md` — stack, core principles, module boundaries
 - `.claude/rules/coding-general.md` — memory management, closures, API models
 - `.claude/rules/viper.md` — VIPER pattern: file roles, protocols, assembly, state management
 - `.claude/rules/testing.md` — test naming, structure, mocks, assertions
 
-**Android** (`~/Projects/Finom/finom`):
+**Android** (`$ANDROID_DIR`):
 - `.claude/CLAUDE.md` — stack, core principles, module boundaries
 - `.claude/rules/coding-general.md` — Kotlin rules, threading constraints
 - `.claude/rules/moxy.md` — MVP/Moxy presenter rules, contract structure, Compose integration

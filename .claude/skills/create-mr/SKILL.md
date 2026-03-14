@@ -12,12 +12,12 @@ Commit staged changes, push the branch, and open a merge request on GitLab. Argu
 Identify the Jira key from `$ARGUMENTS` or the current branch name.
 
 If a Jira key is known, check for a worktree first:
-- Worktree path: `~/Projects/Finom/workdir/<TASK-KEY>/repo`
+- Worktree path: `$SDD_WORKDIR/<TASK-KEY>/repo`
 - If it exists → use it as `<project_dir>`
 
 If no worktree found, fall back to the main project directory:
-- `IOS-` → `~/Projects/Finom/finomcommon`
-- `ANDR-` → `~/Projects/Finom/finom`
+- `IOS-` → `$IOS_DIR`
+- `ANDR-` → `$ANDROID_DIR`
 
 If ambiguous, ask.
 

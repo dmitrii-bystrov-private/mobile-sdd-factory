@@ -68,7 +68,7 @@ Resuming work on an existing story:
 Each story gets its own workdir:
 
 ```
-~/Projects/Finom/workdir/IOS-11860/
+$SDD_WORKDIR/IOS-11860/
 ├── spec.md                  # high-level plan and architecture
 ├── spec-IOS-11860.md        # detailed spec (stories without subtasks)
 ├── spec-IOS-12033.md        # detailed spec per subtask
@@ -90,5 +90,5 @@ Each story gets its own workdir:
 
 | Platform | Path |
 |----------|------|
-| iOS | `~/Projects/Finom/finomcommon` |
-| Android | `~/Projects/Finom/finom` |
+| iOS | `$IOS_DIR` |
+| Android | `$ANDROID_DIR` |

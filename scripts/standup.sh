@@ -3,10 +3,12 @@
 
 ME="dapper.chita"
 
-IOS_DIR="$HOME/Projects/Finom/finomcommon"
+: "${IOS_DIR:?IOS_DIR is not set}"
+[ -d "$IOS_DIR" ] || { echo "IOS_DIR is not a directory: $IOS_DIR" >&2; exit 1; }
 IOS_PATH="M69%2Fmobile%2Fios%2Ffinomcommon"
 
-ANDROID_DIR="$HOME/Projects/Finom/finom"
+: "${ANDROID_DIR:?ANDROID_DIR is not set}"
+[ -d "$ANDROID_DIR" ] || { echo "ANDROID_DIR is not a directory: $ANDROID_DIR" >&2; exit 1; }
 ANDROID_PATH="M69%2Fmobile%2Fandroid%2Ffinom"
 
 TMP=$(mktemp -d)

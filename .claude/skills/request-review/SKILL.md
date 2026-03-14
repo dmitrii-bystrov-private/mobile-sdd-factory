@@ -35,8 +35,8 @@ Extract the numeric MR ID from the URL if a full URL was given.
 ## Step 2 — Fetch MR details
 
 Run from the appropriate project directory:
-- iOS: `cd ~/Projects/Finom/finomcommon && glab mr view <id>`
-- Android: `cd ~/Projects/Finom/finom && glab mr view <id>`
+- iOS: `glab -C "$IOS_DIR" mr view <id>`
+- Android: `glab -C "$ANDROID_DIR" mr view <id>`
 
 From the output extract:
 - **title** — MR title (should already include Jira key, e.g. `IOS-11987: ...`)

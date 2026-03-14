@@ -10,25 +10,6 @@ secrets/
 credentials/
 
 # =============================================================================
-# Obsidian vault
-# =============================================================================
-# Workspace state (per-device, no need to share)
-.obsidian/workspace.json
-.obsidian/workspace-mobile.json
-
-# Cache & plugins (rebuilt locally)
-.obsidian/cache
-.obsidian/plugins/
-!.obsidian/plugins/.gitkeep
-
-# Optional: keep core vault config but ignore plugins
-# If you want to share your vault config (themes, hotkeys), comment out below:
-# .obsidian/
-
-# Obsidian trash
-.trash/
-
-# =============================================================================
 # macOS
 # =============================================================================
 .DS_Store
