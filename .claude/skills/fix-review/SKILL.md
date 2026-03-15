@@ -10,25 +10,40 @@ Fix QA review issues for a Jira task. Argument: Jira key (e.g. `/fix-review IOS-
 
 ## Steps
 
-### 1. Load task and QA feedback
+### 1. Resolve parent key
 
 Parse the task key from `$ARGUMENTS`. If missing, ask for it.
 
-Fetch the task:
+Run a minimal Jira fetch to determine issue type and parent:
+
 ```bash
-acli jira workitem view <KEY> --fields '*all' --json
+acli jira workitem view <KEY> --fields 'issuetype,parent' --json
 ```
 
-Read:
-- Task summary and description
-- All comments — QA feedback is written as regular comments, typically the most recent ones after the last "Ready for test" transition
-- Parent key (if subtask)
+- If `fields.issuetype.subtask == true` → extract `<STORY-KEY>` from `fields.parent.key`
+- Otherwise → `<STORY-KEY>` = `<KEY>`
 
-Determine `<STORY-KEY>`:
-- If subtask → use parent key
-- If story → use task key itself
+### 2. Run snapshot
 
-Show the user a clean summary of the QA comments:
+```bash
+bash scripts/snapshot.sh <STORY-KEY>
+```
+
+This refreshes all Jira data (including the latest QA comments) and ensures the worktree exists.
+
+If the script exits with code 1, stop and report the error to the user.
+
+### 3. Extract QA feedback
+
+Determine which `comments.md` to read:
+- If `<KEY>` is a subtask → `$SDD_WORKDIR/<STORY-KEY>/<KEY>/comments.md`
+- If `<KEY>` is the story itself → `$SDD_WORKDIR/<STORY-KEY>/comments.md`
+
+Parse the file: find the **last** comment block whose body starts with the exact prefix `[QA_HANDOFF]` (case-sensitive, must be the first character of the first line). Extract all comment blocks that appear **after** that marker block — these are the QA feedback comments.
+
+If **no `[QA_HANDOFF]` marker** is found, treat the entire comment history as QA feedback.
+
+Show the user a clean summary:
 ```
 QA feedback on <KEY>:
 1. <issue from comment>
@@ -38,20 +53,20 @@ QA feedback on <KEY>:
 
 Ask: "Это все замечания, или есть что добавить?" — wait for confirmation or additions before proceeding.
 
-### 2. Locate the worktree and save QA feedback to file
+### 4. Locate the worktree and save QA feedback to file
 
 ```bash
 ls "$SDD_WORKDIR/<STORY-KEY>/repo"
 ```
 
-If the worktree does not exist, tell the user and stop — the worktree must exist from the original implementation.
+If the worktree does not exist, tell the user and stop — it must have been set up during the original implementation.
 
 Save the confirmed QA issues to `$SDD_WORKDIR/<STORY-KEY>/qa-<KEY>.md`:
 
 ```markdown
 # QA Feedback for <KEY>
 
-Source: Jira comments (Reopened <date>)
+Source: comments.md (after last [QA_HANDOFF] marker)
 
 ## Issues
 
@@ -66,7 +81,7 @@ Source: Jira comments (Reopened <date>)
 ...
 ```
 
-### 3. Assess complexity and decide on approach
+### 5. Assess complexity and decide on approach
 
 Review the confirmed QA issues and classify each one:
 - **Straightforward** — clear fix, no design decisions (e.g. wrong color, wrong text, missing constraint, simple layout fix)
@@ -76,9 +91,9 @@ If **any** issue is non-trivial, tell the user:
 ```
 Есть нетривиальные замечания: <list them>. Запущу qa-spec-writer, чтобы подготовить детальный план перед имплементацией.
 ```
-Then go to Step 3a. Otherwise go to Step 3b.
+Then go to Step 5a. Otherwise go to Step 5b.
 
-### 3a. Non-trivial path — launch qa-spec-writer first
+### 5a. Non-trivial path — launch qa-spec-writer first
 
 Launch the `qa-spec-writer` agent:
 
@@ -104,7 +119,7 @@ Read the fix spec first — it contains the full plan. Follow it step by step.
 Fix only the issues listed. Do not make unrelated changes.
 ```
 
-### 3b. Straightforward path — launch the implementer directly
+### 5b. Straightforward path — launch the implementer directly
 
 ```
 Fix QA review issues for <KEY>.
@@ -119,7 +134,7 @@ Fix only the issues listed in the QA feedback. Do not make unrelated changes.
 
 Wait for the agent to complete.
 
-### 4. Review the fixes
+### 6. Review the fixes
 
 1. **iOS only — always regenerate Xcode project after implementation:**
    ```bash
@@ -135,14 +150,14 @@ Wait for the agent to complete.
 
 If issues remain, launch the implementer again with specific fix instructions. Repeat until satisfied.
 
-### 5. Commit
+### 7. Commit
 
 ```bash
 git -C "$SDD_WORKDIR/<STORY-KEY>/repo" add -A
 git -C "$SDD_WORKDIR/<STORY-KEY>/repo" commit -m "<KEY>: Fix QA review issues"
 ```
 
-### 6. Send back to test
+### 8. Send back to test
 
 Run the `send-to-test` skill:
 ```
