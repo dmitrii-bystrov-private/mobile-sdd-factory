@@ -8,12 +8,6 @@ description: >
 
 Send a Jira task to QA. Arguments: `$ARGUMENTS`
 
-## Combined invocation
-
-If the message also contains an intent to post an MR for review (e.g. "send to test and request review"), execute **both** skills sequentially:
-1. Complete all steps of this skill first.
-2. Then execute the `request-review` skill for the MR part.
-
 Collect all required parameters for both upfront, show a combined preview, confirm once, then execute both.
 
 ## Step 1 — Collect parameters
@@ -64,10 +58,13 @@ Run sequentially:
 acli jira workitem comment create --key <KEY> --body "<comment text>"
 ```
 
-2. Transition the task:
+2. Transition the task. Tasks in "To Do" status cannot go directly to "Ready for test" — transition through "In Progress" first:
 ```
+acli jira workitem transition --key <KEY> --status "In Progress"
 acli jira workitem transition --key <KEY> --status "Ready for test"
 ```
+
+If the task is already "In Progress", skip the first transition and go straight to "Ready for test".
 
 On success, confirm:
 ```
