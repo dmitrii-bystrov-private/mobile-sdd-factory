@@ -23,17 +23,7 @@ acli jira workitem view <KEY> --fields 'issuetype,parent' --json
 - If `fields.issuetype.subtask == true` → extract `<STORY-KEY>` from `fields.parent.key`
 - Otherwise → `<STORY-KEY>` = `<KEY>`
 
-### 2. Run snapshot
-
-```bash
-bash scripts/snapshot.sh <STORY-KEY>
-```
-
-This refreshes all Jira data (including the latest QA comments) and ensures the worktree exists.
-
-If the script exits with code 1, stop and report the error to the user.
-
-### 3. Extract QA feedback
+### 2. Extract QA feedback
 
 Determine which `comments.md` to read:
 - If `<KEY>` is a subtask → `$SDD_WORKDIR/<STORY-KEY>/<KEY>/comments.md`
