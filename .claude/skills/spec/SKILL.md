@@ -14,38 +14,63 @@ Prepare a technical specification for a Jira task. Argument: Jira key (e.g. `/sp
 Every story uses a single workdir and a single worktree branch, regardless of whether it has subtasks:
 
 ```
-workdir/<STORY-KEY>/
+$SDD_WORKDIR/<STORY-KEY>/
+├── description.md             # parent issue: metadata + rendered description (snapshot)
+├── comments.md                # parent issue: all comments (snapshot)
+├── statuses.md                # parent + subtasks status table (snapshot)
 ├── spec.md                    # always: high-level plan + architecture for the whole story
 ├── spec-<STORY-KEY>.md        # detailed spec — only when the story has NO subtasks
 ├── spec-<SUBTASK-KEY>.md      # detailed spec per subtask — when the story has subtasks
-└── repo/                      # single git worktree for the entire story
+├── repo/                      # single git worktree for the entire story
+└── <SUBTASK-KEY>/
+    ├── description.md         # subtask: metadata + rendered description (snapshot)
+    └── comments.md            # subtask: all comments (snapshot)
 ```
 
 ## Steps
 
-### 1. Load Jira task
+### 1. Resolve parent key and platform
 
-```
-acli jira workitem view <JIRA-KEY> --fields '*all' --json
+If no argument is given, ask for the Jira key.
+
+Run a minimal Jira fetch to determine issue type and parent:
+
+```bash
+acli jira workitem view <JIRA-KEY> --fields 'issuetype,parent,project' --json
 ```
 
-Read: summary, description, acceptance criteria, story points, subtasks, linked issues, and **comments** (discussions in comments often contain refined requirements or implementation decisions that supersede the original description).
+- If `fields.issuetype.subtask == true` → this is a **subtask**; extract `<STORY-KEY>` from `fields.parent.key`
+- Otherwise → `<STORY-KEY>` = `<JIRA-KEY>`
 
 Determine platform from the key prefix:
 - `IOS-XXXXX` → iOS → `$IOS_DIR`
 - `ANDR-XXXXX` → Android → `$ANDROID_DIR`
 
-If no argument is given, ask for the Jira key.
+### 2. Run snapshot
 
-**Determine task mode** — this controls the rest of the flow:
+```bash
+bash scripts/snapshot.sh <STORY-KEY>
+```
 
-- **Subtask** — the task has a parent issue → go to [Subtask mode](#subtask-mode)
-- **Story without subtasks** — the task has no subtasks → go to [Story mode (no subtasks)](#story-mode-no-subtasks)
-- **Story with subtasks** — the task has subtasks listed → go to [Story mode (with subtasks)](#story-mode-with-subtasks)
+This will:
+- Fetch all Jira data (parent + subtasks) and write snapshot files
+- Create the git worktree at `$SDD_WORKDIR/<STORY-KEY>/repo/` (or skip if it already exists)
+- Run iOS bootstrap if applicable (tuist, pods)
 
-### 1a. Check for existing work (resume detection)
+If the script exits with code 1, stop and report the error to the user.
+If it exits with code 2 (partial success), note which subtasks failed but continue.
 
-Before doing anything else, check if work on this task has already started:
+### 3. Determine task mode
+
+Read `$SDD_WORKDIR/<STORY-KEY>/statuses.md` to understand the task structure:
+
+- **Subtask** — `<JIRA-KEY>` differs from `<STORY-KEY>` (subtask was passed) → [Subtask mode](#subtask-mode)
+- **Story without subtasks** — no subtask rows in `statuses.md` → [Story mode (no subtasks)](#story-mode-no-subtasks)
+- **Story with subtasks** — subtask rows present in `statuses.md` → [Story mode (with subtasks)](#story-mode-with-subtasks)
+
+### 3a. Check for existing work (resume detection)
+
+Check if `spec.md` already exists:
 
 ```bash
 ls "$SDD_WORKDIR/<STORY-KEY>/spec.md" 2>/dev/null
@@ -53,10 +78,7 @@ ls "$SDD_WORKDIR/<STORY-KEY>/spec.md" 2>/dev/null
 
 If `spec.md` **already exists** and the task is a **story with subtasks** → **Resume mode**:
 
-1. Load all subtasks and their statuses:
-   ```bash
-   acli jira workitem search --jql "parent = <STORY-KEY>" --fields key,summary,status
-   ```
+1. Read `$SDD_WORKDIR/<STORY-KEY>/statuses.md` for current statuses (already refreshed by snapshot).
 2. Show the user a status summary:
    ```
    Story: <STORY-KEY> — <summary>
@@ -68,7 +90,7 @@ If `spec.md` **already exists** and the task is a **story with subtasks** → **
    ○ IOS-XXXXX  To Do                          — <summary>
    ```
 3. Suggest the next action based on subtask statuses — **priority order**:
-   - If any subtask is **Reopened** → "Следующий шаг: `/fix-review <REOPENED-KEY>`" (QA returned it with comments)
+   - If any subtask is **Reopened** → "Следующий шаг: `/fix-review <REOPENED-KEY>`"
    - Else if any subtask is **In Progress** → "Следующий шаг: `/implement <IN-PROGRESS-KEY>`"
    - Else if any subtask is **To Do** and has a spec file → "Следующий шаг: `/implement <NEXT-KEY>`"
    - Else if any subtask is **To Do** without a spec → "Следующий шаг: `/spec <NEXT-KEY>`"
@@ -86,122 +108,84 @@ If `spec.md` does **not** exist → continue with normal flow below.
 
 ## Story mode (no subtasks)
 
-### 2a. Set up workdir and worktree
+### 4a. Discuss the task with the user
 
-Determine branch type from the Jira task type:
-- `Bug` → `bugfix/<TASK-KEY>`
-- anything else → `feature/<TASK-KEY>`
+Read `$SDD_WORKDIR/<STORY-KEY>/description.md` and `$SDD_WORKDIR/<STORY-KEY>/comments.md` for full context.
 
-Set `<workdir>` = `$SDD_WORKDIR/<TASK-KEY>`.
-
-```bash
-mkdir -p <workdir>
-```
-
-Check if worktree already exists:
-```bash
-git -C <project_dir> worktree list | grep <workdir>/repo
-```
-
-If it does **not** exist:
-1. Ensure the main repo is on master and up to date:
-   ```bash
-   git -C <project_dir> checkout master
-   git -C <project_dir> pull origin master
-   ```
-2. Create the worktree:
-   ```bash
-   git -C <project_dir> worktree add <workdir>/repo -b <branch-name>
-   ```
-3. For iOS only: create a symlink for the SwiftFormat binary, then regenerate the Xcode project (tuist first, then pods):
-   ```bash
-   ln -sf "$IOS_DIR/swift_format" <workdir>/repo/swift_format
-   cd <workdir>/repo && mise trust && mise exec -- tuist generate --no-open
-   cd <workdir>/repo && pod install
-   ```
-
-If it already exists, skip creation and regeneration.
-
-### 3a. Discuss the task with the user
-
-Present a brief summary of what you understood from Jira, then ask the user to clarify or add context:
+Present a brief summary of what you understood, then ask the user to clarify or add context:
 - Summarize the task in 2–3 sentences
 - Ask about details, edge cases, or implementation ideas not captured in Jira
 - Ask about any constraints or decisions already made
 
 **Wait for the user's response before proceeding.**
 
-### 4a. Launch the spec-writer agent
+### 5a. Launch the spec-writer agent
 
 Launch the `spec-writer` subagent (runs on Opus) to write **both** spec files:
 
 ```
 Write a technical spec for Jira task <JIRA-KEY>.
 
-Task summary: <summary from Jira>
-Description: <description from Jira>
-Acceptance criteria: <criteria from Jira>
-Comments: <comments from Jira>
+Task description file: $SDD_WORKDIR/<JIRA-KEY>/description.md
+Task comments file:    $SDD_WORKDIR/<JIRA-KEY>/comments.md
 Platform: <iOS/Android>
 Project directory: <project_dir>
 User context: <details from discussion>
 
 Output two files:
-1. $SDD_WORKDIR/<TASK-KEY>/spec.md
+1. $SDD_WORKDIR/<JIRA-KEY>/spec.md
    High-level: goals, architecture overview, key decisions, risks.
 
-2. $SDD_WORKDIR/<TASK-KEY>/spec-<TASK-KEY>.md
+2. $SDD_WORKDIR/<JIRA-KEY>/spec-<JIRA-KEY>.md
    Detailed implementation plan: exact files to create/modify, step-by-step changes,
    acceptance criteria checklist, code patterns to follow.
 ```
 
-### 5a. Present results
+### 6a. Present results
 
 Show the user:
-- Spec files: `spec.md` and `spec-<TASK-KEY>.md`
-- Worktree: `<workdir>/repo` on branch `<branch-name>`
+- Spec files: `spec.md` and `spec-<JIRA-KEY>.md`
+- Worktree: `$SDD_WORKDIR/<JIRA-KEY>/repo` on branch `<branch-name>`
 - Brief summary of the plan
 - Any open questions or risks
-- Suggest next step: `/implement <TASK-KEY>`
+- Suggest next step: `/implement <JIRA-KEY>`
 
 ---
 
 ## Story mode (with subtasks)
 
-### 2b. Set up workdir and worktree
+### 4b. Discuss the task with the user
 
-Same as [2a](#2a-set-up-workdir-and-worktree) — use the story key for the workdir and branch.
+Read `$SDD_WORKDIR/<STORY-KEY>/description.md`, `$SDD_WORKDIR/<STORY-KEY>/comments.md`, and `$SDD_WORKDIR/<STORY-KEY>/statuses.md` for full context.
 
-### 3b. Discuss the task with the user
-
-Same as [3a](#3a-discuss-the-task-with-the-user) — discuss the story as a whole.
-
-Also clarify: are the existing subtasks correct and complete, or does the story need to be decomposed first?
+Present a brief summary, then discuss:
+- Summarize the story in 2–3 sentences
+- Ask about details, edge cases, or implementation ideas not captured in Jira
+- Ask: are the existing subtasks correct and complete, or does the story need to be decomposed first?
 
 **Wait for the user's response before proceeding.**
 
-### 4b. Launch the spec-writer agent
+### 5b. Launch the spec-writer agent
 
 Launch the `spec-writer` subagent to write the high-level spec only:
 
 ```
-Write a high-level technical spec for Jira story <JIRA-KEY>.
+Write a high-level technical spec for Jira story <STORY-KEY>.
 
-Task summary: <summary from Jira>
-Description: <description from Jira>
-Subtasks: <list of subtask keys and summaries>
-Comments: <comments from Jira>
+Story description file: $SDD_WORKDIR/<STORY-KEY>/description.md
+Story comments file:    $SDD_WORKDIR/<STORY-KEY>/comments.md
+Subtask statuses file:  $SDD_WORKDIR/<STORY-KEY>/statuses.md
 Platform: <iOS/Android>
 Project directory: <project_dir>
 User context: <details from discussion>
 
 Output one file:
-$SDD_WORKDIR/<TASK-KEY>/spec.md
+$SDD_WORKDIR/<STORY-KEY>/spec.md
 Content: goals, architecture overview, key decisions, how subtasks relate to each other, risks.
 Do NOT write detailed per-subtask specs — those are written separately per subtask.
 ```
 
-### 5b. Handle decomposition (if needed)
+### 6b. Handle decomposition (if needed)
 
 If the story has no subtasks yet and the spec-writer recommends decomposition:
 - Present the proposed breakdown to the user for approval
@@ -221,12 +205,16 @@ If the story has no subtasks yet and the spec-writer recommends decomposition:
   acli jira workitem create --from-json /tmp/jira_create.json --json
   ```
 - Always confirm before creating subtasks
+- After creating subtasks, re-run snapshot to refresh the workspace:
+  ```bash
+  bash scripts/snapshot.sh <STORY-KEY>
+  ```
 
-### 6b. Present results
+### 7b. Present results
 
 Show the user:
 - Spec file: `spec.md`
-- Worktree: `<workdir>/repo` on branch `<branch-name>`
+- Worktree: `$SDD_WORKDIR/<STORY-KEY>/repo` on branch `<branch-name>`
 - List of subtasks (existing or newly created)
 - Suggest next step: `/spec <SUBTASK-KEY>` to write the first detailed subtask spec
 
@@ -234,45 +222,33 @@ Show the user:
 
 ## Subtask mode
 
-### 2c. Resolve parent and workdir
+### 4c. Read context
 
-Load the parent story key from the subtask's `parent` field.
+Read the following files:
+- `$SDD_WORKDIR/<STORY-KEY>/spec.md` — parent's high-level spec (if exists)
+- `$SDD_WORKDIR/<STORY-KEY>/<SUBTASK-KEY>/description.md` — subtask details
+- `$SDD_WORKDIR/<STORY-KEY>/<SUBTASK-KEY>/comments.md` — subtask comments
 
-Set `<workdir>` = `$SDD_WORKDIR/<STORY-KEY>` (parent's workdir, not the subtask's).
+### 5c. Discuss the subtask with the user
 
-Verify the worktree exists:
-```bash
-git -C <project_dir> worktree list | grep <workdir>/repo
-```
-
-If it does **not** exist, tell the user: "The story worktree doesn't exist yet. Run `/spec <STORY-KEY>` first to set it up."
-
-Read the parent's high-level spec for context:
-```
-<workdir>/spec.md
-```
-
-### 3c. Discuss the subtask with the user
-
-- Summarize what you understood from Jira and from the parent spec
+- Summarize what you understood from the snapshot files and parent spec
 - Ask about implementation details, edge cases, or constraints specific to this subtask
 - Ask if there are decisions from other already-implemented subtasks to be aware of
 
 **Wait for the user's response before proceeding.**
 
-### 4c. Launch the spec-writer agent
+### 6c. Launch the spec-writer agent
 
 Launch the `spec-writer` subagent with full context:
 
 ```
 Write a detailed implementation spec for subtask <SUBTASK-KEY> (part of story <STORY-KEY>).
 
-Subtask summary: <summary from Jira>
-Subtask description: <description from Jira>
-Subtask comments: <comments from Jira>
-Parent story spec: <contents of spec.md>
+Subtask description file: $SDD_WORKDIR/<STORY-KEY>/<SUBTASK-KEY>/description.md
+Subtask comments file:    $SDD_WORKDIR/<STORY-KEY>/<SUBTASK-KEY>/comments.md
+Parent story spec:        $SDD_WORKDIR/<STORY-KEY>/spec.md
 Platform: <iOS/Android>
-Project directory: <workdir>/repo
+Project directory: $SDD_WORKDIR/<STORY-KEY>/repo
 User context: <details from discussion>
 
 Output one file:
@@ -281,10 +257,10 @@ Content: exact files to create/modify, step-by-step changes, acceptance criteria
 code patterns to follow, how this subtask fits into the overall story.
 ```
 
-### 5c. Present results and offer to implement
+### 7c. Present results and offer to implement
 
 Show the user:
-- Spec file: `<workdir>/spec-<SUBTASK-KEY>.md`
+- Spec file: `$SDD_WORKDIR/<STORY-KEY>/spec-<SUBTASK-KEY>.md`
 - Brief summary of the implementation plan
 - Any open questions or risks
 
