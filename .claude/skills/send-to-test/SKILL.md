@@ -32,9 +32,10 @@ Also check what MR (if any) is referenced in the task or was mentioned by the us
 
 ## Step 3 — Draft the comment
 
-Write a short QA comment in English as plain text (no markdown, no wiki markup — acli posts plain text and Jira does not render formatting). Structure:
+Write a short QA comment in English as plain text (no markdown, no wiki markup — acli posts plain text and Jira does not render formatting). The comment **must** start with `[QA_HANDOFF]` on the very first line — this is the marker used by the fix-review skill to scope QA feedback. Structure:
 
 ```
+[QA_HANDOFF]
 What was done:
 <1–3 sentences in plain language, no technical jargon. What changed from the user's perspective.>
 
