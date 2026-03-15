@@ -1,0 +1,35 @@
+{
+  "key": "IOS-100",
+  "fields": {
+    "comment": {
+      "comments": [
+        {
+          "id": "1001",
+          "created": "2024-01-01T10:00:00.000+0000",
+          "body": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": "First comment."}]
+              }
+            ]
+          }
+        },
+        {
+          "id": "1002",
+          "created": "2024-01-02T10:00:00.000+0000",
+          "body": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [{"type": "text", "text": "[QA_HANDOFF] Ready for testing."}]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

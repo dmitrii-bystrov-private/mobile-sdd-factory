@@ -1,0 +1,17 @@
+{
+  "key": "IOS-100",
+  "fields": {
+    "issuetype": {"name": "Story"},
+    "summary": "Add user authentication",
+    "status": {"name": "In Progress"},
+    "description": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [{"type": "text", "text": "Implement OAuth2 login flow."}]
+        }
+      ]
+    }
+  }
+}

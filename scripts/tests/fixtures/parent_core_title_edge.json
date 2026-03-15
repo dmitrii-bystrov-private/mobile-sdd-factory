@@ -1,0 +1,9 @@
+{
+  "key": "IOS-200",
+  "fields": {
+    "issuetype": {"name": "Bug"},
+    "summary": "Fix login  | broken\nscreen  bug",
+    "status": {"name": "Open"},
+    "description": null
+  }
+}

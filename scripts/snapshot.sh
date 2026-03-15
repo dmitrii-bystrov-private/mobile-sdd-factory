@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/adf_to_md.sh
+source "$SCRIPT_DIR/adf_to_md.sh"
+# shellcheck source=scripts/snapshot_formatters.sh
+source "$SCRIPT_DIR/snapshot_formatters.sh"
+
 # snapshot.sh — Prepare a Jira workspace: snapshot artifacts + git worktree.
 #
 # Usage:
@@ -128,6 +134,7 @@ echo "Found $SUBTASK_COUNT subtask(s)"
 
 # Retrieve each subtask; collect failures instead of exiting immediately
 FAILED_SUBTASKS=()
+SUCCESSFUL_SUBTASKS=()
 
 if (( SUBTASK_COUNT > 0 )); then
   while IFS= read -r SUBKEY; do
@@ -158,13 +165,14 @@ if (( SUBTASK_COUNT > 0 )); then
 
     if ! $SUBKEY_OK; then
       FAILED_SUBTASKS+=("$SUBKEY")
+    else
+      SUCCESSFUL_SUBTASKS+=("$SUBKEY")
     fi
   done < <(jq -r '.[].key' "$SUBTASKS_LIST_JSON")
 fi
 
 if (( ${#FAILED_SUBTASKS[@]} > 0 )); then
-  err "Failed to retrieve the following subtask(s): ${FAILED_SUBTASKS[*]}"
-  exit 1
+  err "Some subtask(s) could not be retrieved: ${FAILED_SUBTASKS[*]}. Continuing with available data..."
 fi
 
 echo "Jira retrieval complete."
@@ -247,4 +255,134 @@ if [[ "$PLATFORM" == "ios" ]] && $WORKTREE_CREATED; then
   echo "iOS bootstrap complete."
 elif [[ "$PLATFORM" == "ios" ]] && ! $WORKTREE_CREATED; then
   echo "iOS bootstrap skipped (worktree already existed)."
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 4: Render ADF bodies to Markdown
+# ---------------------------------------------------------------------------
+
+echo "Rendering ADF content to Markdown..."
+
+# Helper: transform raw acli comments JSON into [{id, created, body_md}] JSON array
+_build_comments_md_json() {
+  local raw_json="$1"
+  local encoded_items
+  encoded_items="$(printf '%s' "$raw_json" | jq -r '.fields.comment.comments // [] | .[] | @base64')"
+
+  local result="["
+  local first=true
+  while IFS= read -r encoded; do
+    [[ -n "$encoded" ]] || continue
+    local comment id created body_adf body_md body_md_json
+    comment="$(printf '%s' "$encoded" | base64 -d)"
+    id="$(printf '%s' "$comment" | jq -r '.id')"
+    created="$(printf '%s' "$comment" | jq -r '.created')"
+    body_adf="$(printf '%s' "$comment" | jq '.body // "null"')"
+    body_md="$(render_adf_to_markdown "$body_adf")"
+    body_md_json="$(printf '%s' "$body_md" | jq -Rs .)"
+
+    $first || result+=","
+    result+="{\"id\":$(printf '%s' "$id" | jq -Rs .),\"created\":$(printf '%s' "$created" | jq -Rs .),\"body_md\":${body_md_json}}"
+    first=false
+  done < <(printf '%s\n' "$encoded_items")
+  result+="]"
+  printf '%s' "$result"
+}
+
+# Render parent description
+PARENT_DESC_ADF="$(jq '.fields.description' "$PARENT_CORE_JSON")"
+PARENT_DESC_MD="$(render_adf_to_markdown "$PARENT_DESC_ADF")"
+PARENT_COMMENTS_MD_JSON="$(_build_comments_md_json "$(cat "$PARENT_COMMENTS_JSON")")"
+
+# Render each successful subtask; store results in tmp files (bash 3 compatible)
+RENDERED_DIR="$TMPDIR_JIRA/rendered"
+mkdir -p "$RENDERED_DIR"
+for SUBKEY in "${SUCCESSFUL_SUBTASKS[@]+"${SUCCESSFUL_SUBTASKS[@]}"}"; do
+  echo "  Rendering $SUBKEY..."
+  SUB_DESC_ADF="$(jq '.fields.description' "$TMPDIR_JIRA/subtask.${SUBKEY}.core.json")"
+  render_adf_to_markdown "$SUB_DESC_ADF" > "$RENDERED_DIR/${SUBKEY}.desc.md"
+  _build_comments_md_json "$(cat "$TMPDIR_JIRA/subtask.${SUBKEY}.comments.json")" \
+    > "$RENDERED_DIR/${SUBKEY}.comments.json"
+done
+
+echo "ADF rendering complete."
+
+# ---------------------------------------------------------------------------
+# Stage 5: Write snapshot artifacts
+# ---------------------------------------------------------------------------
+
+echo "Writing snapshot artifacts to $WORKDIR..."
+
+mkdir -p "$WORKDIR"
+
+# Read parent metadata (PARENT_ISSUE_TYPE already set by worktree stage)
+PARENT_ISSUE_TITLE="$(jq -r '.fields.summary' "$PARENT_CORE_JSON")"
+PARENT_ISSUE_STATUS="$(jq -r '.fields.status.name' "$PARENT_CORE_JSON")"
+
+# Write parent description.md
+write_description_md \
+  "$WORKDIR/description.md" \
+  "$PARENT_KEY" \
+  "$PARENT_ISSUE_TYPE" \
+  "$PARENT_ISSUE_TITLE" \
+  "$PARENT_ISSUE_STATUS" \
+  "$PARENT_DESC_MD"
+echo "  Wrote $WORKDIR/description.md"
+
+# Write parent comments.md
+write_comments_md \
+  "$WORKDIR/comments.md" \
+  "$PARENT_COMMENTS_MD_JSON"
+echo "  Wrote $WORKDIR/comments.md"
+
+# Prepare data for statuses.md
+PARENT_STATUS_JSON="$(jq '{key: .key, type: .fields.issuetype.name, title: .fields.summary, status: .fields.status.name}' "$PARENT_CORE_JSON")"
+SUBTASKS_STATUS_JSON="$(jq 'map({key: .key, type: (.fields.issuetype.name // ""), title: (.fields.summary // ""), status: (.fields.status.name // "")})' "$SUBTASKS_LIST_JSON")"
+
+EXISTING_STATUSES_FILE=""
+[[ -f "$WORKDIR/statuses.md" ]] && EXISTING_STATUSES_FILE="$WORKDIR/statuses.md"
+
+# Skip statuses.md only when subtask failures occurred AND there's no existing file to carry forward
+if (( ${#FAILED_SUBTASKS[@]} > 0 )) && [[ -z "$EXISTING_STATUSES_FILE" ]]; then
+  err "Skipping statuses.md: subtask failures with no existing file to carry forward values."
+else
+  write_statuses_md \
+    "$WORKDIR/statuses.md" \
+    "$PARENT_STATUS_JSON" \
+    "$SUBTASKS_STATUS_JSON" \
+    "$EXISTING_STATUSES_FILE"
+  echo "  Wrote $WORKDIR/statuses.md"
+fi
+
+# Write subtask artifacts
+for SUBKEY in "${SUCCESSFUL_SUBTASKS[@]+"${SUCCESSFUL_SUBTASKS[@]}"}"; do
+  SUB_WORKDIR="$WORKDIR/$SUBKEY"
+  mkdir -p "$SUB_WORKDIR"
+
+  SUB_KEY="$(jq -r '.key' "$TMPDIR_JIRA/subtask.${SUBKEY}.core.json")"
+  SUB_TYPE="$(jq -r '.fields.issuetype.name' "$TMPDIR_JIRA/subtask.${SUBKEY}.core.json")"
+  SUB_TITLE="$(jq -r '.fields.summary' "$TMPDIR_JIRA/subtask.${SUBKEY}.core.json")"
+  SUB_STATUS="$(jq -r '.fields.status.name' "$TMPDIR_JIRA/subtask.${SUBKEY}.core.json")"
+
+  write_description_md \
+    "$SUB_WORKDIR/description.md" \
+    "$SUB_KEY" \
+    "$SUB_TYPE" \
+    "$SUB_TITLE" \
+    "$SUB_STATUS" \
+    "$(cat "$RENDERED_DIR/${SUBKEY}.desc.md")"
+  echo "  Wrote $SUB_WORKDIR/description.md"
+
+  write_comments_md \
+    "$SUB_WORKDIR/comments.md" \
+    "$(cat "$RENDERED_DIR/${SUBKEY}.comments.json")"
+  echo "  Wrote $SUB_WORKDIR/comments.md"
+done
+
+echo "Snapshot complete."
+
+# Exit 2 if any subtasks failed retrieval (partial success: parent + available subtasks written)
+if (( ${#FAILED_SUBTASKS[@]} > 0 )); then
+  err "Completed with errors. Failed subtask(s): ${FAILED_SUBTASKS[*]}"
+  exit 2
 fi

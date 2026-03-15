@@ -137,22 +137,22 @@ write_statuses_md() {
   local subtasks_json="$3"
   local existing_file="${4:-}"
 
-  # Build a lookup map of last-known values from existing statuses.md
-  # Format in existing file: | KEY | TYPE | TITLE | STATUS |
-  declare -A last_type last_title last_status
-  if [[ -n "$existing_file" && -f "$existing_file" ]]; then
-    while IFS='|' read -r _ k t ti s _rest; do
+  # Helper: look up a field value from existing statuses.md for a given issue key.
+  # col: 2=Type, 3=Title, 4=Status (pipe-delimited columns, 1-indexed after splitting by |)
+  _carry_val() {
+    local key="$1" col="$2"
+    [[ -n "$existing_file" && -f "$existing_file" ]] || { printf ''; return; }
+    grep '^|' "$existing_file" | while IFS='|' read -r _ k t ti s _rest; do
       k="$(printf '%s' "$k" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-      t="$(printf '%s' "$t" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-      ti="$(printf '%s' "$ti" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-      s="$(printf '%s' "$s" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-      if [[ -n "$k" && "$k" != "Key" ]]; then
-        last_type["$k"]="$t"
-        last_title["$k"]="$ti"
-        last_status["$k"]="$s"
-      fi
-    done < <(grep '^|' "$existing_file" || true)
-  fi
+      [[ "$k" == "$key" && "$k" != "Key" ]] || continue
+      case "$col" in
+        2) printf '%s' "$(printf '%s' "$t"  | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')" ;;
+        3) printf '%s' "$(printf '%s' "$ti" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')" ;;
+        4) printf '%s' "$(printf '%s' "$s"  | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')" ;;
+      esac
+      return
+    done
+  }
 
   _fmt_row() {
     local row_key="$1" row_type="$2" row_title="$3" row_status="$4"
@@ -184,9 +184,9 @@ write_statuses_md() {
       s_status="$(printf '%s' "$sub" | jq -r '.status')"
 
       # Carry forward last-known values for failed subtasks (empty fields)
-      if [[ -z "$s_type"   || "$s_type"   == "null" ]]; then s_type="${last_type["$s_key"]:-}";   fi
-      if [[ -z "$s_title"  || "$s_title"  == "null" ]]; then s_title="${last_title["$s_key"]:-}";  fi
-      if [[ -z "$s_status" || "$s_status" == "null" ]]; then s_status="${last_status["$s_key"]:-}"; fi
+      if [[ -z "$s_type"   || "$s_type"   == "null" ]]; then s_type="$(_carry_val "$s_key" 2)";   fi
+      if [[ -z "$s_title"  || "$s_title"  == "null" ]]; then s_title="$(_carry_val "$s_key" 3)";  fi
+      if [[ -z "$s_status" || "$s_status" == "null" ]]; then s_status="$(_carry_val "$s_key" 4)"; fi
 
       _fmt_row "$s_key" "$s_type" "$s_title" "$s_status"
     done

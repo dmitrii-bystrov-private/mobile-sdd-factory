@@ -11,10 +11,10 @@
 - [x] 7. Implement statuses.md formatter
 - [x] 8. Implement git worktree setup stage
 - [x] 9. Implement iOS bootstrap stage
-- [ ] 10. Wire all stages into snapshot.sh orchestration
-- [ ] 11. Add snapshot formatter golden-file tests
-- [ ] 12. Add failure-mode tests for snapshot script
-- [ ] 13. Create snapshot skill in .claude/skills/
+- [x] 10. Wire all stages into snapshot.sh orchestration
+- [x] 11. Add snapshot formatter golden-file tests
+- [x] 12. Add failure-mode tests for snapshot script
+- [x] 13. Create snapshot skill in .claude/skills/
 
 - summary: "Add environment validation to snapshot script"
   description: |
