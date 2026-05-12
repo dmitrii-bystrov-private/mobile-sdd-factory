@@ -377,6 +377,42 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(artifact.artifact_type == "runtime_output" for artifact in artifacts_a))
         self.assertTrue(any(artifact.artifact_type == "runtime_output" for artifact in artifacts_b))
 
+    def test_run_loop_once_reconciles_undispatched_work_item(self) -> None:
+        session, _, _ = self.coordinator.create_task_session("IOS-30013")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title="Recovered implementation for IOS-30013",
+            owner_role_id=implementer_role.id,
+            priority=100,
+        )
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="implementation_requested",
+            current_owner="implementer",
+        )
+
+        event, session_count, chunk_count = self.coordinator.run_loop_once()
+        events = self.event_repository.list_for_session(session.id)
+        refreshed_role = self.role_repository.get_by_name(session.id, "implementer")
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertEqual("coordinator_loop_ran", event.event_type)
+        self.assertEqual(1, session_count)
+        self.assertEqual(0, chunk_count)
+        self.assertEqual(1, refreshed_role.last_hydration_version)
+        self.assertEqual(1, len(sent_inputs))
+        self.assertIn("Start implementation work for IOS-30013.", sent_inputs[0])
+        self.assertTrue(
+            any(
+                item.event_type == "role_input_dispatched"
+                and item.payload.get("work_item_id") == work_item.id
+                for item in events
+            )
+        )
+        self.assertTrue(any(item.event_type == "session_dispatch_reconciled" for item in events))
+
 
 if __name__ == "__main__":
     unittest.main()

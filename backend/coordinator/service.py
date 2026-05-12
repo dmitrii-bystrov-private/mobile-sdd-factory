@@ -304,8 +304,11 @@ class CoordinatorService:
         active_sessions = self.session_repository.list_by_status(SessionStatus.ACTIVE)
         total_chunks = 0
         polled_sessions = 0
+        reconciled_sessions = 0
 
         for session in active_sessions:
+            if self._reconcile_session_dispatch(session):
+                reconciled_sessions += 1
             _, _, _, chunk_count = self.poll_session_output(session.id)
             polled_sessions += 1
             total_chunks += chunk_count
@@ -320,6 +323,7 @@ class CoordinatorService:
             payload={
                 "session_count": polled_sessions,
                 "chunk_count": total_chunks,
+                "reconciled_count": reconciled_sessions,
             },
         )
         return summary_event, polled_sessions, total_chunks
@@ -639,6 +643,90 @@ class CoordinatorService:
             if isinstance(output_type, str) and isinstance(payload, dict):
                 results.append((output_type, payload))
         return results
+
+    def _reconcile_session_dispatch(self, session: Session) -> bool:
+        if session.current_owner is None:
+            return False
+
+        role = self.role_repository.get_by_name(session.id, session.current_owner)
+        if role is None:
+            return False
+
+        work_item = self._find_active_work_item_for_role(session.id, role.id)
+        if work_item is None:
+            return False
+
+        if self._has_dispatch_event(
+            session_id=session.id,
+            work_item_id=work_item.id,
+            stage_name=session.current_stage,
+        ):
+            return False
+
+        instruction = self._stage_instruction(session.current_stage, session.task_key)
+        if instruction is None:
+            return False
+
+        self._dispatch_role_work(
+            session=session,
+            role=role,
+            work_item=work_item,
+            stage_name=session.current_stage,
+            instruction=instruction,
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="session_dispatch_reconciled",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": work_item.id,
+                "stage_name": session.current_stage,
+            },
+        )
+        return True
+
+    def _find_active_work_item_for_role(
+        self,
+        session_id: int,
+        role_id: int | None,
+    ) -> WorkItem | None:
+        if role_id is None:
+            return None
+        for item in self.work_item_repository.list_for_session(session_id):
+            if item.owner_role_id != role_id:
+                continue
+            if item.status != WorkItemStatus.ASSIGNED:
+                continue
+            return item
+        return None
+
+    def _has_dispatch_event(
+        self,
+        session_id: int,
+        work_item_id: int | None,
+        stage_name: str,
+    ) -> bool:
+        if work_item_id is None:
+            return False
+        for event in self.event_repository.list_for_session(session_id):
+            if event.event_type != "role_input_dispatched":
+                continue
+            if event.payload.get("work_item_id") != work_item_id:
+                continue
+            if event.payload.get("stage_name") != stage_name:
+                continue
+            return True
+        return False
+
+    def _stage_instruction(self, stage_name: str, task_key: str) -> str | None:
+        if stage_name == "implementation_requested":
+            return f"Start implementation work for {task_key}."
+        if stage_name == "verification_requested":
+            return f"Run deterministic verification for {task_key}."
+        if stage_name == "verification_correction_requested":
+            return f"Apply verification corrections for {task_key}."
+        return None
 
     def _dispatch_role_work(
         self,
