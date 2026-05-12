@@ -54,13 +54,14 @@ class SessionCreationTests(unittest.TestCase):
         self.event_repository = EventRepository(self.database)
         self.artifact_repository = ArtifactRepository(self.database)
         self.work_item_repository = WorkItemRepository(self.database)
+        self.session_backend = TmuxSessionBackend()
         self.coordinator = CoordinatorService(
             session_repository=self.session_repository,
             role_repository=self.role_repository,
             event_repository=self.event_repository,
             artifact_repository=self.artifact_repository,
             work_item_repository=self.work_item_repository,
-            session_backend=TmuxSessionBackend(),
+            session_backend=self.session_backend,
             default_roles=DEFAULT_SESSION_ROLES,
             jira_adapter=FakeJiraAdapter(),
             snapshot_adapter=FakeSnapshotAdapter(),
@@ -102,15 +103,25 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("Story", details["issue_type"])
         self.assertEqual(0, details["snapshot_exit_code"])
         self.assertEqual("implementation_requested", details["followup_event_type"])
-        self.assertEqual(3, len(artifacts))
+        self.assertEqual(4, len(artifacts))
         self.assertEqual(1, len(work_items))
         self.assertEqual("Initial implementation for IOS-30002", work_items[0].title)
         self.assertEqual("implementation_requested", refreshed_session.current_stage)
         self.assertEqual("implementer", refreshed_session.current_owner)
         self.assertEqual(
-            ["task_started", "task_prepared", "implementation_requested"],
+            [
+                "task_started",
+                "task_prepared",
+                "role_input_dispatched",
+                "implementation_requested",
+            ],
             [item.event_type for item in events],
         )
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.assertEqual(1, implementer_role.last_hydration_version)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        self.assertEqual(1, len(sent_inputs))
+        self.assertIn("Start implementation work for IOS-30002.", sent_inputs[0])
 
     def test_implementation_completed_moves_session_to_verification(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003")
@@ -134,12 +145,19 @@ class SessionCreationTests(unittest.TestCase):
             [
                 "task_started",
                 "task_prepared",
+                "role_input_dispatched",
                 "implementation_requested",
                 "implementation_completed",
+                "role_input_dispatched",
                 "verification_requested",
             ],
             [item.event_type for item in events],
         )
+        verification_role = self.role_repository.get_by_name(session.id, "verification-coordinator")
+        self.assertEqual(1, verification_role.last_hydration_version)
+        sent_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
+        self.assertEqual(1, len(sent_inputs))
+        self.assertIn("Run deterministic verification for IOS-30003.", sent_inputs[0])
 
     def test_verification_failed_moves_session_back_to_implementer(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")
@@ -174,14 +192,22 @@ class SessionCreationTests(unittest.TestCase):
             [
                 "task_started",
                 "task_prepared",
+                "role_input_dispatched",
                 "implementation_requested",
                 "implementation_completed",
+                "role_input_dispatched",
                 "verification_requested",
                 "verification_failed",
+                "role_input_dispatched",
                 "verification_correction_requested",
             ],
             [item.event_type for item in events],
         )
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.assertEqual(2, implementer_role.last_hydration_version)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        self.assertEqual(2, len(sent_inputs))
+        self.assertIn("Apply verification corrections for IOS-30004.", sent_inputs[-1])
 
     def test_verification_passed_completes_session(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30005")
@@ -216,8 +242,10 @@ class SessionCreationTests(unittest.TestCase):
             [
                 "task_started",
                 "task_prepared",
+                "role_input_dispatched",
                 "implementation_requested",
                 "implementation_completed",
+                "role_input_dispatched",
                 "verification_requested",
                 "verification_passed",
                 "task_completed",

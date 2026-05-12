@@ -12,8 +12,12 @@ from backend.coordinator.hydration import build_role_hydration
 from backend.models.event import Event
 from backend.models.enums import RoleStatus, SessionStatus, WorkItemStatus
 from backend.models.session import Session
+from backend.models.role import Role
+from backend.models.work_item import WorkItem
+from backend.roles.prompts import role_handoff_prompt
 from backend.roles.contracts import IMPLEMENTER_ROLE, VERIFICATION_COORDINATOR_ROLE
 from backend.session_backend.base import SessionBackend
+from backend.session_backend.runtime_models import RuntimeRoleHandle
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.event_repository import EventRepository
 from backend.state.role_repository import RoleRepository
@@ -212,26 +216,12 @@ class CoordinatorService:
             current_stage="implementation_requested",
             current_owner=IMPLEMENTER_ROLE,
         )
-        hydration = build_role_hydration(
-            role_name=IMPLEMENTER_ROLE,
-            task_key=resolved_task_key,
-            current_stage=session.current_stage,
-            active_work_item=work_item,
-        )
-        hydration_path = write_text_artifact(
-            self.artifacts_root,
-            resolved_task_key,
-            "implementation_requested",
-            "implementer.hydration.json",
-            json.dumps(hydration, indent=2, sort_keys=True),
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            role_id=implementer_role.id,
+        self._dispatch_role_work(
+            session=session,
+            role=implementer_role,
+            work_item=work_item,
             stage_name="implementation_requested",
-            artifact_type="hydration_payload",
-            path=str(hydration_path),
-            metadata={"role_name": IMPLEMENTER_ROLE, "work_item_id": work_item.id},
+            instruction=f"Start implementation work for {resolved_task_key}.",
         )
         return self.event_repository.append(
             session_id=session.id,
@@ -278,29 +268,12 @@ class CoordinatorService:
             current_stage="verification_requested",
             current_owner=VERIFICATION_COORDINATOR_ROLE,
         )
-        hydration = build_role_hydration(
-            role_name=VERIFICATION_COORDINATOR_ROLE,
-            task_key=session.task_key,
-            current_stage=session.current_stage,
-            active_work_item=verification_item,
-        )
-        hydration_path = write_text_artifact(
-            self.artifacts_root,
-            session.task_key,
-            "verification_requested",
-            "verification-coordinator.hydration.json",
-            json.dumps(hydration, indent=2, sort_keys=True),
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            role_id=verification_role.id,
+        self._dispatch_role_work(
+            session=session,
+            role=verification_role,
+            work_item=verification_item,
             stage_name="verification_requested",
-            artifact_type="hydration_payload",
-            path=str(hydration_path),
-            metadata={
-                "role_name": VERIFICATION_COORDINATOR_ROLE,
-                "work_item_id": verification_item.id,
-            },
+            instruction=f"Run deterministic verification for {session.task_key}.",
         )
         event = self.event_repository.append(
             session_id=session.id,
@@ -348,29 +321,12 @@ class CoordinatorService:
             current_stage="verification_correction_requested",
             current_owner=IMPLEMENTER_ROLE,
         )
-        hydration = build_role_hydration(
-            role_name=IMPLEMENTER_ROLE,
-            task_key=session.task_key,
-            current_stage=session.current_stage,
-            active_work_item=correction_item,
-        )
-        hydration_path = write_text_artifact(
-            self.artifacts_root,
-            session.task_key,
-            "verification_correction_requested",
-            "implementer.hydration.json",
-            json.dumps(hydration, indent=2, sort_keys=True),
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            role_id=implementer_role.id,
+        self._dispatch_role_work(
+            session=session,
+            role=implementer_role,
+            work_item=correction_item,
             stage_name="verification_correction_requested",
-            artifact_type="hydration_payload",
-            path=str(hydration_path),
-            metadata={
-                "role_name": IMPLEMENTER_ROLE,
-                "work_item_id": correction_item.id,
-            },
+            instruction=f"Apply verification corrections for {session.task_key}.",
         )
         event = self.event_repository.append(
             session_id=session.id,
@@ -424,3 +380,79 @@ class CoordinatorService:
             if session.id == session_id:
                 return session
         raise IntakeError(f"Session {session_id} was not found")
+
+    def _dispatch_role_work(
+        self,
+        session: Session,
+        role: Role,
+        work_item: WorkItem,
+        stage_name: str,
+        instruction: str,
+    ) -> None:
+        hydration = build_role_hydration(
+            role_name=role.role_name,
+            task_key=session.task_key,
+            current_stage=session.current_stage,
+            active_work_item=work_item,
+        )
+        prompt_text = role_handoff_prompt(
+            role_name=role.role_name,
+            instruction=instruction,
+            hydration_payload=hydration,
+        )
+        hydration_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            stage_name,
+            f"{role.role_name}.hydration.json",
+            json.dumps(hydration, indent=2, sort_keys=True),
+        )
+        prompt_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            stage_name,
+            f"{role.role_name}.prompt.txt",
+            prompt_text,
+        )
+        updated_role = self.role_repository.increment_hydration_version(role.id)
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            stage_name=stage_name,
+            artifact_type="hydration_payload",
+            path=str(hydration_path),
+            metadata={
+                "role_name": role.role_name,
+                "work_item_id": work_item.id,
+                "hydration_version": updated_role.last_hydration_version,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            stage_name=stage_name,
+            artifact_type="role_prompt",
+            path=str(prompt_path),
+            metadata={
+                "role_name": role.role_name,
+                "work_item_id": work_item.id,
+                "hydration_version": updated_role.last_hydration_version,
+            },
+        )
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle or f"{role.runtime_backend}:{role.role_name}",
+            session_id=f"session:{session.id}",
+            backend_name=role.runtime_backend,
+        )
+        self.session_backend.send_input(runtime_role, prompt_text)
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": work_item.id,
+                "stage_name": stage_name,
+                "hydration_version": updated_role.last_hydration_version,
+            },
+        )

@@ -53,3 +53,20 @@ class RoleRepository:
         if row is None:
             return None
         return role_from_row(row)
+
+    def increment_hydration_version(self, role_id: int) -> Role:
+        with self.db.connect() as connection:
+            connection.execute(
+                """
+                UPDATE roles
+                SET last_hydration_version = last_hydration_version + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (role_id,),
+            )
+            row = connection.execute(
+                "SELECT * FROM roles WHERE id = ?",
+                (role_id,),
+            ).fetchone()
+        return role_from_row(row)

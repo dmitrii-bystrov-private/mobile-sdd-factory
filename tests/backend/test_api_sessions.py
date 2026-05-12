@@ -141,7 +141,7 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertEqual("verification_requested", inject_response.followup_event_type)
         self.assertEqual("verification_requested", inject_response.session.current_stage)
-        self.assertEqual(5, len(events_response.items))
+        self.assertEqual(7, len(events_response.items))
         self.assertEqual(2, len(work_items_response.items))
 
     def test_verification_failed_event_returns_correction_handoff(self) -> None:
@@ -205,8 +205,8 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertEqual("task_completed", response.followup_event_type)
         self.assertEqual("completed", response.session.current_stage)
-        self.assertEqual("active", response.session.status)
-        self.assertEqual(7, len(events_response.items))
+        self.assertEqual("completed", response.session.status)
+        self.assertEqual(9, len(events_response.items))
 
 
 if __name__ == "__main__":
