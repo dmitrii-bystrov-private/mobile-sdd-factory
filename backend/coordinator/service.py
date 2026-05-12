@@ -250,6 +250,7 @@ class CoordinatorService:
             return session, None, 0
 
         self._record_runtime_output_artifacts(session, role, chunks)
+        session = self._apply_runtime_output_markers(session, role, chunks)
         event = self._append_event(
             session_id=session.id,
             event_type="role_output_collected",
@@ -282,6 +283,7 @@ class CoordinatorService:
             if not chunks:
                 continue
             self._record_runtime_output_artifacts(session, role, chunks)
+            session = self._apply_runtime_output_markers(session, role, chunks)
             total_chunks += len(chunks)
 
         if total_chunks == 0:
@@ -604,6 +606,39 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
             },
         )
+
+    def _apply_runtime_output_markers(
+        self,
+        session: Session,
+        role: Role,
+        chunks: list[RuntimeOutputChunk],
+    ) -> Session:
+        current_session = session
+        for chunk in chunks:
+            for output_type, payload in self._extract_output_markers(chunk.text):
+                current_session, _, _ = self.handle_role_output(
+                    session_id=current_session.id,
+                    role_name=role.role_name,
+                    output_type=output_type,
+                    payload=payload,
+                )
+        return current_session
+
+    def _extract_output_markers(self, text: str) -> list[tuple[str, dict]]:
+        results: list[tuple[str, dict]] = []
+        for line in text.splitlines():
+            if not line.startswith("SDD_OUTPUT:"):
+                continue
+            raw_payload = line.split("SDD_OUTPUT:", 1)[1].strip()
+            try:
+                parsed = json.loads(raw_payload)
+            except json.JSONDecodeError:
+                continue
+            output_type = parsed.get("output_type")
+            payload = parsed.get("payload", {})
+            if isinstance(output_type, str) and isinstance(payload, dict):
+                results.append((output_type, payload))
+        return results
 
     def _dispatch_role_work(
         self,

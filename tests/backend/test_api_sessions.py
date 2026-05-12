@@ -300,6 +300,38 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(2, response.chunk_count)
         self.assertEqual("role_output_collected", response.event_type)
 
+    def test_collect_role_output_route_normalizes_marker(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"done"}}',
+        )
+
+        response = collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+        events_response = list_events(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.collected)
+        self.assertEqual(1, response.chunk_count)
+        self.assertEqual("role_output_collected", response.event_type)
+        self.assertTrue(any(item.event_type == "implementation_completed" for item in events_response.items))
+        self.assertTrue(any(item.event_type == "verification_requested" for item in events_response.items))
+
     def test_poll_session_output_route_collects_all_role_chunks(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40008"),
@@ -354,11 +386,11 @@ class SessionApiTests(unittest.TestCase):
 
     def test_run_loop_once_route_polls_active_sessions(self) -> None:
         prepare_a = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
-            PrepareSessionRequest(task_key="IOS-40010"),
+            PrepareSessionRequest(task_key="IOS-40011"),
             dependencies=self.dependencies,
         )
         prepare_b = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
-            PrepareSessionRequest(task_key="IOS-40011"),
+            PrepareSessionRequest(task_key="IOS-40012"),
             dependencies=self.dependencies,
         )
         implementer_a = self.dependencies.role_repository.get_by_name(prepare_a.session.id, "implementer")

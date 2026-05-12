@@ -325,8 +325,28 @@ class SessionCreationTests(unittest.TestCase):
             len([artifact for artifact in artifacts if artifact.artifact_type == "runtime_output"]),
         )
 
-    def test_event_bus_receives_published_session_events(self) -> None:
+    def test_collect_role_output_normalizes_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"done"}}',
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertTrue(any(item.event_type == "implementation_completed" for item in events))
+        self.assertTrue(any(item.event_type == "verification_requested" for item in events))
+
+    def test_event_bus_receives_published_session_events(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30010")
         self.coordinator.handle_role_output(
             session_id=session.id,
             role_name="implementer",
@@ -340,8 +360,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(event.event_type == "verification_requested" for event in recent))
 
     def test_run_loop_once_polls_all_active_sessions(self) -> None:
-        session_a, _, _, _ = self.coordinator.prepare_task_session("IOS-30010")
-        session_b, _, _, _ = self.coordinator.prepare_task_session("IOS-30011")
+        session_a, _, _, _ = self.coordinator.prepare_task_session("IOS-30011")
+        session_b, _, _, _ = self.coordinator.prepare_task_session("IOS-30012")
         implementer_a = self.role_repository.get_by_name(session_a.id, "implementer")
         implementer_b = self.role_repository.get_by_name(session_b.id, "implementer")
         self.session_backend.simulate_output(implementer_a.runtime_handle, "a output")

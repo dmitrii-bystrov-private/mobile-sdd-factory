@@ -22,6 +22,10 @@ def role_handoff_prompt(
         f"{base_role_prompt(role_name)}\n"
         "Current routed work:\n"
         f"{instruction}\n\n"
+        "When you reach a terminal outcome for this routed work, emit one line in this exact form:\n"
+        'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"short result"}}\n'
+        "For verification failures, emit:\n"
+        'SDD_OUTPUT: {"output_type":"failed","payload":{"summary":"short result","failures":["..."]}}\n\n'
         "Hydration payload:\n"
         f"{json.dumps(hydration_payload, indent=2, sort_keys=True)}\n"
     )
