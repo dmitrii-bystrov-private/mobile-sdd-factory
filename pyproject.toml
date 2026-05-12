@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sdd-factory"
+version = "0.1.0"
+description = "Task-scoped persistent orchestration backend for SDD Factory"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1.0",
+  "pydantic>=2.7,<3.0",
+  "uvicorn>=0.30,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0,<9.0",
+]
+
+[tool.setuptools]
+packages = [
+  "backend",
+  "backend.api",
+  "backend.coordinator",
+  "backend.models",
+  "backend.roles",
+  "backend.session_backend",
+  "backend.state",
+  "backend.tools",
+]

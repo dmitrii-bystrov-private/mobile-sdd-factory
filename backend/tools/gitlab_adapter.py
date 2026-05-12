@@ -1,0 +1,22 @@
+"""Adapters for GitLab-related shell workflows."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from backend.tools.command_runner import CommandResult, CommandRunner
+
+
+class GitLabAdapter:
+    def __init__(self, runner: CommandRunner, repo_root: Path) -> None:
+        self.runner = runner
+        self.repo_root = repo_root
+
+    def create_mr(self, task_key: str) -> CommandResult:
+        return self.runner.run(["bash", "scripts/create-mr.sh", task_key], cwd=self.repo_root)
+
+    def fetch_mr_comments(self, platform: str, mr_id: str) -> CommandResult:
+        return self.runner.run(
+            ["bash", "scripts/fetch-mr-comments.sh", platform, mr_id],
+            cwd=self.repo_root,
+        )

@@ -1,0 +1,2 @@
+"""Role-level interaction contracts."""
+
