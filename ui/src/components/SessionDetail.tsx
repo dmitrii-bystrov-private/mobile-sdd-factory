@@ -1,0 +1,64 @@
+import { ArtifactPanel } from "./ArtifactPanel";
+import { OperatorActions } from "./OperatorActions";
+import { RoleStatusPanel } from "./RoleStatusPanel";
+import type { Session, SessionBundle } from "../types";
+
+type SessionDetailProps = {
+  session: Session | null;
+  bundle: SessionBundle | null;
+  onRefresh: () => Promise<void>;
+};
+
+export function SessionDetail({
+  session,
+  bundle,
+  onRefresh,
+}: SessionDetailProps): JSX.Element {
+  if (session === null || bundle === null) {
+    return (
+      <section className="panel panel-empty">
+        <p className="eyebrow">No Session Selected</p>
+        <h2>Choose a task session to inspect the factory state.</h2>
+      </section>
+    );
+  }
+
+  return (
+    <section className="detail-layout">
+      <div className="panel hero-panel">
+        <div className="hero-copy">
+          <p className="eyebrow">Current Session</p>
+          <h1>{session.task_key}</h1>
+          <p className="hero-meta">
+            Stage: <strong>{session.current_stage}</strong>
+          </p>
+          <p className="hero-meta">
+            Owner: <strong>{session.current_owner ?? "unowned"}</strong>
+          </p>
+        </div>
+        <div className="hero-stats">
+          <div className="metric-card">
+            <span>Status</span>
+            <strong>{session.status}</strong>
+          </div>
+          <div className="metric-card">
+            <span>Roles</span>
+            <strong>{bundle.roles.length}</strong>
+          </div>
+          <div className="metric-card">
+            <span>Artifacts</span>
+            <strong>{bundle.artifacts.length}</strong>
+          </div>
+          <div className="metric-card">
+            <span>Events</span>
+            <strong>{bundle.events.length}</strong>
+          </div>
+        </div>
+      </div>
+
+      <OperatorActions onRefresh={onRefresh} roles={bundle.roles} session={session} />
+      <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
+      <ArtifactPanel artifacts={bundle.artifacts} events={bundle.events} />
+    </section>
+  );
+}
