@@ -16,7 +16,7 @@ from backend.models.session import Session
 from backend.models.role import Role
 from backend.models.work_item import WorkItem
 from backend.roles.prompts import role_handoff_prompt
-from backend.roles.contracts import IMPLEMENTER_ROLE, VERIFICATION_COORDINATOR_ROLE
+from backend.roles.contracts import IMPLEMENTER_ROLE, TASK_COORDINATOR_ROLE, VERIFICATION_COORDINATOR_ROLE
 from backend.session_backend.base import SessionBackend
 from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle
 from backend.state.artifact_repository import ArtifactRepository
@@ -429,6 +429,77 @@ class CoordinatorService:
             instruction=instruction,
         )
         return session, retried_event, dispatch_event
+
+    def redirect_session(
+        self,
+        session_id: int,
+        target_role_name: str,
+    ) -> tuple[Session, Event, Event]:
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
+            raise IntakeError(
+                f"Session {session_id} is not waiting for operator; current status is {session.status.value}"
+            )
+        if target_role_name == TASK_COORDINATOR_ROLE:
+            raise IntakeError("Redirecting active work to task-coordinator is not supported")
+
+        previous_work_item = self._find_operator_pending_work_item(session.id)
+        if previous_work_item is None:
+            raise IntakeError(f"Session {session_id} has no operator-pending work item to redirect")
+        if previous_work_item.owner_role_id is None:
+            raise IntakeError(f"Work item {previous_work_item.id} is missing an owner role")
+
+        previous_role = self.role_repository.get_by_id(previous_work_item.owner_role_id)
+        if previous_role is None:
+            raise IntakeError(
+                f"Owner role {previous_work_item.owner_role_id} is missing for session {session_id}"
+            )
+        if previous_role.role_name == target_role_name:
+            raise IntakeError(
+                f"Redirect target role must differ from current parked owner {target_role_name}"
+            )
+
+        target_role = self.role_repository.get_by_name(session.id, target_role_name)
+        if target_role is None:
+            raise IntakeError(f"Target role {target_role_name} is missing for session {session_id}")
+
+        redirected_work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type=previous_work_item.work_type,
+            title=self._redirect_work_item_title(previous_work_item.title, target_role_name),
+            owner_role_id=target_role.id,
+            source_event_id=None,
+            priority=previous_work_item.priority,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=target_role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        redirected_event = self._append_event(
+            session_id=session.id,
+            event_type="session_redirected_by_operator",
+            producer_type="operator",
+            payload={
+                "previous_role_name": previous_role.role_name,
+                "target_role_name": target_role.role_name,
+                "previous_work_item_id": previous_work_item.id,
+                "redirect_work_item_id": redirected_work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        instruction = self._stage_instruction(session.current_stage, session.task_key)
+        if instruction is None:
+            raise IntakeError(f"Session {session_id} cannot be redirected from stage {session.current_stage}")
+        dispatch_event = self._dispatch_role_work(
+            session=session,
+            role=target_role,
+            work_item=redirected_work_item,
+            stage_name=session.current_stage,
+            instruction=instruction,
+        )
+        return session, redirected_event, dispatch_event
 
     def _enqueue_initial_implementation(
         self,
@@ -940,6 +1011,9 @@ class CoordinatorService:
         if title.startswith("Retry: "):
             return title
         return f"Retry: {title}"
+
+    def _redirect_work_item_title(self, title: str, target_role_name: str) -> str:
+        return f"Redirect to {target_role_name}: {title}"
 
     def _has_dispatch_event(
         self,

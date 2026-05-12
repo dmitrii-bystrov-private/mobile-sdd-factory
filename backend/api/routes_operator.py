@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.api.routes_sessions import to_session_response
 from backend.api.schemas import (
+    RedirectSessionRequest,
+    RedirectSessionResponse,
     LoopRunnerControlResponse,
     LoopRunnerStatusResponse,
     PollSessionOutputRequest,
@@ -65,6 +67,27 @@ def retry_session(
 
     return RetrySessionResponse(
         retried=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type,
+    )
+
+
+@router.post("/redirect-session", response_model=RedirectSessionResponse)
+def redirect_session(
+    payload: RedirectSessionRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RedirectSessionResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.redirect_session(
+            session_id=payload.session_id,
+            target_role_name=payload.target_role_name,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return RedirectSessionResponse(
+        redirected=True,
         session=to_session_response(session),
         event_type=event.event_type,
         followup_event_type=followup_event.event_type,

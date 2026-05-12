@@ -553,6 +553,65 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Start implementation work for IOS-30019.", sent_inputs[-1])
 
+    def test_redirect_session_reroutes_escalated_work_item_to_new_role(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30020")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        verification_role = self.role_repository.get_by_name(session.id, "verification-coordinator")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+        self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+
+        redirected_session, redirected_event, dispatch_event = self.coordinator.redirect_session(
+            session_id=session.id,
+            target_role_name="verification-coordinator",
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        verification_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
+
+        self.assertEqual("active", redirected_session.status.value)
+        self.assertEqual("verification-coordinator", redirected_session.current_owner)
+        self.assertEqual("session_redirected_by_operator", redirected_event.event_type)
+        self.assertEqual("role_input_dispatched", dispatch_event.event_type)
+        self.assertEqual(2, len(work_items))
+        self.assertTrue(
+            any(
+                item.title.startswith("Redirect to verification-coordinator:")
+                and item.status.value == "assigned"
+                for item in work_items
+            )
+        )
+        self.assertTrue(
+            any(
+                item.owner_role_id == implementer_role.id and item.status.value == "waiting_for_operator"
+                for item in work_items
+            )
+        )
+        self.assertEqual(1, len(verification_inputs))
+        self.assertIn("Start implementation work for IOS-30020.", verification_inputs[-1])
+
+    def test_redirect_session_requires_different_target_role(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+        self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+
+        with self.assertRaisesRegex(IntakeError, "must differ"):
+            self.coordinator.redirect_session(
+                session_id=session.id,
+                target_role_name="implementer",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

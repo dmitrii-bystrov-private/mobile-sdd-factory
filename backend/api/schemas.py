@@ -182,6 +182,18 @@ class RetrySessionResponse(BaseModel):
     followup_event_type: str | None = None
 
 
+class RedirectSessionRequest(BaseModel):
+    session_id: int
+    target_role_name: str
+
+
+class RedirectSessionResponse(BaseModel):
+    redirected: bool
+    session: SessionResponse
+    event_type: str
+    followup_event_type: str | None = None
+
+
 class RunLoopOnceResponse(BaseModel):
     ran: bool
     session_count: int
