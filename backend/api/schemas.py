@@ -160,6 +160,16 @@ class PollSessionOutputResponse(BaseModel):
     event_type: str | None = None
 
 
+class PauseSessionRequest(BaseModel):
+    session_id: int
+
+
+class PauseSessionResponse(BaseModel):
+    paused: bool
+    session: SessionResponse
+    event_type: str
+
+
 class ResumeSessionRequest(BaseModel):
     session_id: int
 

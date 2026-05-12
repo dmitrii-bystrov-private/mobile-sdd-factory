@@ -333,22 +333,44 @@ class CoordinatorService:
         )
         return summary_event, polled_sessions, total_chunks
 
+    def pause_session(self, session_id: int) -> tuple[Session, Event]:
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.ACTIVE:
+            raise IntakeError(
+                f"Session {session_id} is not active; current status is {session.status.value}"
+            )
+        session = self.session_repository.update_status(session.id, SessionStatus.PAUSED)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_paused_by_operator",
+            producer_type="operator",
+            payload={
+                "current_stage": session.current_stage,
+                "current_owner": session.current_owner,
+            },
+        )
+        return session, event
+
     def resume_session(self, session_id: int) -> tuple[Session, Event, Event]:
         session = self._get_session_or_raise(session_id)
-        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
-            raise IntakeError(
-                f"Session {session_id} is not waiting for operator; current status is {session.status.value}"
-            )
+        if session.status == SessionStatus.WAITING_FOR_OPERATOR:
+            return self._resume_waiting_session(session)
+        if session.status == SessionStatus.PAUSED:
+            return self._resume_paused_session(session)
+        raise IntakeError(
+            f"Session {session_id} is not resumable; current status is {session.status.value}"
+        )
 
+    def _resume_waiting_session(self, session: Session) -> tuple[Session, Event, Event]:
         work_item = self._find_operator_pending_work_item(session.id)
         if work_item is None:
-            raise IntakeError(f"Session {session_id} has no operator-pending work item to resume")
+            raise IntakeError(f"Session {session.id} has no operator-pending work item to resume")
         if work_item.owner_role_id is None:
             raise IntakeError(f"Work item {work_item.id} is missing an owner role")
 
         role = self.role_repository.get_by_id(work_item.owner_role_id)
         if role is None:
-            raise IntakeError(f"Owner role {work_item.owner_role_id} is missing for session {session_id}")
+            raise IntakeError(f"Owner role {work_item.owner_role_id} is missing for session {session.id}")
 
         self.work_item_repository.update_status(work_item.id, WorkItemStatus.ASSIGNED)
         session = self.session_repository.update_stage_and_owner(
@@ -362,6 +384,7 @@ class CoordinatorService:
             event_type="session_resumed_by_operator",
             producer_type="operator",
             payload={
+                "resume_reason": "waiting_for_operator",
                 "role_name": role.role_name,
                 "work_item_id": work_item.id,
                 "current_stage": session.current_stage,
@@ -369,7 +392,47 @@ class CoordinatorService:
         )
         instruction = self._stage_instruction(session.current_stage, session.task_key)
         if instruction is None:
-            raise IntakeError(f"Session {session_id} cannot be resumed from stage {session.current_stage}")
+            raise IntakeError(f"Session {session.id} cannot be resumed from stage {session.current_stage}")
+        dispatch_event = self._dispatch_role_work(
+            session=session,
+            role=role,
+            work_item=work_item,
+            stage_name=session.current_stage,
+            instruction=instruction,
+        )
+        return session, resumed_event, dispatch_event
+
+    def _resume_paused_session(self, session: Session) -> tuple[Session, Event, Event]:
+        if session.current_owner is None:
+            raise IntakeError(
+                f"Paused session {session.id} has no current owner and cannot be resumed"
+            )
+        role = self.role_repository.get_by_name(session.id, session.current_owner)
+        if role is None:
+            raise IntakeError(f"Owner role {session.current_owner} is missing for session {session.id}")
+        work_item = self._find_active_work_item_for_role(session.id, role.id)
+        if work_item is None:
+            raise IntakeError(f"Paused session {session.id} has no assigned work item to resume")
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        resumed_event = self._append_event(
+            session_id=session.id,
+            event_type="session_resumed_by_operator",
+            producer_type="operator",
+            payload={
+                "resume_reason": "paused",
+                "role_name": role.role_name,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        instruction = self._stage_instruction(session.current_stage, session.task_key)
+        if instruction is None:
+            raise IntakeError(f"Session {session.id} cannot be resumed from stage {session.current_stage}")
         dispatch_event = self._dispatch_role_work(
             session=session,
             role=role,

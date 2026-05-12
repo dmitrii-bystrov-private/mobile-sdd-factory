@@ -485,8 +485,31 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(0, session_count)
         self.assertEqual(0, loop_chunk_count)
 
-    def test_resume_session_reactivates_escalated_work_item(self) -> None:
+    def test_pause_session_moves_active_session_to_paused(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30017")
+
+        paused_session, event = self.coordinator.pause_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("paused", paused_session.status.value)
+        self.assertEqual("implementer", paused_session.current_owner)
+        self.assertEqual("session_paused_by_operator", event.event_type)
+        self.assertTrue(any(item.event_type == "session_paused_by_operator" for item in events))
+
+    def test_run_loop_once_skips_paused_session(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30018")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.coordinator.pause_session(session.id)
+        self.session_backend.simulate_output(implementer_role.runtime_handle, "should stay unread")
+
+        event, session_count, chunk_count = self.coordinator.run_loop_once()
+
+        self.assertIsNone(event)
+        self.assertEqual(0, session_count)
+        self.assertEqual(0, chunk_count)
+
+    def test_resume_session_reactivates_escalated_work_item(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30019")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
@@ -510,17 +533,32 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, len(work_items))
         self.assertEqual("assigned", work_items[0].status.value)
         self.assertEqual(2, len(sent_inputs))
-        self.assertIn("Start implementation work for IOS-30017.", sent_inputs[-1])
+        self.assertIn("Start implementation work for IOS-30019.", sent_inputs[-1])
         self.assertTrue(any(item.event_type == "session_resumed_by_operator" for item in events))
 
     def test_resume_session_requires_waiting_for_operator_status(self) -> None:
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30018")
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30020")
 
-        with self.assertRaisesRegex(IntakeError, "not waiting for operator"):
+        with self.assertRaisesRegex(IntakeError, "not resumable"):
             self.coordinator.resume_session(session.id)
 
+    def test_resume_session_reactivates_paused_session(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.coordinator.pause_session(session.id)
+
+        resumed_session, resumed_event, dispatch_event = self.coordinator.resume_session(session.id)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertEqual("active", resumed_session.status.value)
+        self.assertEqual("implementer", resumed_session.current_owner)
+        self.assertEqual("session_resumed_by_operator", resumed_event.event_type)
+        self.assertEqual("paused", resumed_event.payload["resume_reason"])
+        self.assertEqual("role_input_dispatched", dispatch_event.event_type)
+        self.assertEqual(2, len(sent_inputs))
+
     def test_retry_session_creates_new_work_item_for_escalated_session(self) -> None:
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30019")
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
@@ -551,10 +589,10 @@ class SessionCreationTests(unittest.TestCase):
             )
         )
         self.assertEqual(2, len(sent_inputs))
-        self.assertIn("Start implementation work for IOS-30019.", sent_inputs[-1])
+        self.assertIn("Start implementation work for IOS-30022.", sent_inputs[-1])
 
     def test_redirect_session_reroutes_escalated_work_item_to_allowed_role(self) -> None:
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30020")
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30023")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         shadow_role = self.role_repository.create(
             session_id=session.id,
@@ -600,10 +638,10 @@ class SessionCreationTests(unittest.TestCase):
             )
         )
         self.assertEqual(1, len(shadow_inputs))
-        self.assertIn("Start implementation work for IOS-30020.", shadow_inputs[-1])
+        self.assertIn("Start implementation work for IOS-30023.", shadow_inputs[-1])
 
     def test_redirect_session_rejects_role_not_allowed_for_stage(self) -> None:
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021")
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30024")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
@@ -621,7 +659,7 @@ class SessionCreationTests(unittest.TestCase):
             )
 
     def test_redirect_session_requires_different_target_role(self) -> None:
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022")
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30025")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,

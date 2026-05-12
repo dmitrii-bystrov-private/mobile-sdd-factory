@@ -16,12 +16,14 @@ try:
     from backend.api.routes_roles import collect_role_output
     from backend.api.routes_operator import poll_session_output
     from backend.api.routes_operator import run_loop_once
+    from backend.api.routes_operator import pause_session
     from backend.api.routes_operator import resume_session
     from backend.api.routes_operator import retry_session
     from backend.api.routes_operator import redirect_session
     from backend.api.routes_operator import loop_status, start_loop, stop_loop
     from backend.api.schemas import (
         PollSessionOutputRequest,
+        PauseSessionRequest,
         RedirectSessionRequest,
         ResumeSessionRequest,
         RetrySessionRequest,
@@ -468,9 +470,25 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("active", response.session.status)
         self.assertEqual("implementer", response.session.current_owner)
 
-    def test_retry_session_route_creates_new_retry_work_item(self) -> None:
+    def test_pause_session_route_pauses_active_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40014"),
+            dependencies=self.dependencies,
+        )
+
+        response = pause_session(
+            PauseSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.paused)
+        self.assertEqual("session_paused_by_operator", response.event_type)
+        self.assertEqual("paused", response.session.status)
+        self.assertEqual("implementer", response.session.current_owner)
+
+    def test_retry_session_route_creates_new_retry_work_item(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40015"),
             dependencies=self.dependencies,
         )
         implementer_role = self.dependencies.role_repository.get_by_name(
@@ -508,7 +526,7 @@ class SessionApiTests(unittest.TestCase):
 
     def test_redirect_session_route_reroutes_escalated_work_to_allowed_target_role(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
-            PrepareSessionRequest(task_key="IOS-40015"),
+            PrepareSessionRequest(task_key="IOS-40016"),
             dependencies=self.dependencies,
         )
         implementer_role = self.dependencies.role_repository.get_by_name(

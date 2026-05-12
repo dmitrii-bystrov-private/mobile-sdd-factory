@@ -10,6 +10,8 @@ from backend.api.schemas import (
     RedirectSessionResponse,
     LoopRunnerControlResponse,
     LoopRunnerStatusResponse,
+    PauseSessionRequest,
+    PauseSessionResponse,
     PollSessionOutputRequest,
     PollSessionOutputResponse,
     RetrySessionRequest,
@@ -28,9 +30,23 @@ def get_dependencies(request: Request) -> AppDependencies:
     return request.app.state.dependencies
 
 
-@router.post("/pause")
-def pause_session() -> dict[str, str]:
-    return {"status": "not_implemented"}
+@router.post("/pause-session", response_model=PauseSessionResponse)
+def pause_session(
+    payload: PauseSessionRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> PauseSessionResponse:
+    try:
+        session, event = dependencies.coordinator_service.pause_session(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return PauseSessionResponse(
+        paused=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+    )
 
 
 @router.post("/resume-session", response_model=ResumeSessionResponse)
