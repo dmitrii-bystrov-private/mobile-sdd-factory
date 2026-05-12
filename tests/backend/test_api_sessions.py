@@ -29,7 +29,7 @@ try:
     from backend.coordinator.service import CoordinatorService
     from backend.coordinator.loop_runner import CoordinatorLoopRunner
     from backend.dependencies import AppDependencies
-    from backend.roles.contracts import DEFAULT_SESSION_ROLES
+    from backend.roles.contracts import ALLOWED_STAGE_ROLE_TARGETS, DEFAULT_SESSION_ROLES
     from backend.session_backend.tmux_backend import TmuxSessionBackend
     from backend.state.artifact_repository import ArtifactRepository
     from backend.state.db import Database
@@ -506,7 +506,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(2, len(work_items_response.items))
         self.assertTrue(any(item.title.startswith("Retry: ") for item in work_items_response.items))
 
-    def test_redirect_session_route_reroutes_escalated_work_to_target_role(self) -> None:
+    def test_redirect_session_route_reroutes_escalated_work_to_allowed_target_role(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40015"),
             dependencies=self.dependencies,
@@ -514,6 +514,12 @@ class SessionApiTests(unittest.TestCase):
         implementer_role = self.dependencies.role_repository.get_by_name(
             prepare_response.session.id,
             "implementer",
+        )
+        self.dependencies.role_repository.create(
+            session_id=prepare_response.session.id,
+            role_name="implementer-shadow",
+            runtime_backend="recording",
+            runtime_handle="recording:implementer-shadow",
         )
         self.dependencies.session_backend.simulate_output(
             implementer_role.runtime_handle,
@@ -526,14 +532,17 @@ class SessionApiTests(unittest.TestCase):
             ),
             dependencies=self.dependencies,
         )
-
-        response = redirect_session(
-            RedirectSessionRequest(
-                session_id=prepare_response.session.id,
-                target_role_name="verification-coordinator",
-            ),
-            dependencies=self.dependencies,
-        )
+        ALLOWED_STAGE_ROLE_TARGETS["implementation_requested"].add("implementer-shadow")
+        try:
+            response = redirect_session(
+                RedirectSessionRequest(
+                    session_id=prepare_response.session.id,
+                    target_role_name="implementer-shadow",
+                ),
+                dependencies=self.dependencies,
+            )
+        finally:
+            ALLOWED_STAGE_ROLE_TARGETS["implementation_requested"].remove("implementer-shadow")
         work_items_response = list_work_items(
             session_id=prepare_response.session.id,
             dependencies=self.dependencies,
@@ -543,11 +552,11 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("session_redirected_by_operator", response.event_type)
         self.assertEqual("role_input_dispatched", response.followup_event_type)
         self.assertEqual("active", response.session.status)
-        self.assertEqual("verification-coordinator", response.session.current_owner)
+        self.assertEqual("implementer-shadow", response.session.current_owner)
         self.assertEqual(2, len(work_items_response.items))
         self.assertTrue(
             any(
-                item.title.startswith("Redirect to verification-coordinator:")
+                item.title.startswith("Redirect to implementer-shadow:")
                 for item in work_items_response.items
             )
         )

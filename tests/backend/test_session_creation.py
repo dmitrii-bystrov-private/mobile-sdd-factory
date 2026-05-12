@@ -5,7 +5,7 @@ import unittest
 from backend.api.sse import SessionEventBus
 from backend.coordinator.intake import IntakeError
 from backend.coordinator.service import CoordinatorService
-from backend.roles.contracts import DEFAULT_SESSION_ROLES
+from backend.roles.contracts import ALLOWED_STAGE_ROLE_TARGETS, DEFAULT_SESSION_ROLES
 from backend.session_backend.tmux_backend import TmuxSessionBackend
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.db import Database
@@ -553,10 +553,15 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Start implementation work for IOS-30019.", sent_inputs[-1])
 
-    def test_redirect_session_reroutes_escalated_work_item_to_new_role(self) -> None:
+    def test_redirect_session_reroutes_escalated_work_item_to_allowed_role(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30020")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
-        verification_role = self.role_repository.get_by_name(session.id, "verification-coordinator")
+        shadow_role = self.role_repository.create(
+            session_id=session.id,
+            role_name="implementer-shadow",
+            runtime_backend="recording",
+            runtime_handle="recording:implementer-shadow",
+        )
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
             'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
@@ -565,22 +570,25 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             role_name="implementer",
         )
-
-        redirected_session, redirected_event, dispatch_event = self.coordinator.redirect_session(
-            session_id=session.id,
-            target_role_name="verification-coordinator",
-        )
+        ALLOWED_STAGE_ROLE_TARGETS["implementation_requested"].add("implementer-shadow")
+        try:
+            redirected_session, redirected_event, dispatch_event = self.coordinator.redirect_session(
+                session_id=session.id,
+                target_role_name="implementer-shadow",
+            )
+        finally:
+            ALLOWED_STAGE_ROLE_TARGETS["implementation_requested"].remove("implementer-shadow")
         work_items = self.work_item_repository.list_for_session(session.id)
-        verification_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
+        shadow_inputs = self.session_backend.get_sent_inputs(shadow_role.runtime_handle)
 
         self.assertEqual("active", redirected_session.status.value)
-        self.assertEqual("verification-coordinator", redirected_session.current_owner)
+        self.assertEqual("implementer-shadow", redirected_session.current_owner)
         self.assertEqual("session_redirected_by_operator", redirected_event.event_type)
         self.assertEqual("role_input_dispatched", dispatch_event.event_type)
         self.assertEqual(2, len(work_items))
         self.assertTrue(
             any(
-                item.title.startswith("Redirect to verification-coordinator:")
+                item.title.startswith("Redirect to implementer-shadow:")
                 and item.status.value == "assigned"
                 for item in work_items
             )
@@ -591,11 +599,29 @@ class SessionCreationTests(unittest.TestCase):
                 for item in work_items
             )
         )
-        self.assertEqual(1, len(verification_inputs))
-        self.assertIn("Start implementation work for IOS-30020.", verification_inputs[-1])
+        self.assertEqual(1, len(shadow_inputs))
+        self.assertIn("Start implementation work for IOS-30020.", shadow_inputs[-1])
+
+    def test_redirect_session_rejects_role_not_allowed_for_stage(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+        self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+
+        with self.assertRaisesRegex(IntakeError, "not allowed for stage"):
+            self.coordinator.redirect_session(
+                session_id=session.id,
+                target_role_name="verification-coordinator",
+            )
 
     def test_redirect_session_requires_different_target_role(self) -> None:
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021")
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,

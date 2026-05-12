@@ -9,3 +9,15 @@ DEFAULT_SESSION_ROLES = [
     IMPLEMENTER_ROLE,
     VERIFICATION_COORDINATOR_ROLE,
 ]
+
+ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
+    "implementation_requested": {
+        IMPLEMENTER_ROLE,
+    },
+    "verification_requested": {
+        VERIFICATION_COORDINATOR_ROLE,
+    },
+    "verification_correction_requested": {
+        IMPLEMENTER_ROLE,
+    },
+}

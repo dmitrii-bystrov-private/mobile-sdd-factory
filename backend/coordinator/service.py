@@ -16,7 +16,12 @@ from backend.models.session import Session
 from backend.models.role import Role
 from backend.models.work_item import WorkItem
 from backend.roles.prompts import role_handoff_prompt
-from backend.roles.contracts import IMPLEMENTER_ROLE, TASK_COORDINATOR_ROLE, VERIFICATION_COORDINATOR_ROLE
+from backend.roles.contracts import (
+    ALLOWED_STAGE_ROLE_TARGETS,
+    IMPLEMENTER_ROLE,
+    TASK_COORDINATOR_ROLE,
+    VERIFICATION_COORDINATOR_ROLE,
+)
 from backend.session_backend.base import SessionBackend
 from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle
 from backend.state.artifact_repository import ArtifactRepository
@@ -442,6 +447,13 @@ class CoordinatorService:
             )
         if target_role_name == TASK_COORDINATOR_ROLE:
             raise IntakeError("Redirecting active work to task-coordinator is not supported")
+        allowed_targets = ALLOWED_STAGE_ROLE_TARGETS.get(session.current_stage, set())
+        if target_role_name not in allowed_targets:
+            allowed_list = ", ".join(sorted(allowed_targets)) if allowed_targets else "none"
+            raise IntakeError(
+                f"Role {target_role_name} is not allowed for stage {session.current_stage}; "
+                f"allowed targets: {allowed_list}"
+            )
 
         previous_work_item = self._find_operator_pending_work_item(session.id)
         if previous_work_item is None:
