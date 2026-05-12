@@ -2,8 +2,10 @@ import type {
   Artifact,
   EventItem,
   Role,
+  SessionPolicyValue,
   Session,
   StreamEventPayload,
+  WorkflowProfile,
   WorkItem,
 } from "../types";
 
@@ -31,11 +33,21 @@ const STREAM_EVENT_TYPES = [
   "session_paused_by_operator",
   "session_resumed_by_operator",
   "session_retried_by_operator",
-  "session_redirected_by_operator",
   "session_escalated_to_operator",
   "session_dispatch_reconciled",
   "coordinator_loop_ran",
 ] as const;
+
+type CreateSessionPayload = {
+  task_key: string;
+  workflow_profile: WorkflowProfile;
+  policy: {
+    self_review_policy: SessionPolicyValue;
+    boy_scout_policy: SessionPolicyValue;
+    doc_harvest_policy: SessionPolicyValue;
+    test_policy?: SessionPolicyValue;
+  };
+};
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -55,6 +67,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const apiClient = {
+  createSession(
+    payload: CreateSessionPayload,
+  ): Promise<{ created: boolean; event_type: string; session: Session }> {
+    return request("/sessions", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  prepareSession(taskKey: string): Promise<{ created: boolean; event_type: string; session: Session }> {
+    return request("/sessions/prepare", {
+      method: "POST",
+      body: JSON.stringify({ task_key: taskKey }),
+    });
+  },
+
   listSessions(): Promise<{ items: Session[] }> {
     return request("/sessions");
   },
@@ -93,19 +121,6 @@ export const apiClient = {
     return request("/operator/retry-session", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId }),
-    });
-  },
-
-  redirectSession(
-    sessionId: number,
-    targetRoleName: string,
-  ): Promise<{ event_type: string; session: Session }> {
-    return request("/operator/redirect-session", {
-      method: "POST",
-      body: JSON.stringify({
-        session_id: sessionId,
-        target_role_name: targetRoleName,
-      }),
     });
   },
 

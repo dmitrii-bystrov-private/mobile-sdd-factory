@@ -3,6 +3,7 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import { apiClient, openSessionEventStream } from "../api/client";
 import { SessionDetail } from "../components/SessionDetail";
 import { SessionList } from "../components/SessionList";
+import { SessionStartForm } from "../components/SessionStartForm";
 import type { Session, SessionBundle } from "../types";
 
 export function SessionsPage(): JSX.Element {
@@ -157,11 +158,20 @@ export function SessionsPage(): JSX.Element {
       {error ? <div className="error-banner top-error">{error}</div> : null}
 
       <div className="page-layout">
-        <SessionList
-          onSelect={(sessionId) => setSelectedSessionId(sessionId)}
-          selectedSessionId={selectedSessionId}
-          sessions={sessions}
-        />
+        <div className="sidebar-stack">
+          <SessionStartForm
+            onCreated={async (sessionId) => {
+              await loadSessions();
+              setSelectedSessionId(sessionId);
+              await loadBundle(sessionId);
+            }}
+          />
+          <SessionList
+            onSelect={(sessionId) => setSelectedSessionId(sessionId)}
+            selectedSessionId={selectedSessionId}
+            sessions={sessions}
+          />
+        </div>
         {loading ? (
           <section className="panel panel-empty">
             <p className="eyebrow">Loading</p>

@@ -155,6 +155,27 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Start implementation work for IOS-30002.", sent_inputs[0])
 
+    def test_prepare_task_session_reuses_existing_policy_aware_session(self) -> None:
+        session, _, created = self.coordinator.create_task_session(
+            "IOS-30002A",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+
+        prepared_session, event, prepared_created, details = self.coordinator.prepare_task_session("IOS-30002A")
+
+        self.assertTrue(created)
+        self.assertFalse(prepared_created)
+        self.assertEqual(session.id, prepared_session.id)
+        self.assertEqual("oneshot", prepared_session.workflow_profile)
+        self.assertEqual("required", prepared_session.policy["self_review_policy"])
+        self.assertEqual("task_prepared", event.event_type)
+        self.assertEqual("implementation_requested", details["followup_event_type"])
+
     def test_implementation_completed_moves_session_to_verification(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003")
 

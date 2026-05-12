@@ -168,6 +168,28 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(0, response.snapshot_exit_code)
         self.assertEqual("implementation_requested", response.followup_event_type)
 
+    def test_prepare_session_route_reuses_existing_policy_aware_session(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40002A",
+                workflow_profile="oneshot",
+                policy={"self_review_policy": "required"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40002A"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertFalse(response.created)
+        self.assertEqual(create_response.session.id, response.session.id)
+        self.assertEqual("oneshot", response.session.workflow_profile)
+        self.assertEqual("required", response.session.policy["self_review_policy"])
+
     def test_event_and_work_item_routes_reflect_verification_handoff(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40003"),

@@ -1,9 +1,14 @@
+export type WorkflowProfile = "oneshot" | "bug_full" | "story_full";
+export type SessionPolicyValue = "disabled" | "enabled" | "required";
+
 export type Session = {
   id: number;
   task_key: string;
   status: string;
   current_stage: string;
   current_owner: string | null;
+  workflow_profile: WorkflowProfile;
+  policy: Record<string, SessionPolicyValue>;
 };
 
 export type Role = {

@@ -138,10 +138,15 @@ class CoordinatorService:
             raise IntakeError("Issue type resolution returned an empty value")
 
         readiness = classify_task_readiness(resolved_task_key, issue_type)
+        existing = self.session_repository.get_by_task_key(resolved_task_key)
         session, _, created = self.create_task_session(
             resolved_task_key,
-            workflow_profile=infer_workflow_profile(issue_type),
-            policy=None,
+            workflow_profile=(
+                existing.workflow_profile
+                if existing is not None
+                else infer_workflow_profile(issue_type)
+            ),
+            policy=existing.policy if existing is not None else None,
         )
 
         snapshot_result = self.snapshot_adapter.run(resolved_task_key)

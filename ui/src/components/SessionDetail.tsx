@@ -30,6 +30,9 @@ export function SessionDetail({
           <p className="eyebrow">Current Session</p>
           <h1>{session.task_key}</h1>
           <p className="hero-meta">
+            Profile: <strong>{session.workflow_profile}</strong>
+          </p>
+          <p className="hero-meta">
             Stage: <strong>{session.current_stage}</strong>
           </p>
           <p className="hero-meta">
@@ -56,7 +59,22 @@ export function SessionDetail({
         </div>
       </div>
 
-      <OperatorActions onRefresh={onRefresh} roles={bundle.roles} session={session} />
+      <div className="grid-two">
+        <section className="subpanel">
+          <div className="subpanel-head">
+            <strong>Session Policy</strong>
+          </div>
+          <div className="table-list">
+            {Object.entries(session.policy).map(([key, value]) => (
+              <div className="table-row" key={key}>
+                <span>{key}</span>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+        <OperatorActions onRefresh={onRefresh} session={session} />
+      </div>
       <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
       <ArtifactPanel artifacts={bundle.artifacts} events={bundle.events} />
     </section>

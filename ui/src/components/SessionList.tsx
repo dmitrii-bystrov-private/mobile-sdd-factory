@@ -36,7 +36,8 @@ export function SessionList({
                   {session.status}
                 </span>
               </div>
-              <p>{session.current_stage}</p>
+              <p>{session.workflow_profile}</p>
+              <small>{session.current_stage}</small>
               <small>{session.current_owner ?? "unowned"}</small>
             </button>
           );
