@@ -76,23 +76,51 @@ class SessionCreationTests(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_create_task_session_creates_roles_and_event(self) -> None:
-        session, event, created = self.coordinator.create_task_session("IOS-30000")
+        session, event, created = self.coordinator.create_task_session(
+            "IOS-30000",
+            workflow_profile="bug_full",
+            policy={"test_policy": "required"},
+        )
         roles = self.role_repository.list_for_session(session.id)
 
         self.assertTrue(created)
         self.assertEqual("task_started", event.event_type)
         self.assertEqual("active", session.status.value)
+        self.assertEqual("bug_full", session.workflow_profile)
+        self.assertEqual("required", session.policy["test_policy"])
         self.assertEqual(DEFAULT_SESSION_ROLES, [role.role_name for role in roles])
 
     def test_create_task_session_is_idempotent_for_existing_key(self) -> None:
-        first_session, _, _ = self.coordinator.create_task_session("IOS-30001")
-        second_session, event, created = self.coordinator.create_task_session("IOS-30001")
+        first_session, _, _ = self.coordinator.create_task_session(
+            "IOS-30001",
+            workflow_profile="oneshot",
+            policy=None,
+        )
+        second_session, event, created = self.coordinator.create_task_session(
+            "IOS-30001",
+            workflow_profile="oneshot",
+            policy=None,
+        )
         roles = self.role_repository.list_for_session(first_session.id)
 
         self.assertFalse(created)
         self.assertEqual(first_session.id, second_session.id)
         self.assertEqual("task_session_reused", event.event_type)
         self.assertEqual(3, len(roles))
+
+    def test_create_task_session_rejects_conflicting_existing_policy(self) -> None:
+        self.coordinator.create_task_session(
+            "IOS-30001A",
+            workflow_profile="oneshot",
+            policy=None,
+        )
+
+        with self.assertRaisesRegex(IntakeError, "different stored policy"):
+            self.coordinator.create_task_session(
+                "IOS-30001A",
+                workflow_profile="oneshot",
+                policy={"self_review_policy": "disabled"},
+            )
 
     def test_prepare_task_session_runs_intake_and_registers_artifacts(self) -> None:
         session, event, created, details = self.coordinator.prepare_task_session("IOS-30002")
@@ -428,7 +456,11 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(artifact.artifact_type == "runtime_output" for artifact in artifacts_b))
 
     def test_run_loop_once_reconciles_undispatched_work_item(self) -> None:
-        session, _, _ = self.coordinator.create_task_session("IOS-30013")
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30013",
+            workflow_profile="oneshot",
+            policy=None,
+        )
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         work_item = self.work_item_repository.create(
             session_id=session.id,

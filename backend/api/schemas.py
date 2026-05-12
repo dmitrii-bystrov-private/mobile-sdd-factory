@@ -5,8 +5,17 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
+class SessionPolicyPayload(BaseModel):
+    test_policy: str | None = None
+    self_review_policy: str | None = None
+    boy_scout_policy: str | None = None
+    doc_harvest_policy: str | None = None
+
+
 class CreateSessionRequest(BaseModel):
     task_key: str
+    workflow_profile: str
+    policy: SessionPolicyPayload | None = None
 
 
 class SessionResponse(BaseModel):
@@ -15,6 +24,8 @@ class SessionResponse(BaseModel):
     status: str
     current_stage: str
     current_owner: str | None = None
+    workflow_profile: str
+    policy: dict[str, str]
 
 
 class CreateSessionResponse(BaseModel):

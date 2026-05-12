@@ -23,7 +23,16 @@ class SseReplayTests(unittest.IsolatedAsyncioTestCase):
         self.temp_dir.cleanup()
 
     async def test_generator_replays_events_from_repository_after_cursor(self) -> None:
-        session = self.session_repository.create(task_key="IOS-50101", current_stage="intake")
+        session = self.session_repository.create(
+            task_key="IOS-50101",
+            current_stage="intake",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
         first = self.event_repository.append(
             session_id=session.id,
             event_type="task_started",
@@ -53,8 +62,26 @@ class SseReplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('"step": 2', chunk)
 
     async def test_generator_filters_replay_by_session(self) -> None:
-        session_a = self.session_repository.create(task_key="IOS-50201", current_stage="intake")
-        session_b = self.session_repository.create(task_key="IOS-50202", current_stage="intake")
+        session_a = self.session_repository.create(
+            task_key="IOS-50201",
+            current_stage="intake",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+        session_b = self.session_repository.create(
+            task_key="IOS-50202",
+            current_stage="intake",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
         anchor = self.event_repository.append(
             session_id=session_a.id,
             event_type="task_started",
@@ -89,7 +116,16 @@ class SseReplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(f'"session_id": {session_b.id}', chunk)
 
     async def test_generator_delivers_live_event_after_replay(self) -> None:
-        session = self.session_repository.create(task_key="IOS-50301", current_stage="intake")
+        session = self.session_repository.create(
+            task_key="IOS-50301",
+            current_stage="intake",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
         anchor = self.event_repository.append(
             session_id=session.id,
             event_type="task_started",

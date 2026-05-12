@@ -23,18 +23,39 @@ class RepositoryTests(unittest.TestCase):
     def test_session_repository_create_and_lookup(self) -> None:
         repository = SessionRepository(self.database)
 
-        created = repository.create(task_key="IOS-20000", current_stage="intake")
+        created = repository.create(
+            task_key="IOS-20000",
+            current_stage="intake",
+            workflow_profile="bug_full",
+            policy={
+                "test_policy": "enabled",
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
         loaded = repository.get_by_task_key("IOS-20000")
 
         self.assertIsNotNone(created.id)
         self.assertIsNotNone(loaded)
         self.assertEqual("IOS-20000", loaded.task_key)
         self.assertEqual(SessionStatus.CREATED, loaded.status)
+        self.assertEqual("bug_full", loaded.workflow_profile)
+        self.assertEqual("enabled", loaded.policy["test_policy"])
 
     def test_role_repository_lists_roles_for_session(self) -> None:
         session_repository = SessionRepository(self.database)
         role_repository = RoleRepository(self.database)
-        session = session_repository.create(task_key="IOS-20001", current_stage="intake")
+        session = session_repository.create(
+            task_key="IOS-20001",
+            current_stage="intake",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
 
         role_repository.create(session.id, "implementer", "tmux", "tmux:implementer")
         role_repository.create(
@@ -48,7 +69,16 @@ class RepositoryTests(unittest.TestCase):
     def test_event_repository_lists_session_events_in_order(self) -> None:
         session_repository = SessionRepository(self.database)
         event_repository = EventRepository(self.database)
-        session = session_repository.create(task_key="IOS-20002", current_stage="intake")
+        session = session_repository.create(
+            task_key="IOS-20002",
+            current_stage="intake",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
 
         event_repository.append(session.id, "task_started", "coordinator", {"task_key": "IOS-20002"})
         event_repository.append(
@@ -65,7 +95,16 @@ class RepositoryTests(unittest.TestCase):
     def test_work_item_repository_lists_items_in_priority_order(self) -> None:
         session_repository = SessionRepository(self.database)
         work_item_repository = WorkItemRepository(self.database)
-        session = session_repository.create(task_key="IOS-20003", current_stage="intake")
+        session = session_repository.create(
+            task_key="IOS-20003",
+            current_stage="intake",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
 
         work_item_repository.create(session.id, "implementation", "low", priority=1)
         work_item_repository.create(session.id, "implementation", "high", priority=10)

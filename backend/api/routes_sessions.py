@@ -29,6 +29,8 @@ def to_session_response(session) -> SessionResponse:
         status=session.status.value,
         current_stage=session.current_stage,
         current_owner=session.current_owner,
+        workflow_profile=session.workflow_profile,
+        policy=session.policy or {},
     )
 
 
@@ -45,9 +47,14 @@ def create_session(
     payload: CreateSessionRequest,
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> CreateSessionResponse:
-    session, event, created = dependencies.coordinator_service.create_task_session(
-        task_key=payload.task_key
-    )
+    try:
+        session, event, created = dependencies.coordinator_service.create_task_session(
+            task_key=payload.task_key,
+            workflow_profile=payload.workflow_profile,
+            policy=payload.policy.model_dump(exclude_none=True) if payload.policy else None,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CreateSessionResponse(
         created=created,
         session=to_session_response(session),

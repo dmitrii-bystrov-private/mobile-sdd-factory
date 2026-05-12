@@ -112,17 +112,23 @@ class SessionApiTests(unittest.TestCase):
 
     def test_create_session_route_returns_created_session(self) -> None:
         response = create_session(
-            CreateSessionRequest(task_key="IOS-40000"),
+            CreateSessionRequest(
+                task_key="IOS-40000",
+                workflow_profile="bug_full",
+                policy={"test_policy": "required"},
+            ),
             dependencies=self.dependencies,
         )
 
         self.assertTrue(response.created)
         self.assertEqual("IOS-40000", response.session.task_key)
+        self.assertEqual("bug_full", response.session.workflow_profile)
+        self.assertEqual("required", response.session.policy["test_policy"])
         self.assertEqual("task_started", response.event_type)
 
     def test_list_sessions_route_returns_created_session(self) -> None:
         create_session(
-            CreateSessionRequest(task_key="IOS-40001"),
+            CreateSessionRequest(task_key="IOS-40001", workflow_profile="oneshot"),
             dependencies=self.dependencies,
         )
 
@@ -130,6 +136,22 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertEqual(1, len(response.items))
         self.assertEqual("IOS-40001", response.items[0].task_key)
+        self.assertEqual("oneshot", response.items[0].workflow_profile)
+
+    def test_create_session_route_rejects_irrelevant_policy_for_profile(self) -> None:
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException) as context:
+            create_session(
+                CreateSessionRequest(
+                    task_key="IOS-40001A",
+                    workflow_profile="oneshot",
+                    policy={"test_policy": "required"},
+                ),
+                dependencies=self.dependencies,
+            )
+
+        self.assertEqual(400, context.exception.status_code)
 
     def test_prepare_session_route_returns_intake_details(self) -> None:
         from backend.api.routes_sessions import prepare_session

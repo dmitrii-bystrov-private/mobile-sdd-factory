@@ -23,6 +23,7 @@ from backend.roles.contracts import (
     VERIFICATION_COORDINATOR_ROLE,
 )
 from backend.session_backend.base import SessionBackend
+from backend.session_policy import infer_workflow_profile, normalize_session_policy
 from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.event_repository import EventRepository
@@ -49,11 +50,26 @@ class CoordinatorService:
     artifacts_root: Path | None = None
     event_bus: SessionEventBus | None = None
 
-    def create_task_session(self, task_key: str) -> tuple[Session, Event, bool]:
+    def create_task_session(
+        self,
+        task_key: str,
+        workflow_profile: str,
+        policy: dict[str, str] | None = None,
+    ) -> tuple[Session, Event, bool]:
         """Create or reuse a task session and emit the initial session event."""
 
+        normalized_policy = normalize_session_policy(workflow_profile, policy)
         existing = self.session_repository.get_by_task_key(task_key)
         if existing is not None:
+            if existing.workflow_profile != normalized_policy.workflow_profile:
+                raise IntakeError(
+                    f"Session {task_key} already exists with workflow profile "
+                    f"{existing.workflow_profile}, not {normalized_policy.workflow_profile}"
+                )
+            if (existing.policy or {}) != normalized_policy.policy:
+                raise IntakeError(
+                    f"Session {task_key} already exists with different stored policy"
+                )
             event = self._append_event(
                 session_id=existing.id,
                 event_type="task_session_reused",
@@ -61,11 +77,18 @@ class CoordinatorService:
                 payload={
                     "task_key": task_key,
                     "current_stage": existing.current_stage,
+                    "workflow_profile": existing.workflow_profile,
+                    "policy": existing.policy or {},
                 },
             )
             return existing, event, False
 
-        session = self.session_repository.create(task_key=task_key, current_stage="intake")
+        session = self.session_repository.create(
+            task_key=task_key,
+            current_stage="intake",
+            workflow_profile=normalized_policy.workflow_profile,
+            policy=normalized_policy.policy,
+        )
         runtime_session = self.session_backend.create_task_session(task_key)
         for role_name in self.default_roles:
             runtime_role = self.session_backend.spawn_role(runtime_session, role_name)
@@ -84,6 +107,8 @@ class CoordinatorService:
             payload={
                 "task_key": task_key,
                 "current_stage": session.current_stage,
+                "workflow_profile": session.workflow_profile,
+                "policy": session.policy or {},
                 "runtime_session_id": runtime_session.session_id,
                 "roles": self.default_roles,
             },
@@ -113,7 +138,11 @@ class CoordinatorService:
             raise IntakeError("Issue type resolution returned an empty value")
 
         readiness = classify_task_readiness(resolved_task_key, issue_type)
-        session, _, created = self.create_task_session(resolved_task_key)
+        session, _, created = self.create_task_session(
+            resolved_task_key,
+            workflow_profile=infer_workflow_profile(issue_type),
+            policy=None,
+        )
 
         snapshot_result = self.snapshot_adapter.run(resolved_task_key)
         stdout_path = write_text_artifact(

@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   status TEXT NOT NULL,
   current_stage TEXT NOT NULL,
   current_owner TEXT,
+  workflow_profile TEXT NOT NULL DEFAULT 'oneshot',
+  policy_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
   ended_at TEXT

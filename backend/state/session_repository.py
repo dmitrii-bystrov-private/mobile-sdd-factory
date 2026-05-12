@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from backend.models.enums import SessionStatus
 from backend.models.session import Session
 from backend.state.db import Database
@@ -12,14 +14,26 @@ class SessionRepository:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    def create(self, task_key: str, current_stage: str) -> Session:
+    def create(
+        self,
+        task_key: str,
+        current_stage: str,
+        workflow_profile: str,
+        policy: dict[str, str],
+    ) -> Session:
         with self.db.connect() as connection:
             cursor = connection.execute(
                 """
-                INSERT INTO sessions (task_key, status, current_stage)
-                VALUES (?, ?, ?)
+                INSERT INTO sessions (task_key, status, current_stage, workflow_profile, policy_json)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (task_key, SessionStatus.CREATED.value, current_stage),
+                (
+                    task_key,
+                    SessionStatus.CREATED.value,
+                    current_stage,
+                    workflow_profile,
+                    json.dumps(policy, sort_keys=True),
+                ),
             )
             row = connection.execute(
                 "SELECT * FROM sessions WHERE id = ?",
@@ -82,6 +96,27 @@ class SessionRepository:
                 WHERE id = ?
                 """,
                 (current_stage, current_owner, session_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+        return session_from_row(row)
+
+    def update_policy(
+        self,
+        session_id: int,
+        workflow_profile: str,
+        policy: dict[str, str],
+    ) -> Session:
+        with self.db.connect() as connection:
+            connection.execute(
+                """
+                UPDATE sessions
+                SET workflow_profile = ?, policy_json = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (workflow_profile, json.dumps(policy, sort_keys=True), session_id),
             )
             row = connection.execute(
                 "SELECT * FROM sessions WHERE id = ?",

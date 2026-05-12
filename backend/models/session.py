@@ -15,6 +15,8 @@ class Session:
     status: SessionStatus
     current_stage: str
     current_owner: str | None
+    workflow_profile: str = "oneshot"
+    policy: dict[str, str] | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
     ended_at: datetime | None = None
