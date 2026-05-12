@@ -201,6 +201,12 @@ class CoordinatorService:
         payload: dict,
     ) -> tuple[Session, Event, Event | None]:
         session = self._get_session_or_raise(session_id)
+        self._record_role_output_artifacts(
+            session=session,
+            role_name=role_name,
+            output_type=output_type,
+            payload=payload,
+        )
         mapped_event_type = self._map_role_output_to_event_type(
             session=session,
             role_name=role_name,
@@ -426,6 +432,55 @@ class CoordinatorService:
                 return "verification_failed"
         raise IntakeError(
             f"Unsupported role output: role={role_name}, output_type={output_type}, stage={session.current_stage}"
+        )
+
+    def _record_role_output_artifacts(
+        self,
+        session: Session,
+        role_name: str,
+        output_type: str,
+        payload: dict,
+    ) -> None:
+        role = self.role_repository.get_by_name(session.id, role_name)
+        if role is None:
+            raise IntakeError(f"Role {role_name} is missing for session {session.id}")
+
+        stage_name = f"role-output-{role_name}"
+        payload_text = json.dumps(payload, indent=2, sort_keys=True)
+        json_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            stage_name,
+            f"{output_type}.json",
+            payload_text,
+        )
+        summary_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            stage_name,
+            f"{output_type}.txt",
+            f"role={role_name}\noutput_type={output_type}\npayload={payload_text}\n",
+        )
+        metadata = {
+            "role_name": role_name,
+            "output_type": output_type,
+            "current_stage": session.current_stage,
+        }
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            stage_name=stage_name,
+            artifact_type="role_output_json",
+            path=str(json_path),
+            metadata=metadata,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            stage_name=stage_name,
+            artifact_type="role_output_summary",
+            path=str(summary_path),
+            metadata=metadata,
         )
 
     def _dispatch_role_work(

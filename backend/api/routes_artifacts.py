@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from pathlib import Path
 
-from backend.api.schemas import ArtifactResponse, ArtifactsResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+from backend.api.schemas import ArtifactDetailResponse, ArtifactResponse, ArtifactsResponse
 from backend.dependencies import AppDependencies
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
@@ -29,7 +31,34 @@ def list_artifacts(
                 stage_name=artifact.stage_name,
                 artifact_type=artifact.artifact_type,
                 path=artifact.path,
+                metadata=artifact.metadata,
             )
             for artifact in artifacts
         ]
+    )
+
+
+@router.get("/{artifact_id}", response_model=ArtifactDetailResponse)
+def get_artifact(
+    artifact_id: int,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> ArtifactDetailResponse:
+    artifact = dependencies.artifact_repository.get_by_id(artifact_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} was not found")
+
+    content: str | None = None
+    artifact_path = Path(artifact.path)
+    if artifact_path.exists() and artifact_path.is_file():
+        content = artifact_path.read_text()
+
+    return ArtifactDetailResponse(
+        id=artifact.id,
+        session_id=artifact.session_id,
+        role_id=artifact.role_id,
+        stage_name=artifact.stage_name,
+        artifact_type=artifact.artifact_type,
+        path=artifact.path,
+        metadata=artifact.metadata,
+        content=content,
     )

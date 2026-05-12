@@ -263,10 +263,14 @@ class SessionCreationTests(unittest.TestCase):
             payload={"summary": "done"},
         )
         events = self.event_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
 
         self.assertEqual("implementation_completed", mapped_event.event_type)
         self.assertEqual("verification_requested", followup_event.event_type)
         self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertTrue(
+            any(artifact.artifact_type == "role_output_json" for artifact in artifacts)
+        )
         self.assertEqual(
             [
                 "task_started",

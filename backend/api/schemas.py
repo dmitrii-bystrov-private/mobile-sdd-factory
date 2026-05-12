@@ -90,10 +90,22 @@ class ArtifactResponse(BaseModel):
     stage_name: str
     artifact_type: str
     path: str
+    metadata: dict | None = None
 
 
 class ArtifactsResponse(BaseModel):
     items: list[ArtifactResponse]
+
+
+class ArtifactDetailResponse(BaseModel):
+    id: int
+    session_id: int
+    role_id: int | None = None
+    stage_name: str
+    artifact_type: str
+    path: str
+    metadata: dict
+    content: str | None = None
 
 
 class WorkItemResponse(BaseModel):

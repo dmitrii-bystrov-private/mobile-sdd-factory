@@ -10,6 +10,7 @@ try:
     from backend.api.schemas import InjectEventRequest
     from backend.api.routes_roles import submit_role_output
     from backend.api.schemas import RoleOutputRequest
+    from backend.api.routes_artifacts import get_artifact, list_artifacts
     from backend.coordinator.service import CoordinatorService
     from backend.dependencies import AppDependencies
     from backend.roles.contracts import DEFAULT_SESSION_ROLES
@@ -234,6 +235,37 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("verification_requested", response.followup_event_type)
         self.assertEqual("verification_requested", response.session.current_stage)
         self.assertEqual(7, len(events_response.items))
+
+    def test_artifact_detail_route_returns_content_and_metadata(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40007"),
+            dependencies=self.dependencies,
+        )
+        submit_role_output(
+            RoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+                output_type="completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        artifacts_response = list_artifacts(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+        output_artifact = next(
+            artifact for artifact in artifacts_response.items if artifact.artifact_type == "role_output_json"
+        )
+        detail = get_artifact(
+            artifact_id=output_artifact.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("role_output_json", detail.artifact_type)
+        self.assertEqual("implementer", detail.metadata["role_name"])
+        self.assertIn('"summary": "done"', detail.content)
 
 
 if __name__ == "__main__":

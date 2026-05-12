@@ -43,3 +43,13 @@ class ArtifactRepository:
                 (session_id,),
             ).fetchall()
         return [artifact_from_row(row) for row in rows]
+
+    def get_by_id(self, artifact_id: int) -> Artifact | None:
+        with self.db.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM artifacts WHERE id = ?",
+                (artifact_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return artifact_from_row(row)
