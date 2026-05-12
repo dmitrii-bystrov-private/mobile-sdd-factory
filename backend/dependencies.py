@@ -18,6 +18,7 @@ from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.command_runner import CommandRunner
+from backend.tools.gitlab_adapter import GitLabAdapter
 from backend.tools.jira_adapter import JiraAdapter
 from backend.tools.snapshot_adapter import SnapshotAdapter
 
@@ -36,6 +37,7 @@ class AppDependencies:
     session_backend: TmuxSessionBackend
     jira_adapter: JiraAdapter
     snapshot_adapter: SnapshotAdapter
+    gitlab_adapter: GitLabAdapter
     event_bus: SessionEventBus
     loop_runner: CoordinatorLoopRunner
     coordinator_service: CoordinatorService
@@ -61,6 +63,7 @@ def build_dependencies() -> AppDependencies:
     runner = CommandRunner()
     jira_adapter = JiraAdapter(runner, config.repo_root)
     snapshot_adapter = SnapshotAdapter(runner, config.repo_root)
+    gitlab_adapter = GitLabAdapter(runner, config.repo_root)
     event_bus = SessionEventBus()
     coordinator_service = CoordinatorService(
         session_repository=session_repository,
@@ -72,6 +75,7 @@ def build_dependencies() -> AppDependencies:
         default_roles=DEFAULT_SESSION_ROLES,
         jira_adapter=jira_adapter,
         snapshot_adapter=snapshot_adapter,
+        gitlab_adapter=gitlab_adapter,
         artifacts_root=config.workdir_root / "factory-artifacts",
         event_bus=event_bus,
     )
@@ -90,6 +94,7 @@ def build_dependencies() -> AppDependencies:
         session_backend=session_backend,
         jira_adapter=jira_adapter,
         snapshot_adapter=snapshot_adapter,
+        gitlab_adapter=gitlab_adapter,
         event_bus=event_bus,
         loop_runner=loop_runner,
         coordinator_service=coordinator_service,

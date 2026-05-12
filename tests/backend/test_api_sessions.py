@@ -20,8 +20,10 @@ try:
     from backend.api.routes_operator import resume_session
     from backend.api.routes_operator import retry_session
     from backend.api.routes_operator import redirect_session
+    from backend.api.routes_operator import ingest_mr_comments
     from backend.api.routes_operator import loop_status, start_loop, stop_loop
     from backend.api.schemas import (
+        IngestMrCommentsRequest,
         PollSessionOutputRequest,
         PauseSessionRequest,
         RedirectSessionRequest,
@@ -59,6 +61,21 @@ class FakeSnapshotAdapter:
         return CommandResult(["snapshot", task_key], 0, "snapshot ok\n", "")
 
 
+class FakeGitLabAdapter:
+    def fetch_mr_comments(self, platform: str, mr_id: str) -> "CommandResult":
+        return CommandResult(
+            ["fetch_mr_comments", platform, mr_id],
+            0,
+            (
+                f"# Unresolved MR discussions: !{mr_id} (1 total)\n\n"
+                "## Discussion 1 — file.swift:10\n\n"
+                "**Reviewer:** Please fix this\n\n"
+                "---\n"
+            ),
+            "",
+        )
+
+
 @unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi is not installed in the local environment")
 class SessionApiTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -84,6 +101,7 @@ class SessionApiTests(unittest.TestCase):
             default_roles=DEFAULT_SESSION_ROLES,
             jira_adapter=FakeJiraAdapter(),
             snapshot_adapter=FakeSnapshotAdapter(),
+            gitlab_adapter=FakeGitLabAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
             event_bus=event_bus,
         )
@@ -102,6 +120,7 @@ class SessionApiTests(unittest.TestCase):
             session_backend=session_backend,
             jira_adapter=FakeJiraAdapter(),
             snapshot_adapter=FakeSnapshotAdapter(),
+            gitlab_adapter=FakeGitLabAdapter(),
             event_bus=event_bus,
             loop_runner=loop_runner,
             coordinator_service=coordinator,
@@ -529,6 +548,44 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("session_paused_by_operator", response.event_type)
         self.assertEqual("paused", response.session.status)
         self.assertEqual("implementer", response.session.current_owner)
+
+    def test_ingest_mr_comments_route_reopens_completed_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014A"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = ingest_mr_comments(
+            IngestMrCommentsRequest(
+                session_id=prepare_response.session.id,
+                platform="ios",
+                mr_id="2942",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.ingested)
+        self.assertEqual("mr_comments_received", response.event_type)
+        self.assertEqual("mr_followup_requested", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertEqual("mr_followup_requested", response.session.current_stage)
+        self.assertEqual(1, response.discussion_count)
 
     def test_retry_session_route_creates_new_retry_work_item(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

@@ -215,6 +215,20 @@ class RedirectSessionResponse(BaseModel):
     followup_event_type: str | None = None
 
 
+class IngestMrCommentsRequest(BaseModel):
+    session_id: int
+    platform: str
+    mr_id: str
+
+
+class IngestMrCommentsResponse(BaseModel):
+    ingested: bool
+    session: SessionResponse
+    event_type: str
+    followup_event_type: str | None = None
+    discussion_count: int
+
+
 class RunLoopOnceResponse(BaseModel):
     ran: bool
     session_count: int

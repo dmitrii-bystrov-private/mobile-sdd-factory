@@ -30,6 +30,7 @@ from backend.state.event_repository import EventRepository
 from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
+from backend.tools.gitlab_adapter import GitLabAdapter
 from backend.tools.jira_adapter import JiraAdapter
 from backend.tools.snapshot_adapter import SnapshotAdapter
 
@@ -47,6 +48,7 @@ class CoordinatorService:
     default_roles: list[str]
     jira_adapter: JiraAdapter | None = None
     snapshot_adapter: SnapshotAdapter | None = None
+    gitlab_adapter: GitLabAdapter | None = None
     artifacts_root: Path | None = None
     event_bus: SessionEventBus | None = None
 
@@ -233,6 +235,75 @@ class CoordinatorService:
             session, followup_event = self._handle_verification_passed(session, accepted_event)
             return session, followup_event
         return session, None
+
+    def ingest_mr_comments(
+        self,
+        session_id: int,
+        platform: str,
+        mr_id: str,
+    ) -> tuple[Session, Event, Event | None, int]:
+        if self.gitlab_adapter is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing GitLab adapter or artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.COMPLETED:
+            raise IntakeError(
+                f"Session {session_id} must be completed before MR comments can reopen it"
+            )
+        if platform not in {"ios", "android"}:
+            raise IntakeError("Platform must be 'ios' or 'android'")
+
+        comments_result = self.gitlab_adapter.fetch_mr_comments(platform=platform, mr_id=mr_id)
+        if comments_result.returncode == 2:
+            event = self._append_event(
+                session_id=session.id,
+                event_type="mr_comments_empty",
+                producer_type="coordinator",
+                payload={"platform": platform, "mr_id": mr_id},
+            )
+            return session, event, None, 0
+        if not comments_result.ok:
+            raise IntakeError(
+                comments_result.stderr or comments_result.stdout or "Failed to fetch MR comments"
+            )
+
+        discussion_count = self._count_mr_discussions(comments_result.stdout)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "mr-followup",
+            f"mr-{mr_id}-comments.md",
+            comments_result.stdout,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="mr-followup",
+            artifact_type="mr_comments_markdown",
+            path=str(artifact_path),
+            metadata={
+                "platform": platform,
+                "mr_id": mr_id,
+                "discussion_count": discussion_count,
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="mr_comments_received",
+            producer_type="coordinator",
+            payload={
+                "platform": platform,
+                "mr_id": mr_id,
+                "discussion_count": discussion_count,
+            },
+        )
+        followup_event = self._enqueue_mr_followup(
+            session=session,
+            source_event=event,
+            mr_id=mr_id,
+            discussion_count=discussion_count,
+        )
+        refreshed = self._get_session_or_raise(session.id)
+        return refreshed, event, followup_event, discussion_count
 
     def handle_role_output(
         self,
@@ -792,6 +863,55 @@ class CoordinatorService:
         )
         return session, event
 
+    def _enqueue_mr_followup(
+        self,
+        session: Session,
+        source_event: Event,
+        mr_id: str,
+        discussion_count: int,
+    ) -> Event:
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        if implementer_role is None:
+            raise IntakeError("Implementer role is missing for the session")
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title=f"MR follow-up for {session.task_key} from !{mr_id}",
+            owner_role_id=implementer_role.id,
+            source_event_id=source_event.id,
+            priority=110,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="mr_followup_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._dispatch_role_work(
+            session=session,
+            role=implementer_role,
+            work_item=work_item,
+            stage_name="mr_followup_requested",
+            instruction=(
+                f"Apply MR follow-up changes for {session.task_key} from MR !{mr_id}. "
+                f"There are {discussion_count} unresolved discussion groups recorded in artifacts."
+            ),
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="mr_followup_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": work_item.id,
+                "mr_id": mr_id,
+                "discussion_count": discussion_count,
+                "current_stage": session.current_stage,
+            },
+        )
+
     def _get_session_or_raise(self, session_id: int) -> Session:
         for session in self.session_repository.list_all():
             if session.id == session_id:
@@ -805,7 +925,11 @@ class CoordinatorService:
         output_type: str,
     ) -> str:
         if role_name == IMPLEMENTER_ROLE and output_type == "completed":
-            if session.current_stage in {"implementation_requested", "verification_correction_requested"}:
+            if session.current_stage in {
+                "implementation_requested",
+                "verification_correction_requested",
+                "mr_followup_requested",
+            }:
                 return "implementation_completed"
         if role_name == VERIFICATION_COORDINATOR_ROLE:
             if output_type in {"passed", "completed"} and session.current_stage == "verification_requested":
@@ -1149,7 +1273,12 @@ class CoordinatorService:
             return f"Run deterministic verification for {task_key}."
         if stage_name == "verification_correction_requested":
             return f"Apply verification corrections for {task_key}."
+        if stage_name == "mr_followup_requested":
+            return f"Apply MR follow-up changes for {task_key}."
         return None
+
+    def _count_mr_discussions(self, markdown: str) -> int:
+        return sum(1 for line in markdown.splitlines() if line.startswith("## Discussion "))
 
     def _dispatch_role_work(
         self,
