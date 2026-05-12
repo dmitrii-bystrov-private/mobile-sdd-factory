@@ -8,6 +8,8 @@ try:
     from backend.api.routes_events import inject_event, list_events
     from backend.api.routes_work_items import list_work_items
     from backend.api.schemas import InjectEventRequest
+    from backend.api.routes_roles import submit_role_output
+    from backend.api.schemas import RoleOutputRequest
     from backend.coordinator.service import CoordinatorService
     from backend.dependencies import AppDependencies
     from backend.roles.contracts import DEFAULT_SESSION_ROLES
@@ -207,6 +209,31 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("completed", response.session.current_stage)
         self.assertEqual("completed", response.session.status)
         self.assertEqual(9, len(events_response.items))
+
+    def test_role_output_route_maps_to_domain_event(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40006"),
+            dependencies=self.dependencies,
+        )
+
+        response = submit_role_output(
+            RoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+                output_type="completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        events_response = list_events(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("implementation_completed", response.mapped_event_type)
+        self.assertEqual("verification_requested", response.followup_event_type)
+        self.assertEqual("verification_requested", response.session.current_stage)
+        self.assertEqual(7, len(events_response.items))
 
 
 if __name__ == "__main__":

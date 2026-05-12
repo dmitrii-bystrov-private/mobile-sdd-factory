@@ -253,6 +253,33 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
 
+    def test_role_output_completed_moves_implementer_flow_forward(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30006")
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="implementer",
+            output_type="completed",
+            payload={"summary": "done"},
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("implementation_completed", mapped_event.event_type)
+        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual(
+            [
+                "task_started",
+                "task_prepared",
+                "role_input_dispatched",
+                "implementation_requested",
+                "implementation_completed",
+                "role_input_dispatched",
+                "verification_requested",
+            ],
+            [item.event_type for item in events],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from backend.api.schemas import RoleResponse, RolesResponse
+from backend.api.routes_sessions import to_session_response
+from backend.api.schemas import RoleOutputRequest, RoleOutputResponse, RoleResponse, RolesResponse
+from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
 
 router = APIRouter(prefix="/roles", tags=["roles"])
@@ -32,4 +34,27 @@ def list_roles(
             )
             for role in roles
         ]
+    )
+
+
+@router.post("/output", response_model=RoleOutputResponse)
+def submit_role_output(
+    payload: RoleOutputRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RoleOutputResponse:
+    try:
+        session, mapped_event, followup_event = dependencies.coordinator_service.handle_role_output(
+            session_id=payload.session_id,
+            role_name=payload.role_name,
+            output_type=payload.output_type,
+            payload=payload.payload,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return RoleOutputResponse(
+        accepted=True,
+        mapped_event_type=mapped_event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+        session=to_session_response(session),
     )

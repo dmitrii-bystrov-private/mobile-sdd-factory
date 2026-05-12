@@ -193,6 +193,35 @@ class CoordinatorService:
             return session, followup_event
         return session, None
 
+    def handle_role_output(
+        self,
+        session_id: int,
+        role_name: str,
+        output_type: str,
+        payload: dict,
+    ) -> tuple[Session, Event, Event | None]:
+        session = self._get_session_or_raise(session_id)
+        mapped_event_type = self._map_role_output_to_event_type(
+            session=session,
+            role_name=role_name,
+            output_type=output_type,
+        )
+        accepted_event = self.event_repository.append(
+            session_id=session_id,
+            event_type=mapped_event_type,
+            producer_type="role",
+            producer_id=role_name,
+            payload=payload,
+        )
+        followup_event: Event | None = None
+        if mapped_event_type == "implementation_completed":
+            session, followup_event = self._handle_implementation_completed(session, accepted_event)
+        elif mapped_event_type == "verification_failed":
+            session, followup_event = self._handle_verification_failed(session, accepted_event)
+        elif mapped_event_type == "verification_passed":
+            session, followup_event = self._handle_verification_passed(session, accepted_event)
+        return session, accepted_event, followup_event
+
     def _enqueue_initial_implementation(
         self,
         session: Session,
@@ -380,6 +409,24 @@ class CoordinatorService:
             if session.id == session_id:
                 return session
         raise IntakeError(f"Session {session_id} was not found")
+
+    def _map_role_output_to_event_type(
+        self,
+        session: Session,
+        role_name: str,
+        output_type: str,
+    ) -> str:
+        if role_name == IMPLEMENTER_ROLE and output_type == "completed":
+            if session.current_stage in {"implementation_requested", "verification_correction_requested"}:
+                return "implementation_completed"
+        if role_name == VERIFICATION_COORDINATOR_ROLE:
+            if output_type in {"passed", "completed"} and session.current_stage == "verification_requested":
+                return "verification_passed"
+            if output_type == "failed" and session.current_stage == "verification_requested":
+                return "verification_failed"
+        raise IntakeError(
+            f"Unsupported role output: role={role_name}, output_type={output_type}, stage={session.current_stage}"
+        )
 
     def _dispatch_role_work(
         self,

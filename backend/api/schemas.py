@@ -55,6 +55,20 @@ class RolesResponse(BaseModel):
     items: list[RoleResponse]
 
 
+class RoleOutputRequest(BaseModel):
+    session_id: int
+    role_name: str
+    output_type: str
+    payload: dict = {}
+
+
+class RoleOutputResponse(BaseModel):
+    accepted: bool
+    mapped_event_type: str
+    followup_event_type: str | None = None
+    session: SessionResponse
+
+
 class EventResponse(BaseModel):
     id: int
     session_id: int
