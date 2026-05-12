@@ -5,7 +5,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from backend.api.routes_sessions import to_session_response
-from backend.api.schemas import RoleOutputRequest, RoleOutputResponse, RoleResponse, RolesResponse
+from backend.api.schemas import (
+    CollectRoleOutputRequest,
+    CollectRoleOutputResponse,
+    RoleOutputRequest,
+    RoleOutputResponse,
+    RoleResponse,
+    RolesResponse,
+)
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
 
@@ -57,4 +64,25 @@ def submit_role_output(
         mapped_event_type=mapped_event.event_type,
         followup_event_type=followup_event.event_type if followup_event else None,
         session=to_session_response(session),
+    )
+
+
+@router.post("/collect-output", response_model=CollectRoleOutputResponse)
+def collect_role_output(
+    payload: CollectRoleOutputRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> CollectRoleOutputResponse:
+    try:
+        session, event, chunk_count = dependencies.coordinator_service.collect_role_output(
+            session_id=payload.session_id,
+            role_name=payload.role_name,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return CollectRoleOutputResponse(
+        collected=chunk_count > 0,
+        session=to_session_response(session),
+        chunk_count=chunk_count,
+        event_type=event.event_type if event else None,
     )

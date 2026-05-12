@@ -9,8 +9,9 @@ try:
     from backend.api.routes_work_items import list_work_items
     from backend.api.schemas import InjectEventRequest
     from backend.api.routes_roles import submit_role_output
-    from backend.api.schemas import RoleOutputRequest
+    from backend.api.schemas import CollectRoleOutputRequest, RoleOutputRequest
     from backend.api.routes_artifacts import get_artifact, list_artifacts
+    from backend.api.routes_roles import collect_role_output
     from backend.coordinator.service import CoordinatorService
     from backend.dependencies import AppDependencies
     from backend.roles.contracts import DEFAULT_SESSION_ROLES
@@ -266,6 +267,30 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("role_output_json", detail.artifact_type)
         self.assertEqual("implementer", detail.metadata["role_name"])
         self.assertIn('"summary": "done"', detail.content)
+
+    def test_collect_role_output_route_returns_chunk_count(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(implementer_role.runtime_handle, "line 1")
+        self.dependencies.session_backend.simulate_output(implementer_role.runtime_handle, "line 2")
+
+        response = collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.collected)
+        self.assertEqual(2, response.chunk_count)
+        self.assertEqual("role_output_collected", response.event_type)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ import shutil
 import subprocess
 
 from backend.session_backend.base import SessionBackend
-from backend.session_backend.runtime_models import RuntimeRoleHandle, RuntimeSessionHandle
+from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle, RuntimeSessionHandle
 
 
 class TmuxSessionBackend(SessionBackend):
@@ -22,6 +22,8 @@ class TmuxSessionBackend(SessionBackend):
         self.mode = mode
         self.runtime_root = runtime_root or Path.cwd() / "workdir" / "factory-runtime"
         self.sent_inputs: dict[str, list[str]] = defaultdict(list)
+        self.pending_outputs: dict[str, list[str]] = defaultdict(list)
+        self.last_captured_output: dict[str, str] = {}
         self._available = shutil.which("tmux") is not None
         self._effective_mode = self._resolve_mode(mode)
 
@@ -91,6 +93,28 @@ class TmuxSessionBackend(SessionBackend):
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to send tmux input")
 
+    def read_output(self, role: RuntimeRoleHandle) -> list[RuntimeOutputChunk]:
+        if self._effective_mode == "recording":
+            outputs = self.pending_outputs.pop(role.role_id, [])
+            return [RuntimeOutputChunk(role_id=role.role_id, text=text) for text in outputs]
+
+        socket_path = self._socket_path(role.session_id)
+        result = self._tmux(socket_path, "capture-pane", "-p", "-t", role.role_id)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr or result.stdout or "Failed to capture tmux output")
+        current = result.stdout
+        previous = self.last_captured_output.get(role.role_id, "")
+        self.last_captured_output[role.role_id] = current
+        if current == previous:
+            return []
+        if previous and current.startswith(previous):
+            delta = current[len(previous):]
+        else:
+            delta = current
+        if not delta:
+            return []
+        return [RuntimeOutputChunk(role_id=role.role_id, text=delta)]
+
     def stop_role(self, role: RuntimeRoleHandle) -> None:
         if self._effective_mode == "tmux":
             socket_path = self._socket_path(role.session_id)
@@ -105,3 +129,6 @@ class TmuxSessionBackend(SessionBackend):
 
     def get_sent_inputs(self, role_id: str) -> list[str]:
         return list(self.sent_inputs.get(role_id, []))
+
+    def simulate_output(self, role_id: str, text: str) -> None:
+        self.pending_outputs[role_id].append(text)

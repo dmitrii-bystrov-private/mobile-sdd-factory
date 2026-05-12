@@ -15,3 +15,9 @@ class RuntimeRoleHandle:
     role_id: str
     session_id: str
     backend_name: str
+
+
+@dataclass(slots=True)
+class RuntimeOutputChunk:
+    role_id: str
+    text: str

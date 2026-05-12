@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from backend.session_backend.runtime_models import RuntimeRoleHandle, RuntimeSessionHandle
+from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle, RuntimeSessionHandle
 
 
 class SessionBackend(ABC):
@@ -20,6 +20,10 @@ class SessionBackend(ABC):
 
     @abstractmethod
     def send_input(self, role: RuntimeRoleHandle, text: str) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def read_output(self, role: RuntimeRoleHandle) -> list[RuntimeOutputChunk]:
         raise NotImplementedError
 
     @abstractmethod

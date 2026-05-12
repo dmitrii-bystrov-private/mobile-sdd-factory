@@ -20,6 +20,23 @@ class TmuxBackendTests(unittest.TestCase):
             self.assertEqual("recording", backend.effective_mode)
             self.assertEqual(["hello world"], backend.get_sent_inputs(role.role_id))
 
+    def test_recording_mode_returns_simulated_output_chunks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            backend = TmuxSessionBackend(
+                mode="recording",
+                runtime_root=Path(temp_dir),
+            )
+            session = backend.create_task_session("IOS-50001")
+            role = backend.spawn_role(session, "implementer")
+
+            backend.simulate_output(role.role_id, "first line")
+            backend.simulate_output(role.role_id, "second line")
+
+            chunks = backend.read_output(role)
+
+            self.assertEqual(["first line", "second line"], [chunk.text for chunk in chunks])
+            self.assertEqual([], backend.read_output(role))
+
 
 if __name__ == "__main__":
     unittest.main()

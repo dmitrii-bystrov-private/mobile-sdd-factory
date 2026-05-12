@@ -17,7 +17,7 @@ from backend.models.work_item import WorkItem
 from backend.roles.prompts import role_handoff_prompt
 from backend.roles.contracts import IMPLEMENTER_ROLE, VERIFICATION_COORDINATOR_ROLE
 from backend.session_backend.base import SessionBackend
-from backend.session_backend.runtime_models import RuntimeRoleHandle
+from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.event_repository import EventRepository
 from backend.state.role_repository import RoleRepository
@@ -227,6 +227,37 @@ class CoordinatorService:
         elif mapped_event_type == "verification_passed":
             session, followup_event = self._handle_verification_passed(session, accepted_event)
         return session, accepted_event, followup_event
+
+    def collect_role_output(
+        self,
+        session_id: int,
+        role_name: str,
+    ) -> tuple[Session, Event | None, int]:
+        session = self._get_session_or_raise(session_id)
+        role = self.role_repository.get_by_name(session_id, role_name)
+        if role is None:
+            raise IntakeError(f"Role {role_name} is missing for session {session_id}")
+
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle or f"{role.runtime_backend}:{role.role_name}",
+            session_id=f"session:{session.id}",
+            backend_name=role.runtime_backend,
+        )
+        chunks = self.session_backend.read_output(runtime_role)
+        if not chunks:
+            return session, None, 0
+
+        self._record_runtime_output_artifacts(session, role, chunks)
+        event = self.event_repository.append(
+            session_id=session.id,
+            event_type="role_output_collected",
+            producer_type="coordinator",
+            payload={
+                "role_name": role_name,
+                "chunk_count": len(chunks),
+            },
+        )
+        return session, event, len(chunks)
 
     def _enqueue_initial_implementation(
         self,
@@ -481,6 +512,34 @@ class CoordinatorService:
             artifact_type="role_output_summary",
             path=str(summary_path),
             metadata=metadata,
+        )
+
+    def _record_runtime_output_artifacts(
+        self,
+        session: Session,
+        role: Role,
+        chunks: list[RuntimeOutputChunk],
+    ) -> None:
+        stage_name = f"runtime-output-{role.role_name}"
+        joined_text = "\n".join(chunk.text for chunk in chunks)
+        output_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            stage_name,
+            "output.log",
+            joined_text,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            stage_name=stage_name,
+            artifact_type="runtime_output",
+            path=str(output_path),
+            metadata={
+                "role_name": role.role_name,
+                "chunk_count": len(chunks),
+                "current_stage": session.current_stage,
+            },
         )
 
     def _dispatch_role_work(

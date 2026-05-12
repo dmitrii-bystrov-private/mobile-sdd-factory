@@ -69,6 +69,18 @@ class RoleOutputResponse(BaseModel):
     session: SessionResponse
 
 
+class CollectRoleOutputRequest(BaseModel):
+    session_id: int
+    role_name: str
+
+
+class CollectRoleOutputResponse(BaseModel):
+    collected: bool
+    session: SessionResponse
+    chunk_count: int
+    event_type: str | None = None
+
+
 class EventResponse(BaseModel):
     id: int
     session_id: int

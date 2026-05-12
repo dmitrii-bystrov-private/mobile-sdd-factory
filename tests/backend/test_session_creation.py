@@ -284,6 +284,23 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
 
+    def test_collect_role_output_records_runtime_output_artifact(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30007")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(implementer_role.runtime_handle, "runtime line 1")
+        self.session_backend.simulate_output(implementer_role.runtime_handle, "runtime line 2")
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(session.id, updated_session.id)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual(2, chunk_count)
+        self.assertTrue(any(artifact.artifact_type == "runtime_output" for artifact in artifacts))
+
 
 if __name__ == "__main__":
     unittest.main()
