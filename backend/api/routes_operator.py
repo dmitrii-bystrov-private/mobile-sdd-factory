@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.api.routes_sessions import to_session_response
-from backend.api.schemas import PollSessionOutputRequest, PollSessionOutputResponse
+from backend.api.schemas import PollSessionOutputRequest, PollSessionOutputResponse, RunLoopOnceResponse
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
 
@@ -37,6 +37,19 @@ def poll_session_output(
         polled=chunk_count > 0,
         session=to_session_response(session),
         role_count=role_count,
+        chunk_count=chunk_count,
+        event_type=event.event_type if event else None,
+    )
+
+
+@router.post("/run-loop-once", response_model=RunLoopOnceResponse)
+def run_loop_once(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RunLoopOnceResponse:
+    event, session_count, chunk_count = dependencies.coordinator_service.run_loop_once()
+    return RunLoopOnceResponse(
+        ran=session_count > 0,
+        session_count=session_count,
         chunk_count=chunk_count,
         event_type=event.event_type if event else None,
     )

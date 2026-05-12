@@ -44,6 +44,14 @@ class SessionRepository:
             ).fetchall()
         return [session_from_row(row) for row in rows]
 
+    def list_by_status(self, status: SessionStatus) -> list[Session]:
+        with self.db.connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM sessions WHERE status = ? ORDER BY created_at DESC, id DESC",
+                (status.value,),
+            ).fetchall()
+        return [session_from_row(row) for row in rows]
+
     def update_status(self, session_id: int, status: SessionStatus) -> Session:
         with self.db.connect() as connection:
             connection.execute(

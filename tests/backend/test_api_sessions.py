@@ -14,6 +14,7 @@ try:
     from backend.api.routes_artifacts import get_artifact, list_artifacts
     from backend.api.routes_roles import collect_role_output
     from backend.api.routes_operator import poll_session_output
+    from backend.api.routes_operator import run_loop_once
     from backend.api.schemas import PollSessionOutputRequest
     from backend.coordinator.service import CoordinatorService
     from backend.dependencies import AppDependencies
@@ -350,6 +351,27 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertTrue(any(event.event_type == "implementation_completed" for event in recent))
         self.assertTrue(any(event.event_type == "verification_requested" for event in recent))
+
+    def test_run_loop_once_route_polls_active_sessions(self) -> None:
+        prepare_a = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40010"),
+            dependencies=self.dependencies,
+        )
+        prepare_b = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40011"),
+            dependencies=self.dependencies,
+        )
+        implementer_a = self.dependencies.role_repository.get_by_name(prepare_a.session.id, "implementer")
+        implementer_b = self.dependencies.role_repository.get_by_name(prepare_b.session.id, "implementer")
+        self.dependencies.session_backend.simulate_output(implementer_a.runtime_handle, "a line")
+        self.dependencies.session_backend.simulate_output(implementer_b.runtime_handle, "b line")
+
+        response = run_loop_once(dependencies=self.dependencies)
+
+        self.assertTrue(response.ran)
+        self.assertEqual(2, response.session_count)
+        self.assertEqual(2, response.chunk_count)
+        self.assertEqual("coordinator_loop_ran", response.event_type)
 
 
 if __name__ == "__main__":

@@ -160,5 +160,12 @@ class PollSessionOutputResponse(BaseModel):
     event_type: str | None = None
 
 
+class RunLoopOnceResponse(BaseModel):
+    ran: bool
+    session_count: int
+    chunk_count: int
+    event_type: str | None = None
+
+
 class HealthResponse(BaseModel):
     status: str

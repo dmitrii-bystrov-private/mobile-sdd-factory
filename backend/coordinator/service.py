@@ -298,6 +298,30 @@ class CoordinatorService:
         )
         return session, event, len(roles), total_chunks
 
+    def run_loop_once(self) -> tuple[Event | None, int, int]:
+        active_sessions = self.session_repository.list_by_status(SessionStatus.ACTIVE)
+        total_chunks = 0
+        polled_sessions = 0
+
+        for session in active_sessions:
+            _, _, _, chunk_count = self.poll_session_output(session.id)
+            polled_sessions += 1
+            total_chunks += chunk_count
+
+        if polled_sessions == 0:
+            return None, 0, 0
+
+        summary_event = self._append_event(
+            session_id=active_sessions[0].id,
+            event_type="coordinator_loop_ran",
+            producer_type="coordinator",
+            payload={
+                "session_count": polled_sessions,
+                "chunk_count": total_chunks,
+            },
+        )
+        return summary_event, polled_sessions, total_chunks
+
     def _enqueue_initial_implementation(
         self,
         session: Session,

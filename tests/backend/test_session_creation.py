@@ -339,6 +339,24 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(event.event_type == "implementation_completed" for event in recent))
         self.assertTrue(any(event.event_type == "verification_requested" for event in recent))
 
+    def test_run_loop_once_polls_all_active_sessions(self) -> None:
+        session_a, _, _, _ = self.coordinator.prepare_task_session("IOS-30010")
+        session_b, _, _, _ = self.coordinator.prepare_task_session("IOS-30011")
+        implementer_a = self.role_repository.get_by_name(session_a.id, "implementer")
+        implementer_b = self.role_repository.get_by_name(session_b.id, "implementer")
+        self.session_backend.simulate_output(implementer_a.runtime_handle, "a output")
+        self.session_backend.simulate_output(implementer_b.runtime_handle, "b output")
+
+        event, session_count, chunk_count = self.coordinator.run_loop_once()
+        artifacts_a = self.artifact_repository.list_for_session(session_a.id)
+        artifacts_b = self.artifact_repository.list_for_session(session_b.id)
+
+        self.assertEqual("coordinator_loop_ran", event.event_type)
+        self.assertEqual(2, session_count)
+        self.assertEqual(2, chunk_count)
+        self.assertTrue(any(artifact.artifact_type == "runtime_output" for artifact in artifacts_a))
+        self.assertTrue(any(artifact.artifact_type == "runtime_output" for artifact in artifacts_b))
+
 
 if __name__ == "__main__":
     unittest.main()
