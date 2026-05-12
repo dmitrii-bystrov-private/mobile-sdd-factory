@@ -75,4 +75,9 @@ def prepare_session(
         issue_type=str(details["issue_type"]),
         readiness=str(details["readiness"]),
         snapshot_exit_code=int(details["snapshot_exit_code"]),
+        followup_event_type=(
+            str(details["followup_event_type"])
+            if details["followup_event_type"] is not None
+            else None
+        ),
     )
