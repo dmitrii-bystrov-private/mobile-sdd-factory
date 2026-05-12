@@ -183,6 +183,48 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
 
+    def test_verification_passed_completes_session(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30005")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all checks passed"},
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("completed", updated_session.current_stage)
+        self.assertIsNone(updated_session.current_owner)
+        self.assertEqual("completed", updated_session.status.value)
+        self.assertEqual("task_completed", followup_event.event_type)
+        self.assertEqual(
+            sorted(
+                [
+                    ("Initial implementation for IOS-30005", "completed"),
+                    ("Verification for IOS-30005", "completed"),
+                ]
+            ),
+            sorted((item.title, item.status.value) for item in work_items),
+        )
+        self.assertEqual(
+            [
+                "task_started",
+                "task_prepared",
+                "implementation_requested",
+                "implementation_completed",
+                "verification_requested",
+                "verification_passed",
+                "task_completed",
+            ],
+            [item.event_type for item in events],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

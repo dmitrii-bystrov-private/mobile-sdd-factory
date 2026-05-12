@@ -184,6 +184,9 @@ class CoordinatorService:
         if event_type == "verification_failed":
             session, followup_event = self._handle_verification_failed(session, accepted_event)
             return session, followup_event
+        if event_type == "verification_passed":
+            session, followup_event = self._handle_verification_passed(session, accepted_event)
+            return session, followup_event
         return session, None
 
     def _enqueue_initial_implementation(
@@ -378,6 +381,40 @@ class CoordinatorService:
                 "role_name": IMPLEMENTER_ROLE,
                 "work_item_id": correction_item.id,
                 "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _handle_verification_passed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        verification_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "verification" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not verification_items:
+            raise IntakeError("No active verification work item found for the session")
+
+        active_item = verification_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="completed",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        event = self.event_repository.append(
+            session_id=session.id,
+            event_type="task_completed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "source_event_id": source_event.id,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
             },
         )
         return session, event
