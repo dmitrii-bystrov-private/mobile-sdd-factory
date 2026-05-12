@@ -44,11 +44,14 @@ def list_events(
 def stream_events(
     request: Request,
     session_id: int | None = Query(default=None),
+    since_event_id: int | None = Query(default=None),
 ) -> StreamingResponse:
     dependencies: AppDependencies = request.app.state.dependencies
     generator = sse_event_generator(
+        dependencies.event_repository,
         dependencies.event_bus,
         session_id=session_id,
+        since_event_id=since_event_id,
     )
     return StreamingResponse(generator, media_type="text/event-stream")
 

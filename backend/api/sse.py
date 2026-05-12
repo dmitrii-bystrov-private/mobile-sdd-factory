@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import AsyncIterator
 
 from backend.models.event import Event
+from backend.state.event_repository import EventRepository
 
 
 def event_stream_name() -> str:
@@ -16,6 +17,7 @@ def event_stream_name() -> str:
 
 @dataclass(slots=True)
 class StreamEvent:
+    event_id: int | None
     session_id: int
     event_type: str
     payload: dict
@@ -30,6 +32,7 @@ class SessionEventBus:
 
     def publish(self, event: Event) -> None:
         stream_event = StreamEvent(
+            event_id=event.id,
             session_id=event.session_id,
             event_type=event.event_type,
             payload=event.payload,
@@ -55,15 +58,29 @@ class SessionEventBus:
 
 
 async def sse_event_generator(
+    event_repository: EventRepository,
     bus: SessionEventBus,
     session_id: int | None = None,
+    since_event_id: int | None = None,
 ) -> AsyncIterator[str]:
     queue = bus.subscribe()
     try:
-        for event in bus.recent_events(session_id=session_id):
+        if since_event_id is not None:
+            replay_events = [
+                _to_stream_event(event)
+                for event in event_repository.list_after_id(
+                    after_id=since_event_id,
+                    session_id=session_id,
+                )
+            ]
+        else:
+            replay_events = bus.recent_events(session_id=session_id)
+        for event in replay_events:
             yield _format_sse_event(event)
         while True:
             event = await queue.get()
+            if since_event_id is not None and event.event_id is not None and event.event_id <= since_event_id:
+                continue
             if session_id is not None and event.session_id != session_id:
                 continue
             yield _format_sse_event(event)
@@ -72,7 +89,19 @@ async def sse_event_generator(
 
 
 def _format_sse_event(event: StreamEvent) -> str:
-    return (
+    body = (
         f"event: {event.event_type}\n"
         f"data: {json.dumps({'session_id': event.session_id, 'payload': event.payload})}\n\n"
+    )
+    if event.event_id is None:
+        return body
+    return f"id: {event.event_id}\n{body}"
+
+
+def _to_stream_event(event: Event) -> StreamEvent:
+    return StreamEvent(
+        event_id=event.id,
+        session_id=event.session_id,
+        event_type=event.event_type,
+        payload=event.payload,
     )

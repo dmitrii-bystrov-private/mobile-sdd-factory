@@ -52,3 +52,18 @@ class EventRepository:
                 (session_id,),
             ).fetchall()
         return [event_from_row(row) for row in rows]
+
+    def list_after_id(
+        self,
+        after_id: int,
+        session_id: int | None = None,
+    ) -> list[Event]:
+        query = "SELECT * FROM events WHERE id > ?"
+        params: list[int] = [after_id]
+        if session_id is not None:
+            query += " AND session_id = ?"
+            params.append(session_id)
+        query += " ORDER BY id ASC"
+        with self.db.connect() as connection:
+            rows = connection.execute(query, tuple(params)).fetchall()
+        return [event_from_row(row) for row in rows]
