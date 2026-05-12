@@ -613,6 +613,37 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "mr_comments_received" for item in events))
         self.assertTrue(any(item.event_type == "mr_followup_requested" for item in events))
 
+    def test_reopen_from_qa_reactivates_completed_session(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        completed_session, _ = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        updated_session, event, followup_event = self.coordinator.reopen_from_qa(
+            session_id=completed_session.id,
+            comment_text="QA: still broken on edge case",
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("qa_reopen_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertEqual("qa_reopened", event.event_type)
+        self.assertEqual("qa_reopen_requested", followup_event.event_type)
+        self.assertTrue(
+            any(item.title == "QA reopen follow-up for IOS-30021" for item in work_items)
+        )
+        self.assertTrue(any(item.event_type == "qa_reopened" for item in events))
+        self.assertTrue(any(item.event_type == "qa_reopen_requested" for item in events))
+
     def test_resume_session_reactivates_escalated_work_item(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30019")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")

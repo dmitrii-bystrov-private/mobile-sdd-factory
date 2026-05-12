@@ -19,6 +19,7 @@ try:
     from backend.api.routes_operator import pause_session
     from backend.api.routes_operator import resume_session
     from backend.api.routes_operator import retry_session
+    from backend.api.routes_operator import reopen_from_qa
     from backend.api.routes_operator import redirect_session
     from backend.api.routes_operator import ingest_mr_comments
     from backend.api.routes_operator import loop_status, start_loop, stop_loop
@@ -26,6 +27,7 @@ try:
         IngestMrCommentsRequest,
         PollSessionOutputRequest,
         PauseSessionRequest,
+        ReopenFromQaRequest,
         RedirectSessionRequest,
         ResumeSessionRequest,
         RetrySessionRequest,
@@ -586,6 +588,42 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("active", response.session.status)
         self.assertEqual("mr_followup_requested", response.session.current_stage)
         self.assertEqual(1, response.discussion_count)
+
+    def test_reopen_from_qa_route_reactivates_completed_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014B"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = reopen_from_qa(
+            ReopenFromQaRequest(
+                session_id=prepare_response.session.id,
+                comment_text="QA: still failing on edge case",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.reopened)
+        self.assertEqual("qa_reopened", response.event_type)
+        self.assertEqual("qa_reopen_requested", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertEqual("qa_reopen_requested", response.session.current_stage)
 
     def test_retry_session_route_creates_new_retry_work_item(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

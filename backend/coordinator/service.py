@@ -305,6 +305,49 @@ class CoordinatorService:
         refreshed = self._get_session_or_raise(session.id)
         return refreshed, event, followup_event, discussion_count
 
+    def reopen_from_qa(
+        self,
+        session_id: int,
+        comment_text: str,
+    ) -> tuple[Session, Event, Event]:
+        if self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing artifact root")
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.COMPLETED:
+            raise IntakeError(
+                f"Session {session_id} must be completed before QA can reopen it"
+            )
+        normalized_comment = comment_text.strip()
+        if not normalized_comment:
+            raise IntakeError("QA comment text must not be empty")
+
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "qa-reopen",
+            "qa-comments.md",
+            normalized_comment,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="qa-reopen",
+            artifact_type="qa_reopen_comments",
+            path=str(artifact_path),
+            metadata={"comment_length": len(normalized_comment)},
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="qa_reopened",
+            producer_type="coordinator",
+            payload={"comment_length": len(normalized_comment)},
+        )
+        followup_event = self._enqueue_qa_followup(
+            session=session,
+            source_event=event,
+        )
+        refreshed = self._get_session_or_raise(session.id)
+        return refreshed, event, followup_event
+
     def handle_role_output(
         self,
         session_id: int,
@@ -912,6 +955,51 @@ class CoordinatorService:
             },
         )
 
+    def _enqueue_qa_followup(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> Event:
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        if implementer_role is None:
+            raise IntakeError("Implementer role is missing for the session")
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title=f"QA reopen follow-up for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            source_event_id=source_event.id,
+            priority=115,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="qa_reopen_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._dispatch_role_work(
+            session=session,
+            role=implementer_role,
+            work_item=work_item,
+            stage_name="qa_reopen_requested",
+            instruction=(
+                f"Apply QA reopen follow-up changes for {session.task_key}. "
+                "Use the latest QA comments artifact as the highest-priority scope."
+            ),
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="qa_reopen_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
     def _get_session_or_raise(self, session_id: int) -> Session:
         for session in self.session_repository.list_all():
             if session.id == session_id:
@@ -929,6 +1017,7 @@ class CoordinatorService:
                 "implementation_requested",
                 "verification_correction_requested",
                 "mr_followup_requested",
+                "qa_reopen_requested",
             }:
                 return "implementation_completed"
         if role_name == VERIFICATION_COORDINATOR_ROLE:
@@ -1275,6 +1364,8 @@ class CoordinatorService:
             return f"Apply verification corrections for {task_key}."
         if stage_name == "mr_followup_requested":
             return f"Apply MR follow-up changes for {task_key}."
+        if stage_name == "qa_reopen_requested":
+            return f"Apply QA reopen follow-up changes for {task_key}."
         return None
 
     def _count_mr_discussions(self, markdown: str) -> int:

@@ -8,6 +8,8 @@ from backend.api.routes_sessions import to_session_response
 from backend.api.schemas import (
     IngestMrCommentsRequest,
     IngestMrCommentsResponse,
+    ReopenFromQaRequest,
+    ReopenFromQaResponse,
     RedirectSessionRequest,
     RedirectSessionResponse,
     LoopRunnerControlResponse,
@@ -134,6 +136,27 @@ def ingest_mr_comments(
         event_type=event.event_type,
         followup_event_type=followup_event.event_type if followup_event else None,
         discussion_count=discussion_count,
+    )
+
+
+@router.post("/reopen-from-qa", response_model=ReopenFromQaResponse)
+def reopen_from_qa(
+    payload: ReopenFromQaRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> ReopenFromQaResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.reopen_from_qa(
+            session_id=payload.session_id,
+            comment_text=payload.comment_text,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ReopenFromQaResponse(
+        reopened=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
     )
 
 
