@@ -160,6 +160,17 @@ class PollSessionOutputResponse(BaseModel):
     event_type: str | None = None
 
 
+class ResumeSessionRequest(BaseModel):
+    session_id: int
+
+
+class ResumeSessionResponse(BaseModel):
+    resumed: bool
+    session: SessionResponse
+    event_type: str
+    followup_event_type: str | None = None
+
+
 class RunLoopOnceResponse(BaseModel):
     ran: bool
     session_count: int

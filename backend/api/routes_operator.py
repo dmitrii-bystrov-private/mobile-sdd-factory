@@ -10,6 +10,8 @@ from backend.api.schemas import (
     LoopRunnerStatusResponse,
     PollSessionOutputRequest,
     PollSessionOutputResponse,
+    ResumeSessionRequest,
+    ResumeSessionResponse,
     RunLoopOnceResponse,
 )
 from backend.coordinator.intake import IntakeError
@@ -25,6 +27,26 @@ def get_dependencies(request: Request) -> AppDependencies:
 @router.post("/pause")
 def pause_session() -> dict[str, str]:
     return {"status": "not_implemented"}
+
+
+@router.post("/resume-session", response_model=ResumeSessionResponse)
+def resume_session(
+    payload: ResumeSessionRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> ResumeSessionResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.resume_session(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ResumeSessionResponse(
+        resumed=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type,
+    )
 
 
 @router.post("/poll-session-output", response_model=PollSessionOutputResponse)

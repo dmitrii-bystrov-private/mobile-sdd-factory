@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 from backend.api.sse import SessionEventBus
+from backend.coordinator.intake import IntakeError
 from backend.coordinator.service import CoordinatorService
 from backend.roles.contracts import DEFAULT_SESSION_ROLES
 from backend.session_backend.tmux_backend import TmuxSessionBackend
@@ -481,6 +482,37 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIsNone(event)
         self.assertEqual(0, session_count)
         self.assertEqual(0, loop_chunk_count)
+
+    def test_resume_session_reactivates_escalated_work_item(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30017")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+        escalated_session, _, _ = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+
+        resumed_session, resumed_event, dispatch_event = self.coordinator.resume_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertEqual("waiting_for_operator", escalated_session.status.value)
+        self.assertEqual("active", resumed_session.status.value)
+        self.assertEqual("implementer", resumed_session.current_owner)
+        self.assertEqual("session_resumed_by_operator", resumed_event.event_type)
+        self.assertEqual("role_input_dispatched", dispatch_event.event_type)
+        self.assertEqual(2, len(sent_inputs))
+        self.assertIn("Start implementation work for IOS-30017.", sent_inputs[-1])
+        self.assertTrue(any(item.event_type == "session_resumed_by_operator" for item in events))
+
+    def test_resume_session_requires_waiting_for_operator_status(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30018")
+
+        with self.assertRaisesRegex(IntakeError, "not waiting for operator"):
+            self.coordinator.resume_session(session.id)
 
 
 if __name__ == "__main__":

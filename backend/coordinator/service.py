@@ -328,6 +328,51 @@ class CoordinatorService:
         )
         return summary_event, polled_sessions, total_chunks
 
+    def resume_session(self, session_id: int) -> tuple[Session, Event, Event]:
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
+            raise IntakeError(
+                f"Session {session_id} is not waiting for operator; current status is {session.status.value}"
+            )
+
+        work_item = self._find_resume_work_item(session.id)
+        if work_item is None:
+            raise IntakeError(f"Session {session_id} has no assigned work item to resume")
+        if work_item.owner_role_id is None:
+            raise IntakeError(f"Work item {work_item.id} is missing an owner role")
+
+        role = self.role_repository.get_by_id(work_item.owner_role_id)
+        if role is None:
+            raise IntakeError(f"Owner role {work_item.owner_role_id} is missing for session {session_id}")
+
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        resumed_event = self._append_event(
+            session_id=session.id,
+            event_type="session_resumed_by_operator",
+            producer_type="operator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        instruction = self._stage_instruction(session.current_stage, session.task_key)
+        if instruction is None:
+            raise IntakeError(f"Session {session_id} cannot be resumed from stage {session.current_stage}")
+        dispatch_event = self._dispatch_role_work(
+            session=session,
+            role=role,
+            work_item=work_item,
+            stage_name=session.current_stage,
+            instruction=instruction,
+        )
+        return session, resumed_event, dispatch_event
+
     def _enqueue_initial_implementation(
         self,
         session: Session,
@@ -540,7 +585,7 @@ class CoordinatorService:
         role_name: str,
         output_type: str,
         payload: dict,
-    ) -> None:
+    ) -> Event:
         role = self.role_repository.get_by_name(session.id, role_name)
         if role is None:
             raise IntakeError(f"Role {role_name} is missing for session {session.id}")
@@ -819,6 +864,15 @@ class CoordinatorService:
             return item
         return None
 
+    def _find_resume_work_item(self, session_id: int) -> WorkItem | None:
+        for item in self.work_item_repository.list_for_session(session_id):
+            if item.status != WorkItemStatus.ASSIGNED:
+                continue
+            if item.owner_role_id is None:
+                continue
+            return item
+        return None
+
     def _has_dispatch_event(
         self,
         session_id: int,
@@ -910,7 +964,7 @@ class CoordinatorService:
             backend_name=role.runtime_backend,
         )
         self.session_backend.send_input(runtime_role, prompt_text)
-        self._append_event(
+        return self._append_event(
             session_id=session.id,
             event_type="role_input_dispatched",
             producer_type="coordinator",

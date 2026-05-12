@@ -54,6 +54,16 @@ class RoleRepository:
             return None
         return role_from_row(row)
 
+    def get_by_id(self, role_id: int) -> Role | None:
+        with self.db.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM roles WHERE id = ?",
+                (role_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return role_from_row(row)
+
     def increment_hydration_version(self, role_id: int) -> Role:
         with self.db.connect() as connection:
             connection.execute(
