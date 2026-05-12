@@ -385,7 +385,10 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, chunk_count)
         self.assertEqual("role_output_collected", event.event_type)
         self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertIsNone(updated_session.current_owner)
         self.assertTrue(any(item.event_type == "role_runtime_error_reported" for item in events))
+        self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
         self.assertFalse(any(item.event_type == "implementation_completed" for item in events))
         self.assertTrue(any(item.artifact_type == "runtime_error_json" for item in artifacts))
 
@@ -456,6 +459,28 @@ class SessionCreationTests(unittest.TestCase):
             )
         )
         self.assertTrue(any(item.event_type == "session_dispatch_reconciled" for item in events))
+
+    def test_run_loop_once_skips_session_escalated_to_operator(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30016")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+
+        updated_session, _, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual(1, chunk_count)
+
+        self.session_backend.simulate_output(implementer_role.runtime_handle, "should stay unread")
+        event, session_count, loop_chunk_count = self.coordinator.run_loop_once()
+
+        self.assertIsNone(event)
+        self.assertEqual(0, session_count)
+        self.assertEqual(0, loop_chunk_count)
 
 
 if __name__ == "__main__":

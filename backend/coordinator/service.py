@@ -644,6 +644,12 @@ class CoordinatorService:
                     marker_type=marker_type,
                     payload=payload,
                 )
+                if marker_type == "error":
+                    current_session = self._escalate_runtime_error(
+                        session=current_session,
+                        role=role,
+                        payload=payload,
+                    )
         return current_session
 
     def _extract_output_markers(self, text: str) -> list[tuple[str, dict]]:
@@ -725,6 +731,36 @@ class CoordinatorService:
                 **payload,
             },
         )
+
+    def _escalate_runtime_error(
+        self,
+        session: Session,
+        role: Role,
+        payload: dict,
+    ) -> Session:
+        if session.status == SessionStatus.WAITING_FOR_OPERATOR and session.current_owner is None:
+            return session
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(
+            session.id,
+            SessionStatus.WAITING_FOR_OPERATOR,
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "current_stage": session.current_stage,
+                "reason": "runtime_error",
+                **payload,
+            },
+        )
+        return session
 
     def _reconcile_session_dispatch(self, session: Session) -> bool:
         if session.current_owner is None:
