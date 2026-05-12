@@ -10,6 +10,8 @@ from backend.api.schemas import (
     LoopRunnerStatusResponse,
     PollSessionOutputRequest,
     PollSessionOutputResponse,
+    RetrySessionRequest,
+    RetrySessionResponse,
     ResumeSessionRequest,
     ResumeSessionResponse,
     RunLoopOnceResponse,
@@ -43,6 +45,26 @@ def resume_session(
 
     return ResumeSessionResponse(
         resumed=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type,
+    )
+
+
+@router.post("/retry-session", response_model=RetrySessionResponse)
+def retry_session(
+    payload: RetrySessionRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RetrySessionResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.retry_session(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return RetrySessionResponse(
+        retried=True,
         session=to_session_response(session),
         event_type=event.event_type,
         followup_event_type=followup_event.event_type,

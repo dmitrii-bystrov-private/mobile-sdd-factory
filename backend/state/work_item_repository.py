@@ -82,3 +82,19 @@ class WorkItemRepository:
                 (work_item_id,),
             ).fetchone()
         return work_item_from_row(row)
+
+    def update_title(self, work_item_id: int, title: str) -> WorkItem:
+        with self.db.connect() as connection:
+            connection.execute(
+                """
+                UPDATE work_items
+                SET title = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (title, work_item_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM work_items WHERE id = ?",
+                (work_item_id,),
+            ).fetchone()
+        return work_item_from_row(row)

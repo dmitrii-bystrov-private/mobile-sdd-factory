@@ -335,9 +335,9 @@ class CoordinatorService:
                 f"Session {session_id} is not waiting for operator; current status is {session.status.value}"
             )
 
-        work_item = self._find_resume_work_item(session.id)
+        work_item = self._find_operator_pending_work_item(session.id)
         if work_item is None:
-            raise IntakeError(f"Session {session_id} has no assigned work item to resume")
+            raise IntakeError(f"Session {session_id} has no operator-pending work item to resume")
         if work_item.owner_role_id is None:
             raise IntakeError(f"Work item {work_item.id} is missing an owner role")
 
@@ -345,6 +345,7 @@ class CoordinatorService:
         if role is None:
             raise IntakeError(f"Owner role {work_item.owner_role_id} is missing for session {session_id}")
 
+        self.work_item_repository.update_status(work_item.id, WorkItemStatus.ASSIGNED)
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage=session.current_stage,
@@ -372,6 +373,62 @@ class CoordinatorService:
             instruction=instruction,
         )
         return session, resumed_event, dispatch_event
+
+    def retry_session(self, session_id: int) -> tuple[Session, Event, Event]:
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
+            raise IntakeError(
+                f"Session {session_id} is not waiting for operator; current status is {session.status.value}"
+            )
+
+        previous_work_item = self._find_operator_pending_work_item(session.id)
+        if previous_work_item is None:
+            raise IntakeError(f"Session {session_id} has no operator-pending work item to retry")
+        if previous_work_item.owner_role_id is None:
+            raise IntakeError(f"Work item {previous_work_item.id} is missing an owner role")
+
+        role = self.role_repository.get_by_id(previous_work_item.owner_role_id)
+        if role is None:
+            raise IntakeError(
+                f"Owner role {previous_work_item.owner_role_id} is missing for session {session_id}"
+            )
+
+        retry_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type=previous_work_item.work_type,
+            title=self._retry_work_item_title(previous_work_item.title),
+            owner_role_id=previous_work_item.owner_role_id,
+            source_event_id=None,
+            priority=previous_work_item.priority,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        retried_event = self._append_event(
+            session_id=session.id,
+            event_type="session_retried_by_operator",
+            producer_type="operator",
+            payload={
+                "role_name": role.role_name,
+                "previous_work_item_id": previous_work_item.id,
+                "retry_work_item_id": retry_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        instruction = self._stage_instruction(session.current_stage, session.task_key)
+        if instruction is None:
+            raise IntakeError(f"Session {session_id} cannot be retried from stage {session.current_stage}")
+        dispatch_event = self._dispatch_role_work(
+            session=session,
+            role=role,
+            work_item=retry_item,
+            stage_name=session.current_stage,
+            instruction=instruction,
+        )
+        return session, retried_event, dispatch_event
 
     def _enqueue_initial_implementation(
         self,
@@ -785,6 +842,12 @@ class CoordinatorService:
     ) -> Session:
         if session.status == SessionStatus.WAITING_FOR_OPERATOR and session.current_owner is None:
             return session
+        active_work_item = self._find_active_work_item_for_role(session.id, role.id)
+        if active_work_item is not None:
+            self.work_item_repository.update_status(
+                active_work_item.id,
+                WorkItemStatus.WAITING_FOR_OPERATOR,
+            )
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage=session.current_stage,
@@ -864,14 +927,19 @@ class CoordinatorService:
             return item
         return None
 
-    def _find_resume_work_item(self, session_id: int) -> WorkItem | None:
+    def _find_operator_pending_work_item(self, session_id: int) -> WorkItem | None:
         for item in self.work_item_repository.list_for_session(session_id):
-            if item.status != WorkItemStatus.ASSIGNED:
+            if item.status != WorkItemStatus.WAITING_FOR_OPERATOR:
                 continue
             if item.owner_role_id is None:
                 continue
             return item
         return None
+
+    def _retry_work_item_title(self, title: str) -> str:
+        if title.startswith("Retry: "):
+            return title
+        return f"Retry: {title}"
 
     def _has_dispatch_event(
         self,

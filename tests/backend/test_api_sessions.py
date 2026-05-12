@@ -17,8 +17,9 @@ try:
     from backend.api.routes_operator import poll_session_output
     from backend.api.routes_operator import run_loop_once
     from backend.api.routes_operator import resume_session
+    from backend.api.routes_operator import retry_session
     from backend.api.routes_operator import loop_status, start_loop, stop_loop
-    from backend.api.schemas import PollSessionOutputRequest, ResumeSessionRequest
+    from backend.api.schemas import PollSessionOutputRequest, ResumeSessionRequest, RetrySessionRequest
     from backend.coordinator.service import CoordinatorService
     from backend.coordinator.loop_runner import CoordinatorLoopRunner
     from backend.dependencies import AppDependencies
@@ -460,6 +461,44 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("role_input_dispatched", response.followup_event_type)
         self.assertEqual("active", response.session.status)
         self.assertEqual("implementer", response.session.current_owner)
+
+    def test_retry_session_route_creates_new_retry_work_item(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = retry_session(
+            RetrySessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+        work_items_response = list_work_items(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.retried)
+        self.assertEqual("session_retried_by_operator", response.event_type)
+        self.assertEqual("role_input_dispatched", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertEqual("implementer", response.session.current_owner)
+        self.assertEqual(2, len(work_items_response.items))
+        self.assertTrue(any(item.title.startswith("Retry: ") for item in work_items_response.items))
 
 
 if __name__ == "__main__":

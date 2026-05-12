@@ -388,6 +388,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("implementation_requested", updated_session.current_stage)
         self.assertEqual("waiting_for_operator", updated_session.status.value)
         self.assertIsNone(updated_session.current_owner)
+        work_items = self.work_item_repository.list_for_session(session.id)
+        self.assertEqual("waiting_for_operator", work_items[0].status.value)
         self.assertTrue(any(item.event_type == "role_runtime_error_reported" for item in events))
         self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
         self.assertFalse(any(item.event_type == "implementation_completed" for item in events))
@@ -498,12 +500,15 @@ class SessionCreationTests(unittest.TestCase):
         resumed_session, resumed_event, dispatch_event = self.coordinator.resume_session(session.id)
         events = self.event_repository.list_for_session(session.id)
         sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        work_items = self.work_item_repository.list_for_session(session.id)
 
         self.assertEqual("waiting_for_operator", escalated_session.status.value)
         self.assertEqual("active", resumed_session.status.value)
         self.assertEqual("implementer", resumed_session.current_owner)
         self.assertEqual("session_resumed_by_operator", resumed_event.event_type)
         self.assertEqual("role_input_dispatched", dispatch_event.event_type)
+        self.assertEqual(1, len(work_items))
+        self.assertEqual("assigned", work_items[0].status.value)
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Start implementation work for IOS-30017.", sent_inputs[-1])
         self.assertTrue(any(item.event_type == "session_resumed_by_operator" for item in events))
@@ -513,6 +518,40 @@ class SessionCreationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(IntakeError, "not waiting for operator"):
             self.coordinator.resume_session(session.id)
+
+    def test_retry_session_creates_new_work_item_for_escalated_session(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30019")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+        self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+
+        retried_session, retried_event, dispatch_event = self.coordinator.retry_session(session.id)
+        work_items = self.work_item_repository.list_for_session(session.id)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertEqual("active", retried_session.status.value)
+        self.assertEqual("implementer", retried_session.current_owner)
+        self.assertEqual("session_retried_by_operator", retried_event.event_type)
+        self.assertEqual("role_input_dispatched", dispatch_event.event_type)
+        self.assertEqual(2, len(work_items))
+        self.assertEqual(
+            ["assigned", "waiting_for_operator"],
+            sorted(item.status.value for item in work_items),
+        )
+        self.assertTrue(
+            any(
+                item.title.startswith("Retry: ") and item.status.value == "assigned"
+                for item in work_items
+            )
+        )
+        self.assertEqual(2, len(sent_inputs))
+        self.assertIn("Start implementation work for IOS-30019.", sent_inputs[-1])
 
 
 if __name__ == "__main__":
