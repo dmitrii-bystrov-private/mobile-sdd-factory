@@ -7,6 +7,7 @@ from functools import lru_cache
 
 from backend.config import AppConfig, load_config
 from backend.api.sse import SessionEventBus
+from backend.coordinator.loop_runner import CoordinatorLoopRunner
 from backend.coordinator.service import CoordinatorService
 from backend.roles.contracts import DEFAULT_SESSION_ROLES
 from backend.session_backend.tmux_backend import TmuxSessionBackend
@@ -36,6 +37,7 @@ class AppDependencies:
     jira_adapter: JiraAdapter
     snapshot_adapter: SnapshotAdapter
     event_bus: SessionEventBus
+    loop_runner: CoordinatorLoopRunner
     coordinator_service: CoordinatorService
 
 
@@ -73,6 +75,10 @@ def build_dependencies() -> AppDependencies:
         artifacts_root=config.workdir_root / "factory-artifacts",
         event_bus=event_bus,
     )
+    loop_runner = CoordinatorLoopRunner(
+        callback=coordinator_service.run_loop_once,
+        interval_seconds=config.loop_interval_seconds,
+    )
     return AppDependencies(
         config=config,
         database=database,
@@ -85,5 +91,6 @@ def build_dependencies() -> AppDependencies:
         jira_adapter=jira_adapter,
         snapshot_adapter=snapshot_adapter,
         event_bus=event_bus,
+        loop_runner=loop_runner,
         coordinator_service=coordinator_service,
     )

@@ -16,6 +16,7 @@ class AppConfig:
     database_path: Path
     runtime_backend: str
     runtime_root: Path
+    loop_interval_seconds: float
     host: str = "127.0.0.1"
     port: int = 8000
     log_level: str = "INFO"
@@ -39,6 +40,7 @@ def load_config() -> AppConfig:
         runtime_root=Path(
             os.environ.get("SDD_FACTORY_RUNTIME_ROOT", default_workdir_root / "factory-runtime")
         ),
+        loop_interval_seconds=float(os.environ.get("SDD_FACTORY_LOOP_INTERVAL_SECONDS", "1.0")),
         host=os.environ.get("SDD_FACTORY_HOST", "127.0.0.1"),
         port=int(os.environ.get("SDD_FACTORY_PORT", "8000")),
         log_level=os.environ.get("SDD_FACTORY_LOG_LEVEL", "INFO"),

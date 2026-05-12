@@ -1,5 +1,6 @@
 from pathlib import Path
 import tempfile
+import time
 import unittest
 
 try:
@@ -15,8 +16,10 @@ try:
     from backend.api.routes_roles import collect_role_output
     from backend.api.routes_operator import poll_session_output
     from backend.api.routes_operator import run_loop_once
+    from backend.api.routes_operator import loop_status, start_loop, stop_loop
     from backend.api.schemas import PollSessionOutputRequest
     from backend.coordinator.service import CoordinatorService
+    from backend.coordinator.loop_runner import CoordinatorLoopRunner
     from backend.dependencies import AppDependencies
     from backend.roles.contracts import DEFAULT_SESSION_ROLES
     from backend.session_backend.tmux_backend import TmuxSessionBackend
@@ -74,6 +77,10 @@ class SessionApiTests(unittest.TestCase):
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
             event_bus=event_bus,
         )
+        loop_runner = CoordinatorLoopRunner(
+            callback=coordinator.run_loop_once,
+            interval_seconds=0.01,
+        )
         self.dependencies = AppDependencies(
             config=None,
             database=self.database,
@@ -86,6 +93,7 @@ class SessionApiTests(unittest.TestCase):
             jira_adapter=FakeJiraAdapter(),
             snapshot_adapter=FakeSnapshotAdapter(),
             event_bus=event_bus,
+            loop_runner=loop_runner,
             coordinator_service=coordinator,
         )
 
@@ -404,6 +412,21 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(2, response.session_count)
         self.assertEqual(2, response.chunk_count)
         self.assertEqual("coordinator_loop_ran", response.event_type)
+
+    def test_loop_runner_routes_control_background_loop(self) -> None:
+        start_response = start_loop(dependencies=self.dependencies)
+        self.assertTrue(start_response.changed)
+        self.assertTrue(start_response.status.running)
+
+        time.sleep(0.03)
+
+        status_response = loop_status(dependencies=self.dependencies)
+        self.assertTrue(status_response.running)
+        self.assertGreaterEqual(status_response.tick_count, 1)
+
+        stop_response = stop_loop(dependencies=self.dependencies)
+        self.assertTrue(stop_response.changed)
+        self.assertFalse(stop_response.status.running)
 
 
 if __name__ == "__main__":

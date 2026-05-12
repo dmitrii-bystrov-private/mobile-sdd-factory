@@ -5,7 +5,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.api.routes_sessions import to_session_response
-from backend.api.schemas import PollSessionOutputRequest, PollSessionOutputResponse, RunLoopOnceResponse
+from backend.api.schemas import (
+    LoopRunnerControlResponse,
+    LoopRunnerStatusResponse,
+    PollSessionOutputRequest,
+    PollSessionOutputResponse,
+    RunLoopOnceResponse,
+)
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
 
@@ -52,4 +58,43 @@ def run_loop_once(
         session_count=session_count,
         chunk_count=chunk_count,
         event_type=event.event_type if event else None,
+    )
+
+
+def to_loop_status_response(status) -> LoopRunnerStatusResponse:
+    return LoopRunnerStatusResponse(
+        running=status.running,
+        interval_seconds=status.interval_seconds,
+        tick_count=status.tick_count,
+        last_session_count=status.last_session_count,
+        last_chunk_count=status.last_chunk_count,
+    )
+
+
+@router.get("/loop-status", response_model=LoopRunnerStatusResponse)
+def loop_status(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> LoopRunnerStatusResponse:
+    return to_loop_status_response(dependencies.loop_runner.status())
+
+
+@router.post("/start-loop", response_model=LoopRunnerControlResponse)
+def start_loop(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> LoopRunnerControlResponse:
+    changed = dependencies.loop_runner.start()
+    return LoopRunnerControlResponse(
+        changed=changed,
+        status=to_loop_status_response(dependencies.loop_runner.status()),
+    )
+
+
+@router.post("/stop-loop", response_model=LoopRunnerControlResponse)
+def stop_loop(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> LoopRunnerControlResponse:
+    changed = dependencies.loop_runner.stop()
+    return LoopRunnerControlResponse(
+        changed=changed,
+        status=to_loop_status_response(dependencies.loop_runner.status()),
     )

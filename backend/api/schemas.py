@@ -167,5 +167,18 @@ class RunLoopOnceResponse(BaseModel):
     event_type: str | None = None
 
 
+class LoopRunnerStatusResponse(BaseModel):
+    running: bool
+    interval_seconds: float
+    tick_count: int
+    last_session_count: int
+    last_chunk_count: int
+
+
+class LoopRunnerControlResponse(BaseModel):
+    changed: bool
+    status: LoopRunnerStatusResponse
+
+
 class HealthResponse(BaseModel):
     status: str
