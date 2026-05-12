@@ -610,6 +610,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(
             any(item.title == "MR follow-up for IOS-30020 from !2942" for item in work_items)
         )
+        self.assertTrue(
+            any(item.work_type == "followup_implementation" for item in work_items)
+        )
         self.assertTrue(any(item.event_type == "mr_comments_received" for item in events))
         self.assertTrue(any(item.event_type == "mr_followup_requested" for item in events))
 
@@ -641,8 +644,38 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(
             any(item.title == "QA reopen follow-up for IOS-30021" for item in work_items)
         )
+        self.assertTrue(
+            any(item.work_type == "followup_implementation" for item in work_items)
+        )
         self.assertTrue(any(item.event_type == "qa_reopened" for item in events))
         self.assertTrue(any(item.event_type == "qa_reopen_requested" for item in events))
+
+    def test_followup_implementation_completed_reenters_verification_loop(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        completed_session, _ = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.reopen_from_qa(
+            session_id=completed_session.id,
+            comment_text="QA: still failing on edge case",
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "qa fix done"},
+        )
+
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+        self.assertEqual("verification_requested", followup_event.event_type)
 
     def test_resume_session_reactivates_escalated_work_item(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30019")

@@ -771,15 +771,9 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
-        implementation_items = [
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "implementation" and item.status != WorkItemStatus.COMPLETED
-        ]
-        if not implementation_items:
-            raise IntakeError("No active implementation work item found for the session")
-
-        active_item = implementation_items[0]
+        active_item = self._find_active_implementer_work_item(session)
+        if active_item is None:
+            raise IntakeError("No active implementer work item found for the session")
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
 
         verification_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
@@ -913,45 +907,20 @@ class CoordinatorService:
         mr_id: str,
         discussion_count: int,
     ) -> Event:
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        if implementer_role is None:
-            raise IntakeError("Implementer role is missing for the session")
-
-        work_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="implementation",
-            title=f"MR follow-up for {session.task_key} from !{mr_id}",
-            owner_role_id=implementer_role.id,
-            source_event_id=source_event.id,
-            priority=110,
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="mr_followup_requested",
-            current_owner=IMPLEMENTER_ROLE,
-        )
-        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        self._dispatch_role_work(
+        return self._enqueue_followup_implementation(
             session=session,
-            role=implementer_role,
-            work_item=work_item,
+            source_event=source_event,
             stage_name="mr_followup_requested",
+            event_type="mr_followup_requested",
+            title=f"MR follow-up for {session.task_key} from !{mr_id}",
             instruction=(
                 f"Apply MR follow-up changes for {session.task_key} from MR !{mr_id}. "
                 f"There are {discussion_count} unresolved discussion groups recorded in artifacts."
             ),
-        )
-        return self._append_event(
-            session_id=session.id,
-            event_type="mr_followup_requested",
-            producer_type="coordinator",
+            priority=110,
             payload={
-                "task_key": session.task_key,
-                "role_name": IMPLEMENTER_ROLE,
-                "work_item_id": work_item.id,
                 "mr_id": mr_id,
                 "discussion_count": discussion_count,
-                "current_stage": session.current_stage,
             },
         )
 
@@ -960,21 +929,46 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> Event:
+        return self._enqueue_followup_implementation(
+            session=session,
+            source_event=source_event,
+            stage_name="qa_reopen_requested",
+            event_type="qa_reopen_requested",
+            title=f"QA reopen follow-up for {session.task_key}",
+            instruction=(
+                f"Apply QA reopen follow-up changes for {session.task_key}. "
+                "Use the latest QA comments artifact as the highest-priority scope."
+            ),
+            priority=115,
+            payload={},
+        )
+
+    def _enqueue_followup_implementation(
+        self,
+        session: Session,
+        source_event: Event,
+        stage_name: str,
+        event_type: str,
+        title: str,
+        instruction: str,
+        priority: int,
+        payload: dict,
+    ) -> Event:
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         if implementer_role is None:
             raise IntakeError("Implementer role is missing for the session")
 
         work_item = self.work_item_repository.create(
             session_id=session.id,
-            work_type="implementation",
-            title=f"QA reopen follow-up for {session.task_key}",
+            work_type="followup_implementation",
+            title=title,
             owner_role_id=implementer_role.id,
             source_event_id=source_event.id,
-            priority=115,
+            priority=priority,
         )
         session = self.session_repository.update_stage_and_owner(
             session.id,
-            current_stage="qa_reopen_requested",
+            current_stage=stage_name,
             current_owner=IMPLEMENTER_ROLE,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
@@ -982,21 +976,19 @@ class CoordinatorService:
             session=session,
             role=implementer_role,
             work_item=work_item,
-            stage_name="qa_reopen_requested",
-            instruction=(
-                f"Apply QA reopen follow-up changes for {session.task_key}. "
-                "Use the latest QA comments artifact as the highest-priority scope."
-            ),
+            stage_name=stage_name,
+            instruction=instruction,
         )
         return self._append_event(
             session_id=session.id,
-            event_type="qa_reopen_requested",
+            event_type=event_type,
             producer_type="coordinator",
             payload={
                 "task_key": session.task_key,
                 "role_name": IMPLEMENTER_ROLE,
                 "work_item_id": work_item.id,
                 "current_stage": session.current_stage,
+                **payload,
             },
         )
 
@@ -1319,6 +1311,24 @@ class CoordinatorService:
                 continue
             return item
         return None
+
+    def _find_active_implementer_work_item(
+        self,
+        session: Session,
+    ) -> WorkItem | None:
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        if implementer_role is None:
+            return None
+        active_item = self._find_active_work_item_for_role(session.id, implementer_role.id)
+        if active_item is None:
+            return None
+        if active_item.work_type not in {
+            "implementation",
+            "verification_correction",
+            "followup_implementation",
+        }:
+            return None
+        return active_item
 
     def _find_operator_pending_work_item(self, session_id: int) -> WorkItem | None:
         for item in self.work_item_repository.list_for_session(session_id):

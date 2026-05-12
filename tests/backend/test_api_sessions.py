@@ -625,6 +625,47 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("active", response.session.status)
         self.assertEqual("qa_reopen_requested", response.session.current_stage)
 
+    def test_followup_completion_after_qa_reopen_returns_to_verification(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014C"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+        reopen_from_qa(
+            ReopenFromQaRequest(
+                session_id=prepare_response.session.id,
+                comment_text="QA: still failing on edge case",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "qa fix done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("verification_requested", response.followup_event_type)
+        self.assertEqual("verification_requested", response.session.current_stage)
+
     def test_retry_session_route_creates_new_retry_work_item(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40015"),
