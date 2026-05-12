@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from backend.api.routes_sessions import to_session_response
 from backend.api.schemas import EventResponse, EventsResponse, InjectEventRequest, InjectEventResponse
+from backend.api.sse import sse_event_generator
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
 
@@ -36,6 +38,19 @@ def list_events(
             for event in events
         ]
     )
+
+
+@router.get("/stream")
+def stream_events(
+    request: Request,
+    session_id: int | None = Query(default=None),
+) -> StreamingResponse:
+    dependencies: AppDependencies = request.app.state.dependencies
+    generator = sse_event_generator(
+        dependencies.event_bus,
+        session_id=session_id,
+    )
+    return StreamingResponse(generator, media_type="text/event-stream")
 
 
 @router.post("", response_model=InjectEventResponse)

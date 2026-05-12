@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 try:
+    from backend.api.sse import SessionEventBus
     from backend.api.routes_sessions import create_session, list_sessions
     from backend.api.schemas import CreateSessionRequest, PrepareSessionRequest
     from backend.api.routes_events import inject_event, list_events
@@ -58,6 +59,7 @@ class SessionApiTests(unittest.TestCase):
         artifact_repository = ArtifactRepository(self.database)
         work_item_repository = WorkItemRepository(self.database)
         session_backend = TmuxSessionBackend()
+        event_bus = SessionEventBus()
         coordinator = CoordinatorService(
             session_repository=session_repository,
             role_repository=role_repository,
@@ -69,6 +71,7 @@ class SessionApiTests(unittest.TestCase):
             jira_adapter=FakeJiraAdapter(),
             snapshot_adapter=FakeSnapshotAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
+            event_bus=event_bus,
         )
         self.dependencies = AppDependencies(
             config=None,
@@ -81,6 +84,7 @@ class SessionApiTests(unittest.TestCase):
             session_backend=session_backend,
             jira_adapter=FakeJiraAdapter(),
             snapshot_adapter=FakeSnapshotAdapter(),
+            event_bus=event_bus,
             coordinator_service=coordinator,
         )
 
@@ -326,6 +330,26 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("session_output_polled", response.event_type)
         runtime_outputs = [a for a in artifacts_response.items if a.artifact_type == "runtime_output"]
         self.assertEqual(2, len(runtime_outputs))
+
+    def test_event_bus_recent_events_reflect_api_actions(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40009"),
+            dependencies=self.dependencies,
+        )
+        submit_role_output(
+            RoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+                output_type="completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        recent = self.dependencies.event_bus.recent_events(session_id=prepare_response.session.id)
+
+        self.assertTrue(any(event.event_type == "implementation_completed" for event in recent))
+        self.assertTrue(any(event.event_type == "verification_requested" for event in recent))
 
 
 if __name__ == "__main__":

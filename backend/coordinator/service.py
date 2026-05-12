@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 
+from backend.api.sse import SessionEventBus
 from backend.coordinator.artifacts import write_text_artifact
 from backend.coordinator.intake import IntakeError, classify_task_readiness
 from backend.coordinator.hydration import build_role_hydration
@@ -41,13 +42,14 @@ class CoordinatorService:
     jira_adapter: JiraAdapter | None = None
     snapshot_adapter: SnapshotAdapter | None = None
     artifacts_root: Path | None = None
+    event_bus: SessionEventBus | None = None
 
     def create_task_session(self, task_key: str) -> tuple[Session, Event, bool]:
         """Create or reuse a task session and emit the initial session event."""
 
         existing = self.session_repository.get_by_task_key(task_key)
         if existing is not None:
-            event = self.event_repository.append(
+            event = self._append_event(
                 session_id=existing.id,
                 event_type="task_session_reused",
                 producer_type="coordinator",
@@ -70,7 +72,7 @@ class CoordinatorService:
                 status=RoleStatus.RUNNING,
             )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        event = self.event_repository.append(
+        event = self._append_event(
             session_id=session.id,
             event_type="task_started",
             producer_type="coordinator",
@@ -142,7 +144,7 @@ class CoordinatorService:
         if snapshot_result.returncode != 0:
             event_type = "task_preparation_failed"
 
-        event = self.event_repository.append(
+        event = self._append_event(
             session_id=session.id,
             event_type=event_type,
             producer_type="coordinator",
@@ -176,7 +178,7 @@ class CoordinatorService:
         payload: dict,
     ) -> tuple[Session, Event | None]:
         session = self._get_session_or_raise(session_id)
-        accepted_event = self.event_repository.append(
+        accepted_event = self._append_event(
             session_id=session_id,
             event_type=event_type,
             producer_type="operator",
@@ -212,7 +214,7 @@ class CoordinatorService:
             role_name=role_name,
             output_type=output_type,
         )
-        accepted_event = self.event_repository.append(
+        accepted_event = self._append_event(
             session_id=session_id,
             event_type=mapped_event_type,
             producer_type="role",
@@ -248,7 +250,7 @@ class CoordinatorService:
             return session, None, 0
 
         self._record_runtime_output_artifacts(session, role, chunks)
-        event = self.event_repository.append(
+        event = self._append_event(
             session_id=session.id,
             event_type="role_output_collected",
             producer_type="coordinator",
@@ -285,7 +287,7 @@ class CoordinatorService:
         if total_chunks == 0:
             return session, None, len(roles), 0
 
-        event = self.event_repository.append(
+        event = self._append_event(
             session_id=session.id,
             event_type="session_output_polled",
             producer_type="coordinator",
@@ -326,7 +328,7 @@ class CoordinatorService:
             stage_name="implementation_requested",
             instruction=f"Start implementation work for {resolved_task_key}.",
         )
-        return self.event_repository.append(
+        return self._append_event(
             session_id=session.id,
             event_type="implementation_requested",
             producer_type="coordinator",
@@ -378,7 +380,7 @@ class CoordinatorService:
             stage_name="verification_requested",
             instruction=f"Run deterministic verification for {session.task_key}.",
         )
-        event = self.event_repository.append(
+        event = self._append_event(
             session_id=session.id,
             event_type="verification_requested",
             producer_type="coordinator",
@@ -431,7 +433,7 @@ class CoordinatorService:
             stage_name="verification_correction_requested",
             instruction=f"Apply verification corrections for {session.task_key}.",
         )
-        event = self.event_repository.append(
+        event = self._append_event(
             session_id=session.id,
             event_type="verification_correction_requested",
             producer_type="coordinator",
@@ -465,7 +467,7 @@ class CoordinatorService:
             current_owner=None,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
-        event = self.event_repository.append(
+        event = self._append_event(
             session_id=session.id,
             event_type="task_completed",
             producer_type="coordinator",
@@ -643,7 +645,7 @@ class CoordinatorService:
             backend_name=role.runtime_backend,
         )
         self.session_backend.send_input(runtime_role, prompt_text)
-        self.event_repository.append(
+        self._append_event(
             session_id=session.id,
             event_type="role_input_dispatched",
             producer_type="coordinator",
@@ -654,3 +656,24 @@ class CoordinatorService:
                 "hydration_version": updated_role.last_hydration_version,
             },
         )
+
+    def _append_event(
+        self,
+        session_id: int,
+        event_type: str,
+        producer_type: str,
+        payload: dict,
+        producer_id: str | None = None,
+        correlation_id: str | None = None,
+    ) -> Event:
+        event = self.event_repository.append(
+            session_id=session_id,
+            event_type=event_type,
+            producer_type=producer_type,
+            producer_id=producer_id,
+            payload=payload,
+            correlation_id=correlation_id,
+        )
+        if self.event_bus is not None:
+            self.event_bus.publish(event)
+        return event

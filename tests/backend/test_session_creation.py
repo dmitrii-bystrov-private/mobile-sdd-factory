@@ -2,6 +2,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from backend.api.sse import SessionEventBus
 from backend.coordinator.service import CoordinatorService
 from backend.roles.contracts import DEFAULT_SESSION_ROLES
 from backend.session_backend.tmux_backend import TmuxSessionBackend
@@ -55,6 +56,7 @@ class SessionCreationTests(unittest.TestCase):
         self.artifact_repository = ArtifactRepository(self.database)
         self.work_item_repository = WorkItemRepository(self.database)
         self.session_backend = TmuxSessionBackend()
+        self.event_bus = SessionEventBus()
         self.coordinator = CoordinatorService(
             session_repository=self.session_repository,
             role_repository=self.role_repository,
@@ -66,6 +68,7 @@ class SessionCreationTests(unittest.TestCase):
             jira_adapter=FakeJiraAdapter(),
             snapshot_adapter=FakeSnapshotAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
+            event_bus=self.event_bus,
         )
 
     def tearDown(self) -> None:
@@ -321,6 +324,20 @@ class SessionCreationTests(unittest.TestCase):
             2,
             len([artifact for artifact in artifacts if artifact.artifact_type == "runtime_output"]),
         )
+
+    def test_event_bus_receives_published_session_events(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="implementer",
+            output_type="completed",
+            payload={"summary": "done"},
+        )
+
+        recent = self.event_bus.recent_events(session_id=session.id)
+
+        self.assertTrue(any(event.event_type == "implementation_completed" for event in recent))
+        self.assertTrue(any(event.event_type == "verification_requested" for event in recent))
 
 
 if __name__ == "__main__":
