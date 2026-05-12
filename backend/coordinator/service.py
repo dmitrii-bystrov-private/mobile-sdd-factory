@@ -10,9 +10,9 @@ from backend.coordinator.artifacts import write_text_artifact
 from backend.coordinator.intake import IntakeError, classify_task_readiness
 from backend.coordinator.hydration import build_role_hydration
 from backend.models.event import Event
-from backend.models.enums import RoleStatus, SessionStatus
+from backend.models.enums import RoleStatus, SessionStatus, WorkItemStatus
 from backend.models.session import Session
-from backend.roles.contracts import IMPLEMENTER_ROLE
+from backend.roles.contracts import IMPLEMENTER_ROLE, VERIFICATION_COORDINATOR_ROLE
 from backend.session_backend.base import SessionBackend
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.event_repository import EventRepository
@@ -165,6 +165,24 @@ class CoordinatorService:
             ).event_type
         return session, event, created, details
 
+    def handle_operator_event(
+        self,
+        session_id: int,
+        event_type: str,
+        payload: dict,
+    ) -> tuple[Session, Event | None]:
+        session = self._get_session_or_raise(session_id)
+        accepted_event = self.event_repository.append(
+            session_id=session_id,
+            event_type=event_type,
+            producer_type="operator",
+            payload=payload,
+        )
+        if event_type == "implementation_completed":
+            session, followup_event = self._handle_implementation_completed(session, accepted_event)
+            return session, followup_event
+        return session, None
+
     def _enqueue_initial_implementation(
         self,
         session: Session,
@@ -220,3 +238,79 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
             },
         )
+
+    def _handle_implementation_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        implementation_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not implementation_items:
+            raise IntakeError("No active implementation work item found for the session")
+
+        active_item = implementation_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+
+        verification_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        if verification_role is None:
+            raise IntakeError("Verification coordinator role is missing for the session")
+
+        verification_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification",
+            title=f"Verification for {session.task_key}",
+            owner_role_id=verification_role.id,
+            source_event_id=source_event.id,
+            priority=90,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_requested",
+            current_owner=VERIFICATION_COORDINATOR_ROLE,
+        )
+        hydration = build_role_hydration(
+            role_name=VERIFICATION_COORDINATOR_ROLE,
+            task_key=session.task_key,
+            current_stage=session.current_stage,
+            active_work_item=verification_item,
+        )
+        hydration_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "verification_requested",
+            "verification-coordinator.hydration.json",
+            json.dumps(hydration, indent=2, sort_keys=True),
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=verification_role.id,
+            stage_name="verification_requested",
+            artifact_type="hydration_payload",
+            path=str(hydration_path),
+            metadata={
+                "role_name": VERIFICATION_COORDINATOR_ROLE,
+                "work_item_id": verification_item.id,
+            },
+        )
+        event = self.event_repository.append(
+            session_id=session.id,
+            event_type="verification_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": VERIFICATION_COORDINATOR_ROLE,
+                "work_item_id": verification_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _get_session_or_raise(self, session_id: int) -> Session:
+        for session in self.session_repository.list_all():
+            if session.id == session_id:
+                return session
+        raise IntakeError(f"Session {session_id} was not found")

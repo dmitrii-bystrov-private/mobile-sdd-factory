@@ -56,3 +56,29 @@ class WorkItemRepository:
                 (session_id,),
             ).fetchall()
         return [work_item_from_row(row) for row in rows]
+
+    def get_by_id(self, work_item_id: int) -> WorkItem | None:
+        with self.db.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM work_items WHERE id = ?",
+                (work_item_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return work_item_from_row(row)
+
+    def update_status(self, work_item_id: int, status: WorkItemStatus) -> WorkItem:
+        with self.db.connect() as connection:
+            connection.execute(
+                """
+                UPDATE work_items
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (status.value, work_item_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM work_items WHERE id = ?",
+                (work_item_id,),
+            ).fetchone()
+        return work_item_from_row(row)

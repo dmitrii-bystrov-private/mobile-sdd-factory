@@ -55,6 +55,20 @@ class RolesResponse(BaseModel):
     items: list[RoleResponse]
 
 
+class EventResponse(BaseModel):
+    id: int
+    session_id: int
+    event_type: str
+    producer_type: str
+    producer_id: str | None = None
+    payload: dict
+    correlation_id: str | None = None
+
+
+class EventsResponse(BaseModel):
+    items: list[EventResponse]
+
+
 class ArtifactResponse(BaseModel):
     id: int
     session_id: int
@@ -66,6 +80,34 @@ class ArtifactResponse(BaseModel):
 
 class ArtifactsResponse(BaseModel):
     items: list[ArtifactResponse]
+
+
+class WorkItemResponse(BaseModel):
+    id: int
+    session_id: int
+    work_type: str
+    title: str
+    status: str
+    owner_role_id: int | None = None
+    source_event_id: int | None = None
+    priority: int
+
+
+class WorkItemsResponse(BaseModel):
+    items: list[WorkItemResponse]
+
+
+class InjectEventRequest(BaseModel):
+    session_id: int
+    event_type: str
+    payload: dict = {}
+
+
+class InjectEventResponse(BaseModel):
+    accepted: bool
+    event_type: str
+    followup_event_type: str | None = None
+    session: SessionResponse
 
 
 class HealthResponse(BaseModel):

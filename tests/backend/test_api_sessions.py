@@ -5,6 +5,9 @@ import unittest
 try:
     from backend.api.routes_sessions import create_session, list_sessions
     from backend.api.schemas import CreateSessionRequest, PrepareSessionRequest
+    from backend.api.routes_events import inject_event, list_events
+    from backend.api.routes_work_items import list_work_items
+    from backend.api.schemas import InjectEventRequest
     from backend.coordinator.service import CoordinatorService
     from backend.dependencies import AppDependencies
     from backend.roles.contracts import DEFAULT_SESSION_ROLES
@@ -112,6 +115,34 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("Story", response.issue_type)
         self.assertEqual(0, response.snapshot_exit_code)
         self.assertEqual("implementation_requested", response.followup_event_type)
+
+    def test_event_and_work_item_routes_reflect_verification_handoff(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003"),
+            dependencies=self.dependencies,
+        )
+
+        inject_response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        events_response = list_events(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+        work_items_response = list_work_items(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("verification_requested", inject_response.followup_event_type)
+        self.assertEqual("verification_requested", inject_response.session.current_stage)
+        self.assertEqual(5, len(events_response.items))
+        self.assertEqual(2, len(work_items_response.items))
 
 
 if __name__ == "__main__":

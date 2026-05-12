@@ -112,6 +112,35 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
 
+    def test_implementation_completed_moves_session_to_verification(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003")
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual(
+            ["completed", "assigned"],
+            [work_items[0].status.value, work_items[1].status.value],
+        )
+        self.assertEqual(
+            [
+                "task_started",
+                "task_prepared",
+                "implementation_requested",
+                "implementation_completed",
+                "verification_requested",
+            ],
+            [item.event_type for item in events],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
