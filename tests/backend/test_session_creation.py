@@ -141,6 +141,48 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
 
+    def test_verification_failed_moves_session_back_to_implementer(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_failed",
+            payload={"failures": ["test", "lint"]},
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("verification_correction_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertEqual("verification_correction_requested", followup_event.event_type)
+        self.assertEqual(
+            sorted(
+                [
+                    ("Verification corrections for IOS-30004", "assigned"),
+                    ("Initial implementation for IOS-30004", "completed"),
+                    ("Verification for IOS-30004", "completed"),
+                ]
+            ),
+            sorted((item.title, item.status.value) for item in work_items),
+        )
+        self.assertEqual(
+            [
+                "task_started",
+                "task_prepared",
+                "implementation_requested",
+                "implementation_completed",
+                "verification_requested",
+                "verification_failed",
+                "verification_correction_requested",
+            ],
+            [item.event_type for item in events],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

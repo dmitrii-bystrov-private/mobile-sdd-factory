@@ -181,6 +181,9 @@ class CoordinatorService:
         if event_type == "implementation_completed":
             session, followup_event = self._handle_implementation_completed(session, accepted_event)
             return session, followup_event
+        if event_type == "verification_failed":
+            session, followup_event = self._handle_verification_failed(session, accepted_event)
+            return session, followup_event
         return session, None
 
     def _enqueue_initial_implementation(
@@ -304,6 +307,76 @@ class CoordinatorService:
                 "task_key": session.task_key,
                 "role_name": VERIFICATION_COORDINATOR_ROLE,
                 "work_item_id": verification_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _handle_verification_failed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        verification_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "verification" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not verification_items:
+            raise IntakeError("No active verification work item found for the session")
+
+        active_item = verification_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        if implementer_role is None:
+            raise IntakeError("Implementer role is missing for the session")
+
+        correction_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification_correction",
+            title=f"Verification corrections for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            source_event_id=source_event.id,
+            priority=95,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_correction_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        hydration = build_role_hydration(
+            role_name=IMPLEMENTER_ROLE,
+            task_key=session.task_key,
+            current_stage=session.current_stage,
+            active_work_item=correction_item,
+        )
+        hydration_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "verification_correction_requested",
+            "implementer.hydration.json",
+            json.dumps(hydration, indent=2, sort_keys=True),
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=implementer_role.id,
+            stage_name="verification_correction_requested",
+            artifact_type="hydration_payload",
+            path=str(hydration_path),
+            metadata={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": correction_item.id,
+            },
+        )
+        event = self.event_repository.append(
+            session_id=session.id,
+            event_type="verification_correction_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": correction_item.id,
                 "current_stage": session.current_stage,
             },
         )

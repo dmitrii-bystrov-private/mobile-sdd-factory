@@ -144,6 +144,38 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(5, len(events_response.items))
         self.assertEqual(2, len(work_items_response.items))
 
+    def test_verification_failed_event_returns_correction_handoff(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40004"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="verification_failed",
+                payload={"failures": ["tests failed"]},
+            ),
+            dependencies=self.dependencies,
+        )
+        work_items_response = list_work_items(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("verification_correction_requested", response.followup_event_type)
+        self.assertEqual("verification_correction_requested", response.session.current_stage)
+        self.assertEqual("implementer", response.session.current_owner)
+        self.assertEqual(3, len(work_items_response.items))
+
 
 if __name__ == "__main__":
     unittest.main()
