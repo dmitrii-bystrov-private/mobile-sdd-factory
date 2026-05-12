@@ -14,6 +14,8 @@ class AppConfig:
     repo_root: Path
     workdir_root: Path
     database_path: Path
+    runtime_backend: str
+    runtime_root: Path
     host: str = "127.0.0.1"
     port: int = 8000
     log_level: str = "INFO"
@@ -33,6 +35,10 @@ def load_config() -> AppConfig:
         repo_root=repo_root,
         workdir_root=workdir_root,
         database_path=database_path,
+        runtime_backend=os.environ.get("SDD_FACTORY_RUNTIME_BACKEND", "auto"),
+        runtime_root=Path(
+            os.environ.get("SDD_FACTORY_RUNTIME_ROOT", default_workdir_root / "factory-runtime")
+        ),
         host=os.environ.get("SDD_FACTORY_HOST", "127.0.0.1"),
         port=int(os.environ.get("SDD_FACTORY_PORT", "8000")),
         log_level=os.environ.get("SDD_FACTORY_LOG_LEVEL", "INFO"),

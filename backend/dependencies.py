@@ -50,7 +50,10 @@ def build_dependencies() -> AppDependencies:
     event_repository = EventRepository(database)
     artifact_repository = ArtifactRepository(database)
     work_item_repository = WorkItemRepository(database)
-    session_backend = TmuxSessionBackend()
+    session_backend = TmuxSessionBackend(
+        mode=config.runtime_backend,
+        runtime_root=config.runtime_root,
+    )
     runner = CommandRunner()
     jira_adapter = JiraAdapter(runner, config.repo_root)
     snapshot_adapter = SnapshotAdapter(runner, config.repo_root)
