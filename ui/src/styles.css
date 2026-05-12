@@ -51,6 +51,12 @@ select {
   margin-bottom: 24px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+}
+
 .topbar h1,
 .hero-copy h1 {
   margin: 0;
@@ -131,6 +137,47 @@ select {
   padding: 6px 10px;
   font-size: 0.76rem;
   line-height: 1;
+}
+
+.live-chip {
+  display: grid;
+  align-items: center;
+  grid-template-columns: auto auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 10px 14px;
+  min-width: 220px;
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.live-chip strong,
+.live-chip small {
+  grid-column: 2;
+}
+
+.live-chip small {
+  color: var(--ink-soft);
+}
+
+.live-dot {
+  grid-row: 1 / span 2;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(17, 33, 50, 0.24);
+  align-self: center;
+}
+
+.live-live .live-dot {
+  background: var(--mint);
+  box-shadow: 0 0 0 6px rgba(21, 127, 93, 0.12);
+}
+
+.live-reconnecting .live-dot {
+  background: var(--gold);
+  box-shadow: 0 0 0 6px rgba(196, 135, 31, 0.12);
 }
 
 .badge-muted {
@@ -328,7 +375,8 @@ select {
   }
 
   .topbar,
-  .redirect-box {
+  .redirect-box,
+  .topbar-actions {
     flex-direction: column;
     align-items: stretch;
   }

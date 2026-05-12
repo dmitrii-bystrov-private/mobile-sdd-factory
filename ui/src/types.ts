@@ -25,6 +25,11 @@ export type EventItem = {
   correlation_id?: string | null;
 };
 
+export type StreamEventPayload = {
+  session_id: number;
+  payload: Record<string, unknown>;
+};
+
 export type Artifact = {
   id: number;
   session_id: number;

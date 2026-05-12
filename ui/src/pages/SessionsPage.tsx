@@ -1,6 +1,6 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 
-import { apiClient } from "../api/client";
+import { apiClient, openSessionEventStream } from "../api/client";
 import { SessionDetail } from "../components/SessionDetail";
 import { SessionList } from "../components/SessionList";
 import type { Session, SessionBundle } from "../types";
@@ -11,6 +11,10 @@ export function SessionsPage(): JSX.Element {
   const [bundle, setBundle] = useState<SessionBundle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [streamState, setStreamState] = useState<"idle" | "live" | "reconnecting">("idle");
+  const [lastStreamEventType, setLastStreamEventType] = useState<string | null>(null);
+  const [lastStreamEventId, setLastStreamEventId] = useState<number | null>(null);
+  const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? null;
@@ -58,6 +62,19 @@ export function SessionsPage(): JSX.Element {
     }
   }
 
+  function scheduleLiveRefresh(): void {
+    if (selectedSessionId === null) {
+      return;
+    }
+    if (refreshTimeoutRef.current !== null) {
+      return;
+    }
+    refreshTimeoutRef.current = setTimeout(() => {
+      refreshTimeoutRef.current = null;
+      void refreshSelected();
+    }, 180);
+  }
+
   useEffect(() => {
     void loadSessions();
   }, []);
@@ -70,6 +87,46 @@ export function SessionsPage(): JSX.Element {
     void loadBundle(selectedSessionId);
   }, [selectedSessionId]);
 
+  useEffect(() => {
+    if (selectedSessionId === null) {
+      setStreamState("idle");
+      setLastStreamEventType(null);
+      return;
+    }
+
+    const latestKnownEventId =
+      bundle !== null && bundle.events.length > 0
+        ? bundle.events[bundle.events.length - 1].id
+        : null;
+    const close = openSessionEventStream(
+      selectedSessionId,
+      latestKnownEventId,
+      (eventType, _payload, incomingEventId) => {
+        setStreamState("live");
+        setLastStreamEventType(eventType);
+        if (incomingEventId !== null) {
+          setLastStreamEventId(incomingEventId);
+        }
+        scheduleLiveRefresh();
+      },
+      () => {
+        setStreamState("reconnecting");
+      },
+    );
+
+    return () => {
+      close();
+    };
+  }, [selectedSessionId, bundle?.events]);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimeoutRef.current !== null) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, []);
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -77,13 +134,24 @@ export function SessionsPage(): JSX.Element {
           <p className="eyebrow">SDD Factory</p>
           <h1>Operator Console</h1>
         </div>
-        <button
-          className="action-button action-button-strong"
-          onClick={() => void refreshSelected()}
-          type="button"
-        >
-          Refresh Surface
-        </button>
+        <div className="topbar-actions">
+          <div className={`live-chip live-${streamState}`}>
+            <span className="live-dot" />
+            <strong>{streamState}</strong>
+            <small>
+              {lastStreamEventType
+                ? `${lastStreamEventType}${lastStreamEventId !== null ? ` #${lastStreamEventId}` : ""}`
+                : "waiting for events"}
+            </small>
+          </div>
+          <button
+            className="action-button action-button-strong"
+            onClick={() => void refreshSelected()}
+            type="button"
+          >
+            Refresh Surface
+          </button>
+        </div>
       </header>
 
       {error ? <div className="error-banner top-error">{error}</div> : null}
