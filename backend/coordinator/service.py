@@ -259,6 +259,43 @@ class CoordinatorService:
         )
         return session, event, len(chunks)
 
+    def poll_session_output(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event | None, int, int]:
+        session = self._get_session_or_raise(session_id)
+        roles = [
+            role
+            for role in self.role_repository.list_for_session(session_id)
+            if role.runtime_handle is not None
+        ]
+        total_chunks = 0
+        for role in roles:
+            runtime_role = RuntimeRoleHandle(
+                role_id=role.runtime_handle or f"{role.runtime_backend}:{role.role_name}",
+                session_id=f"session:{session.id}",
+                backend_name=role.runtime_backend,
+            )
+            chunks = self.session_backend.read_output(runtime_role)
+            if not chunks:
+                continue
+            self._record_runtime_output_artifacts(session, role, chunks)
+            total_chunks += len(chunks)
+
+        if total_chunks == 0:
+            return session, None, len(roles), 0
+
+        event = self.event_repository.append(
+            session_id=session.id,
+            event_type="session_output_polled",
+            producer_type="coordinator",
+            payload={
+                "role_count": len(roles),
+                "chunk_count": total_chunks,
+            },
+        )
+        return session, event, len(roles), total_chunks
+
     def _enqueue_initial_implementation(
         self,
         session: Session,

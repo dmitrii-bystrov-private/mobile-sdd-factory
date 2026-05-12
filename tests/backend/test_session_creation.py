@@ -301,6 +301,27 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(2, chunk_count)
         self.assertTrue(any(artifact.artifact_type == "runtime_output" for artifact in artifacts))
 
+    def test_poll_session_output_collects_chunks_for_multiple_roles(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30008")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        verification_role = self.role_repository.get_by_name(session.id, "verification-coordinator")
+        self.session_backend.simulate_output(implementer_role.runtime_handle, "impl output")
+        self.session_backend.simulate_output(verification_role.runtime_handle, "verify output")
+
+        updated_session, event, role_count, chunk_count = self.coordinator.poll_session_output(
+            session_id=session.id,
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(session.id, updated_session.id)
+        self.assertEqual("session_output_polled", event.event_type)
+        self.assertEqual(3, role_count)
+        self.assertEqual(2, chunk_count)
+        self.assertEqual(
+            2,
+            len([artifact for artifact in artifacts if artifact.artifact_type == "runtime_output"]),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

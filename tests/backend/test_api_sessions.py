@@ -12,6 +12,8 @@ try:
     from backend.api.schemas import CollectRoleOutputRequest, RoleOutputRequest
     from backend.api.routes_artifacts import get_artifact, list_artifacts
     from backend.api.routes_roles import collect_role_output
+    from backend.api.routes_operator import poll_session_output
+    from backend.api.schemas import PollSessionOutputRequest
     from backend.coordinator.service import CoordinatorService
     from backend.dependencies import AppDependencies
     from backend.roles.contracts import DEFAULT_SESSION_ROLES
@@ -55,13 +57,14 @@ class SessionApiTests(unittest.TestCase):
         event_repository = EventRepository(self.database)
         artifact_repository = ArtifactRepository(self.database)
         work_item_repository = WorkItemRepository(self.database)
+        session_backend = TmuxSessionBackend()
         coordinator = CoordinatorService(
             session_repository=session_repository,
             role_repository=role_repository,
             event_repository=event_repository,
             artifact_repository=artifact_repository,
             work_item_repository=work_item_repository,
-            session_backend=TmuxSessionBackend(),
+            session_backend=session_backend,
             default_roles=DEFAULT_SESSION_ROLES,
             jira_adapter=FakeJiraAdapter(),
             snapshot_adapter=FakeSnapshotAdapter(),
@@ -75,7 +78,7 @@ class SessionApiTests(unittest.TestCase):
             event_repository=event_repository,
             artifact_repository=artifact_repository,
             work_item_repository=work_item_repository,
-            session_backend=TmuxSessionBackend(),
+            session_backend=session_backend,
             jira_adapter=FakeJiraAdapter(),
             snapshot_adapter=FakeSnapshotAdapter(),
             coordinator_service=coordinator,
@@ -291,6 +294,38 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(response.collected)
         self.assertEqual(2, response.chunk_count)
         self.assertEqual("role_output_collected", response.event_type)
+
+    def test_poll_session_output_route_collects_all_role_chunks(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        verification_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "verification-coordinator",
+        )
+        self.dependencies.session_backend.simulate_output(implementer_role.runtime_handle, "impl line")
+        self.dependencies.session_backend.simulate_output(verification_role.runtime_handle, "verif line")
+
+        response = poll_session_output(
+            PollSessionOutputRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.polled)
+        self.assertEqual(3, response.role_count)
+        self.assertEqual(2, response.chunk_count)
+        self.assertEqual("session_output_polled", response.event_type)
+        runtime_outputs = [a for a in artifacts_response.items if a.artifact_type == "runtime_output"]
+        self.assertEqual(2, len(runtime_outputs))
 
 
 if __name__ == "__main__":

@@ -148,5 +148,17 @@ class InjectEventResponse(BaseModel):
     session: SessionResponse
 
 
+class PollSessionOutputRequest(BaseModel):
+    session_id: int
+
+
+class PollSessionOutputResponse(BaseModel):
+    polled: bool
+    session: SessionResponse
+    role_count: int
+    chunk_count: int
+    event_type: str | None = None
+
+
 class HealthResponse(BaseModel):
     status: str
