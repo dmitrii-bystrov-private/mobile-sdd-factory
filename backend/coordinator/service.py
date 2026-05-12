@@ -619,11 +619,29 @@ class CoordinatorService:
     ) -> Session:
         current_session = session
         for chunk in chunks:
-            for output_type, payload in self._extract_output_markers(chunk.text):
-                current_session, _, _ = self.handle_role_output(
-                    session_id=current_session.id,
-                    role_name=role.role_name,
-                    output_type=output_type,
+            for marker_type, payload in self._extract_output_markers(chunk.text):
+                if marker_type == "output":
+                    output_type = payload.get("output_type")
+                    output_payload = payload.get("payload", {})
+                    if not isinstance(output_type, str) or not isinstance(output_payload, dict):
+                        continue
+                    current_session, _, _ = self.handle_role_output(
+                        session_id=current_session.id,
+                        role_name=role.role_name,
+                        output_type=output_type,
+                        payload=output_payload,
+                    )
+                    continue
+                self._record_runtime_marker_artifact(
+                    session=current_session,
+                    role=role,
+                    marker_type=marker_type,
+                    payload=payload,
+                )
+                self._append_runtime_marker_event(
+                    session=current_session,
+                    role=role,
+                    marker_type=marker_type,
                     payload=payload,
                 )
         return current_session
@@ -631,18 +649,82 @@ class CoordinatorService:
     def _extract_output_markers(self, text: str) -> list[tuple[str, dict]]:
         results: list[tuple[str, dict]] = []
         for line in text.splitlines():
-            if not line.startswith("SDD_OUTPUT:"):
+            marker_type = self._line_marker_type(line)
+            if marker_type is None:
                 continue
-            raw_payload = line.split("SDD_OUTPUT:", 1)[1].strip()
+            raw_payload = line.split(":", 1)[1].strip()
             try:
                 parsed = json.loads(raw_payload)
             except json.JSONDecodeError:
                 continue
-            output_type = parsed.get("output_type")
-            payload = parsed.get("payload", {})
-            if isinstance(output_type, str) and isinstance(payload, dict):
-                results.append((output_type, payload))
+            if isinstance(parsed, dict):
+                results.append((marker_type, parsed))
         return results
+
+    def _line_marker_type(self, line: str) -> str | None:
+        if line.startswith("SDD_OUTPUT:"):
+            return "output"
+        if line.startswith("SDD_PROGRESS:"):
+            return "progress"
+        if line.startswith("SDD_ERROR:"):
+            return "error"
+        return None
+
+    def _record_runtime_marker_artifact(
+        self,
+        session: Session,
+        role: Role,
+        marker_type: str,
+        payload: dict,
+    ) -> None:
+        stage_name = f"runtime-marker-{role.role_name}"
+        payload_text = json.dumps(payload, indent=2, sort_keys=True)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            stage_name,
+            f"{marker_type}.json",
+            payload_text,
+        )
+        artifact_type = f"runtime_{marker_type}_json"
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            stage_name=stage_name,
+            artifact_type=artifact_type,
+            path=str(artifact_path),
+            metadata={
+                "role_name": role.role_name,
+                "marker_type": marker_type,
+                "current_stage": session.current_stage,
+            },
+        )
+
+    def _append_runtime_marker_event(
+        self,
+        session: Session,
+        role: Role,
+        marker_type: str,
+        payload: dict,
+    ) -> Event:
+        if marker_type == "progress":
+            event_type = "role_progress_reported"
+        elif marker_type == "error":
+            event_type = "role_runtime_error_reported"
+        else:
+            event_type = "role_runtime_marker_reported"
+        return self._append_event(
+            session_id=session.id,
+            event_type=event_type,
+            producer_type="role",
+            producer_id=role.role_name,
+            payload={
+                "role_name": role.role_name,
+                "marker_type": marker_type,
+                "current_stage": session.current_stage,
+                **payload,
+            },
+        )
 
     def _reconcile_session_dispatch(self, session: Session) -> bool:
         if session.current_owner is None:

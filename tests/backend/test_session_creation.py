@@ -345,8 +345,52 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "implementation_completed" for item in events))
         self.assertTrue(any(item.event_type == "verification_requested" for item in events))
 
-    def test_event_bus_receives_published_session_events(self) -> None:
+    def test_collect_role_output_records_progress_marker_without_stage_transition(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30010")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_PROGRESS: {"status":"in_progress","message":"halfway there","progress":50}',
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        events = self.event_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertTrue(any(item.event_type == "role_progress_reported" for item in events))
+        self.assertFalse(any(item.event_type == "implementation_completed" for item in events))
+        self.assertTrue(any(item.artifact_type == "runtime_progress_json" for item in artifacts))
+
+    def test_collect_role_output_records_error_marker_without_stage_transition(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30014")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        events = self.event_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertTrue(any(item.event_type == "role_runtime_error_reported" for item in events))
+        self.assertFalse(any(item.event_type == "implementation_completed" for item in events))
+        self.assertTrue(any(item.artifact_type == "runtime_error_json" for item in artifacts))
+
+    def test_event_bus_receives_published_session_events(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30015")
         self.coordinator.handle_role_output(
             session_id=session.id,
             role_name="implementer",

@@ -22,6 +22,10 @@ def role_handoff_prompt(
         f"{base_role_prompt(role_name)}\n"
         "Current routed work:\n"
         f"{instruction}\n\n"
+        "For intermediate progress updates, you may emit:\n"
+        'SDD_PROGRESS: {"status":"in_progress","message":"short progress update","progress":25}\n'
+        "If you hit a runtime/tooling problem and need operator visibility, emit:\n"
+        'SDD_ERROR: {"summary":"short error summary","details":"optional detail"}\n\n'
         "When you reach a terminal outcome for this routed work, emit one line in this exact form:\n"
         'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"short result"}}\n'
         "For verification failures, emit:\n"
