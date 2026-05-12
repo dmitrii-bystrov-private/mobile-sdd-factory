@@ -2,10 +2,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/adf_to_md.sh
-source "$SCRIPT_DIR/adf_to_md.sh"
-# shellcheck source=scripts/snapshot_formatters.sh
-source "$SCRIPT_DIR/snapshot_formatters.sh"
+# shellcheck source=scripts/adf-to-md.sh
+source "$SCRIPT_DIR/adf-to-md.sh"
+# shellcheck source=scripts/snapshot-formatters.sh
+source "$SCRIPT_DIR/snapshot-formatters.sh"
 
 # snapshot.sh — Prepare a Jira workspace: snapshot artifacts + git worktree.
 #
@@ -27,8 +27,8 @@ Usage: bash scripts/snapshot.sh <PARENT-KEY>
 
 Required environment variables:
   SDD_WORKDIR   root directory for task workspaces (e.g. /path/to/workdir)
-  IOS_DIR       path to iOS repo  } exactly one must be set and non-empty
-  ANDROID_DIR   path to Android repo }
+  IOS_DIR       path to iOS repo
+  ANDROID_DIR   path to Android repo
 EOF
 }
 
@@ -60,28 +60,24 @@ if [[ -z "${SDD_WORKDIR:-}" ]]; then
   exit 1
 fi
 
-# 3. Exactly one of IOS_DIR / ANDROID_DIR
-IOS_SET=false
-ANDROID_SET=false
-[[ -n "${IOS_DIR:-}" ]]     && IOS_SET=true
-[[ -n "${ANDROID_DIR:-}" ]] && ANDROID_SET=true
-
-if $IOS_SET && $ANDROID_SET; then
-  err "Both IOS_DIR and ANDROID_DIR are set. Exactly one must be set."
-  exit 1
-fi
-
-if ! $IOS_SET && ! $ANDROID_SET; then
-  err "Neither IOS_DIR nor ANDROID_DIR is set. Exactly one must be set."
-  exit 1
-fi
-
-if $IOS_SET; then
-  PLATFORM_DIR="$IOS_DIR"
+# 3. Determine platform from key prefix
+if [[ "$PARENT_KEY" == IOS-* ]]; then
   PLATFORM="ios"
-else
-  PLATFORM_DIR="$ANDROID_DIR"
+  if [[ -z "${IOS_DIR:-}" ]]; then
+    err "IOS_DIR is not set but key $PARENT_KEY requires it."
+    exit 1
+  fi
+  PLATFORM_DIR="$IOS_DIR"
+elif [[ "$PARENT_KEY" == ANDR-* ]]; then
   PLATFORM="android"
+  if [[ -z "${ANDROID_DIR:-}" ]]; then
+    err "ANDROID_DIR is not set but key $PARENT_KEY requires it."
+    exit 1
+  fi
+  PLATFORM_DIR="$ANDROID_DIR"
+else
+  err "Cannot determine platform from key '$PARENT_KEY'. Expected prefix IOS- or ANDR-."
+  exit 1
 fi
 
 # 4. Required CLI tools
@@ -109,6 +105,47 @@ if ! acli jira workitem view "$PARENT_KEY" \
   err "Failed to retrieve parent issue $PARENT_KEY"
   cat "$TMPDIR_JIRA/parent.core.err" >&2
   exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Early Resolved check — avoid fetching subtasks for already-done tasks
+# ---------------------------------------------------------------------------
+
+_early_type="$(jq -r '.fields.issuetype.name' "$PARENT_CORE_JSON")"
+_early_status="$(jq -r '.fields.status.name' "$PARENT_CORE_JSON")"
+if [[ "$_early_type" == "Bug" ]]; then
+  _early_branch="bugfix/${PARENT_KEY}"
+else
+  _early_branch="feature/${PARENT_KEY}"
+fi
+_early_workdir="$SDD_WORKDIR/$PARENT_KEY"
+_early_worktree="$_early_workdir/repo"
+
+if [[ "$_early_status" == "Resolved" ]]; then
+  echo "Task $PARENT_KEY is Resolved — cleaning up worktree, branch, and workspace."
+
+  if git -C "$_early_worktree" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+    git -C "$PLATFORM_DIR" worktree remove "$_early_worktree" 2>/dev/null || \
+      git -C "$PLATFORM_DIR" worktree remove --force "$_early_worktree"
+    echo "  Worktree removed: $_early_worktree"
+  else
+    echo "  Worktree not found at $_early_worktree — skipping."
+  fi
+
+  if git -C "$PLATFORM_DIR" rev-parse --verify "$_early_branch" > /dev/null 2>&1; then
+    git -C "$PLATFORM_DIR" branch -D "$_early_branch"
+    echo "  Branch deleted: $_early_branch"
+  else
+    echo "  Branch $_early_branch not found — skipping."
+  fi
+
+  if [[ -d "$_early_workdir" ]]; then
+    rm -rf "$_early_workdir"
+    echo "  Workspace removed: $_early_workdir"
+  fi
+
+  echo "Cleanup complete."
+  exit 0
 fi
 
 if ! acli jira workitem view "$PARENT_KEY" \
@@ -199,16 +236,32 @@ else
   echo "Creating worktree at $WORKTREE_PATH on branch $BRANCH_NAME..."
   mkdir -p "$WORKDIR"
 
-  # Ensure master is up to date before branching
-  echo "Updating master from origin..."
-  git -C "$PLATFORM_DIR" checkout master
-  git -C "$PLATFORM_DIR" pull origin master
+  # Fetch so we have an up-to-date view of remote branches
+  echo "Fetching origin..."
+  git -C "$PLATFORM_DIR" fetch origin
 
-  # Create worktree; clean up on failure
-  if ! git -C "$PLATFORM_DIR" worktree add "$WORKTREE_PATH" -b "$BRANCH_NAME" 2>"$TMPDIR_JIRA/worktree.err"; then
+  _branch_local=false
+  _branch_remote=false
+  git -C "$PLATFORM_DIR" rev-parse --verify "$BRANCH_NAME" > /dev/null 2>&1 && _branch_local=true
+  git -C "$PLATFORM_DIR" rev-parse --verify "origin/$BRANCH_NAME" > /dev/null 2>&1 && _branch_remote=true
+
+  _worktree_add_failed=false
+  if $_branch_local; then
+    echo "Branch $BRANCH_NAME exists locally — reusing it."
+    git -C "$PLATFORM_DIR" worktree add "$WORKTREE_PATH" "$BRANCH_NAME" 2>"$TMPDIR_JIRA/worktree.err" || _worktree_add_failed=true
+  elif $_branch_remote; then
+    echo "Branch $BRANCH_NAME found on origin — checking out with tracking."
+    git -C "$PLATFORM_DIR" worktree add "$WORKTREE_PATH" --track -b "$BRANCH_NAME" "origin/$BRANCH_NAME" 2>"$TMPDIR_JIRA/worktree.err" || _worktree_add_failed=true
+  else
+    echo "Branch $BRANCH_NAME does not exist — creating from master."
+    git -C "$PLATFORM_DIR" checkout master
+    git -C "$PLATFORM_DIR" pull origin master
+    git -C "$PLATFORM_DIR" worktree add "$WORKTREE_PATH" -b "$BRANCH_NAME" 2>"$TMPDIR_JIRA/worktree.err" || _worktree_add_failed=true
+  fi
+
+  if $_worktree_add_failed; then
     err "Failed to create worktree at $WORKTREE_PATH"
     cat "$TMPDIR_JIRA/worktree.err" >&2
-    # Remove any partial directory left behind
     if [[ -d "$WORKTREE_PATH" ]]; then
       rm -rf "$WORKTREE_PATH"
       git -C "$PLATFORM_DIR" worktree prune 2>/dev/null || true
@@ -221,31 +274,55 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Stage 3: iOS one-time bootstrap (new worktrees only)
+# Stage 3: Platform one-time bootstrap (new worktrees only)
 # ---------------------------------------------------------------------------
 
 if [[ "$PLATFORM" == "ios" ]] && $WORKTREE_CREATED; then
   echo "Running iOS bootstrap in $WORKTREE_PATH..."
 
-  # 1. Symlink swift_format from the main iOS repo
-  ln -sf "$IOS_DIR/swift_format" "$WORKTREE_PATH/swift_format"
-  echo "  swift_format symlinked."
-
-  # 2. mise trust
+  # 1. mise trust
   if ! (cd "$WORKTREE_PATH" && mise trust); then
     err "iOS bootstrap: 'mise trust' failed in $WORKTREE_PATH"
     exit 1
   fi
   echo "  mise trust: OK"
 
-  # 3. tuist generate
+  # 3. mise install (installs pinned toolchain versions before tuist generate)
+  if ! (cd "$WORKTREE_PATH" && mise install); then
+    err "iOS bootstrap: 'mise install' failed in $WORKTREE_PATH"
+    exit 1
+  fi
+  echo "  mise install: OK"
+
+  # 4. tuist install (fetches SPM dependencies for this worktree)
+  if ! (cd "$WORKTREE_PATH" && GIT_TERMINAL_PROMPT=0 mise exec -- tuist install); then
+    err "iOS bootstrap: 'tuist install' failed in $WORKTREE_PATH"
+    exit 1
+  fi
+  echo "  tuist install: OK"
+
+  # 5. tuist generate — load .env.local first so Tuist receives TUIST_* variables
+  if [[ -f "$WORKTREE_PATH/.env.local" ]]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+      if [[ $line =~ ^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+        key=${BASH_REMATCH[2]}
+        val=${BASH_REMATCH[3]}
+        if [[ ${val:0:1} == '"' && ${val: -1} == '"' ]]; then
+          val=${val:1:-1}
+        fi
+        export "TUIST_${key}=${val}"
+      fi
+    done < "$WORKTREE_PATH/.env.local"
+    echo "  Loaded .env.local for Tuist generation"
+  fi
   if ! (cd "$WORKTREE_PATH" && mise exec -- tuist generate --no-open); then
     err "iOS bootstrap: 'tuist generate' failed in $WORKTREE_PATH"
     exit 1
   fi
   echo "  tuist generate: OK"
 
-  # 4. pod install
+  # 6. pod install
   if ! (cd "$WORKTREE_PATH" && pod install); then
     err "iOS bootstrap: 'pod install' failed in $WORKTREE_PATH"
     exit 1
@@ -257,8 +334,57 @@ elif [[ "$PLATFORM" == "ios" ]] && ! $WORKTREE_CREATED; then
   echo "iOS bootstrap skipped (worktree already existed)."
 fi
 
+if [[ "$PLATFORM" == "android" ]] && $WORKTREE_CREATED; then
+  echo "Running Android bootstrap in $WORKTREE_PATH..."
+
+  # 1. Copy .gradle cache from the main Android repo to avoid re-downloading dependencies.
+  # Copying (not symlinking) so parallel worktree builds don't share mutable lock files.
+  if [[ -d "$ANDROID_DIR/.gradle" ]]; then
+    cp -r "$ANDROID_DIR/.gradle" "$WORKTREE_PATH/.gradle"
+    echo "  .gradle copied from $ANDROID_DIR/.gradle"
+  else
+    echo "  WARN: $ANDROID_DIR/.gradle not found — skipping copy (dependencies will be downloaded on first build)."
+  fi
+
+  # 2. Symlink local.properties from the main Android repo (contains SDK path required for builds)
+  if [[ -f "$ANDROID_DIR/local.properties" ]]; then
+    ln -sf "$ANDROID_DIR/local.properties" "$WORKTREE_PATH/local.properties"
+    echo "  local.properties symlinked from $ANDROID_DIR/local.properties"
+  else
+    echo "  WARN: $ANDROID_DIR/local.properties not found — skipping symlink (build may fail without SDK path)."
+  fi
+
+  # 3. Clean stale build artifacts so the copied .gradle cache is consistent for this worktree
+  echo "  Running ./gradlew clean..."
+  (cd "$WORKTREE_PATH" && ./gradlew clean --quiet) && echo "  ./gradlew clean done." || echo "  WARN: ./gradlew clean failed — check the worktree before building."
+
+  echo "Android bootstrap complete."
+elif [[ "$PLATFORM" == "android" ]] && ! $WORKTREE_CREATED; then
+  echo "Android bootstrap skipped (worktree already existed)."
+fi
+
 # ---------------------------------------------------------------------------
-# Stage 4: Render ADF bodies to Markdown
+# Stage 4: Transition to In Progress (Bugs only, when status is To Do)
+#
+# Stories require "Dev finish date" and "Story Points" to be set before
+# transitioning — these are set manually during sprint planning.
+# ---------------------------------------------------------------------------
+
+_parent_status_now="$(jq -r '.fields.status.name' "$PARENT_CORE_JSON")"
+if [[ "$PARENT_ISSUE_TYPE" == "Bug" && "$_parent_status_now" == "To Do" ]]; then
+  echo "Transitioning $PARENT_KEY to In Progress..."
+  _transition_output="$(acli jira workitem transition --key "$PARENT_KEY" --status "In Progress" 2>&1)"
+  _transition_exit=$?
+  if [[ $_transition_exit -eq 0 && "$_transition_output" != *"Failure"* && "$_transition_output" != *"Error"* ]]; then
+    echo "  Transitioned to In Progress."
+  else
+    echo "  WARN: could not transition $PARENT_KEY to In Progress." >&2
+    echo "  $TRANSITION_OUTPUT" >&2
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Stage 5: Render ADF bodies to Markdown
 # ---------------------------------------------------------------------------
 
 echo "Rendering ADF content to Markdown..."
@@ -308,12 +434,21 @@ done
 echo "ADF rendering complete."
 
 # ---------------------------------------------------------------------------
-# Stage 5: Write snapshot artifacts
+# Stage 6: Write snapshot artifacts
 # ---------------------------------------------------------------------------
 
 echo "Writing snapshot artifacts to $WORKDIR..."
 
 mkdir -p "$WORKDIR"
+
+# Create directory structure based on issue type
+if [[ "$PARENT_ISSUE_TYPE" != "Bug" ]]; then
+  mkdir -p "$WORKDIR/spec/context" "$WORKDIR/plan"
+  echo "  Created story directories: spec/context/, plan/"
+else
+  mkdir -p "$WORKDIR/spec"
+  echo "  Created bug directories: spec/"
+fi
 
 # Read parent metadata (PARENT_ISSUE_TYPE already set by worktree stage)
 PARENT_ISSUE_TITLE="$(jq -r '.fields.summary' "$PARENT_CORE_JSON")"
@@ -378,6 +513,12 @@ for SUBKEY in "${SUCCESSFUL_SUBTASKS[@]+"${SUCCESSFUL_SUBTASKS[@]}"}"; do
     "$(cat "$RENDERED_DIR/${SUBKEY}.comments.json")"
   echo "  Wrote $SUB_WORKDIR/comments.md"
 done
+
+# Create symlink spec/context/project.md → platform CLAUDE.md (stories only)
+if [[ "$PARENT_ISSUE_TYPE" != "Bug" ]]; then
+  ln -sf "$PLATFORM_DIR/CLAUDE.md" "$WORKDIR/spec/context/project.md"
+  echo "  Symlinked spec/context/project.md → $PLATFORM_DIR/CLAUDE.md"
+fi
 
 echo "Snapshot complete."
 

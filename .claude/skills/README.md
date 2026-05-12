@@ -5,12 +5,23 @@ Skills are prompt templates invoked via `/skill-name` in Claude Code. Each skill
 ## Task lifecycle
 
 ```
-/snapshot → /spec → /implement → /send-to-test
-                                      ↓ (Reopened)
-                               /fix-review → /send-to-test
-```
+Story flow:
+/jira-task → /jira-story → (internal: proposal-collector → context-collector →
+  requirements-clarifier → acceptance-criteria-writer → constraints-definer →
+  spec-verifier → task-decomposer → subtask creation → implementer loop →
+  optional /self-review → optional boy-scout → /final-verification → optional doc-harvest) → /create-mr → /send-to-test
 
-At any point: `/create-mr` to open an MR, `/request-review` to post it to Slack.
+Bug flow:
+/jira-task → /jira-bug → (internal: bug-fixer →
+  commit → optional /self-review → optional boy-scout → /final-verification → optional doc-harvest) → /create-mr → /send-to-test
+
+One-shot flow (explicit only):
+/oneshot → /snapshot → (internal: implementer → commit →
+  optional /self-review → optional boy-scout → /final-verification → optional doc-harvest) → /create-mr → /send-to-test
+
+QA loop (all flows):
+  /send-to-test → [QA reviews] → (if Reopened) reopen the task and continue the normal implementation flow with comments priority → /send-to-test
+```
 
 ## Catalog
 
@@ -18,24 +29,26 @@ At any point: `/create-mr` to open an MR, `/request-review` to post it to Slack.
 
 | Skill | Command | Description |
 |-------|---------|-------------|
-| snapshot | `/snapshot <KEY>` | Prepare a Jira workspace — fetch issue data, create a git worktree, write `description.md`, `comments.md`, `statuses.md`. Run before starting or resuming work. |
-| spec | `/spec <KEY>` | Prepare a technical spec — read the Jira task, discuss with the user, delegate deep research and spec writing to an Opus subagent. |
-| implement | `/implement <KEY>` | Implement a task from its spec using the implementer subagent, then review the result. |
+| jira-task | `/jira-task <KEY>` | Router: fetch issue type and delegate to `/jira-story` (Story) or `/jira-bug` (Bug). Also triggered by pasting a bare Jira URL. |
+| jira-story | `/jira-story <KEY>` | Full story flow: collect requirements, write spec, decompose into subtasks, create subtasks in Jira, run implementer loop, open MR. |
+| jira-bug | `/jira-bug <KEY>` | Bug flow: analyze root cause, write and commit failing test, implement fix, send to QA. |
+| oneshot | `/oneshot <KEY>` | One-shot flow for stories or bugs: snapshot → implement from description.md + comments.md directly, no context/spec pipeline. For small, self-contained tasks. Must be invoked explicitly. |
+| snapshot | `/snapshot <KEY>` | Prepare a Jira workspace — fetch issue data, create a git worktree, write `description.md`, `comments.md`, `statuses.md`. Called internally by story/bug skills; also available standalone for refresh. |
+| self-review | `/self-review <KEY>` | Run the optional convention-focused diff review as a standalone orchestration step. Generates the structured diff, calls `code-reviewer`, and routes fixes through `implementer`. |
+| final-verification | `/final-verification <KEY>` | Run the workflow-level `test + lint` gate as a standalone orchestration step. Calls `final-verifier`, routes verification corrections through `implementer`, and manages the retry loop. |
 
 ### QA workflow
 
 | Skill | Command | Description |
 |-------|---------|-------------|
-| send-to-test | `/send-to-test <KEY>` | Post a `[QA_HANDOFF]` comment and transition the task to "Ready for test". |
-| fix-review | `/fix-review <KEY>` | Fix QA review issues for a Reopened task — read feedback from `comments.md` (after the last `[QA_HANDOFF]` marker), fix in the worktree, commit, send back to test. |
+| send-to-test | `/send-to-test <KEY>` | Commit local changes and transition the task to "Ready for test". |
 
 ### GitLab & Slack
 
 | Skill | Command | Description |
 |-------|---------|-------------|
-| create-mr | `/create-mr` | Commit changes, push, and open a GitLab merge request to master. |
-| request-review | `/request-review` | Post an MR to the team Slack channel for review. |
-| review-mr | `/review-mr <MR>` | Review a GitLab MR — fetch diff, load Jira context, explore codebase with RAG tools, produce a structured review. |
+| create-mr | `/create-mr` | Commit changes, push, open a GitLab merge request to master, and prepare the Slack-ready review message. |
+| handle-mr-comments | `/handle-mr-comments <KEY> <MR>` | Fetch unresolved MR discussions, group them into actionable themes, write `plan/` files, and optionally create Jira subtasks. Requires an existing task workspace (`/snapshot <KEY>`); can auto-detect the Jira key from the MR if omitted. |
 
 ### Jira
 
@@ -43,19 +56,48 @@ At any point: `/create-mr` to open an MR, `/request-review` to post it to Slack.
 |-------|---------|-------------|
 | create-task | `/create-task` | Create a Jira Bug or Story in the iOS or Android project. |
 
+### Documentation
+
+| Skill | Command | Description |
+|-------|---------|-------------|
+| doc-harvest | `/doc-harvest <KEY>` | Create or enrich feature-level `README.md` files in the repository from the structured branch diff. Called automatically by flows only when enabled; also available standalone. |
+| boy-scout | `/boy-scout <KEY>` | Run an optional improvement pass over the structured source diff, present real maintainability findings, and optionally create subtasks or tech-debt stories. |
+
+### Workspace maintenance
+
+| Skill | Command | Description |
+|-------|---------|-------------|
+| cleanup | `/cleanup` | Scan `$SDD_WORKDIR`, check Jira status, and remove worktree + directory for tasks with status `Resolved`. |
+
 ## File layout per task
 
 ```
 $SDD_WORKDIR/<STORY-KEY>/
-├── description.md          # parent issue metadata + description (snapshot artifact)
-├── comments.md             # parent issue comments, chronological (snapshot artifact)
-├── statuses.md             # parent + subtasks status table (snapshot artifact)
-├── spec.md                 # high-level architecture and plan (spec artifact)
-├── spec-<KEY>.md           # detailed implementation spec per task/subtask
-├── spec-qa-<KEY>.md        # fix spec written by qa-spec-writer (if needed)
-├── qa-<KEY>.md             # QA feedback extracted by fix-review
-├── repo/                   # git worktree on feature/<STORY-KEY>
+├── description.md          # parent issue metadata + description (snapshot)
+├── comments.md             # parent issue comments, chronological (snapshot)
+├── statuses.md             # parent + subtasks status table (snapshot)
+├── spec/
+│   ├── proposal.md         # collected requirements (proposal-collector)
+│   ├── context/
+│   │   └── project.md -> <project>/CLAUDE.md
+│   ├── requirements.md     # clarified requirements
+│   ├── acceptance_criteria.md
+│   ├── constraints.md
+│   ├── diff.md             # structured source diff vs master (default generate-diff.sh output)
+│   ├── final-verification.md  # workflow-level test + lint report (optional)
+│   ├── doc-diff.md         # structured documentation-only diff (optional)
+│   └── full-diff.md        # structured source + documentation diff (optional, e.g. doc-harvest)
+├── plan/                   # stories only
+│   ├── index.md
+│   └── NN-task-name.md
+├── repo/                   # git worktree on feature/<KEY> or bugfix/<KEY>
 └── <SUBTASK-KEY>/
-    ├── description.md      # subtask description (snapshot artifact)
-    └── comments.md         # subtask comments (snapshot artifact)
+    ├── description.md
+    └── comments.md
 ```
+
+For bugs: no `plan/`; `spec/` contains `bug-analysis.md` plus generated verification/diff artifacts instead of `requirements.md`/`acceptance_criteria.md`/`constraints.md`.
+
+## Direct script reference
+
+The skills are wrappers around the shell scripts in [`scripts/`](../../scripts). For direct CLI usage, environment-variable requirements, and debugging helpers, see [`scripts/README.md`](../../scripts/README.md).

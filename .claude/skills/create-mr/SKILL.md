@@ -1,8 +1,8 @@
 ---
 description: >
-  Commit changes, push, and open a GitLab merge request to master.
+  Commit changes, push, open a GitLab merge request to master, and prepare the Slack-ready review message.
   TRIGGER when the user asks to create/open/push an MR, merge request, or PR — or says "push and create MR", "open MR", "submit MR".
-  DO NOT TRIGGER for reviewing MRs, checking MR status, or posting to Slack (that is /request-review).
+  DO NOT TRIGGER for reviewing MRs or checking MR status.
 ---
 
 Commit staged changes, push the branch, and open a merge request on GitLab. Arguments: `$ARGUMENTS`
@@ -47,62 +47,31 @@ If there are staged or unstaged changes:
 
 If all changes are already committed, skip this step.
 
-## Step 4 — Run linter (Android only)
-
-**iOS: skip this step** — linting is not enforced at this stage.
-
-**Android:** run detekt and ktlint before pushing:
+## Step 4 — Push and create merge request
 
 ```
-cd <project_dir> && ./gradlew detekt ktlint 2>&1 | tail -40
+bash scripts/create-mr.sh <JIRA-KEY>
 ```
 
-If either fails:
-1. Show the errors to the user
-2. Fix them (magic numbers → named constants, unused imports, formatting, etc.)
-3. Re-run to confirm both pass
-4. Commit the fixes
+The script resolves the project directory from the task worktree, pushes the branch, and opens the MR to master. It prints the created MR URL on success.
 
-Do NOT push if the linter fails.
+If the script fails (e.g. push rejected, already on master), surface the error to the user and stop. Do NOT force-push without explicit confirmation.
 
-## Step 5 — Push
+## Step 5 — Prepare review message
 
-```
-git -C <project_dir> push -u origin <branch-name>
-```
+After MR creation succeeds:
 
-If the push fails (e.g. rejected), explain the error and suggest a fix. Do NOT force-push without explicit confirmation.
+1. Read the created MR URL from the script output.
+2. Extract the numeric MR ID from the URL.
+3. Infer platform:
+   - `IOS-` task key or MR URL containing `finomcommon`/`/ios/` → `ios`
+   - `ANDR-` task key or MR URL containing `/android/` → `android`
+4. Run:
 
-## Step 6 — Create merge request
-
-Extract a Jira key from the branch name if possible (e.g. `feature/ANDR-12345` → `ANDR-12345`).
-
-Build the title: `<JIRA-KEY>: <task summary>` (use the Jira task summary if known, otherwise derive from commits).
-
-Build the description:
-- One-line summary of what was done
-- Jira link: `https://pnlfintech.atlassian.net/browse/<JIRA-KEY>` (if key is available)
-- List of key changes (files/components touched)
-
-Run:
-```
-cd <project_dir> && glab mr create \
-  --fill \
-  --title "<JIRA-KEY>: <summary>" \
-  --description "<description>" \
-  --target-branch master \
-  --remove-source-branch \
-  --yes
+```bash
+bash scripts/request-review-message.sh <platform> <mr_id>
 ```
 
-Note: `--fill` and `--title` must both be present — `--yes` alone without `--fill` will error.
+5. Show the generated review message to the user together with the MR URL.
 
-Show the created MR URL.
-
-## Step 7 — Offer next steps
-
-After the MR is created, ask:
-
-"MR создан: <URL>. Отправить на ревью в Slack?"
-
-If the user confirms, invoke the `/request-review` skill with the MR URL.
+If review-message generation fails, still surface the MR URL and report the review-message error separately.

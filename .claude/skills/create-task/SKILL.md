@@ -15,68 +15,98 @@ Parse `$ARGUMENTS` as a free-form description. Extract:
 - **summary** — short title (required)
 - **type** — `Bug` or `Story` (required; ask if unclear)
 - **platform** — `iOS` → project `IOS`, `Android` → project `ANDR` (required; ask if not specified)
-- **description** — longer description. Extract from the user's message even if not explicitly labelled — any context about what needs to be done, why, or how counts as description. If the message is too brief to infer a meaningful description, ask for details before proceeding.
+- **raw_context** — everything the user said about the task: what, why, how, affected files, fix ideas
 - **priority** — Highest / High / Medium / Low / Lowest (default: `Medium`)
 
 If **summary** or **type** or **platform** is missing or ambiguous, ask before proceeding.
-If there is not enough context for a meaningful **description**, ask for more details before proceeding.
+If there is not enough context to write a meaningful description, ask for more details before proceeding.
 
-## Step 2 — Show preview and confirm
+## Step 2 — Compose description
 
-Show a concise preview:
+Using `raw_context`, write a full structured description in **Markdown**. The script converts it to Jira ADF automatically. Do not truncate or summarise — include all relevant detail.
+
+**For Bug:**
+```
+## Description
+[What goes wrong and when. Include any error messages or observable symptoms.]
+
+## Root Cause
+[Technical explanation of why it happens. Reference specific files/methods/lines if known.]
+
+## Consequences
+[List all impact points — broken UI, security bypass, data loss, etc.]
+
+## Steps to Reproduce
+1. ...
+2. ...
+
+## Expected Behavior
+[What should happen.]
+
+## Actual Behavior
+[What actually happens.]
+
+## Fix
+[Proposed fix approach with file names, method names, line numbers if known.]
+```
+
+**For Story:**
+```
+## Background
+[Why this is needed. Business or technical motivation.]
+
+## Goal
+[What should be achieved when done.]
+
+## Implementation Notes
+[Technical approach, affected files, constraints, edge cases if known.]
+
+## Acceptance Criteria
+- [ ] ...
+- [ ] ...
+```
+
+Omit sections that have no relevant information. Keep language precise and technical.
+
+## Step 3 — Show preview and confirm
+
+Show the full description so the user can review it:
 ```
 Project:     <IOS|ANDR>
 Type:        <Bug|Story>
 Summary:     <summary>
 Priority:    <priority>
-Assignee:    d.bystrov@pnlfin.tech
-Team:        common-mobile
-Description: <first 120 chars or "none">
+
+--- Description ---
+<full description>
+---
 ```
 
-Ask: "Создать задачу?" — wait for explicit confirmation before proceeding.
+Ask: "Create a task?" — wait for explicit confirmation before proceeding.
 
-## Step 3 — Build JSON and create
+## Step 4 — Create via script
 
-Write a JSON file to `/tmp/jira_create.json`.
+Run `scripts/create-issue.sh` in a single Bash call:
 
-**For both Bug and Story:**
-```json
-{
-  "additionalAttributes": {
-    "priority": {"name": "<priority>"},
-    "customfield_10625": {"id": "11914"}
-  },
-  "assignee": "d.bystrov@pnlfin.tech",
-  "summary": "<summary>",
-  "description": "<description_adf_or_omit>",
-  "projectKey": "<IOS|ANDR>",
-  "type": "<Bug|Story>"
-}
+```bash
+scripts/create-issue.sh \
+  --project <IOS|ANDR> \
+  --type <Bug|Story> \
+  --summary "<summary>" \
+  --description "<description>" \
+  --priority "<priority>"
 ```
 
-If description is provided, format it as ADF:
-```json
-{
-  "type": "doc",
-  "version": 1,
-  "content": [{"type": "paragraph", "content": [{"type": "text", "text": "<description>"}]}]
-}
-```
+Omit `--description` if none was provided.
 
-If no description — omit the `"description"` key entirely.
+The script prints two lines: the issue key and the URL.
 
-Run:
-```
-acli jira workitem create --from-json /tmp/jira_create.json --json
-```
-
-## Step 4 — Show result
+## Step 5 — Show result
 
 On success, show:
 ```
 ✓ Created: <KEY-123>
-  https://finom.atlassian.net/browse/<KEY-123>
+  https://pnlfintech.atlassian.net/browse/<KEY-123>
 ```
 
 On error, show the raw error and suggest what to fix.

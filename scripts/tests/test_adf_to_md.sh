@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../adf_to_md.sh"
+source "$SCRIPT_DIR/../adf-to-md.sh"
 
 # ---------------------------------------------------------------------------
 # Test harness

@@ -4,8 +4,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/../adf_to_md.sh"
-source "$SCRIPT_DIR/../snapshot_formatters.sh"
+source "$SCRIPT_DIR/../adf-to-md.sh"
+source "$SCRIPT_DIR/../snapshot-formatters.sh"
 
 FIXTURES="$SCRIPT_DIR/fixtures"
 GOLDEN="$SCRIPT_DIR/golden"

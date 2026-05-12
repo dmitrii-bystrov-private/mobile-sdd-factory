@@ -23,7 +23,7 @@ fetch_unapproved_review() {
     err_file=$(mktemp)
     mrs=$(cd "$dir" && NO_COLOR=1 glab mr list --reviewer @me --output json 2>"$err_file")
 
-    if [ -z "$mrs" ] || ! echo "$mrs" | jq -e . >/dev/null 2>&1; then
+    if [ -z "$mrs" ] || ! printf '%s' "$mrs" | jq -e . >/dev/null 2>&1; then
         echo "ERROR: $(cat "$err_file")" > "$out"
         rm -f "$err_file"
         return
@@ -31,14 +31,14 @@ fetch_unapproved_review() {
     rm -f "$err_file"
 
     local count
-    count=$(echo "$mrs" | jq 'length')
+    count=$(printf '%s' "$mrs" | jq 'length')
 
     > "$out"
     for i in $(seq 0 $((count - 1))); do
         local id title branch
-        id=$(echo "$mrs" | jq -r ".[$i].iid")
-        title=$(echo "$mrs" | jq -r ".[$i].title")
-        branch=$(echo "$mrs" | jq -r ".[$i].source_branch")
+        id=$(printf '%s' "$mrs" | jq -r ".[$i].iid")
+        title=$(printf '%s' "$mrs" | jq -r ".[$i].title")
+        branch=$(printf '%s' "$mrs" | jq -r ".[$i].source_branch")
 
         local approved
         approved=$(cd "$dir" && NO_COLOR=1 glab api "projects/$encoded/merge_requests/$id/approvals" 2>/dev/null \
@@ -63,10 +63,43 @@ fetch_unapproved_review() {
     fi
 }
 
+fetch_my_mrs() {
+    local dir="$1"
+    local encoded="$2"
+    local out="$3"
+
+    local mrs
+    mrs=$(cd "$dir" && NO_COLOR=1 glab mr list --author @me --output json 2>/dev/null)
+
+    local count
+    count=$(printf '%s' "$mrs" | jq 'length')
+
+    > "$out"
+    for i in $(seq 0 $((count - 1))); do
+        local id title
+        id=$(printf '%s' "$mrs" | jq -r ".[$i].iid")
+        title=$(printf '%s' "$mrs" | jq -r ".[$i].title")
+
+        local approved
+        approved=$(cd "$dir" && NO_COLOR=1 glab api "projects/$encoded/merge_requests/$id/approvals" 2>/dev/null \
+            | jq -r "[.approved_by[].user.username] | length > 0")
+
+        if [ "$approved" = "false" ]; then
+            echo "!$id $title" >> "$out"
+        else
+            echo "!$id $title [approved]" >> "$out"
+        fi
+    done
+
+    if [ ! -s "$out" ]; then
+        echo "No open merge requests available." >> "$out"
+    fi
+}
+
 # Run all glab calls sequentially to avoid keychain contention
-(cd "$IOS_DIR" && NO_COLOR=1 glab mr list --assignee @me 2>&1) > "$TMP/ios_mine.txt"
+fetch_my_mrs "$IOS_DIR" "$IOS_PATH" "$TMP/ios_mine.txt"
 fetch_unapproved_review "$IOS_DIR" "$IOS_PATH" "$TMP/ios_review.txt"
-(cd "$ANDROID_DIR" && NO_COLOR=1 glab mr list --assignee @me 2>&1) > "$TMP/andr_mine.txt"
+fetch_my_mrs "$ANDROID_DIR" "$ANDROID_PATH" "$TMP/andr_mine.txt"
 fetch_unapproved_review "$ANDROID_DIR" "$ANDROID_PATH" "$TMP/andr_review.txt"
 
 # Jira can run independently (different tool, no keychain conflict)

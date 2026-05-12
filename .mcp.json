@@ -1,20 +1,20 @@
 {
   "mcpServers": {
-    "notion": {
-      "type": "http",
-      "url": "https://mcp.notion.com/mcp"
-    },
     "ios-rag": {
       "type": "http",
-      "url": "https://mobile.finom.world/mcp/swift"
+      "url": "https://mcp.finom.world/mcp/swift"
     },
     "android-rag": {
       "type": "http",
-      "url": "https://mobile.finom.world/mcp/kotlin"
+      "url": "https://mcp.finom.world/mcp/kotlin"
     },
-    "firebase": {
-      "command": "firebase",
-      "args": ["mcp", "--only", "crashlytics,core"]
-    }
+    "frontend-rag": {
+      "type": "http",
+      "url": "https://mcp.finom.world/mcp/frontend"
+    },
+    "notion": {
+      "type": "http",
+      "url": "https://mcp.notion.com/mcp"
+    }    
   }
 }
