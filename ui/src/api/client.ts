@@ -1,5 +1,6 @@
 import type {
   Artifact,
+  ArtifactDetail,
   EventItem,
   Role,
   SessionPolicyValue,
@@ -25,6 +26,11 @@ const STREAM_EVENT_TYPES = [
   "verification_correction_requested",
   "verification_passed",
   "task_completed",
+  "mr_comments_empty",
+  "mr_comments_received",
+  "mr_followup_requested",
+  "qa_reopened",
+  "qa_reopen_requested",
   "role_input_dispatched",
   "role_output_collected",
   "role_progress_reported",
@@ -95,6 +101,10 @@ export const apiClient = {
     return request(`/artifacts?session_id=${sessionId}`);
   },
 
+  getArtifact(artifactId: number): Promise<ArtifactDetail> {
+    return request(`/artifacts/${artifactId}`);
+  },
+
   listEvents(sessionId: number): Promise<{ items: EventItem[] }> {
     return request(`/events?session_id=${sessionId}`);
   },
@@ -121,6 +131,45 @@ export const apiClient = {
     return request("/operator/retry-session", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId }),
+    });
+  },
+
+  ingestMrComments(
+    sessionId: number,
+    platform: "ios" | "android",
+    mrId: string,
+  ): Promise<{
+    ingested: boolean;
+    event_type: string;
+    followup_event_type: string | null;
+    discussion_count: number;
+    session: Session;
+  }> {
+    return request("/operator/ingest-mr-comments", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        platform,
+        mr_id: mrId,
+      }),
+    });
+  },
+
+  reopenFromQa(
+    sessionId: number,
+    commentText: string,
+  ): Promise<{
+    reopened: boolean;
+    event_type: string;
+    followup_event_type: string | null;
+    session: Session;
+  }> {
+    return request("/operator/reopen-from-qa", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        comment_text: commentText,
+      }),
     });
   },
 

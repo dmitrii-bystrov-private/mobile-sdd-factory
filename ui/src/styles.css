@@ -31,7 +31,9 @@ body {
 }
 
 button,
-select {
+select,
+textarea,
+input {
   font: inherit;
 }
 
@@ -307,6 +309,43 @@ select {
   gap: 12px;
 }
 
+.followup-form,
+.operator-followup-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.followup-form {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.followup-form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.operator-followup-copy h4,
+.followup-snippet p,
+.followup-empty {
+  margin: 0;
+}
+
+.followup-snippet {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(17, 33, 50, 0.06);
+}
+
+.followup-snippet-label {
+  display: inline-block;
+  margin-bottom: 8px;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+
 .form-field {
   display: grid;
   gap: 8px;
@@ -348,6 +387,16 @@ select {
   background: var(--surface-strong);
   padding: 12px 14px;
   color: var(--ink-strong);
+}
+
+.text-area-input {
+  min-height: 108px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-strong);
+  padding: 12px 14px;
+  color: var(--ink-strong);
+  resize: vertical;
 }
 
 .table-row {
@@ -405,7 +454,8 @@ select {
 
   .actions-grid,
   .hero-stats,
-  .grid-two {
+  .grid-two,
+  .followup-form-grid {
     grid-template-columns: 1fr;
   }
 }

@@ -45,6 +45,10 @@ export type Artifact = {
   metadata?: Record<string, unknown> | null;
 };
 
+export type ArtifactDetail = Artifact & {
+  content?: string | null;
+};
+
 export type WorkItem = {
   id: number;
   session_id: number;
@@ -56,9 +60,20 @@ export type WorkItem = {
   priority: number;
 };
 
+export type FollowupContext = {
+  source: "mr" | "qa";
+  eventId: number;
+  eventType: string;
+  stageName: string;
+  artifactType: string;
+  artifactDetail: ArtifactDetail | null;
+  eventPayload: Record<string, unknown>;
+};
+
 export type SessionBundle = {
   roles: Role[];
   artifacts: Artifact[];
   events: EventItem[];
   workItems: WorkItem[];
+  followupContext: FollowupContext | null;
 };

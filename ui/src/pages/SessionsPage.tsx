@@ -4,7 +4,60 @@ import { apiClient, openSessionEventStream } from "../api/client";
 import { SessionDetail } from "../components/SessionDetail";
 import { SessionList } from "../components/SessionList";
 import { SessionStartForm } from "../components/SessionStartForm";
-import type { Session, SessionBundle } from "../types";
+import type {
+  Artifact,
+  EventItem,
+  FollowupContext,
+  Session,
+  SessionBundle,
+} from "../types";
+
+const FOLLOWUP_ARTIFACT_TYPES = new Set(["mr_comments_markdown", "qa_reopen_comments"]);
+
+function buildFollowupContext(
+  artifacts: Artifact[],
+  events: EventItem[],
+): Promise<FollowupContext | null> | FollowupContext | null {
+  const sourceEvent = [...events]
+    .reverse()
+    .find((event) => event.event_type === "mr_comments_received" || event.event_type === "qa_reopened");
+  if (sourceEvent === undefined) {
+    return null;
+  }
+
+  const source =
+    sourceEvent.event_type === "mr_comments_received" ? "mr" : "qa";
+  const expectedFollowupEventType =
+    source === "mr" ? "mr_followup_requested" : "qa_reopen_requested";
+  const followupEvent = events.find(
+    (event) => event.id > sourceEvent.id && event.event_type === expectedFollowupEventType,
+  );
+  const followupArtifact = [...artifacts]
+    .reverse()
+    .find((artifact) => FOLLOWUP_ARTIFACT_TYPES.has(artifact.artifact_type));
+
+  if (followupArtifact === undefined) {
+    return {
+      source,
+      eventId: sourceEvent.id,
+      eventType: sourceEvent.event_type,
+      stageName: followupEvent?.event_type ?? "followup_implementation",
+      artifactType: "missing_followup_artifact",
+      artifactDetail: null,
+      eventPayload: sourceEvent.payload,
+    };
+  }
+
+  return apiClient.getArtifact(followupArtifact.id).then((artifactDetail) => ({
+    source,
+    eventId: sourceEvent.id,
+    eventType: sourceEvent.event_type,
+    stageName: followupEvent?.event_type ?? followupArtifact.stage_name,
+    artifactType: followupArtifact.artifact_type,
+    artifactDetail,
+    eventPayload: sourceEvent.payload,
+  }));
+}
 
 export function SessionsPage(): JSX.Element {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -45,11 +98,13 @@ export function SessionsPage(): JSX.Element {
         apiClient.listEvents(sessionId),
         apiClient.listWorkItems(sessionId),
       ]);
+      const followupContext = await buildFollowupContext(artifacts.items, events.items);
       setBundle({
         roles: roles.items,
         artifacts: artifacts.items,
         events: events.items,
         workItems: workItems.items,
+        followupContext,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load session detail");
