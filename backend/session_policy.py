@@ -51,8 +51,6 @@ def infer_workflow_profile(issue_type: str) -> str:
     normalized = issue_type.strip().lower()
     if normalized == "bug":
         return "bug_full"
-    if normalized == "story":
-        return "story_full"
     return "oneshot"
 
 

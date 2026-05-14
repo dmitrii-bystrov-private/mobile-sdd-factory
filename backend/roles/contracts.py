@@ -11,6 +11,12 @@ DEFAULT_SESSION_ROLES = [
 ]
 
 ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
+    "bug_analysis_requested": {
+        IMPLEMENTER_ROLE,
+    },
+    "story_spec_requested": {
+        IMPLEMENTER_ROLE,
+    },
     "implementation_requested": {
         IMPLEMENTER_ROLE,
     },

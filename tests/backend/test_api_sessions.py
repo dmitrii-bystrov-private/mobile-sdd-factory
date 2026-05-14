@@ -315,6 +315,58 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("implementation_requested", response.session.current_stage)
         self.assertEqual(2, len(work_items_response.items))
 
+    def test_prepare_session_route_uses_story_spec_for_story_full(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40002STORY",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40002STORY"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertFalse(response.created)
+        self.assertEqual(create_response.session.id, response.session.id)
+        self.assertEqual("story_full", response.session.workflow_profile)
+        self.assertEqual("story_spec_requested", response.followup_event_type)
+        self.assertEqual("story_spec_requested", response.session.current_stage)
+
+    def test_story_spec_completed_event_returns_implementation_handoff(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003STORY",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003STORY"),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="story_spec_completed",
+                payload={"summary": "Define screen structure first"},
+            ),
+            dependencies=self.dependencies,
+        )
+        work_items_response = list_work_items(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("implementation_requested", response.followup_event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertEqual(2, len(work_items_response.items))
+
     def test_verification_failed_event_returns_correction_handoff(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40004"),

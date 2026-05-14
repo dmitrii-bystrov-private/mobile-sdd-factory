@@ -330,6 +330,85 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Start implementation work for IOS-30003BUG.", sent_inputs[-1])
         self.assertIn("Bug analysis summary: Likely missing state reset in coordinator", sent_inputs[-1])
 
+    def test_prepare_task_session_routes_story_full_into_story_spec(self) -> None:
+        session, _, created = self.coordinator.create_task_session(
+            "IOS-30002STORY",
+            workflow_profile="story_full",
+            policy=None,
+        )
+
+        prepared_session, event, prepared_created, details = self.coordinator.prepare_task_session("IOS-30002STORY")
+        work_items = self.work_item_repository.list_for_session(prepared_session.id)
+        events = self.event_repository.list_for_session(prepared_session.id)
+        implementer_role = self.role_repository.get_by_name(prepared_session.id, "implementer")
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertTrue(created)
+        self.assertFalse(prepared_created)
+        self.assertEqual(session.id, prepared_session.id)
+        self.assertEqual("task_prepared", event.event_type)
+        self.assertEqual("story_spec_requested", details["followup_event_type"])
+        self.assertEqual("story_spec_requested", prepared_session.current_stage)
+        self.assertEqual("implementer", prepared_session.current_owner)
+        self.assertEqual("story_spec", work_items[0].work_type)
+        self.assertEqual(
+            [
+                "task_started",
+                "task_session_reused",
+                "task_prepared",
+                "role_input_dispatched",
+                "story_spec_requested",
+            ],
+            [item.event_type for item in events],
+        )
+        self.assertEqual(1, len(sent_inputs))
+        self.assertIn("Prepare a concise implementation spec for story IOS-30002STORY before coding.", sent_inputs[0])
+
+    def test_story_spec_completed_moves_session_to_implementation(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003STORY",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003STORY")
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="story_spec_completed",
+            payload={
+                "summary": "Need a new screen plus navigation wiring",
+                "constraints": "Reuse existing assembly pattern and analytics hooks",
+            },
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual(
+            ["completed", "assigned"],
+            [work_items[0].status.value, work_items[1].status.value],
+        )
+        self.assertEqual(
+            [
+                "task_started",
+                "task_session_reused",
+                "task_prepared",
+                "role_input_dispatched",
+                "story_spec_requested",
+                "story_spec_completed",
+                "role_input_dispatched",
+                "implementation_requested",
+            ],
+            [item.event_type for item in events],
+        )
+        self.assertEqual(2, len(sent_inputs))
+        self.assertIn("Start implementation work for IOS-30003STORY.", sent_inputs[-1])
+        self.assertIn("Story spec summary: Need a new screen plus navigation wiring", sent_inputs[-1])
+
     def test_verification_failed_moves_session_back_to_implementer(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")
         self.coordinator.handle_operator_event(
@@ -482,6 +561,39 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "bug_analysis_requested",
                 "bug_analysis_completed",
+                "role_input_dispatched",
+                "implementation_requested",
+            ],
+            [item.event_type for item in events],
+        )
+
+    def test_role_output_completed_moves_story_spec_forward(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30006STORY",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30006STORY")
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="implementer",
+            output_type="completed",
+            payload={"summary": "Scope clarified"},
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("story_spec_completed", mapped_event.event_type)
+        self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual(
+            [
+                "task_started",
+                "task_session_reused",
+                "task_prepared",
+                "role_input_dispatched",
+                "story_spec_requested",
+                "story_spec_completed",
                 "role_input_dispatched",
                 "implementation_requested",
             ],

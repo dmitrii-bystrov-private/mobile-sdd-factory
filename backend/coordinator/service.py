@@ -210,6 +210,11 @@ class CoordinatorService:
                     session=session,
                     source_event=event,
                 ).event_type
+            elif session.workflow_profile == "story_full":
+                details["followup_event_type"] = self._enqueue_story_spec(
+                    session=session,
+                    source_event=event,
+                ).event_type
             else:
                 details["followup_event_type"] = self._enqueue_initial_implementation(
                     session=session,
@@ -234,6 +239,9 @@ class CoordinatorService:
         )
         if event_type == "bug_analysis_completed":
             session, followup_event = self._handle_bug_analysis_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "story_spec_completed":
+            session, followup_event = self._handle_story_spec_completed(session, accepted_event)
             return session, followup_event
         if event_type == "implementation_completed":
             session, followup_event = self._handle_implementation_completed(session, accepted_event)
@@ -687,6 +695,8 @@ class CoordinatorService:
         followup_event: Event | None = None
         if mapped_event_type == "bug_analysis_completed":
             session, followup_event = self._handle_bug_analysis_completed(session, accepted_event)
+        elif mapped_event_type == "story_spec_completed":
+            session, followup_event = self._handle_story_spec_completed(session, accepted_event)
         elif mapped_event_type == "implementation_completed":
             session, followup_event = self._handle_implementation_completed(session, accepted_event)
         elif mapped_event_type == "verification_failed":
@@ -1130,6 +1140,51 @@ class CoordinatorService:
             },
         )
 
+    def _enqueue_story_spec(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> Event:
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        if implementer_role is None:
+            raise IntakeError("Implementer role is missing for the session")
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="story_spec",
+            title=f"Story planning and spec for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            source_event_id=source_event.id,
+            priority=104,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="story_spec_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        instruction = (
+            f"Prepare a concise implementation spec for story {session.task_key} before coding. "
+            "Clarify the intended scope, key constraints, and an implementation approach that will guide the next coding step."
+        )
+        self._dispatch_role_work(
+            session=session,
+            role=implementer_role,
+            work_item=work_item,
+            stage_name="story_spec_requested",
+            instruction=instruction,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="story_spec_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
     def _handle_bug_analysis_completed(
         self,
         session: Session,
@@ -1153,6 +1208,40 @@ class CoordinatorService:
             context_lines.append(f"Bug analysis summary: {summary}")
         if proposed_test:
             context_lines.append(f"Suggested test strategy: {proposed_test}")
+        additional_context = "\n".join(context_lines) if context_lines else None
+
+        event = self._enqueue_initial_implementation(
+            session=session,
+            resolved_task_key=session.task_key,
+            source_event=source_event,
+            additional_context=additional_context,
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event
+
+    def _handle_story_spec_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        spec_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "story_spec" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not spec_items:
+            raise IntakeError("No active story spec work item found for the session")
+
+        active_item = spec_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+
+        summary = str(source_event.payload.get("summary") or "").strip()
+        constraints = str(source_event.payload.get("constraints") or "").strip()
+        context_lines: list[str] = []
+        if summary:
+            context_lines.append(f"Story spec summary: {summary}")
+        if constraints:
+            context_lines.append(f"Key constraints: {constraints}")
         additional_context = "\n".join(context_lines) if context_lines else None
 
         event = self._enqueue_initial_implementation(
@@ -1500,6 +1589,8 @@ class CoordinatorService:
         if role_name == IMPLEMENTER_ROLE and output_type == "completed":
             if session.current_stage == "bug_analysis_requested":
                 return "bug_analysis_completed"
+            if session.current_stage == "story_spec_requested":
+                return "story_spec_completed"
             if session.current_stage in {
                 "implementation_requested",
                 "self_review_correction_requested",
@@ -1820,6 +1911,7 @@ class CoordinatorService:
             return None
         if active_item.work_type not in {
             "bug_analysis",
+            "story_spec",
             "implementation",
             "self_review_correction",
             "verification_correction",
@@ -1868,6 +1960,11 @@ class CoordinatorService:
             return (
                 f"Analyze bug {task_key} before implementation. "
                 "Identify probable root cause, expected fix direction, and whether a regression test should be added."
+            )
+        if stage_name == "story_spec_requested":
+            return (
+                f"Prepare a concise implementation spec for story {task_key} before coding. "
+                "Clarify the intended scope, key constraints, and an implementation approach that will guide the next coding step."
             )
         if stage_name == "implementation_requested":
             return f"Start implementation work for {task_key}."
