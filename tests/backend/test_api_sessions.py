@@ -22,6 +22,7 @@ try:
     from backend.api.routes_operator import reopen_from_qa
     from backend.api.routes_operator import redirect_session
     from backend.api.routes_operator import create_mr
+    from backend.api.routes_operator import send_to_test
     from backend.api.routes_operator import ingest_mr_comments
     from backend.api.routes_operator import loop_status, start_loop, stop_loop
     from backend.api.schemas import (
@@ -33,6 +34,7 @@ try:
         RedirectSessionRequest,
         ResumeSessionRequest,
         RetrySessionRequest,
+        SendToTestRequest,
     )
     from backend.coordinator.service import CoordinatorService
     from backend.coordinator.loop_runner import CoordinatorLoopRunner
@@ -58,6 +60,9 @@ class FakeJiraAdapter:
 
     def get_issue_type(self, task_key: str) -> "CommandResult":
         return CommandResult(["get_issue_type", task_key], 0, "Story\n", "")
+
+    def send_to_test(self, task_key: str) -> "CommandResult":
+        return CommandResult(["send_to_test", task_key], 0, f"Done: {task_key} -> Ready for test\n", "")
 
 
 class FakeSnapshotAdapter:
@@ -642,6 +647,47 @@ class SessionApiTests(unittest.TestCase):
             response.mr_url,
         )
         self.assertTrue(any(item.artifact_type == "mr_handoff_stdout" for item in artifacts_response.items))
+
+    def test_send_to_test_route_marks_mr_handed_off_session_as_ready(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014ST"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+        create_mr(
+            CreateMrRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        response = send_to_test(
+            SendToTestRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.handed_off)
+        self.assertEqual("send_to_test_completed", response.event_type)
+        self.assertEqual("send_to_test_completed", response.session.current_stage)
+        self.assertEqual("completed", response.session.status)
+        self.assertTrue(any(item.artifact_type == "send_to_test_stdout" for item in artifacts_response.items))
 
     def test_reopen_from_qa_route_reactivates_completed_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

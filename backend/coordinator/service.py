@@ -392,6 +392,93 @@ class CoordinatorService:
         )
         return session, event, mr_url
 
+    def send_to_test_handoff(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event]:
+        if self.jira_adapter is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing Jira adapter or artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.COMPLETED:
+            raise IntakeError(
+                f"Session {session_id} must be completed before send-to-test handoff can run"
+            )
+        if session.current_stage != "mr_handoff_completed":
+            raise IntakeError(
+                f"Session {session_id} must complete MR handoff before send-to-test handoff"
+            )
+
+        result = self.jira_adapter.send_to_test(session.task_key)
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "send-to-test",
+            "send-to-test.stdout.log",
+            result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "send-to-test",
+            "send-to-test.stderr.log",
+            result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="send-to-test",
+            artifact_type="send_to_test_stdout",
+            path=str(stdout_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="send-to-test",
+            artifact_type="send_to_test_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+
+        if not result.ok:
+            event = self._append_event(
+                session_id=session.id,
+                event_type="send_to_test_failed",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "returncode": result.returncode,
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                },
+            )
+            return session, event
+
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="send_to_test_completed",
+            current_owner=None,
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="send_to_test_completed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "returncode": result.returncode,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event
+
     def reopen_from_qa(
         self,
         session_id: int,

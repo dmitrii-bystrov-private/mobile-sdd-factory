@@ -61,6 +61,8 @@ export function OperatorActions({
 
   const canOpenFollowup = session.status === "completed";
   const canCreateMr = session.status === "completed" && session.current_stage !== "mr_handoff_completed";
+  const canSendToTest =
+    session.status === "completed" && session.current_stage === "mr_handoff_completed";
 
   return (
     <section className="panel">
@@ -111,6 +113,14 @@ export function OperatorActions({
           type="button"
         >
           Create MR Handoff
+        </button>
+        <button
+          className="action-button action-button-strong"
+          disabled={busy || !canSendToTest}
+          onClick={() => run(() => apiClient.sendToTest(session.id))}
+          type="button"
+        >
+          Send To Test
         </button>
       </div>
 

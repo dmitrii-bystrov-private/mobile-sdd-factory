@@ -22,6 +22,8 @@ from backend.api.schemas import (
     PollSessionOutputResponse,
     RetrySessionRequest,
     RetrySessionResponse,
+    SendToTestRequest,
+    SendToTestResponse,
     ResumeSessionRequest,
     ResumeSessionResponse,
     RunLoopOnceResponse,
@@ -158,6 +160,25 @@ def create_mr(
         session=to_session_response(session),
         event_type=event.event_type,
         mr_url=mr_url,
+    )
+
+
+@router.post("/send-to-test", response_model=SendToTestResponse)
+def send_to_test(
+    payload: SendToTestRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> SendToTestResponse:
+    try:
+        session, event = dependencies.coordinator_service.send_to_test_handoff(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return SendToTestResponse(
+        handed_off=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
     )
 
 

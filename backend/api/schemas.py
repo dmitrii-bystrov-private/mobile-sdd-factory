@@ -240,6 +240,16 @@ class CreateMrResponse(BaseModel):
     mr_url: str | None = None
 
 
+class SendToTestRequest(BaseModel):
+    session_id: int
+
+
+class SendToTestResponse(BaseModel):
+    handed_off: bool
+    session: SessionResponse
+    event_type: str
+
+
 class ReopenFromQaRequest(BaseModel):
     session_id: int
     comment_text: str

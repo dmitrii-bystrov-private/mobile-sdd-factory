@@ -31,6 +31,8 @@ const STREAM_EVENT_TYPES = [
   "mr_followup_requested",
   "mr_handoff_completed",
   "mr_handoff_failed",
+  "send_to_test_completed",
+  "send_to_test_failed",
   "qa_reopened",
   "qa_reopen_requested",
   "role_input_dispatched",
@@ -184,6 +186,21 @@ export const apiClient = {
     session: Session;
   }> {
     return request("/operator/create-mr", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+      }),
+    });
+  },
+
+  sendToTest(
+    sessionId: number,
+  ): Promise<{
+    handed_off: boolean;
+    event_type: string;
+    session: Session;
+  }> {
+    return request("/operator/send-to-test", {
       method: "POST",
       body: JSON.stringify({
         session_id: sessionId,

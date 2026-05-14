@@ -33,6 +33,14 @@ class FakeJiraAdapter:
             stderr="",
         )
 
+    def send_to_test(self, task_key: str) -> CommandResult:
+        return CommandResult(
+            command=["send_to_test", task_key],
+            returncode=0,
+            stdout=f"Done: {task_key} -> Ready for test\n",
+            stderr="",
+        )
+
 
 class FakeSnapshotAdapter:
     def run(self, task_key: str) -> CommandResult:
@@ -696,6 +704,47 @@ class SessionCreationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(IntakeError, "must be completed before MR handoff"):
             self.coordinator.create_mr_handoff(session_id=session.id)
+
+    def test_send_to_test_handoff_marks_mr_handed_off_session_as_ready(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021C")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        completed_session, _ = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.create_mr_handoff(session_id=completed_session.id)
+
+        updated_session, event = self.coordinator.send_to_test_handoff(session_id=session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("completed", updated_session.status.value)
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertEqual("send_to_test_completed", event.event_type)
+        self.assertTrue(any(item.artifact_type == "send_to_test_stdout" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "send_to_test_stderr" for item in artifacts))
+        self.assertTrue(any(item.event_type == "send_to_test_completed" for item in events))
+
+    def test_send_to_test_handoff_requires_mr_handoff_stage(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021D")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        completed_session, _ = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        with self.assertRaisesRegex(IntakeError, "must complete MR handoff"):
+            self.coordinator.send_to_test_handoff(session_id=completed_session.id)
 
     def test_followup_implementation_completed_reenters_verification_loop(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022")
