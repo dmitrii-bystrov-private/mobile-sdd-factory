@@ -250,6 +250,17 @@ class SendToTestResponse(BaseModel):
     event_type: str
 
 
+class CompleteDocHarvestRequest(BaseModel):
+    session_id: int
+    summary: str
+
+
+class CompleteDocHarvestResponse(BaseModel):
+    completed: bool
+    session: SessionResponse
+    event_type: str
+
+
 class ReopenFromQaRequest(BaseModel):
     session_id: int
     comment_text: str

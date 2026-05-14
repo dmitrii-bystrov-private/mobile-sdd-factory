@@ -21,11 +21,13 @@ try:
     from backend.api.routes_operator import retry_session
     from backend.api.routes_operator import reopen_from_qa
     from backend.api.routes_operator import redirect_session
+    from backend.api.routes_operator import complete_doc_harvest
     from backend.api.routes_operator import create_mr
     from backend.api.routes_operator import send_to_test
     from backend.api.routes_operator import ingest_mr_comments
     from backend.api.routes_operator import loop_status, start_loop, stop_loop
     from backend.api.schemas import (
+        CompleteDocHarvestRequest,
         CreateMrRequest,
         IngestMrCommentsRequest,
         PollSessionOutputRequest,
@@ -688,6 +690,89 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("send_to_test_completed", response.session.current_stage)
         self.assertEqual("completed", response.session.status)
         self.assertTrue(any(item.artifact_type == "send_to_test_stdout" for item in artifacts_response.items))
+
+    def test_verification_passed_routes_to_doc_harvest_when_policy_required(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40014DH",
+                workflow_profile="oneshot",
+                policy={"doc_harvest_policy": "required"},
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014DH"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("doc_harvest_requested", response.followup_event_type)
+        self.assertEqual("doc_harvest_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
+
+    def test_complete_doc_harvest_route_marks_lane_completed(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40014DH2",
+                workflow_profile="oneshot",
+                policy={"doc_harvest_policy": "required"},
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014DH2"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = complete_doc_harvest(
+            CompleteDocHarvestRequest(
+                session_id=create_response.session.id,
+                summary="Feature README updated with current behavior.",
+            ),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=create_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.completed)
+        self.assertEqual("doc_harvest_completed", response.event_type)
+        self.assertEqual("doc_harvest_completed", response.session.current_stage)
+        self.assertEqual("completed", response.session.status)
+        self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts_response.items))
 
     def test_reopen_from_qa_route_reactivates_completed_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

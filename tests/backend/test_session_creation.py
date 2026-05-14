@@ -746,6 +746,58 @@ class SessionCreationTests(unittest.TestCase):
         with self.assertRaisesRegex(IntakeError, "must complete MR handoff"):
             self.coordinator.send_to_test_handoff(session_id=completed_session.id)
 
+    def test_verification_passed_routes_to_doc_harvest_when_policy_required(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021E",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021E")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("doc_harvest_requested", updated_session.current_stage)
+        self.assertEqual("doc_harvest_requested", followup_event.event_type)
+
+    def test_complete_doc_harvest_marks_lane_completed(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021F",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021F")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        updated_session, event = self.coordinator.complete_doc_harvest(
+            session_id=session.id,
+            summary="Feature README updated with current behavior.",
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("completed", updated_session.status.value)
+        self.assertEqual("doc_harvest_completed", updated_session.current_stage)
+        self.assertEqual("doc_harvest_completed", event.event_type)
+        self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
+
     def test_followup_implementation_completed_reenters_verification_loop(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022")
         self.coordinator.handle_operator_event(

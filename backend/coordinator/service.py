@@ -392,6 +392,59 @@ class CoordinatorService:
         )
         return session, event, mr_url
 
+    def complete_doc_harvest(
+        self,
+        session_id: int,
+        summary: str,
+    ) -> tuple[Session, Event]:
+        if self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        normalized_summary = summary.strip()
+        if not normalized_summary:
+            raise IntakeError("Doc harvest summary must not be empty")
+
+        if session.current_stage not in {"completed", "doc_harvest_requested"}:
+            raise IntakeError(
+                f"Session {session_id} is not in a doc-harvest-capable stage"
+            )
+        if (session.policy or {}).get("doc_harvest_policy") == "disabled":
+            raise IntakeError(f"Session {session_id} has doc harvest disabled by policy")
+
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "doc-harvest",
+            "doc-harvest-summary.md",
+            normalized_summary,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="doc-harvest",
+            artifact_type="doc_harvest_summary",
+            path=str(artifact_path),
+            metadata={"summary_length": len(normalized_summary)},
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="doc_harvest_completed",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="doc_harvest_completed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "summary_length": len(normalized_summary),
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event
+
     def send_to_test_handoff(
         self,
         session_id: int,
@@ -1055,6 +1108,26 @@ class CoordinatorService:
 
         active_item = verification_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        doc_harvest_policy = (session.policy or {}).get("doc_harvest_policy")
+        if doc_harvest_policy == "required":
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="doc_harvest_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="doc_harvest_requested",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "source_event_id": source_event.id,
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                },
+            )
+            return session, event
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage="completed",

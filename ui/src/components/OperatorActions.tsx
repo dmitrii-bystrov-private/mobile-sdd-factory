@@ -19,6 +19,7 @@ export function OperatorActions({
   );
   const [mrId, setMrId] = useState("");
   const [qaComment, setQaComment] = useState("");
+  const [docHarvestSummary, setDocHarvestSummary] = useState("");
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
@@ -59,7 +60,23 @@ export function OperatorActions({
     });
   }
 
+  async function handleDocHarvest(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const normalizedSummary = docHarvestSummary.trim();
+    if (normalizedSummary.length === 0) {
+      setError("Doc harvest summary is required");
+      return;
+    }
+    await run(async () => {
+      await apiClient.completeDocHarvest(session.id, normalizedSummary);
+      setDocHarvestSummary("");
+    });
+  }
+
   const canOpenFollowup = session.status === "completed";
+  const canCompleteDocHarvest =
+    (session.current_stage === "doc_harvest_requested" && session.status === "active") ||
+    (session.current_stage === "completed" && session.status === "completed");
   const canCreateMr = session.status === "completed" && session.current_stage !== "mr_handoff_completed";
   const canSendToTest =
     session.status === "completed" && session.current_stage === "mr_handoff_completed";
@@ -122,6 +139,37 @@ export function OperatorActions({
         >
           Send To Test
         </button>
+      </div>
+
+      <div className="operator-followup-stack">
+        <div className="operator-followup-copy">
+          <p className="eyebrow">Optional Lane</p>
+          <h4>Doc Harvest</h4>
+          <p className="path-label">
+            Record documentation harvest output as an explicit session stage before downstream handoff.
+          </p>
+        </div>
+
+        <form className="followup-form" onSubmit={(event) => void handleDocHarvest(event)}>
+          <label className="form-field">
+            <span>Doc Harvest Summary</span>
+            <textarea
+              className="text-area-input"
+              disabled={busy || !canCompleteDocHarvest}
+              onChange={(event) => setDocHarvestSummary(event.target.value)}
+              placeholder="README updated for the feature area and the current behavior is documented."
+              rows={4}
+              value={docHarvestSummary}
+            />
+          </label>
+          <button
+            className="action-button"
+            disabled={busy || !canCompleteDocHarvest}
+            type="submit"
+          >
+            Complete Doc Harvest
+          </button>
+        </form>
       </div>
 
       <div className="operator-followup-stack">

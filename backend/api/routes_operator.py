@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.api.routes_sessions import to_session_response
 from backend.api.schemas import (
+    CompleteDocHarvestRequest,
+    CompleteDocHarvestResponse,
     CreateMrRequest,
     CreateMrResponse,
     IngestMrCommentsRequest,
@@ -160,6 +162,26 @@ def create_mr(
         session=to_session_response(session),
         event_type=event.event_type,
         mr_url=mr_url,
+    )
+
+
+@router.post("/complete-doc-harvest", response_model=CompleteDocHarvestResponse)
+def complete_doc_harvest(
+    payload: CompleteDocHarvestRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> CompleteDocHarvestResponse:
+    try:
+        session, event = dependencies.coordinator_service.complete_doc_harvest(
+            session_id=payload.session_id,
+            summary=payload.summary,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return CompleteDocHarvestResponse(
+        completed=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
     )
 
 

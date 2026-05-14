@@ -21,6 +21,8 @@ const STREAM_EVENT_TYPES = [
   "task_preparation_failed",
   "implementation_requested",
   "implementation_completed",
+  "doc_harvest_requested",
+  "doc_harvest_completed",
   "verification_requested",
   "verification_failed",
   "verification_correction_requested",
@@ -189,6 +191,23 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify({
         session_id: sessionId,
+      }),
+    });
+  },
+
+  completeDocHarvest(
+    sessionId: number,
+    summary: string,
+  ): Promise<{
+    completed: boolean;
+    event_type: string;
+    session: Session;
+  }> {
+    return request("/operator/complete-doc-harvest", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        summary,
       }),
     });
   },
