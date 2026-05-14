@@ -20,6 +20,8 @@ export function OperatorActions({
   const [mrId, setMrId] = useState("");
   const [qaComment, setQaComment] = useState("");
   const [docHarvestSummary, setDocHarvestSummary] = useState("");
+  const [selfReviewOutcome, setSelfReviewOutcome] = useState<"passed" | "issues_found">("passed");
+  const [selfReviewSummary, setSelfReviewSummary] = useState("");
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
@@ -73,7 +75,23 @@ export function OperatorActions({
     });
   }
 
+  async function handleSelfReview(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const normalizedSummary = selfReviewSummary.trim();
+    if (normalizedSummary.length === 0) {
+      setError("Self review summary is required");
+      return;
+    }
+    await run(async () => {
+      await apiClient.completeSelfReview(session.id, selfReviewOutcome, normalizedSummary);
+      setSelfReviewSummary("");
+      setSelfReviewOutcome("passed");
+    });
+  }
+
   const canOpenFollowup = session.status === "completed";
+  const canCompleteSelfReview =
+    session.current_stage === "self_review_requested" && session.status === "active";
   const canCompleteDocHarvest =
     (session.current_stage === "doc_harvest_requested" && session.status === "active") ||
     (session.current_stage === "completed" && session.status === "completed");
@@ -139,6 +157,51 @@ export function OperatorActions({
         >
           Send To Test
         </button>
+      </div>
+
+      <div className="operator-followup-stack">
+        <div className="operator-followup-copy">
+          <p className="eyebrow">Optional Lane</p>
+          <h4>Self Review</h4>
+          <p className="path-label">
+            Record the explicit self-review outcome before final verification or route findings back into correction.
+          </p>
+        </div>
+
+        <form className="followup-form" onSubmit={(event) => void handleSelfReview(event)}>
+          <div className="followup-form-grid">
+            <label className="form-field">
+              <span>Outcome</span>
+              <select
+                className="select-input"
+                disabled={busy || !canCompleteSelfReview}
+                onChange={(event) => setSelfReviewOutcome(event.target.value as "passed" | "issues_found")}
+                value={selfReviewOutcome}
+              >
+                <option value="passed">passed</option>
+                <option value="issues_found">issues_found</option>
+              </select>
+            </label>
+          </div>
+          <label className="form-field">
+            <span>Self Review Summary</span>
+            <textarea
+              className="text-area-input"
+              disabled={busy || !canCompleteSelfReview}
+              onChange={(event) => setSelfReviewSummary(event.target.value)}
+              placeholder="Reviewed implementation; either no blocking issues were found or the main findings are listed here."
+              rows={4}
+              value={selfReviewSummary}
+            />
+          </label>
+          <button
+            className="action-button"
+            disabled={busy || !canCompleteSelfReview}
+            type="submit"
+          >
+            Complete Self Review
+          </button>
+        </form>
       </div>
 
       <div className="operator-followup-stack">

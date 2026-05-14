@@ -769,6 +769,105 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("doc_harvest_requested", updated_session.current_stage)
         self.assertEqual("doc_harvest_requested", followup_event.event_type)
 
+    def test_implementation_completed_routes_to_self_review_when_policy_required(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021SR1",
+            workflow_profile="oneshot",
+            policy={"self_review_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021SR1")
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("self_review_requested", updated_session.current_stage)
+        self.assertIsNone(updated_session.current_owner)
+        self.assertEqual("self_review_requested", followup_event.event_type)
+
+    def test_complete_self_review_passed_routes_to_verification(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021SR2",
+            workflow_profile="oneshot",
+            policy={"self_review_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021SR2")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        updated_session, event, followup_event = self.coordinator.complete_self_review(
+            session_id=session.id,
+            outcome="passed",
+            summary="Reviewed implementation and found no blocking issues.",
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("self_review_passed", event.event_type)
+        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+        self.assertTrue(any(item.artifact_type == "self_review_summary" for item in artifacts))
+
+    def test_complete_self_review_with_issues_routes_to_implementer_correction(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021SR3",
+            workflow_profile="oneshot",
+            policy={"self_review_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021SR3")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        updated_session, event, followup_event = self.coordinator.complete_self_review(
+            session_id=session.id,
+            outcome="issues_found",
+            summary="Found two naming issues and one missing guard branch.",
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("self_review_issues_found", event.event_type)
+        self.assertEqual("self_review_correction_requested", followup_event.event_type)
+        self.assertEqual("self_review_correction_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertTrue(any(item.work_type == "self_review_correction" for item in work_items))
+
+    def test_self_review_correction_completed_reenters_verification_loop(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021SR4",
+            workflow_profile="oneshot",
+            policy={"self_review_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021SR4")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.complete_self_review(
+            session_id=session.id,
+            outcome="issues_found",
+            summary="Found two naming issues and one missing guard branch.",
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "self review fixes done"},
+        )
+
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+        self.assertEqual("verification_requested", followup_event.event_type)
+
     def test_complete_doc_harvest_marks_lane_completed(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021F",

@@ -22,12 +22,14 @@ try:
     from backend.api.routes_operator import reopen_from_qa
     from backend.api.routes_operator import redirect_session
     from backend.api.routes_operator import complete_doc_harvest
+    from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
     from backend.api.routes_operator import send_to_test
     from backend.api.routes_operator import ingest_mr_comments
     from backend.api.routes_operator import loop_status, start_loop, stop_loop
     from backend.api.schemas import (
         CompleteDocHarvestRequest,
+        CompleteSelfReviewRequest,
         CreateMrRequest,
         IngestMrCommentsRequest,
         PollSessionOutputRequest,
@@ -725,6 +727,111 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("doc_harvest_requested", response.followup_event_type)
         self.assertEqual("doc_harvest_requested", response.session.current_stage)
         self.assertEqual("active", response.session.status)
+
+    def test_implementation_completed_routes_to_self_review_when_policy_required(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40014SR",
+                workflow_profile="oneshot",
+                policy={"self_review_policy": "required"},
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014SR"),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("self_review_requested", response.followup_event_type)
+        self.assertEqual("self_review_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
+
+    def test_complete_self_review_route_passed_marks_verification_requested(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40014SR2",
+                workflow_profile="oneshot",
+                policy={"self_review_policy": "required"},
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014SR2"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = complete_self_review(
+            CompleteSelfReviewRequest(
+                session_id=create_response.session.id,
+                outcome="passed",
+                summary="Reviewed implementation and found no blocking issues.",
+            ),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=create_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.completed)
+        self.assertEqual("self_review_passed", response.event_type)
+        self.assertEqual("verification_requested", response.followup_event_type)
+        self.assertEqual("verification_requested", response.session.current_stage)
+        self.assertTrue(any(item.artifact_type == "self_review_summary" for item in artifacts_response.items))
+
+    def test_complete_self_review_route_with_issues_marks_correction_requested(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40014SR3",
+                workflow_profile="oneshot",
+                policy={"self_review_policy": "required"},
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014SR3"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = complete_self_review(
+            CompleteSelfReviewRequest(
+                session_id=create_response.session.id,
+                outcome="issues_found",
+                summary="Found two naming issues and one missing guard branch.",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.completed)
+        self.assertEqual("self_review_issues_found", response.event_type)
+        self.assertEqual("self_review_correction_requested", response.followup_event_type)
+        self.assertEqual("self_review_correction_requested", response.session.current_stage)
+        self.assertEqual("implementer", response.session.current_owner)
 
     def test_complete_doc_harvest_route_marks_lane_completed(self) -> None:
         create_response = create_session(

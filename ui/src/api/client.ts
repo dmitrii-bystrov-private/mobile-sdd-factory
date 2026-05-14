@@ -21,6 +21,10 @@ const STREAM_EVENT_TYPES = [
   "task_preparation_failed",
   "implementation_requested",
   "implementation_completed",
+  "self_review_requested",
+  "self_review_passed",
+  "self_review_issues_found",
+  "self_review_correction_requested",
   "doc_harvest_requested",
   "doc_harvest_completed",
   "verification_requested",
@@ -207,6 +211,26 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify({
         session_id: sessionId,
+        summary,
+      }),
+    });
+  },
+
+  completeSelfReview(
+    sessionId: number,
+    outcome: "passed" | "issues_found",
+    summary: string,
+  ): Promise<{
+    completed: boolean;
+    event_type: string;
+    followup_event_type: string | null;
+    session: Session;
+  }> {
+    return request("/operator/complete-self-review", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        outcome,
         summary,
       }),
     });

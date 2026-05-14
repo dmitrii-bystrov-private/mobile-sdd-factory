@@ -20,4 +20,7 @@ ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     "verification_correction_requested": {
         IMPLEMENTER_ROLE,
     },
+    "self_review_correction_requested": {
+        IMPLEMENTER_ROLE,
+    },
 }

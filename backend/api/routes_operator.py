@@ -8,6 +8,8 @@ from backend.api.routes_sessions import to_session_response
 from backend.api.schemas import (
     CompleteDocHarvestRequest,
     CompleteDocHarvestResponse,
+    CompleteSelfReviewRequest,
+    CompleteSelfReviewResponse,
     CreateMrRequest,
     CreateMrResponse,
     IngestMrCommentsRequest,
@@ -182,6 +184,28 @@ def complete_doc_harvest(
         completed=True,
         session=to_session_response(session),
         event_type=event.event_type,
+    )
+
+
+@router.post("/complete-self-review", response_model=CompleteSelfReviewResponse)
+def complete_self_review(
+    payload: CompleteSelfReviewRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> CompleteSelfReviewResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.complete_self_review(
+            session_id=payload.session_id,
+            outcome=payload.outcome,
+            summary=payload.summary,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return CompleteSelfReviewResponse(
+        completed=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
     )
 
 

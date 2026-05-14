@@ -261,6 +261,19 @@ class CompleteDocHarvestResponse(BaseModel):
     event_type: str
 
 
+class CompleteSelfReviewRequest(BaseModel):
+    session_id: int
+    outcome: str
+    summary: str
+
+
+class CompleteSelfReviewResponse(BaseModel):
+    completed: bool
+    session: SessionResponse
+    event_type: str
+    followup_event_type: str | None = None
+
+
 class ReopenFromQaRequest(BaseModel):
     session_id: int
     comment_text: str

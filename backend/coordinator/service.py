@@ -445,6 +445,79 @@ class CoordinatorService:
         )
         return session, event
 
+    def complete_self_review(
+        self,
+        session_id: int,
+        outcome: str,
+        summary: str,
+    ) -> tuple[Session, Event, Event]:
+        if self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        normalized_summary = summary.strip()
+        if not normalized_summary:
+            raise IntakeError("Self review summary must not be empty")
+        if outcome not in {"passed", "issues_found"}:
+            raise IntakeError("Self review outcome must be 'passed' or 'issues_found'")
+        if session.current_stage != "self_review_requested":
+            raise IntakeError(f"Session {session_id} is not waiting for self review")
+        if (session.policy or {}).get("self_review_policy") == "disabled":
+            raise IntakeError(f"Session {session_id} has self review disabled by policy")
+
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "self-review",
+            "self-review-summary.md",
+            normalized_summary,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="self-review",
+            artifact_type="self_review_summary",
+            path=str(artifact_path),
+            metadata={
+                "outcome": outcome,
+                "summary_length": len(normalized_summary),
+            },
+        )
+
+        if outcome == "passed":
+            event = self._append_event(
+                session_id=session.id,
+                event_type="self_review_passed",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "summary_length": len(normalized_summary),
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                },
+            )
+            session, followup_event = self._enqueue_verification(
+                session=session,
+                source_event=event,
+            )
+            return session, event, followup_event
+
+        event = self._append_event(
+            session_id=session.id,
+            event_type="self_review_issues_found",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "summary_length": len(normalized_summary),
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        session, followup_event = self._enqueue_self_review_correction(
+            session=session,
+            source_event=event,
+        )
+        return session, event, followup_event
+
     def send_to_test_handoff(
         self,
         session_id: int,
@@ -1003,42 +1076,30 @@ class CoordinatorService:
             raise IntakeError("No active implementer work item found for the session")
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
 
-        verification_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
-        if verification_role is None:
-            raise IntakeError("Verification coordinator role is missing for the session")
+        if (
+            active_item.work_type == "implementation"
+            and (session.policy or {}).get("self_review_policy") == "required"
+        ):
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="self_review_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="self_review_requested",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "source_event_id": source_event.id,
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                },
+            )
+            return session, event
 
-        verification_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="verification",
-            title=f"Verification for {session.task_key}",
-            owner_role_id=verification_role.id,
-            source_event_id=source_event.id,
-            priority=90,
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="verification_requested",
-            current_owner=VERIFICATION_COORDINATOR_ROLE,
-        )
-        self._dispatch_role_work(
-            session=session,
-            role=verification_role,
-            work_item=verification_item,
-            stage_name="verification_requested",
-            instruction=f"Run deterministic verification for {session.task_key}.",
-        )
-        event = self._append_event(
-            session_id=session.id,
-            event_type="verification_requested",
-            producer_type="coordinator",
-            payload={
-                "task_key": session.task_key,
-                "role_name": VERIFICATION_COORDINATOR_ROLE,
-                "work_item_id": verification_item.id,
-                "current_stage": session.current_stage,
-            },
-        )
-        return session, event
+        return self._enqueue_verification(session=session, source_event=source_event)
 
     def _handle_verification_failed(
         self,
@@ -1239,6 +1300,92 @@ class CoordinatorService:
             },
         )
 
+    def _enqueue_self_review_correction(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        if implementer_role is None:
+            raise IntakeError("Implementer role is missing for the session")
+
+        correction_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="self_review_correction",
+            title=f"Self review corrections for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            source_event_id=source_event.id,
+            priority=92,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="self_review_correction_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._dispatch_role_work(
+            session=session,
+            role=implementer_role,
+            work_item=correction_item,
+            stage_name="self_review_correction_requested",
+            instruction=f"Apply self review corrections for {session.task_key}.",
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="self_review_correction_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": correction_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _enqueue_verification(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        verification_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        if verification_role is None:
+            raise IntakeError("Verification coordinator role is missing for the session")
+
+        verification_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification",
+            title=f"Verification for {session.task_key}",
+            owner_role_id=verification_role.id,
+            source_event_id=source_event.id,
+            priority=90,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_requested",
+            current_owner=VERIFICATION_COORDINATOR_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._dispatch_role_work(
+            session=session,
+            role=verification_role,
+            work_item=verification_item,
+            stage_name="verification_requested",
+            instruction=f"Run deterministic verification for {session.task_key}.",
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="verification_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": VERIFICATION_COORDINATOR_ROLE,
+                "work_item_id": verification_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
     def _get_session_or_raise(self, session_id: int) -> Session:
         for session in self.session_repository.list_all():
             if session.id == session_id:
@@ -1254,6 +1401,7 @@ class CoordinatorService:
         if role_name == IMPLEMENTER_ROLE and output_type == "completed":
             if session.current_stage in {
                 "implementation_requested",
+                "self_review_correction_requested",
                 "verification_correction_requested",
                 "mr_followup_requested",
                 "qa_reopen_requested",
@@ -1571,6 +1719,7 @@ class CoordinatorService:
             return None
         if active_item.work_type not in {
             "implementation",
+            "self_review_correction",
             "verification_correction",
             "followup_implementation",
         }:
@@ -1619,6 +1768,8 @@ class CoordinatorService:
             return f"Run deterministic verification for {task_key}."
         if stage_name == "verification_correction_requested":
             return f"Apply verification corrections for {task_key}."
+        if stage_name == "self_review_correction_requested":
+            return f"Apply self review corrections for {task_key}."
         if stage_name == "mr_followup_requested":
             return f"Apply MR follow-up changes for {task_key}."
         if stage_name == "qa_reopen_requested":
