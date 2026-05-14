@@ -98,3 +98,48 @@ class WorkItemRepository:
                 (work_item_id,),
             ).fetchone()
         return work_item_from_row(row)
+
+    def update_assignment(
+        self,
+        work_item_id: int,
+        owner_role_id: int | None,
+        status: WorkItemStatus,
+    ) -> WorkItem:
+        with self.db.connect() as connection:
+            connection.execute(
+                """
+                UPDATE work_items
+                SET owner_role_id = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (owner_role_id, status.value, work_item_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM work_items WHERE id = ?",
+                (work_item_id,),
+            ).fetchone()
+        return work_item_from_row(row)
+
+    def update_shape(
+        self,
+        work_item_id: int,
+        *,
+        work_type: str,
+        title: str,
+        owner_role_id: int | None,
+        status: WorkItemStatus,
+    ) -> WorkItem:
+        with self.db.connect() as connection:
+            connection.execute(
+                """
+                UPDATE work_items
+                SET work_type = ?, title = ?, owner_role_id = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (work_type, title, owner_role_id, status.value, work_item_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM work_items WHERE id = ?",
+                (work_item_id,),
+            ).fetchone()
+        return work_item_from_row(row)

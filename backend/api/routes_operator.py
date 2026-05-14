@@ -28,6 +28,8 @@ from backend.api.schemas import (
     RetrySessionResponse,
     SendToTestRequest,
     SendToTestResponse,
+    StartSubtaskGraphRequest,
+    StartSubtaskGraphResponse,
     ResumeSessionRequest,
     ResumeSessionResponse,
     RunLoopOnceResponse,
@@ -225,6 +227,26 @@ def send_to_test(
         handed_off=True,
         session=to_session_response(session),
         event_type=event.event_type,
+    )
+
+
+@router.post("/start-subtask-graph", response_model=StartSubtaskGraphResponse)
+def start_subtask_graph(
+    payload: StartSubtaskGraphRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> StartSubtaskGraphResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.start_subtask_graph(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return StartSubtaskGraphResponse(
+        started=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type,
     )
 
 

@@ -77,6 +77,7 @@ def build_dependencies() -> AppDependencies:
         snapshot_adapter=snapshot_adapter,
         gitlab_adapter=gitlab_adapter,
         artifacts_root=config.workdir_root / "factory-artifacts",
+        workdir_root=config.workdir_root,
         event_bus=event_bus,
     )
     loop_runner = CoordinatorLoopRunner(

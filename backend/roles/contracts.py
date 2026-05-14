@@ -17,6 +17,9 @@ ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     "story_spec_requested": {
         IMPLEMENTER_ROLE,
     },
+    "subtask_implementation_requested": {
+        IMPLEMENTER_ROLE,
+    },
     "implementation_requested": {
         IMPLEMENTER_ROLE,
     },

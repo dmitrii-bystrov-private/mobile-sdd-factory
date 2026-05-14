@@ -19,6 +19,13 @@ const STREAM_EVENT_TYPES = [
   "task_session_reused",
   "task_prepared",
   "task_preparation_failed",
+  "bug_analysis_requested",
+  "bug_analysis_completed",
+  "story_spec_requested",
+  "story_spec_completed",
+  "subtask_graph_requested",
+  "subtask_implementation_requested",
+  "subtask_completed",
   "implementation_requested",
   "implementation_completed",
   "self_review_requested",
@@ -244,6 +251,22 @@ export const apiClient = {
     session: Session;
   }> {
     return request("/operator/send-to-test", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+      }),
+    });
+  },
+
+  startSubtaskGraph(
+    sessionId: number,
+  ): Promise<{
+    started: boolean;
+    event_type: string;
+    followup_event_type: string;
+    session: Session;
+  }> {
+    return request("/operator/start-subtask-graph", {
       method: "POST",
       body: JSON.stringify({
         session_id: sessionId,

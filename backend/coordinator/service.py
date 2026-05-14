@@ -9,6 +9,7 @@ import json
 from backend.api.sse import SessionEventBus
 from backend.coordinator.artifacts import write_text_artifact
 from backend.coordinator.intake import IntakeError, classify_task_readiness
+from backend.coordinator.subtasks import read_snapshot_subtasks, unresolved_subtasks
 from backend.coordinator.hydration import build_role_hydration
 from backend.models.event import Event
 from backend.models.enums import RoleStatus, SessionStatus, WorkItemStatus
@@ -50,6 +51,7 @@ class CoordinatorService:
     snapshot_adapter: SnapshotAdapter | None = None
     gitlab_adapter: GitLabAdapter | None = None
     artifacts_root: Path | None = None
+    workdir_root: Path | None = None
     event_bus: SessionEventBus | None = None
 
     def create_task_session(
@@ -242,6 +244,9 @@ class CoordinatorService:
             return session, followup_event
         if event_type == "story_spec_completed":
             session, followup_event = self._handle_story_spec_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "subtask_completed":
+            session, followup_event = self._handle_subtask_completed(session, accepted_event)
             return session, followup_event
         if event_type == "implementation_completed":
             session, followup_event = self._handle_implementation_completed(session, accepted_event)
@@ -666,6 +671,76 @@ class CoordinatorService:
         refreshed = self._get_session_or_raise(session.id)
         return refreshed, event, followup_event
 
+    def start_subtask_graph(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event, Event]:
+        if self.workdir_root is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing workdir root or artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        if session.workflow_profile != "story_full":
+            raise IntakeError(
+                f"Session {session_id} is {session.workflow_profile}, but subtask graph is only supported for story_full"
+            )
+        if session.status != SessionStatus.ACTIVE:
+            raise IntakeError(
+                f"Session {session_id} must be active before starting subtask graph"
+            )
+        if session.current_stage != "implementation_requested":
+            raise IntakeError(
+                f"Session {session_id} must be at implementation_requested before starting subtask graph"
+            )
+        active_item = self._find_active_implementer_work_item(session)
+        if active_item is None or active_item.work_type != "implementation":
+            raise IntakeError("No active implementation work item found for subtask graph start")
+
+        statuses_file = self.workdir_root / session.task_key / "statuses.md"
+        try:
+            subtasks = read_snapshot_subtasks(statuses_file)
+        except FileNotFoundError as exc:
+            raise IntakeError(f"statuses.md not found for session {session.task_key}") from exc
+
+        unresolved = unresolved_subtasks(subtasks)
+        if not unresolved:
+            raise IntakeError(f"No unresolved subtasks found for session {session.task_key}")
+
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "subtask-graph",
+            "statuses.md",
+            statuses_file.read_text(),
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="subtask-graph",
+            artifact_type="subtask_statuses_markdown",
+            path=str(artifact_path),
+            metadata={
+                "subtask_count": len(subtasks),
+                "unresolved_count": len(unresolved),
+            },
+        )
+
+        event = self._append_event(
+            session_id=session.id,
+            event_type="subtask_graph_requested",
+            producer_type="operator",
+            payload={
+                "subtask_count": len(subtasks),
+                "unresolved_count": len(unresolved),
+            },
+        )
+        followup_event = self._enqueue_subtask_graph(
+            session=session,
+            source_event=event,
+            subtasks=subtasks,
+            initial_work_item=active_item,
+        )
+        refreshed = self._get_session_or_raise(session.id)
+        return refreshed, event, followup_event
+
     def handle_role_output(
         self,
         session_id: int,
@@ -697,6 +772,8 @@ class CoordinatorService:
             session, followup_event = self._handle_bug_analysis_completed(session, accepted_event)
         elif mapped_event_type == "story_spec_completed":
             session, followup_event = self._handle_story_spec_completed(session, accepted_event)
+        elif mapped_event_type == "subtask_completed":
+            session, followup_event = self._handle_subtask_completed(session, accepted_event)
         elif mapped_event_type == "implementation_completed":
             session, followup_event = self._handle_implementation_completed(session, accepted_event)
         elif mapped_event_type == "verification_failed":
@@ -1253,6 +1330,131 @@ class CoordinatorService:
         session = self._get_session_or_raise(session.id)
         return session, event
 
+    def _enqueue_subtask_graph(
+        self,
+        session: Session,
+        source_event: Event,
+        subtasks: list,
+        initial_work_item: WorkItem,
+    ) -> Event:
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        if implementer_role is None:
+            raise IntakeError("Implementer role is missing for the session")
+
+        unresolved = unresolved_subtasks(subtasks)
+        if not unresolved:
+            raise IntakeError("No unresolved subtasks found for subtask graph dispatch")
+
+        first_subtask = unresolved[0]
+        active_item = self.work_item_repository.update_shape(
+            initial_work_item.id,
+            work_type="subtask_implementation",
+            title=f"Subtask implementation for {first_subtask.key}: {first_subtask.title}",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        for index, subtask in enumerate(unresolved[1:], start=1):
+            self.work_item_repository.create(
+                session_id=session.id,
+                work_type="subtask_implementation",
+                title=f"Subtask implementation for {subtask.key}: {subtask.title}",
+                owner_role_id=None,
+                source_event_id=source_event.id,
+                priority=max(70 - index, 1),
+                status=WorkItemStatus.UNASSIGNED,
+            )
+
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._dispatch_role_work(
+            session=session,
+            role=implementer_role,
+            work_item=active_item,
+            stage_name="subtask_implementation_requested",
+            instruction=(
+                f"Implement subtask {first_subtask.key} for parent task {session.task_key}. "
+                "Focus only on this subtask scope before moving to the next one."
+            ),
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="subtask_implementation_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": active_item.id,
+                "current_stage": session.current_stage,
+                "subtask_key": first_subtask.key,
+                "remaining_subtask_count": len(unresolved),
+            },
+        )
+
+    def _handle_subtask_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        active_item = self._find_active_implementer_work_item(session)
+        if active_item is None or active_item.work_type != "subtask_implementation":
+            raise IntakeError("No active subtask implementation work item found for the session")
+
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        if implementer_role is None:
+            raise IntakeError("Implementer role is missing for the session")
+
+        remaining_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "subtask_implementation"
+            and item.status == WorkItemStatus.UNASSIGNED
+        ]
+        if remaining_items:
+            next_item = self.work_item_repository.update_assignment(
+                remaining_items[0].id,
+                owner_role_id=implementer_role.id,
+                status=WorkItemStatus.ASSIGNED,
+            )
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="subtask_implementation_requested",
+                current_owner=IMPLEMENTER_ROLE,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            self._dispatch_role_work(
+                session=session,
+                role=implementer_role,
+                work_item=next_item,
+                stage_name="subtask_implementation_requested",
+                instruction=(
+                    f"Continue subtask implementation for parent task {session.task_key}. "
+                    "Finish this subtask before moving forward."
+                ),
+            )
+            return session, self._append_event(
+                session_id=session.id,
+                event_type="subtask_implementation_requested",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "role_name": IMPLEMENTER_ROLE,
+                    "work_item_id": next_item.id,
+                    "current_stage": session.current_stage,
+                    "remaining_subtask_count": len(remaining_items),
+                },
+            )
+
+        return self._advance_after_coding_completion(
+            session=session,
+            source_event=source_event,
+            completed_work_type="subtask_implementation",
+        )
+
     def _handle_implementation_completed(
         self,
         session: Session,
@@ -1263,8 +1465,21 @@ class CoordinatorService:
             raise IntakeError("No active implementer work item found for the session")
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
 
+        return self._advance_after_coding_completion(
+            session=session,
+            source_event=source_event,
+            completed_work_type=active_item.work_type,
+        )
+
+    def _advance_after_coding_completion(
+        self,
+        session: Session,
+        source_event: Event,
+        completed_work_type: str,
+    ) -> tuple[Session, Event]:
+
         if (
-            active_item.work_type == "implementation"
+            completed_work_type in {"implementation", "subtask_implementation"}
             and (session.policy or {}).get("self_review_policy") == "required"
         ):
             session = self.session_repository.update_stage_and_owner(
@@ -1591,6 +1806,8 @@ class CoordinatorService:
                 return "bug_analysis_completed"
             if session.current_stage == "story_spec_requested":
                 return "story_spec_completed"
+            if session.current_stage == "subtask_implementation_requested":
+                return "subtask_completed"
             if session.current_stage in {
                 "implementation_requested",
                 "self_review_correction_requested",
@@ -1912,6 +2129,7 @@ class CoordinatorService:
         if active_item.work_type not in {
             "bug_analysis",
             "story_spec",
+            "subtask_implementation",
             "implementation",
             "self_review_correction",
             "verification_correction",
@@ -1965,6 +2183,11 @@ class CoordinatorService:
             return (
                 f"Prepare a concise implementation spec for story {task_key} before coding. "
                 "Clarify the intended scope, key constraints, and an implementation approach that will guide the next coding step."
+            )
+        if stage_name == "subtask_implementation_requested":
+            return (
+                f"Continue sequential subtask implementation for {task_key}. "
+                "Finish the currently assigned subtask before moving to the next one."
             )
         if stage_name == "implementation_requested":
             return f"Start implementation work for {task_key}."

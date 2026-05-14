@@ -250,6 +250,17 @@ class SendToTestResponse(BaseModel):
     event_type: str
 
 
+class StartSubtaskGraphRequest(BaseModel):
+    session_id: int
+
+
+class StartSubtaskGraphResponse(BaseModel):
+    started: bool
+    session: SessionResponse
+    event_type: str
+    followup_event_type: str
+
+
 class CompleteDocHarvestRequest(BaseModel):
     session_id: int
     summary: str

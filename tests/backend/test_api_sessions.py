@@ -25,6 +25,7 @@ try:
     from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
     from backend.api.routes_operator import send_to_test
+    from backend.api.routes_operator import start_subtask_graph
     from backend.api.routes_operator import ingest_mr_comments
     from backend.api.routes_operator import loop_status, start_loop, stop_loop
     from backend.api.schemas import (
@@ -39,6 +40,7 @@ try:
         ResumeSessionRequest,
         RetrySessionRequest,
         SendToTestRequest,
+        StartSubtaskGraphRequest,
     )
     from backend.coordinator.service import CoordinatorService
     from backend.coordinator.loop_runner import CoordinatorLoopRunner
@@ -127,6 +129,7 @@ class SessionApiTests(unittest.TestCase):
             snapshot_adapter=FakeSnapshotAdapter(),
             gitlab_adapter=FakeGitLabAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
+            workdir_root=Path(self.temp_dir.name),
             event_bus=event_bus,
         )
         loop_runner = CoordinatorLoopRunner(
@@ -152,6 +155,11 @@ class SessionApiTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def write_statuses_file(self, task_key: str, content: str) -> None:
+        task_dir = Path(self.temp_dir.name) / task_key
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "statuses.md").write_text(content)
 
     def test_create_session_route_returns_created_session(self) -> None:
         response = create_session(
@@ -366,6 +374,117 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("implementation_requested", response.followup_event_type)
         self.assertEqual("implementation_requested", response.session.current_stage)
         self.assertEqual(2, len(work_items_response.items))
+
+    def test_start_subtask_graph_route_converts_story_session(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003SUBTASK",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003SUBTASK"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="story_spec_completed",
+                payload={"summary": "Split work into subtasks"},
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40003SUBTASK",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40003SUBTASK | Story | Parent story | In Progress |
+| IOS-40100 | Sub-task | Build repository | To Do |
+| IOS-40101 | Sub-task | Connect presenter | In Progress |
+| IOS-40102 | Sub-task | Final QA polish | Ready for test |
+""",
+        )
+
+        response = start_subtask_graph(
+            StartSubtaskGraphRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+        work_items_response = list_work_items(
+            session_id=create_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.started)
+        self.assertEqual("subtask_graph_requested", response.event_type)
+        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+        self.assertEqual(3, len(work_items_response.items))
+
+    def test_subtask_completed_event_keeps_story_session_in_subtask_lane(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40004SUBTASK",
+                workflow_profile="story_full",
+                policy={"self_review_policy": "disabled"},
+            ),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40004SUBTASK"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="story_spec_completed",
+                payload={"summary": "Split work into subtasks"},
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40004SUBTASK",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40004SUBTASK | Story | Parent story | In Progress |
+| IOS-40110 | Sub-task | Build data source | To Do |
+| IOS-40111 | Sub-task | Wire screen state | To Do |
+""",
+        )
+        start_subtask_graph(
+            StartSubtaskGraphRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        first_response = inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="subtask_completed",
+                payload={"summary": "First subtask done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        second_response = inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="subtask_completed",
+                payload={"summary": "Second subtask done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("subtask_implementation_requested", first_response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", first_response.session.current_stage)
+        self.assertEqual("verification_requested", second_response.followup_event_type)
+        self.assertEqual("verification_requested", second_response.session.current_stage)
 
     def test_verification_failed_event_returns_correction_handoff(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

@@ -95,6 +95,10 @@ export function OperatorActions({
   const canCompleteDocHarvest =
     (session.current_stage === "doc_harvest_requested" && session.status === "active") ||
     (session.current_stage === "completed" && session.status === "completed");
+  const canStartSubtaskGraph =
+    session.status === "active" &&
+    session.workflow_profile === "story_full" &&
+    session.current_stage === "implementation_requested";
   const canCreateMr = session.status === "completed" && session.current_stage !== "mr_handoff_completed";
   const canSendToTest =
     session.status === "completed" && session.current_stage === "mr_handoff_completed";
@@ -140,6 +144,14 @@ export function OperatorActions({
           type="button"
         >
           Run Loop Once
+        </button>
+        <button
+          className="action-button action-button-strong"
+          disabled={busy || !canStartSubtaskGraph}
+          onClick={() => run(() => apiClient.startSubtaskGraph(session.id))}
+          type="button"
+        >
+          Start Subtask Graph
         </button>
         <button
           className="action-button action-button-strong"

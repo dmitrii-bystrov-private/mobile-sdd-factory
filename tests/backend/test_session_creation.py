@@ -107,11 +107,17 @@ class SessionCreationTests(unittest.TestCase):
             snapshot_adapter=FakeSnapshotAdapter(),
             gitlab_adapter=FakeGitLabAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
+            workdir_root=Path(self.temp_dir.name),
             event_bus=self.event_bus,
         )
 
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
+
+    def write_statuses_file(self, task_key: str, content: str) -> None:
+        task_dir = Path(self.temp_dir.name) / task_key
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "statuses.md").write_text(content)
 
     def test_create_task_session_creates_roles_and_event(self) -> None:
         session, event, created = self.coordinator.create_task_session(
@@ -408,6 +414,98 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Start implementation work for IOS-30003STORY.", sent_inputs[-1])
         self.assertIn("Story spec summary: Need a new screen plus navigation wiring", sent_inputs[-1])
+
+    def test_start_subtask_graph_converts_story_implementation_into_subtask_lane(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003SUBTASK",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003SUBTASK")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="story_spec_completed",
+            payload={"summary": "Split into focused subtasks"},
+        )
+        self.write_statuses_file(
+            "IOS-30003SUBTASK",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30003SUBTASK | Story | Parent story | In Progress |
+| IOS-30010 | Sub-task | Implement networking layer | To Do |
+| IOS-30011 | Sub-task | Wire screen presentation | In Progress |
+| IOS-30012 | Sub-task | Update docs | Ready for test |
+""",
+        )
+
+        updated_session, event, followup_event = self.coordinator.start_subtask_graph(session.id)
+        work_items = self.work_item_repository.list_for_session(session.id)
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertEqual("subtask_graph_requested", event.event_type)
+        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertEqual(
+            [
+                ("story_spec", "completed"),
+                ("subtask_implementation", "assigned"),
+                ("subtask_implementation", "unassigned"),
+            ],
+            sorted((item.work_type, item.status.value) for item in work_items),
+        )
+        self.assertIn("Implement subtask IOS-30010", sent_inputs[-1])
+
+    def test_subtask_completion_assigns_next_subtask_before_verification(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004SUBTASK",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004SUBTASK")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="story_spec_completed",
+            payload={"summary": "Split into focused subtasks"},
+        )
+        self.write_statuses_file(
+            "IOS-30004SUBTASK",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004SUBTASK | Story | Parent story | In Progress |
+| IOS-30020 | Sub-task | Add data source | To Do |
+| IOS-30021 | Sub-task | Wire view state | To Do |
+""",
+        )
+        self.coordinator.start_subtask_graph(session.id)
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="subtask_completed",
+            payload={"summary": "First subtask implemented"},
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual(
+            ["assigned", "completed", "completed"],
+            sorted(item.status.value for item in work_items),
+        )
+
+        final_session, final_followup = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="subtask_completed",
+            payload={"summary": "Second subtask implemented"},
+        )
+
+        self.assertEqual("verification_requested", final_followup.event_type)
+        self.assertEqual("verification_requested", final_session.current_stage)
 
     def test_verification_failed_moves_session_back_to_implementer(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")
