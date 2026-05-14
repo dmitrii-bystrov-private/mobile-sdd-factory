@@ -10,6 +10,7 @@ from backend.session_backend.tmux_backend import TmuxSessionBackend
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.db import Database
 from backend.state.event_repository import EventRepository
+from backend.state.memory_item_repository import MemoryItemRepository
 from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
@@ -91,6 +92,7 @@ class SessionCreationTests(unittest.TestCase):
         self.session_repository = SessionRepository(self.database)
         self.role_repository = RoleRepository(self.database)
         self.event_repository = EventRepository(self.database)
+        self.memory_item_repository = MemoryItemRepository(self.database)
         self.artifact_repository = ArtifactRepository(self.database)
         self.work_item_repository = WorkItemRepository(self.database)
         self.session_backend = TmuxSessionBackend()
@@ -99,6 +101,7 @@ class SessionCreationTests(unittest.TestCase):
             session_repository=self.session_repository,
             role_repository=self.role_repository,
             event_repository=self.event_repository,
+            memory_item_repository=self.memory_item_repository,
             artifact_repository=self.artifact_repository,
             work_item_repository=self.work_item_repository,
             session_backend=self.session_backend,
@@ -265,10 +268,16 @@ class SessionCreationTests(unittest.TestCase):
         )
         work_items = self.work_item_repository.list_for_session(session.id)
         events = self.event_repository.list_for_session(session.id)
+        memory_items = self.memory_item_repository.list_matching(
+            item_type="verification_failure_lesson",
+            platform="ios",
+            workflow_profile="story_full",
+        )
 
         self.assertEqual("verification_correction_requested", updated_session.current_stage)
         self.assertEqual("implementer", updated_session.current_owner)
         self.assertEqual("verification_correction_requested", followup_event.event_type)
+        self.assertEqual(1, len(memory_items))
         self.assertEqual(
             sorted(
                 [
@@ -290,6 +299,7 @@ class SessionCreationTests(unittest.TestCase):
                 "verification_requested",
                 "verification_failed",
                 "role_input_dispatched",
+                "memory_item_created",
                 "verification_correction_requested",
             ],
             [item.event_type for item in events],
@@ -299,6 +309,37 @@ class SessionCreationTests(unittest.TestCase):
         sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Apply verification corrections for IOS-30004.", sent_inputs[-1])
+        self.assertTrue(any(item.event_type == "memory_item_created" for item in events))
+
+    def test_prepare_task_session_attaches_matching_verification_failure_lessons(self) -> None:
+        source_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30026A")
+        self.coordinator.handle_operator_event(
+            session_id=source_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=source_session.id,
+            event_type="verification_failed",
+            payload={
+                "summary": "Missing edge-case guard",
+                "details": "nil branch was not handled",
+            },
+        )
+
+        prepared_session, _, _, details = self.coordinator.prepare_task_session("IOS-30026B")
+        artifacts = self.artifact_repository.list_for_session(prepared_session.id)
+        events = self.event_repository.list_for_session(prepared_session.id)
+        implementer_role = self.role_repository.get_by_name(prepared_session.id, "implementer")
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertEqual(1, details["memory_item_count"])
+        self.assertTrue(
+            any(item.artifact_type == "verification_failure_lessons_markdown" for item in artifacts)
+        )
+        self.assertTrue(any(item.event_type == "memory_lessons_attached" for item in events))
+        self.assertIn("Relevant previous verification lessons for similar work:", sent_inputs[-1])
+        self.assertIn("Missing edge-case guard", sent_inputs[-1])
 
     def test_verification_passed_completes_session(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30005")

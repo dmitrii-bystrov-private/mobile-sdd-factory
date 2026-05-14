@@ -9,6 +9,7 @@ from backend.models.artifact import Artifact
 from backend.models.checkpoint import Checkpoint
 from backend.models.enums import RoleStatus, SessionStatus, VerificationStatus, WorkItemStatus
 from backend.models.event import Event
+from backend.models.memory_item import MemoryItem
 from backend.models.role import Role
 from backend.models.session import Session
 from backend.models.verification import VerificationRun
@@ -54,6 +55,23 @@ def event_from_row(row: sqlite3.Row) -> Event:
         payload=json.loads(row["payload_json"]),
         correlation_id=row["correlation_id"],
         created_at=row["created_at"],
+    )
+
+
+def memory_item_from_row(row: sqlite3.Row) -> MemoryItem:
+    return MemoryItem(
+        id=row["id"],
+        item_type=row["item_type"],
+        status=row["status"],
+        platform=row["platform"],
+        workflow_profile=row["workflow_profile"],
+        source_session_id=row["source_session_id"],
+        source_event_id=row["source_event_id"],
+        summary=row["summary"],
+        metadata=json.loads(row["metadata_json"]),
+        use_count=row["use_count"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )
 
 

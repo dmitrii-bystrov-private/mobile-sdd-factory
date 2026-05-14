@@ -27,6 +27,7 @@ from backend.session_policy import infer_workflow_profile, normalize_session_pol
 from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.event_repository import EventRepository
+from backend.state.memory_item_repository import MemoryItemRepository
 from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
@@ -42,6 +43,7 @@ class CoordinatorService:
     session_repository: SessionRepository
     role_repository: RoleRepository
     event_repository: EventRepository
+    memory_item_repository: MemoryItemRepository
     artifact_repository: ArtifactRepository
     work_item_repository: WorkItemRepository
     session_backend: SessionBackend
@@ -197,18 +199,21 @@ class CoordinatorService:
                 "snapshot_exit_code": snapshot_result.returncode,
             },
         )
+        lesson_summaries = self._attach_verification_failure_lessons(session)
         details = {
             "resolved_task_key": resolved_task_key,
             "issue_type": issue_type,
             "readiness": readiness,
             "snapshot_exit_code": snapshot_result.returncode,
             "followup_event_type": None,
+            "memory_item_count": len(lesson_summaries),
         }
         if snapshot_result.ok and readiness == "ready_for_execution":
             details["followup_event_type"] = self._enqueue_initial_implementation(
                 session=session,
                 resolved_task_key=resolved_task_key,
                 source_event=event,
+                verification_lessons=lesson_summaries,
             ).event_type
         return session, event, created, details
 
@@ -1029,6 +1034,7 @@ class CoordinatorService:
         session: Session,
         resolved_task_key: str,
         source_event: Event,
+        verification_lessons: list[str] | None = None,
     ) -> Event:
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         if implementer_role is None:
@@ -1047,12 +1053,20 @@ class CoordinatorService:
             current_stage="implementation_requested",
             current_owner=IMPLEMENTER_ROLE,
         )
+        instruction = f"Start implementation work for {resolved_task_key}."
+        if verification_lessons:
+            lesson_lines = "\n".join(f"- {lesson}" for lesson in verification_lessons)
+            instruction = (
+                f"{instruction}\n\n"
+                "Relevant previous verification lessons for similar work:\n"
+                f"{lesson_lines}"
+            )
         self._dispatch_role_work(
             session=session,
             role=implementer_role,
             work_item=work_item,
             stage_name="implementation_requested",
-            instruction=f"Start implementation work for {resolved_task_key}.",
+            instruction=instruction,
         )
         return self._append_event(
             session_id=session.id,
@@ -1141,6 +1155,10 @@ class CoordinatorService:
             stage_name="verification_correction_requested",
             instruction=f"Apply verification corrections for {session.task_key}.",
         )
+        memory_item = self._create_verification_failure_memory_item(
+            session=session,
+            source_event=source_event,
+        )
         event = self._append_event(
             session_id=session.id,
             event_type="verification_correction_requested",
@@ -1150,6 +1168,7 @@ class CoordinatorService:
                 "role_name": IMPLEMENTER_ROLE,
                 "work_item_id": correction_item.id,
                 "current_stage": session.current_stage,
+                "memory_item_id": memory_item.id,
             },
         )
         return session, event
@@ -1385,6 +1404,116 @@ class CoordinatorService:
             },
         )
         return session, event
+
+    def _create_verification_failure_memory_item(
+        self,
+        session: Session,
+        source_event: Event,
+    ):
+        summary = self._build_verification_failure_lesson_summary(session, source_event)
+        metadata = {
+            "task_key": session.task_key,
+            "event_type": source_event.event_type,
+            "source_stage": session.current_stage,
+            "failure_payload": source_event.payload,
+        }
+        memory_item = self.memory_item_repository.create(
+            item_type="verification_failure_lesson",
+            status="active",
+            platform=self._platform_for_task_key(session.task_key),
+            workflow_profile=session.workflow_profile,
+            source_session_id=session.id,
+            source_event_id=source_event.id,
+            summary=summary,
+            metadata=metadata,
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="memory_item_created",
+            producer_type="coordinator",
+            payload={
+                "memory_item_id": memory_item.id,
+                "item_type": memory_item.item_type,
+                "platform": memory_item.platform,
+                "workflow_profile": memory_item.workflow_profile,
+            },
+        )
+        return memory_item
+
+    def _attach_verification_failure_lessons(
+        self,
+        session: Session,
+    ) -> list[str]:
+        if self.artifacts_root is None:
+            return []
+        platform = self._platform_for_task_key(session.task_key)
+        memory_items = self.memory_item_repository.list_matching(
+            item_type="verification_failure_lesson",
+            platform=platform,
+            workflow_profile=session.workflow_profile,
+        )
+        filtered_items = [
+            item
+            for item in memory_items
+            if item.source_session_id != session.id
+        ][:3]
+        if not filtered_items:
+            return []
+
+        for item in filtered_items:
+            self.memory_item_repository.increment_use_count(item.id)
+        markdown_lines = ["# Reused Verification Failure Lessons", ""]
+        for item in filtered_items:
+            markdown_lines.append(f"- {item.summary}")
+        content = "\n".join(markdown_lines) + "\n"
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "memory",
+            "verification-failure-lessons.md",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="memory",
+            artifact_type="verification_failure_lessons_markdown",
+            path=str(artifact_path),
+            metadata={
+                "item_ids": [item.id for item in filtered_items],
+                "item_count": len(filtered_items),
+                "platform": platform,
+                "workflow_profile": session.workflow_profile,
+            },
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="memory_lessons_attached",
+            producer_type="coordinator",
+            payload={
+                "item_ids": [item.id for item in filtered_items],
+                "item_count": len(filtered_items),
+                "item_type": "verification_failure_lesson",
+            },
+        )
+        return [item.summary for item in filtered_items]
+
+    def _build_verification_failure_lesson_summary(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> str:
+        summary = str(source_event.payload.get("summary") or "").strip()
+        details = str(source_event.payload.get("details") or "").strip()
+        if summary and details:
+            return f"{summary} ({details})"
+        if summary:
+            return summary
+        if details:
+            return details
+        return (
+            f"Verification failed for {session.workflow_profile} work on {self._platform_for_task_key(session.task_key)}; "
+            "reuse this as a reminder to strengthen implementation and review checks before verification."
+        )
 
     def _get_session_or_raise(self, session_id: int) -> Session:
         for session in self.session_repository.list_all():
@@ -1788,6 +1917,13 @@ class CoordinatorService:
             if stripped.startswith(marker):
                 return stripped.removeprefix(marker).strip() or None
         return None
+
+    def _platform_for_task_key(self, task_key: str) -> str:
+        if task_key.startswith("IOS-"):
+            return "ios"
+        if task_key.startswith("ANDR-"):
+            return "android"
+        return "unknown"
 
     def _dispatch_role_work(
         self,
