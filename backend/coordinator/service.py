@@ -305,6 +305,93 @@ class CoordinatorService:
         refreshed = self._get_session_or_raise(session.id)
         return refreshed, event, followup_event, discussion_count
 
+    def create_mr_handoff(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event, str | None]:
+        if self.gitlab_adapter is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing GitLab adapter or artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.COMPLETED:
+            raise IntakeError(
+                f"Session {session_id} must be completed before MR handoff can run"
+            )
+        if session.current_stage == "mr_handoff_completed":
+            raise IntakeError(f"Session {session_id} has already completed MR handoff")
+
+        result = self.gitlab_adapter.create_mr(session.task_key)
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "mr-handoff",
+            "create-mr.stdout.log",
+            result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "mr-handoff",
+            "create-mr.stderr.log",
+            result.stderr,
+        )
+        mr_url = self._extract_mr_url(result.stdout)
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="mr-handoff",
+            artifact_type="mr_handoff_stdout",
+            path=str(stdout_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+                "mr_url": mr_url,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="mr-handoff",
+            artifact_type="mr_handoff_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+
+        if not result.ok:
+            event = self._append_event(
+                session_id=session.id,
+                event_type="mr_handoff_failed",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "returncode": result.returncode,
+                    "mr_url": mr_url,
+                },
+            )
+            return session, event, mr_url
+
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="mr_handoff_completed",
+            current_owner=None,
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="mr_handoff_completed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "returncode": result.returncode,
+                "mr_url": mr_url,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event, mr_url
+
     def reopen_from_qa(
         self,
         session_id: int,
@@ -1380,6 +1467,16 @@ class CoordinatorService:
 
     def _count_mr_discussions(self, markdown: str) -> int:
         return sum(1 for line in markdown.splitlines() if line.startswith("## Discussion "))
+
+    def _extract_mr_url(self, stdout: str) -> str | None:
+        for line in stdout.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("http://") or stripped.startswith("https://"):
+                return stripped
+            marker = "MR already exists: "
+            if stripped.startswith(marker):
+                return stripped.removeprefix(marker).strip() or None
+        return None
 
     def _dispatch_role_work(
         self,

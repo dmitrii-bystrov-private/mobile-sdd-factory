@@ -29,6 +29,8 @@ const STREAM_EVENT_TYPES = [
   "mr_comments_empty",
   "mr_comments_received",
   "mr_followup_requested",
+  "mr_handoff_completed",
+  "mr_handoff_failed",
   "qa_reopened",
   "qa_reopen_requested",
   "role_input_dispatched",
@@ -169,6 +171,22 @@ export const apiClient = {
       body: JSON.stringify({
         session_id: sessionId,
         comment_text: commentText,
+      }),
+    });
+  },
+
+  createMr(
+    sessionId: number,
+  ): Promise<{
+    handed_off: boolean;
+    event_type: string;
+    mr_url: string | null;
+    session: Session;
+  }> {
+    return request("/operator/create-mr", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
       }),
     });
   },

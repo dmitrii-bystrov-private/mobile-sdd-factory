@@ -21,9 +21,11 @@ try:
     from backend.api.routes_operator import retry_session
     from backend.api.routes_operator import reopen_from_qa
     from backend.api.routes_operator import redirect_session
+    from backend.api.routes_operator import create_mr
     from backend.api.routes_operator import ingest_mr_comments
     from backend.api.routes_operator import loop_status, start_loop, stop_loop
     from backend.api.schemas import (
+        CreateMrRequest,
         IngestMrCommentsRequest,
         PollSessionOutputRequest,
         PauseSessionRequest,
@@ -64,6 +66,17 @@ class FakeSnapshotAdapter:
 
 
 class FakeGitLabAdapter:
+    def create_mr(self, task_key: str) -> "CommandResult":
+        return CommandResult(
+            ["create_mr", task_key],
+            0,
+            (
+                f"Pushing branch for {task_key}\n"
+                f"https://gitlab.example.com/mobile/{task_key}/-/merge_requests/42\n"
+            ),
+            "",
+        )
+
     def fetch_mr_comments(self, platform: str, mr_id: str) -> "CommandResult":
         return CommandResult(
             ["fetch_mr_comments", platform, mr_id],
@@ -588,6 +601,47 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("active", response.session.status)
         self.assertEqual("mr_followup_requested", response.session.current_stage)
         self.assertEqual(1, response.discussion_count)
+
+    def test_create_mr_route_marks_completed_session_as_handed_off(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014MR"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = create_mr(
+            CreateMrRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.handed_off)
+        self.assertEqual("mr_handoff_completed", response.event_type)
+        self.assertEqual("mr_handoff_completed", response.session.current_stage)
+        self.assertEqual("completed", response.session.status)
+        self.assertEqual(
+            "https://gitlab.example.com/mobile/IOS-40014MR/-/merge_requests/42",
+            response.mr_url,
+        )
+        self.assertTrue(any(item.artifact_type == "mr_handoff_stdout" for item in artifacts_response.items))
 
     def test_reopen_from_qa_route_reactivates_completed_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

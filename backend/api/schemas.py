@@ -229,6 +229,17 @@ class IngestMrCommentsResponse(BaseModel):
     discussion_count: int
 
 
+class CreateMrRequest(BaseModel):
+    session_id: int
+
+
+class CreateMrResponse(BaseModel):
+    handed_off: bool
+    session: SessionResponse
+    event_type: str
+    mr_url: str | None = None
+
+
 class ReopenFromQaRequest(BaseModel):
     session_id: int
     comment_text: str

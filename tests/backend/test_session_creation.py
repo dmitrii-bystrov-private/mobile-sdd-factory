@@ -45,6 +45,17 @@ class FakeSnapshotAdapter:
 
 
 class FakeGitLabAdapter:
+    def create_mr(self, task_key: str) -> CommandResult:
+        return CommandResult(
+            command=["create_mr", task_key],
+            returncode=0,
+            stdout=(
+                f"Pushing branch for {task_key}\n"
+                f"https://gitlab.example.com/mobile/{task_key}/-/merge_requests/42\n"
+            ),
+            stderr="",
+        )
+
     def fetch_mr_comments(self, platform: str, mr_id: str) -> CommandResult:
         return CommandResult(
             command=["fetch_mr_comments", platform, mr_id],
@@ -649,6 +660,42 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.assertTrue(any(item.event_type == "qa_reopened" for item in events))
         self.assertTrue(any(item.event_type == "qa_reopen_requested" for item in events))
+
+    def test_create_mr_handoff_marks_completed_session_as_handed_off(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021A")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        completed_session, _ = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        updated_session, event, mr_url = self.coordinator.create_mr_handoff(
+            session_id=completed_session.id
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("completed", updated_session.status.value)
+        self.assertEqual("mr_handoff_completed", updated_session.current_stage)
+        self.assertEqual("mr_handoff_completed", event.event_type)
+        self.assertEqual(
+            "https://gitlab.example.com/mobile/IOS-30021A/-/merge_requests/42",
+            mr_url,
+        )
+        self.assertTrue(any(item.artifact_type == "mr_handoff_stdout" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "mr_handoff_stderr" for item in artifacts))
+        self.assertTrue(any(item.event_type == "mr_handoff_completed" for item in events))
+
+    def test_create_mr_handoff_requires_completed_session(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021B")
+
+        with self.assertRaisesRegex(IntakeError, "must be completed before MR handoff"):
+            self.coordinator.create_mr_handoff(session_id=session.id)
 
     def test_followup_implementation_completed_reenters_verification_loop(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022")

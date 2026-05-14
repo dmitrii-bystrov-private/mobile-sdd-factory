@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.api.routes_sessions import to_session_response
 from backend.api.schemas import (
+    CreateMrRequest,
+    CreateMrResponse,
     IngestMrCommentsRequest,
     IngestMrCommentsResponse,
     ReopenFromQaRequest,
@@ -136,6 +138,26 @@ def ingest_mr_comments(
         event_type=event.event_type,
         followup_event_type=followup_event.event_type if followup_event else None,
         discussion_count=discussion_count,
+    )
+
+
+@router.post("/create-mr", response_model=CreateMrResponse)
+def create_mr(
+    payload: CreateMrRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> CreateMrResponse:
+    try:
+        session, event, mr_url = dependencies.coordinator_service.create_mr_handoff(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return CreateMrResponse(
+        handed_off=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        mr_url=mr_url,
     )
 
 
