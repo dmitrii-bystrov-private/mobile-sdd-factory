@@ -43,7 +43,7 @@ Experimental or optional steps are gated by env vars. The project default (`.cla
 
 | Flag | Default | What it controls |
 |------|---------|-----------------|
-| `BOY_SCOUT_ENABLED` | `false` | Boy Scout pass at the end of jira-story / jira-bug / oneshot — scans the diff for SOLID/DRY improvement opportunities and offers to create subtasks or tech-debt stories. |
+| `BOY_SCOUT_ENABLED` | `false` | Boy Scout pass at the end of jira-story / jira-bug / oneshot — scans the diff for SOLID/DRY improvement opportunities; auto-applies findings in new code, prompts for old-code findings (implement now or tech-debt story). |
 | `DOC_HARVEST_ENABLED` | `false` | Doc harvest pass at the end of jira-story / jira-bug / oneshot — generates or enriches a feature-level README.md from the accumulated spec/context and commits it to the branch. |
 
 To enable both locally:

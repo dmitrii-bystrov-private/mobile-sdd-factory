@@ -113,27 +113,22 @@ fi
 web_url="${web_url%/}"
 echo "${web_url}/diffs"
 
-diffs_json="$((cd "$project_dir" && glab api "projects/$encoded_project_path/merge_requests/$mr_iid/diffs" 2>/dev/null) || true)"
-if [ -z "$diffs_json" ]; then
-  exit 0
-fi
+source_branch="$(printf '%s' "$mr_json" | jq -r '.source_branch // empty')"
+target_branch="$(printf '%s' "$mr_json" | jq -r '.target_branch // "master"')"
 
-stats="$(
-  printf '%s' "$diffs_json" | jq -r '
-    def add_del:
-      {
-        a: ([.diff | split("\n")[] | select(startswith("+") and (startswith("+++") | not))] | length),
-        d: ([.diff | split("\n")[] | select(startswith("-") and (startswith("---") | not))] | length)
-      };
-    [ .[] | add_del ] as $xs
-    | {
-        files: ($xs | length),
-        additions: ($xs | map(.a) | add // 0),
-        deletions: ($xs | map(.d) | add // 0)
-      }
-    | "\(.files) files +\(.additions) \u2212\(.deletions)"
-  ' 2>/dev/null || true
-)"
+stats=""
+if [ -n "$source_branch" ]; then
+  (cd "$project_dir" && git fetch --quiet origin "$target_branch" "$source_branch" 2>/dev/null) || true
+  stat_line="$(cd "$project_dir" && git diff --stat "origin/$target_branch...origin/$source_branch" 2>/dev/null | tail -1)"
+  # "27 files changed, 2287 insertions(+), 80 deletions(-)"
+  if [[ "$stat_line" =~ ([0-9]+)\ file.*,\ ([0-9]+)\ insertion.*\(\+\),?\ ([0-9]+)\ deletion ]]; then
+    stats="${BASH_REMATCH[1]} files +${BASH_REMATCH[2]} $(printf '\xe2\x88\x92')${BASH_REMATCH[3]}"
+  elif [[ "$stat_line" =~ ([0-9]+)\ file.*,\ ([0-9]+)\ insertion ]]; then
+    stats="${BASH_REMATCH[1]} files +${BASH_REMATCH[2]} $(printf '\xe2\x88\x92')0"
+  elif [[ "$stat_line" =~ ([0-9]+)\ file.*,\ ([0-9]+)\ deletion ]]; then
+    stats="${BASH_REMATCH[1]} files +0 $(printf '\xe2\x88\x92')${BASH_REMATCH[2]}"
+  fi
+fi
 
 if [ -n "$stats" ]; then
   echo "$stats"

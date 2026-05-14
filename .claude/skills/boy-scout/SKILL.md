@@ -1,8 +1,8 @@
 ---
 description: >
-  Boy Scout pass: scan changed code for SOLID/DRY/code-quality improvement opportunities, present findings,
-  and optionally create Jira subtasks or tech-debt stories. Runs silently when nothing is found.
-  Can be invoked standalone: /boy-scout <KEY>.
+  Boy Scout pass: scan changed code for SOLID/DRY/code-quality improvement opportunities.
+  New-code findings are applied immediately; old-code findings prompt the user to implement now or create tech-debt stories.
+  Runs silently when nothing is found. Can be invoked standalone: /boy-scout <KEY>.
 ---
 
 Run a Boy Scout pass for Jira task `$ARGUMENTS`.
@@ -89,18 +89,25 @@ Read the **first line** of `$SDD_WORKDIR/<KEY>/spec/findings.md`:
 - `SCOUT_RESULT: clean` → print "No improvement opportunities found." Stop — caller continues.
 - `SCOUT_RESULT: findings_found` → proceed to Step 5.
 
-## Step 5 — Present findings
+## Step 5 — Present findings and route by file origin
 
 Read the full `spec/findings.md` and present each finding to the user in a readable format.
 
-Then ask:
+Then classify each finding:
+- **New-code finding**: all files listed in the finding were **added** in the diff (i.e. the diff block for that file starts with `new file mode` or the path only appears as `new_path` with no prior content)
+- **Old-code finding**: any file in the finding was **modified** (existed before the branch)
+
+If **all** findings are new-code findings → proceed directly to the "Implement now" path in Step 6 without asking the user.
+
+If **any** finding touches old code → ask:
 
 ```
-Boy Scout found N improvement opportunity(-ies). How would you like to handle them?
+Boy Scout found N improvement opportunity(-ies).
+
+Old-code findings (in pre-existing files) — choose an action:
 
 1. **Implement now** — apply all improvements directly in the current worktree
-2. **Subtasks** — create a subtask on <KEY> for each finding; continue the flow after
-3. **Tech-debt stories** — create a separate Story in the backlog for each finding; continue the flow after
+2. **Tech-debt stories** — create a separate Story in the backlog for each finding; continue the flow after
 ```
 
 Wait for user choice.
@@ -123,61 +130,6 @@ Task: Apply the following Boy Scout improvement to the codebase:
 ```
 
 Stop — caller continues.
-
-### Subtasks
-
-Derive `<PROJECT>` from `<KEY>` (e.g. `IOS-1234` → `IOS`, `ANDR-5678` → `ANDR`).
-
-First, create a temp directory for description files:
-
-```bash
-mkdir -p "/tmp/sdd-findings/<KEY>"
-```
-
-For each finding extracted from `spec/findings.md`:
-
-1. Write its description to `/tmp/sdd-findings/<KEY>/<N>-description.md`:
-
-   ```markdown
-   ## <finding title>
-
-   **Files**: <files>
-   **Principle**: <principle>
-
-   ### Problem
-
-   <problem>
-
-   ### Suggestion
-
-   <suggestion>
-   ```
-
-2. Run:
-   ```bash
-   bash scripts/create-subtask.sh \
-     --parent <KEY> \
-     --title "<finding title>" \
-     --description "/tmp/sdd-findings/<KEY>/<N>-description.md"
-   ```
-
-3. Collect the returned subtask key.
-
-After all subtasks are created, append each finding title to `$SDD_WORKDIR/<KEY>/spec/scout-deferred.md`:
-
-```bash
-echo "- <finding title> (<SUBTASK-KEY>)" >> "$SDD_WORKDIR/<KEY>/spec/scout-deferred.md"
-```
-
-Then report the list:
-
-```
-Created improvement subtasks on <KEY>:
-- <SUBTASK-KEY-1>: <title>
-- <SUBTASK-KEY-2>: <title>
-```
-
-Stop — caller continues to doc-harvest.
 
 ### Tech-debt stories
 
@@ -223,7 +175,9 @@ Stop — caller continues to doc-harvest.
 ## Rules
 
 - MUST stop silently (no output except "No improvement opportunities found.") when `SCOUT_RESULT: clean`.
-- MUST NOT auto-create tasks without user confirmation.
-- MUST continue (return control to caller) after creating tasks — do not halt the flow.
+- MUST implement new-code findings (files added in the current branch) directly without asking the user.
+- MUST ask the user before acting on old-code findings (modified pre-existing files).
+- MUST NOT auto-create tech-debt stories without user confirmation.
+- MUST continue (return control to caller) after any action — do not halt the flow.
 - MUST derive project key from the Jira key prefix.
 - MUST write individual finding description files to `/tmp/sdd-findings/<KEY>/` before calling create scripts.
