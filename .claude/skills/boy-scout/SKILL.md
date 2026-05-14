@@ -63,6 +63,14 @@ Clear any stale findings file before invoking the scout:
 rm -f "$SDD_WORKDIR/<KEY>/spec/findings.md"
 ```
 
+Check whether deferred findings exist from previous sessions:
+
+```bash
+ls "$SDD_WORKDIR/<KEY>/spec/scout-deferred.md" 2>/dev/null && echo "exists" || echo "missing"
+```
+
+If the file exists, include `Deferred: $SDD_WORKDIR/<KEY>/spec/scout-deferred.md` in the scout invocation.
+
 Invoke the `code-scout` subagent:
 
 ```
@@ -71,6 +79,7 @@ Diff: $SDD_WORKDIR/<KEY>/spec/diff.md
 Project directory: $SDD_WORKDIR/<KEY>/repo
 Context dir: $SDD_WORKDIR/<KEY>/spec/context
 Output: $SDD_WORKDIR/<KEY>/spec/findings.md
+Deferred: $SDD_WORKDIR/<KEY>/spec/scout-deferred.md   ← include only if file exists
 ```
 
 ## Step 4 — Read result
@@ -154,7 +163,13 @@ For each finding extracted from `spec/findings.md`:
 
 3. Collect the returned subtask key.
 
-After all subtasks are created, report the list:
+After all subtasks are created, append each finding title to `$SDD_WORKDIR/<KEY>/spec/scout-deferred.md`:
+
+```bash
+echo "- <finding title> (<SUBTASK-KEY>)" >> "$SDD_WORKDIR/<KEY>/spec/scout-deferred.md"
+```
+
+Then report the list:
 
 ```
 Created improvement subtasks on <KEY>:
@@ -189,7 +204,13 @@ For each finding extracted from `spec/findings.md`:
 
 3. Collect the returned story key and URL.
 
-After all stories are created, report the list:
+After all stories are created, append each finding title to `$SDD_WORKDIR/<KEY>/spec/scout-deferred.md`:
+
+```bash
+echo "- <finding title> (<STORY-KEY>)" >> "$SDD_WORKDIR/<KEY>/spec/scout-deferred.md"
+```
+
+Then report the list:
 
 ```
 Created tech-debt stories:

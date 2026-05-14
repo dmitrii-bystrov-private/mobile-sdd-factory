@@ -70,15 +70,22 @@ Creates all Jira subtasks from a decomposition plan in one batch:
 
 ```bash
 scripts/create-subtasks-batch.sh --parent <KEY> --plan-dir <plan/>
+scripts/create-subtasks-batch.sh --parent <KEY> --plan-dir <plan/> \
+  --task-file ./10-follow-up-a.md \
+  --task-file ./11-follow-up-b.md
 ```
 
-- Reads `<plan-dir>/index.md` to determine creation order.
 - If `--plan-dir` is omitted, defaults to `$SDD_WORKDIR/<KEY>/plan/`.
+- If `--task-file` is omitted, reads `<plan-dir>/index.md` to determine creation order.
+- If one or more `--task-file` flags are provided, creates only those files in the order passed on the command line.
+- Relative `--task-file` paths are resolved against `<plan-dir>`; absolute paths are also accepted.
 - Calls `create-subtask.sh` for each task file in that order.
 - Skips tasks whose titles already exist as subtasks under the same parent.
 - Stops on first failure and reports which task failed and why.
 - Already-created subtasks are NOT rolled back on partial failure.
 - Prints a summary table of created subtask keys and any skipped titles.
+
+This selective mode is useful when `plan/` contains a broader backlog but you only want to create newly added review findings or MR follow-up tasks without rebuilding a temporary plan directory.
 
 #### `request-review-message.sh`
 
@@ -217,6 +224,7 @@ This script is the first half of the `/handle-mr-comments` workflow:
 - `fetch-mr-comments.sh` exports unresolved MR discussions
 - the `mr-comments-analyst` agent groups them into `plan/` files under `$SDD_WORKDIR/<KEY>/plan/`
 - `create-subtasks-batch.sh --parent <KEY>` creates Jira subtasks from those generated plan files
+- when only a subset of new plan files should become Jira subtasks, pass them explicitly with repeated `--task-file`
 
 That workflow assumes an existing task workspace at `$SDD_WORKDIR/<KEY>/repo/`, typically prepared via `bash scripts/snapshot.sh <KEY>`.
 
@@ -255,9 +263,28 @@ bash scripts/create-issue.sh \
 - Uses `DEFAULT_JIRA_ASSIGNEE` when `--assignee` is omitted.
 - Prints both the created Jira key and browse URL.
 
+#### `update-issue.sh`
+
+Updates fields of an existing Jira issue:
+
+```bash
+scripts/update-issue.sh \
+  --key <KEY> \
+  [--summary "<text>"] \
+  [--description "<markdown>"] \
+  [--description-file path/to/file.md] \
+  [--assignee <email>]
+```
+
+- At least one optional field is required; exits with an error otherwise.
+- Converts Markdown descriptions to Jira ADF via `md-to-adf.sh`.
+- Prints `✓ Updated: <KEY>` and the browse URL on success.
+
+Note: `acli` does not support updating priority via CLI — change it in the Jira UI.
+
 #### `md-to-adf.sh`
 
-Library sourced by `create-issue.sh` and `create-subtask.sh`. Provides `render_markdown_to_adf`, which converts Markdown to Jira ADF JSON. It can read either a file path or stdin.
+Library sourced by `create-issue.sh`, `update-issue.sh`, and `create-subtask.sh`. Provides `render_markdown_to_adf`, which converts Markdown to Jira ADF JSON. It can read either a file path or stdin.
 
 #### `gitlab.sh`
 

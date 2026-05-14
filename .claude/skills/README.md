@@ -48,7 +48,7 @@ QA loop (all flows):
 | Skill | Command | Description |
 |-------|---------|-------------|
 | create-mr | `/create-mr` | Commit changes, push, open a GitLab merge request to master, and prepare the Slack-ready review message. |
-| handle-mr-comments | `/handle-mr-comments <KEY> <MR>` | Fetch unresolved MR discussions, group them into actionable themes, write `plan/` files, and optionally create Jira subtasks. Requires an existing task workspace (`/snapshot <KEY>`); can auto-detect the Jira key from the MR if omitted. |
+| handle-mr-comments | `/handle-mr-comments <KEY> <MR>` | Fetch unresolved MR discussions, group them into actionable themes, write `plan/` files, and create Jira subtasks. Supports selective subtask creation with `create-subtasks-batch.sh --task-file` when only new follow-up artifacts should be created. Requires an existing task workspace (`/snapshot <KEY>`); can auto-detect the Jira key from the MR if omitted. |
 
 ### Jira
 

@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# create-subtasks-batch.sh — Create all Jira subtasks from a decomposition plan.
+# create-subtasks-batch.sh — Create Jira subtasks from a decomposition plan.
 #
 # Usage:
-#   scripts/create-subtasks-batch.sh --parent <KEY> [--plan-dir <path-to-plan/>]
+#   scripts/create-subtasks-batch.sh --parent <KEY> [--plan-dir <path-to-plan/>] [--task-file <file.md> ...]
 #
 # If --plan-dir is omitted, defaults to $SDD_WORKDIR/<KEY>/plan/
+# If --task-file is omitted, all task files are read from plan/index.md in order.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CREATE_SUBTASK_SCRIPT="${CREATE_SUBTASK_SCRIPT:-$SCRIPT_DIR/create-subtask.sh}"
 
 err() {
   echo "ERROR: $*" >&2
@@ -18,20 +20,13 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { err "Missing required command: $1"; exit 1; }
 }
 
-# ---------------------------------------------------------------------------
-# Validate required tools
-# ---------------------------------------------------------------------------
-
 need_cmd acli
 need_cmd jq
 need_cmd git
 
-# ---------------------------------------------------------------------------
-# Parse arguments
-# ---------------------------------------------------------------------------
-
 PARENT=""
 PLAN_DIR=""
+declare -a SELECTED_TASK_FILES=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,6 +36,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --plan-dir)
       PLAN_DIR="${2:-}"
+      shift 2
+      ;;
+    --task-file)
+      SELECTED_TASK_FILES+=("${2:-}")
       shift 2
       ;;
     *)
@@ -63,10 +62,6 @@ if [[ -z "$PLAN_DIR" ]]; then
   PLAN_DIR="$SDD_WORKDIR/$PARENT/plan"
 fi
 
-# ---------------------------------------------------------------------------
-# Validate plan directory and index
-# ---------------------------------------------------------------------------
-
 INDEX_FILE="$PLAN_DIR/index.md"
 
 if [[ ! -f "$INDEX_FILE" ]]; then
@@ -74,23 +69,39 @@ if [[ ! -f "$INDEX_FILE" ]]; then
   exit 1
 fi
 
-# ---------------------------------------------------------------------------
-# Parse task files from index.md in order
-# Extract relative paths from markdown link syntax: (./NN-task-name.md)
-# ---------------------------------------------------------------------------
+declare -a TASK_FILES=()
 
-IFS=$'\n' read -r -d '' -a TASK_FILES < <(grep -oE '\(\./[^)]+\.md\)' "$INDEX_FILE" | tr -d '()' && printf '\0') || true
+if [[ ${#SELECTED_TASK_FILES[@]} -gt 0 ]]; then
+  for task_file in "${SELECTED_TASK_FILES[@]}"; do
+    if [[ -z "$task_file" ]]; then
+      err "Empty value passed to --task-file"
+      exit 1
+    fi
+
+    if [[ "$task_file" == /* ]]; then
+      TASK_FILES+=("$task_file")
+    else
+      TASK_FILES+=("$PLAN_DIR/${task_file#./}")
+    fi
+  done
+else
+  declare -a INDEX_TASK_FILES=()
+  IFS=$'\n' read -r -d '' -a INDEX_TASK_FILES < <(grep -oE '\(\./[^)]+\.md\)' "$INDEX_FILE" | tr -d '()' && printf '\0') || true
+  for task_file in "${INDEX_TASK_FILES[@]}"; do
+    TASK_FILES+=("$PLAN_DIR/${task_file#./}")
+  done
+fi
 
 if [[ ${#TASK_FILES[@]} -eq 0 ]]; then
-  err "No task files found in $INDEX_FILE"
+  err "No task files selected"
   exit 1
 fi
 
-echo "Found ${#TASK_FILES[@]} task(s) in $INDEX_FILE"
-
-# ---------------------------------------------------------------------------
-# Fetch existing subtask titles from Jira to avoid duplicates
-# ---------------------------------------------------------------------------
+if [[ ${#SELECTED_TASK_FILES[@]} -gt 0 ]]; then
+  echo "Selected ${#TASK_FILES[@]} task file(s) explicitly"
+else
+  echo "Found ${#TASK_FILES[@]} task(s) in $INDEX_FILE"
+fi
 
 echo "Fetching existing subtasks for $PARENT from Jira..."
 EXISTING_TITLES_JSON="$(acli jira workitem search \
@@ -98,20 +109,14 @@ EXISTING_TITLES_JSON="$(acli jira workitem search \
   --fields key,summary \
   --json --paginate 2>/dev/null)" || EXISTING_TITLES_JSON="[]"
 
-# Build a newline-separated list of existing subtask titles (lowercased for comparison)
 EXISTING_TITLES="$(echo "$EXISTING_TITLES_JSON" | jq -r '.[].fields.summary' 2>/dev/null | tr '[:upper:]' '[:lower:]')" || EXISTING_TITLES=""
-
-# ---------------------------------------------------------------------------
-# Create subtasks in order, skipping already existing ones
-# ---------------------------------------------------------------------------
 
 declare -a CREATED_KEYS
 declare -a CREATED_TITLES
 declare -a SKIPPED_TITLES
 
 for i in "${!TASK_FILES[@]}"; do
-  RELATIVE_PATH="${TASK_FILES[$i]}"
-  TASK_FILE="$PLAN_DIR/${RELATIVE_PATH#./}"
+  TASK_FILE="${TASK_FILES[$i]}"
   TASK_NUM="$(printf '%02d' $((i + 1)))"
 
   if [[ ! -f "$TASK_FILE" ]]; then
@@ -119,15 +124,12 @@ for i in "${!TASK_FILES[@]}"; do
     exit 1
   fi
 
-  # Extract title from first '# ' heading in the task file
   TASK_TITLE="$(grep -m1 '^# ' "$TASK_FILE" | sed 's/^# //')"
   if [[ -z "$TASK_TITLE" ]]; then
-    # Fallback: derive from filename by stripping NN- prefix and replacing hyphens
     BASENAME="$(basename "$TASK_FILE" .md)"
     TASK_TITLE="$(echo "${BASENAME#[0-9][0-9]-}" | tr '-' ' ' | sed 's/\b\(.\)/\u\1/g')"
   fi
 
-  # Skip if a subtask with this title already exists in Jira
   TASK_TITLE_LOWER="$(echo "$TASK_TITLE" | tr '[:upper:]' '[:lower:]')"
   if echo "$EXISTING_TITLES" | grep -qxF "$TASK_TITLE_LOWER"; then
     echo "Skipping subtask $TASK_NUM (already exists): $TASK_TITLE"
@@ -137,7 +139,7 @@ for i in "${!TASK_FILES[@]}"; do
 
   echo "Creating subtask $TASK_NUM: $TASK_TITLE"
 
-  SUBTASK_KEY="$("$SCRIPT_DIR/create-subtask.sh" \
+  SUBTASK_KEY="$("$CREATE_SUBTASK_SCRIPT" \
     --parent "$PARENT" \
     --title "$TASK_TITLE" \
     --description "$TASK_FILE")" || {
@@ -149,10 +151,6 @@ for i in "${!TASK_FILES[@]}"; do
   CREATED_TITLES+=("$TASK_TITLE")
   echo "  Created: $SUBTASK_KEY"
 done
-
-# ---------------------------------------------------------------------------
-# Print summary table
-# ---------------------------------------------------------------------------
 
 echo ""
 if [[ ${#CREATED_KEYS[@]} -gt 0 ]]; then

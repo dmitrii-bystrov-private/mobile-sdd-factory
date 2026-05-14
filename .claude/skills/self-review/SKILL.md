@@ -39,6 +39,12 @@ PASS_FILE=$SDD_WORKDIR/<KEY>/review/pass-NN.md
 
 ## Step 3 — Run reviewer
 
+Collect paths of all existing pass files (if any):
+
+```bash
+ls $SDD_WORKDIR/<KEY>/review/pass-*.md 2>/dev/null
+```
+
 Invoke the `code-reviewer` subagent:
 
 ```text
@@ -46,6 +52,7 @@ Key: <KEY>
 Diff: $SDD_WORKDIR/<KEY>/spec/diff.md
 Project directory: $SDD_WORKDIR/<KEY>/repo
 Output: <PASS_FILE>
+Previous reviews: <space-separated list of existing pass-*.md paths>   ← omit line if none exist
 ```
 
 The reviewer writes its result to `<PASS_FILE>`.

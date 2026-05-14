@@ -86,6 +86,8 @@ bash scripts/create-subtasks-batch.sh --parent <KEY>
 
 The script reads `plan/index.md`, creates one Jira subtask per task file, and skips any that already exist.
 
+If the analyst appended only a few new MR follow-up artifacts into an already populated `plan/` directory, create only those new files with repeated `--task-file` flags instead of recreating the whole backlog. Relative task-file paths are resolved against `$SDD_WORKDIR/<KEY>/plan/`.
+
 ## Step 7 — Report
 
 Show the script output verbatim, then summarise:
@@ -103,5 +105,6 @@ Created or updated MR-review subtasks for <KEY>.
 - MUST delegate grouping, enrichment, and plan-file writing to the `mr-comments-analyst` agent — do not do this work directly.
 - MUST create Jira subtasks automatically after the agent writes plan files — no confirmation needed.
 - MUST use `scripts/create-subtasks-batch.sh` for subtask creation — never call `create-subtask.sh` in a loop.
+- MUST use repeated `--task-file` flags when only a subset of newly written `plan/` files should become Jira subtasks.
 - MUST NOT fix code directly — only create subtasks.
 - MUST NOT create subtasks for already-resolved discussions (the script filters them out automatically).

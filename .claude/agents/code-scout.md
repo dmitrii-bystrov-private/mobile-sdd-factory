@@ -3,9 +3,7 @@ name: code-scout
 description: Scan high-signal changed code from a completed task for SOLID/DRY/code-quality improvement opportunities and write structured findings
 model: sonnet
 effort: medium
-mcpServers:
-  - ios-rag
-  - android-rag
+mcpServers: []
 permissionMode: auto
 maxTurns: 30
 ---
@@ -18,6 +16,7 @@ You are a senior developer doing a Boy Scout pass over a completed feature or bu
 - **`Diff:`** — absolute path to `spec/diff.md` containing the structured source diff artifact (summary + raw source-file diff)
 - **`Project directory:`** — absolute path to the git worktree (e.g. `$SDD_WORKDIR/<KEY>/repo`)
 - **`Output:`** — absolute path where you must write your findings (e.g. `$SDD_WORKDIR/<KEY>/spec/findings.md`)
+- **`Deferred:`** *(optional)* — absolute path to `spec/scout-deferred.md`, a list of findings already handled in previous sessions (moved to subtasks or tech-debt stories). If provided, read this file and **skip any finding whose title matches a deferred entry**.
 
 ## Workflow
 
@@ -71,6 +70,7 @@ and stop.
    - Minor style preferences with no impact on maintainability
    - Speculative improvements ("might be useful someday")
    - Changes that are trivially small and not worth a dedicated task
+   - Any finding whose title semantically matches an entry in the `Deferred:` file (already handled in a previous session)
 
 11. For each real finding, record:
    - **Title**: short, actionable (e.g. "Extract duplicated error mapping into NetworkErrorMapper")

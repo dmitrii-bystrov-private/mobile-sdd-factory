@@ -154,6 +154,8 @@ Invoke the `task-decomposer` subagent with key `<KEY>`.
 
    On partial failure: surface which task failed and why to the user. Halt.
 
+   If later follow-up work adds only a few new plan artifacts into an existing `plan/` directory, prefer `scripts/create-subtasks-batch.sh --parent <KEY> --task-file ...` for those specific files instead of rerunning the whole backlog.
+
 2. Run `/snapshot <KEY>` to fetch fresh details and update `statuses.md` before starting the first subtask.
 
 3. Notify the developer:
@@ -264,6 +266,7 @@ $SDD_WORKDIR/<KEY>/
 - MUST orchestrate steps 3–12 in the order defined above, starting from the resume point.
 - MUST NOT inspect code, make implementation decisions, or run build/test/lint directly.
 - MUST use `scripts/create-subtasks-batch.sh` for Jira subtask creation.
+- MUST use repeated `--task-file` flags when only a subset of later-added `plan/` artifacts should become Jira subtasks.
 - MUST run `/send-to-test <SUBTASK-KEY>` after each implementer succeeds.
 - MUST run `/send-to-test <KEY>` to transition the story to Ready for test before creating the MR.
 - MUST automatically run `/create-mr` after all subtasks complete.

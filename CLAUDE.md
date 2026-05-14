@@ -14,6 +14,8 @@ CLAUDE.md contains only common orchestration context. Detailed instructions and 
 
 When invoking subagents, pass exactly what their spec requires — no extra paths, no derived variables. Subagents resolve paths from environment variables (`$SDD_WORKDIR`, `$IOS_DIR`, `$ANDROID_DIR`) and the Jira key on their own.
 
+After any nested `Skill()` returns, immediately continue the calling skill's next step — never stop unless the skill has an explicit "Wait for user" instruction.
+
 ## Mobile projects
 
 | Platform | Path          |

@@ -6,6 +6,7 @@ effort: high
 mcpServers:
   - ios-rag
   - android-rag
+  - frontend-rag  
 permissionMode: auto
 maxTurns: 80
 ---

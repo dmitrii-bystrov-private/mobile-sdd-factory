@@ -64,7 +64,8 @@ Use one `## Output: ...` section per failed check.
 
 - MUST NOT modify product code, tests, docs, or prompts.
 - MUST run only `run-test.sh` and `run-lint.sh` for the current workflow gate.
-- MUST write `spec/final-verification.md` whether checks pass or fail.
+- MUST always run both scripts on every invocation — do NOT read or check whether `spec/final-verification.md` already exists before running. Every call is a fresh run.
+- MUST overwrite `spec/final-verification.md` with the results of the current run.
 - MUST stop after reporting failures; do not attempt fixes.
 
 ## Output

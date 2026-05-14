@@ -255,6 +255,16 @@ export PATH="$PATH:/path/to/mobile-dev-sdd/scripts"
 
 The pipeline runs, pausing at the three checkpoints for your input.
 
+When a workflow writes follow-up artifacts into an existing `plan/` directory and only the newly added files should become Jira subtasks, use selective batch creation:
+
+```bash
+bash scripts/create-subtasks-batch.sh \
+  --parent IOS-1234 \
+  --plan-dir "$SDD_WORKDIR/IOS-1234/plan" \
+  --task-file ./10-follow-up-a.md \
+  --task-file ./11-follow-up-b.md
+```
+
 ### QA cycle
 
 When a task comes back from QA (status: Reopened), resume the normal task flow for that Jira key. The workflow should treat the latest comments as the highest-priority follow-up input instead of routing to a separate dedicated skill.

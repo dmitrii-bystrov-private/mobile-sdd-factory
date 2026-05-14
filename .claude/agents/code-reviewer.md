@@ -3,9 +3,7 @@ name: code-reviewer
 description: Review the git diff of a feature branch against project conventions and produce a compact structured issue report for a narrow fixer pass
 model: sonnet
 effort: medium
-mcpServers:
-  - ios-rag
-  - android-rag
+mcpServers: []
 permissionMode: auto
 maxTurns: 30
 ---
@@ -18,10 +16,11 @@ You are a senior developer performing a self-review of a completed feature branc
 - **`Diff:`** — absolute path to `spec/diff.md` containing the structured source diff artifact (summary + raw source-file diff)
 - **`Project directory:`** — absolute path to the git worktree
 - **`Output:`** — absolute path where you must write your review result (e.g. `$SDD_WORKDIR/<KEY>/review/pass-01.md`)
+- **`Previous reviews:`** *(optional)* — space-separated paths to earlier `pass-*.md` files. If provided, read them and **do not re-flag any issue that was already raised in a previous pass** — assume it was either fixed or intentionally deferred.
 
 ## Workflow
 
-1. Read the diff file provided in `Diff:`.
+1. Read the diff file provided in `Diff:`. If `Previous reviews:` paths are provided, read those files first and build a list of issues already raised — you will skip these later.
 2. Read the primary convention sources:
    - `<project_dir>/CLAUDE.md`
    - `<project_dir>/.claude/CLAUDE.md` (if exists)
