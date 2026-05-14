@@ -5,7 +5,6 @@ import unittest
 from backend.models.enums import SessionStatus
 from backend.state.db import Database
 from backend.state.event_repository import EventRepository
-from backend.state.memory_item_repository import MemoryItemRepository
 from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
@@ -113,43 +112,6 @@ class RepositoryTests(unittest.TestCase):
         items = work_item_repository.list_for_session(session.id)
 
         self.assertEqual(["high", "low"], [item.title for item in items])
-
-    def test_memory_item_repository_creates_and_matches_items(self) -> None:
-        session_repository = SessionRepository(self.database)
-        repository = MemoryItemRepository(self.database)
-        session = session_repository.create(
-            task_key="IOS-20004",
-            current_stage="intake",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
-            },
-        )
-
-        created = repository.create(
-            item_type="verification_failure_lesson",
-            status="active",
-            platform="ios",
-            workflow_profile="oneshot",
-            source_session_id=session.id,
-            source_event_id=None,
-            summary="Missing guard branch before verification.",
-            metadata={"source_stage": "verification_requested"},
-        )
-        matched = repository.list_matching(
-            item_type="verification_failure_lesson",
-            platform="ios",
-            workflow_profile="oneshot",
-        )
-        updated = repository.increment_use_count(created.id)
-
-        self.assertIsNotNone(created.id)
-        self.assertEqual(1, len(matched))
-        self.assertEqual("Missing guard branch before verification.", matched[0].summary)
-        self.assertEqual(1, updated.use_count)
-
 
 if __name__ == "__main__":
     unittest.main()

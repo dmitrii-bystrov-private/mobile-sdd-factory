@@ -87,5 +87,4 @@ def prepare_session(
             if details["followup_event_type"] is not None
             else None
         ),
-        memory_item_count=int(details.get("memory_item_count", 0)),
     )

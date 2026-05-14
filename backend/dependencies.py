@@ -14,7 +14,6 @@ from backend.session_backend.tmux_backend import TmuxSessionBackend
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.db import Database
 from backend.state.event_repository import EventRepository
-from backend.state.memory_item_repository import MemoryItemRepository
 from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
@@ -33,7 +32,6 @@ class AppDependencies:
     session_repository: SessionRepository
     role_repository: RoleRepository
     event_repository: EventRepository
-    memory_item_repository: MemoryItemRepository
     artifact_repository: ArtifactRepository
     work_item_repository: WorkItemRepository
     session_backend: TmuxSessionBackend
@@ -56,7 +54,6 @@ def build_dependencies() -> AppDependencies:
     session_repository = SessionRepository(database)
     role_repository = RoleRepository(database)
     event_repository = EventRepository(database)
-    memory_item_repository = MemoryItemRepository(database)
     artifact_repository = ArtifactRepository(database)
     work_item_repository = WorkItemRepository(database)
     session_backend = TmuxSessionBackend(
@@ -72,7 +69,6 @@ def build_dependencies() -> AppDependencies:
         session_repository=session_repository,
         role_repository=role_repository,
         event_repository=event_repository,
-        memory_item_repository=memory_item_repository,
         artifact_repository=artifact_repository,
         work_item_repository=work_item_repository,
         session_backend=session_backend,
@@ -93,7 +89,6 @@ def build_dependencies() -> AppDependencies:
         session_repository=session_repository,
         role_repository=role_repository,
         event_repository=event_repository,
-        memory_item_repository=memory_item_repository,
         artifact_repository=artifact_repository,
         work_item_repository=work_item_repository,
         session_backend=session_backend,

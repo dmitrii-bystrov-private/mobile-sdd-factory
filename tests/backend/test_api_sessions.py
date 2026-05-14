@@ -48,7 +48,6 @@ try:
     from backend.state.artifact_repository import ArtifactRepository
     from backend.state.db import Database
     from backend.state.event_repository import EventRepository
-    from backend.state.memory_item_repository import MemoryItemRepository
     from backend.state.role_repository import RoleRepository
     from backend.state.session_repository import SessionRepository
     from backend.state.work_item_repository import WorkItemRepository
@@ -112,7 +111,6 @@ class SessionApiTests(unittest.TestCase):
         session_repository = SessionRepository(self.database)
         role_repository = RoleRepository(self.database)
         event_repository = EventRepository(self.database)
-        memory_item_repository = MemoryItemRepository(self.database)
         artifact_repository = ArtifactRepository(self.database)
         work_item_repository = WorkItemRepository(self.database)
         session_backend = TmuxSessionBackend()
@@ -121,7 +119,6 @@ class SessionApiTests(unittest.TestCase):
             session_repository=session_repository,
             role_repository=role_repository,
             event_repository=event_repository,
-            memory_item_repository=memory_item_repository,
             artifact_repository=artifact_repository,
             work_item_repository=work_item_repository,
             session_backend=session_backend,
@@ -142,7 +139,6 @@ class SessionApiTests(unittest.TestCase):
             session_repository=session_repository,
             role_repository=role_repository,
             event_repository=event_repository,
-            memory_item_repository=memory_item_repository,
             artifact_repository=artifact_repository,
             work_item_repository=work_item_repository,
             session_backend=session_backend,
@@ -214,7 +210,6 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("Story", response.issue_type)
         self.assertEqual(0, response.snapshot_exit_code)
         self.assertEqual("implementation_requested", response.followup_event_type)
-        self.assertEqual(0, response.memory_item_count)
 
     def test_prepare_session_route_reuses_existing_policy_aware_session(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -237,50 +232,6 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(create_response.session.id, response.session.id)
         self.assertEqual("oneshot", response.session.workflow_profile)
         self.assertEqual("required", response.session.policy["self_review_policy"])
-
-    def test_prepare_session_route_attaches_matching_verification_failure_lessons(self) -> None:
-        source_prepare = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
-            PrepareSessionRequest(task_key="IOS-40002B"),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=source_prepare.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "done"},
-            ),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=source_prepare.session.id,
-                event_type="verification_failed",
-                payload={
-                    "summary": "Missing edge-case guard",
-                    "details": "nil branch was not handled",
-                },
-            ),
-            dependencies=self.dependencies,
-        )
-
-        response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
-            PrepareSessionRequest(task_key="IOS-40002C"),
-            dependencies=self.dependencies,
-        )
-        artifacts_response = list_artifacts(
-            session_id=response.session.id,
-            dependencies=self.dependencies,
-        )
-        events_response = list_events(
-            session_id=response.session.id,
-            dependencies=self.dependencies,
-        )
-
-        self.assertEqual(1, response.memory_item_count)
-        self.assertTrue(
-            any(item.artifact_type == "verification_failure_lessons_markdown" for item in artifacts_response.items)
-        )
-        self.assertTrue(any(item.event_type == "memory_lessons_attached" for item in events_response.items))
 
     def test_event_and_work_item_routes_reflect_verification_handoff(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

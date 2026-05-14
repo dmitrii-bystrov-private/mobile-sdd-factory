@@ -47,7 +47,6 @@ class PrepareSessionResponse(BaseModel):
     readiness: str
     snapshot_exit_code: int
     followup_event_type: str | None = None
-    memory_item_count: int = 0
 
 
 class SessionsResponse(BaseModel):
