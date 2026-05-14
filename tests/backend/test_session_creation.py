@@ -214,6 +214,41 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("task_prepared", event.event_type)
         self.assertEqual("implementation_requested", details["followup_event_type"])
 
+    def test_prepare_task_session_routes_bug_full_into_bug_analysis(self) -> None:
+        session, _, created = self.coordinator.create_task_session(
+            "IOS-30002BUG",
+            workflow_profile="bug_full",
+            policy={"test_policy": "required"},
+        )
+
+        prepared_session, event, prepared_created, details = self.coordinator.prepare_task_session("IOS-30002BUG")
+        work_items = self.work_item_repository.list_for_session(prepared_session.id)
+        events = self.event_repository.list_for_session(prepared_session.id)
+        implementer_role = self.role_repository.get_by_name(prepared_session.id, "implementer")
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertTrue(created)
+        self.assertFalse(prepared_created)
+        self.assertEqual(session.id, prepared_session.id)
+        self.assertEqual("task_prepared", event.event_type)
+        self.assertEqual("bug_analysis_requested", details["followup_event_type"])
+        self.assertEqual("bug_analysis_requested", prepared_session.current_stage)
+        self.assertEqual("implementer", prepared_session.current_owner)
+        self.assertEqual("bug_analysis", work_items[0].work_type)
+        self.assertEqual(
+            [
+                "task_started",
+                "task_session_reused",
+                "task_prepared",
+                "role_input_dispatched",
+                "bug_analysis_requested",
+            ],
+            [item.event_type for item in events],
+        )
+        self.assertEqual(1, len(sent_inputs))
+        self.assertIn("Analyze bug IOS-30002BUG before implementation.", sent_inputs[0])
+        self.assertIn("Test policy for this session: required.", sent_inputs[0])
+
     def test_implementation_completed_moves_session_to_verification(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003")
 
@@ -249,6 +284,51 @@ class SessionCreationTests(unittest.TestCase):
         sent_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Run deterministic verification for IOS-30003.", sent_inputs[0])
+
+    def test_bug_analysis_completed_moves_session_to_implementation(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003BUG",
+            workflow_profile="bug_full",
+            policy={"test_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30003BUG")
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="bug_analysis_completed",
+            payload={
+                "summary": "Likely missing state reset in coordinator",
+                "test_strategy": "Add regression test for repeated resume path",
+            },
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual(
+            ["completed", "assigned"],
+            [work_items[0].status.value, work_items[1].status.value],
+        )
+        self.assertEqual(
+            [
+                "task_started",
+                "task_session_reused",
+                "task_prepared",
+                "role_input_dispatched",
+                "bug_analysis_requested",
+                "bug_analysis_completed",
+                "role_input_dispatched",
+                "implementation_requested",
+            ],
+            [item.event_type for item in events],
+        )
+        self.assertEqual(2, len(sent_inputs))
+        self.assertIn("Start implementation work for IOS-30003BUG.", sent_inputs[-1])
+        self.assertIn("Bug analysis summary: Likely missing state reset in coordinator", sent_inputs[-1])
 
     def test_verification_failed_moves_session_back_to_implementer(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")
@@ -371,6 +451,39 @@ class SessionCreationTests(unittest.TestCase):
                 "implementation_completed",
                 "role_input_dispatched",
                 "verification_requested",
+            ],
+            [item.event_type for item in events],
+        )
+
+    def test_role_output_completed_moves_bug_analysis_forward(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30006BUG",
+            workflow_profile="bug_full",
+            policy={"test_policy": "enabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30006BUG")
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="implementer",
+            output_type="completed",
+            payload={"summary": "Root cause isolated"},
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("bug_analysis_completed", mapped_event.event_type)
+        self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual(
+            [
+                "task_started",
+                "task_session_reused",
+                "task_prepared",
+                "role_input_dispatched",
+                "bug_analysis_requested",
+                "bug_analysis_completed",
+                "role_input_dispatched",
+                "implementation_requested",
             ],
             [item.event_type for item in events],
         )

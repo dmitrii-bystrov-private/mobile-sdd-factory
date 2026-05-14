@@ -233,6 +233,29 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("oneshot", response.session.workflow_profile)
         self.assertEqual("required", response.session.policy["self_review_policy"])
 
+    def test_prepare_session_route_uses_bug_analysis_for_bug_full(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40002BUG",
+                workflow_profile="bug_full",
+                policy={"test_policy": "required"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40002BUG"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertFalse(response.created)
+        self.assertEqual(create_response.session.id, response.session.id)
+        self.assertEqual("bug_full", response.session.workflow_profile)
+        self.assertEqual("bug_analysis_requested", response.followup_event_type)
+        self.assertEqual("bug_analysis_requested", response.session.current_stage)
+
     def test_event_and_work_item_routes_reflect_verification_handoff(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40003"),
@@ -259,6 +282,37 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("verification_requested", inject_response.followup_event_type)
         self.assertEqual("verification_requested", inject_response.session.current_stage)
         self.assertEqual(7, len(events_response.items))
+        self.assertEqual(2, len(work_items_response.items))
+
+    def test_bug_analysis_completed_event_returns_implementation_handoff(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003BUG",
+                workflow_profile="bug_full",
+                policy={"test_policy": "enabled"},
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003BUG"),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="bug_analysis_completed",
+                payload={"summary": "Need to restore coordinator state"},
+            ),
+            dependencies=self.dependencies,
+        )
+        work_items_response = list_work_items(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("implementation_requested", response.followup_event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
         self.assertEqual(2, len(work_items_response.items))
 
     def test_verification_failed_event_returns_correction_handoff(self) -> None:

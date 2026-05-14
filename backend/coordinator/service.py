@@ -205,11 +205,18 @@ class CoordinatorService:
             "followup_event_type": None,
         }
         if snapshot_result.ok and readiness == "ready_for_execution":
-            details["followup_event_type"] = self._enqueue_initial_implementation(
-                session=session,
-                resolved_task_key=resolved_task_key,
-                source_event=event,
-            ).event_type
+            if session.workflow_profile == "bug_full":
+                details["followup_event_type"] = self._enqueue_bug_analysis(
+                    session=session,
+                    source_event=event,
+                ).event_type
+            else:
+                details["followup_event_type"] = self._enqueue_initial_implementation(
+                    session=session,
+                    resolved_task_key=resolved_task_key,
+                    source_event=event,
+                ).event_type
+            session = self._get_session_or_raise(session.id)
         return session, event, created, details
 
     def handle_operator_event(
@@ -225,6 +232,9 @@ class CoordinatorService:
             producer_type="operator",
             payload=payload,
         )
+        if event_type == "bug_analysis_completed":
+            session, followup_event = self._handle_bug_analysis_completed(session, accepted_event)
+            return session, followup_event
         if event_type == "implementation_completed":
             session, followup_event = self._handle_implementation_completed(session, accepted_event)
             return session, followup_event
@@ -675,7 +685,9 @@ class CoordinatorService:
             payload=payload,
         )
         followup_event: Event | None = None
-        if mapped_event_type == "implementation_completed":
+        if mapped_event_type == "bug_analysis_completed":
+            session, followup_event = self._handle_bug_analysis_completed(session, accepted_event)
+        elif mapped_event_type == "implementation_completed":
             session, followup_event = self._handle_implementation_completed(session, accepted_event)
         elif mapped_event_type == "verification_failed":
             session, followup_event = self._handle_verification_failed(session, accepted_event)
@@ -1029,6 +1041,7 @@ class CoordinatorService:
         session: Session,
         resolved_task_key: str,
         source_event: Event,
+        additional_context: str | None = None,
     ) -> Event:
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         if implementer_role is None:
@@ -1048,6 +1061,8 @@ class CoordinatorService:
             current_owner=IMPLEMENTER_ROLE,
         )
         instruction = f"Start implementation work for {resolved_task_key}."
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
         self._dispatch_role_work(
             session=session,
             role=implementer_role,
@@ -1066,6 +1081,88 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
             },
         )
+
+    def _enqueue_bug_analysis(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> Event:
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        if implementer_role is None:
+            raise IntakeError("Implementer role is missing for the session")
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="bug_analysis",
+            title=f"Bug analysis for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            source_event_id=source_event.id,
+            priority=105,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="bug_analysis_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        test_policy = (session.policy or {}).get("test_policy", "enabled")
+        instruction = (
+            f"Analyze bug {session.task_key} before implementation. "
+            "Identify probable root cause, expected fix direction, and whether a regression test should be added. "
+            f"Test policy for this session: {test_policy}."
+        )
+        self._dispatch_role_work(
+            session=session,
+            role=implementer_role,
+            work_item=work_item,
+            stage_name="bug_analysis_requested",
+            instruction=instruction,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="bug_analysis_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+                "test_policy": test_policy,
+            },
+        )
+
+    def _handle_bug_analysis_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        analysis_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "bug_analysis" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not analysis_items:
+            raise IntakeError("No active bug analysis work item found for the session")
+
+        active_item = analysis_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+
+        summary = str(source_event.payload.get("summary") or "").strip()
+        proposed_test = str(source_event.payload.get("test_strategy") or "").strip()
+        context_lines: list[str] = []
+        if summary:
+            context_lines.append(f"Bug analysis summary: {summary}")
+        if proposed_test:
+            context_lines.append(f"Suggested test strategy: {proposed_test}")
+        additional_context = "\n".join(context_lines) if context_lines else None
+
+        event = self._enqueue_initial_implementation(
+            session=session,
+            resolved_task_key=session.task_key,
+            source_event=source_event,
+            additional_context=additional_context,
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event
 
     def _handle_implementation_completed(
         self,
@@ -1401,6 +1498,8 @@ class CoordinatorService:
         output_type: str,
     ) -> str:
         if role_name == IMPLEMENTER_ROLE and output_type == "completed":
+            if session.current_stage == "bug_analysis_requested":
+                return "bug_analysis_completed"
             if session.current_stage in {
                 "implementation_requested",
                 "self_review_correction_requested",
@@ -1720,6 +1819,7 @@ class CoordinatorService:
         if active_item is None:
             return None
         if active_item.work_type not in {
+            "bug_analysis",
             "implementation",
             "self_review_correction",
             "verification_correction",
@@ -1764,6 +1864,11 @@ class CoordinatorService:
         return False
 
     def _stage_instruction(self, stage_name: str, task_key: str) -> str | None:
+        if stage_name == "bug_analysis_requested":
+            return (
+                f"Analyze bug {task_key} before implementation. "
+                "Identify probable root cause, expected fix direction, and whether a regression test should be added."
+            )
         if stage_name == "implementation_requested":
             return f"Start implementation work for {task_key}."
         if stage_name == "verification_requested":
