@@ -205,6 +205,8 @@ class SessionCreationTests(unittest.TestCase):
             / "AGENTS.md"
         ).read_text()
         self.assertIn("Project conventions:", reviewer_agents)
+        self.assertIn("Read previous review summaries first when they are provided", reviewer_agents)
+        self.assertIn("Keep outputs compact and fixer-oriented.", reviewer_agents)
 
     def test_create_task_session_creates_role_launch_scripts(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -425,6 +427,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, len(review_items))
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Review the current task changes for IOS-30003R.", sent_inputs[0])
+        self.assertIn("Role-specific rules:", sent_inputs[0])
+        self.assertIn("Start from the current diff and review only the touched changes.", sent_inputs[0])
+        self.assertIn("review_scope", sent_inputs[0])
 
     def test_reviewer_output_passed_routes_self_review_to_verification(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -483,6 +488,41 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("self_review_correction_requested", followup_event.event_type)
         self.assertEqual("self_review_correction_requested", updated_session.current_stage)
         self.assertEqual("implementer", updated_session.current_owner)
+
+    def test_second_self_review_dispatch_includes_previous_review_summary_paths(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003R2",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003R2")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        _, review_event, _ = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="failed",
+            payload={"summary": "issues remain"},
+        )
+
+        refreshed = self.coordinator._get_session_or_raise(session.id)
+        self.coordinator._enqueue_self_review(session=refreshed, source_event=review_event)
+
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
+        self.assertEqual(2, len(sent_inputs))
+        self.assertIn(
+            "Previous review summaries (read first and do not re-flag the same issues):",
+            sent_inputs[-1],
+        )
+        self.assertIn("previous_review_summary_paths", sent_inputs[-1])
 
     def test_bug_analysis_completed_moves_session_to_implementation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

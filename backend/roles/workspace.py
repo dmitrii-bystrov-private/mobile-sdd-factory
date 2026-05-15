@@ -135,6 +135,9 @@ def _role_operating_rules(role_name: str) -> list[str]:
     if role_name == "code-reviewer":
         return [
             "- Review only the routed diff and conventions relevant to that diff.",
+            "- Read previous review summaries first when they are provided and do not re-flag the same issue twice.",
+            "- Read only the convention files relevant to the touched diff area; do not broaden the review scope speculatively.",
+            "- Keep outputs compact and fixer-oriented.",
             "- Do not re-flag issues that were already raised in previous review passes when that context is provided.",
         ]
     return [

@@ -1616,15 +1616,29 @@ class CoordinatorService:
             current_owner=CODE_REVIEWER_ROLE,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        previous_review_summaries = self._previous_reviewer_summary_paths(session.id)
+        instruction = (
+            f"Review the current task changes for {session.task_key}. "
+            "Start from the current diff, read only the relevant convention sources, "
+            "and report a clean pass or remaining issues."
+        )
+        if previous_review_summaries:
+            instruction += (
+                "\nPrevious review summaries (read first and do not re-flag the same issues):\n"
+                + "\n".join(previous_review_summaries)
+            )
         self._dispatch_role_work(
             session=session,
             role=reviewer_role,
             work_item=review_item,
             stage_name="self_review_requested",
-            instruction=(
-                f"Review the current task changes for {session.task_key}. "
-                "Report a clean pass or remaining issues."
-            ),
+            instruction=instruction,
+            extra_hydration={
+                "review_scope": "current_diff_only",
+                "previous_review_summary_paths": "\n".join(previous_review_summaries)
+                if previous_review_summaries
+                else None,
+            },
         )
         event = self._append_event(
             session_id=session.id,
@@ -2342,6 +2356,19 @@ class CoordinatorService:
             raise IntakeError("No active self review work item found for the session")
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
 
+    def _previous_reviewer_summary_paths(self, session_id: int) -> list[str]:
+        reviewer_role = self.role_repository.get_by_name(session_id, CODE_REVIEWER_ROLE)
+        if reviewer_role is None:
+            return []
+        paths: list[str] = []
+        for artifact in self.artifact_repository.list_for_session(session_id):
+            if artifact.role_id != reviewer_role.id:
+                continue
+            if artifact.artifact_type != "role_output_summary":
+                continue
+            paths.append(artifact.path)
+        return paths
+
     def _find_operator_pending_work_item(self, session_id: int) -> WorkItem | None:
         for item in self.work_item_repository.list_for_session(session_id):
             if item.status != WorkItemStatus.WAITING_FOR_OPERATOR:
@@ -2592,6 +2619,7 @@ class CoordinatorService:
         work_item: WorkItem,
         stage_name: str,
         instruction: str,
+        extra_hydration: dict[str, str | int | None] | None = None,
     ) -> None:
         prompt_mode = self._prompt_mode_for_dispatch(role)
         hydration = build_role_hydration(
@@ -2599,6 +2627,7 @@ class CoordinatorService:
             task_key=session.task_key,
             current_stage=session.current_stage,
             active_work_item=work_item,
+            extra_payload=extra_hydration,
         )
         prompt_text = role_handoff_prompt(
             role_name=role.role_name,

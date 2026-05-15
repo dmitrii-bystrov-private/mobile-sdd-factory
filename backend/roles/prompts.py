@@ -23,6 +23,14 @@ def role_runtime_rules(role_name: str) -> str:
             "- Do not run workflow-level build/test/lint gates here unless the routed work explicitly requires a narrow task-specific check.\n"
             "- Final test+lint gate remains deferred to the coordinator.\n\n"
         )
+    if role_name == "code-reviewer":
+        return (
+            "Role-specific rules:\n"
+            "- Start from the current diff and review only the touched changes.\n"
+            "- If previous review summaries are provided, read them first and do not re-flag already raised issues.\n"
+            "- Read only the convention sources relevant to the touched diff area.\n"
+            "- Keep the output compact and optimized for a narrow fixer pass.\n\n"
+        )
     return ""
 
 
