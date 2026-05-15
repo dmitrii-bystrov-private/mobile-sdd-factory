@@ -22,6 +22,12 @@ export function OperatorActions({
   const [docHarvestSummary, setDocHarvestSummary] = useState("");
   const [selfReviewOutcome, setSelfReviewOutcome] = useState<"passed" | "issues_found">("passed");
   const [selfReviewSummary, setSelfReviewSummary] = useState("");
+  const [reviewKnowledgeTitle, setReviewKnowledgeTitle] = useState("");
+  const [reviewKnowledgeScope, setReviewKnowledgeScope] = useState("");
+  const [reviewKnowledgeGuidance, setReviewKnowledgeGuidance] = useState("");
+  const [sessionInsightTitle, setSessionInsightTitle] = useState("");
+  const [sessionInsightScope, setSessionInsightScope] = useState("");
+  const [sessionInsightGuidance, setSessionInsightGuidance] = useState("");
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
@@ -86,6 +92,48 @@ export function OperatorActions({
       await apiClient.completeSelfReview(session.id, selfReviewOutcome, normalizedSummary);
       setSelfReviewSummary("");
       setSelfReviewOutcome("passed");
+    });
+  }
+
+  async function handleReviewKnowledge(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const normalizedTitle = reviewKnowledgeTitle.trim();
+    const normalizedGuidance = reviewKnowledgeGuidance.trim();
+    if (normalizedTitle.length === 0 || normalizedGuidance.length === 0) {
+      setError("Review knowledge title and guidance are required");
+      return;
+    }
+    await run(async () => {
+      await apiClient.createReviewKnowledge(
+        session.id,
+        normalizedTitle,
+        normalizedGuidance,
+        reviewKnowledgeScope.trim(),
+      );
+      setReviewKnowledgeTitle("");
+      setReviewKnowledgeScope("");
+      setReviewKnowledgeGuidance("");
+    });
+  }
+
+  async function handleSessionInsightKnowledge(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const normalizedTitle = sessionInsightTitle.trim();
+    const normalizedGuidance = sessionInsightGuidance.trim();
+    if (normalizedTitle.length === 0 || normalizedGuidance.length === 0) {
+      setError("Session insight title and guidance are required");
+      return;
+    }
+    await run(async () => {
+      await apiClient.createSessionInsightKnowledge(
+        session.id,
+        normalizedTitle,
+        normalizedGuidance,
+        sessionInsightScope.trim(),
+      );
+      setSessionInsightTitle("");
+      setSessionInsightScope("");
+      setSessionInsightGuidance("");
     });
   }
 
@@ -308,6 +356,104 @@ export function OperatorActions({
             type="submit"
           >
             Reopen From QA
+          </button>
+        </form>
+      </div>
+
+      <div className="operator-followup-stack">
+        <div className="operator-followup-copy">
+          <p className="eyebrow">Knowledge</p>
+          <h4>Promote Review Feedback</h4>
+          <p className="path-label">
+            Capture a reusable repo-visible rule from merge request review feedback.
+          </p>
+        </div>
+
+        <form className="followup-form" onSubmit={(event) => void handleReviewKnowledge(event)}>
+          <div className="followup-form-grid">
+            <label className="form-field">
+              <span>Knowledge Title</span>
+              <input
+                className="text-input"
+                disabled={busy}
+                onChange={(event) => setReviewKnowledgeTitle(event.target.value)}
+                placeholder="Reuse existing formatter helper"
+                value={reviewKnowledgeTitle}
+              />
+            </label>
+            <label className="form-field">
+              <span>Scope</span>
+              <input
+                className="text-input"
+                disabled={busy}
+                onChange={(event) => setReviewKnowledgeScope(event.target.value)}
+                placeholder="shared-formatting"
+                value={reviewKnowledgeScope}
+              />
+            </label>
+          </div>
+          <label className="form-field">
+            <span>Guidance</span>
+            <textarea
+              className="text-area-input"
+              disabled={busy}
+              onChange={(event) => setReviewKnowledgeGuidance(event.target.value)}
+              placeholder="Do not introduce a new helper here; use the existing shared formatter already used in this module."
+              rows={4}
+              value={reviewKnowledgeGuidance}
+            />
+          </label>
+          <button className="action-button" disabled={busy} type="submit">
+            Create Review Knowledge
+          </button>
+        </form>
+      </div>
+
+      <div className="operator-followup-stack">
+        <div className="operator-followup-copy">
+          <p className="eyebrow">Knowledge</p>
+          <h4>Capture Session Insight</h4>
+          <p className="path-label">
+            Record a non-obvious discovery from the current session so it becomes visible in later similar work.
+          </p>
+        </div>
+
+        <form className="followup-form" onSubmit={(event) => void handleSessionInsightKnowledge(event)}>
+          <div className="followup-form-grid">
+            <label className="form-field">
+              <span>Insight Title</span>
+              <input
+                className="text-input"
+                disabled={busy}
+                onChange={(event) => setSessionInsightTitle(event.target.value)}
+                placeholder="State actually lives in presenter cache"
+                value={sessionInsightTitle}
+              />
+            </label>
+            <label className="form-field">
+              <span>Scope</span>
+              <input
+                className="text-input"
+                disabled={busy}
+                onChange={(event) => setSessionInsightScope(event.target.value)}
+                placeholder="card-details"
+                value={sessionInsightScope}
+              />
+            </label>
+          </div>
+          <label className="form-field">
+            <span>Guidance</span>
+            <textarea
+              className="text-area-input"
+              disabled={busy}
+              onChange={(event) => setSessionInsightGuidance(event.target.value)}
+              placeholder="Treat the presenter cache as the real source of truth; direct VC state updates will drift."
+              rows={4}
+              value={sessionInsightGuidance}
+            />
+          </label>
+          <button className="action-button" disabled={busy} type="submit">
+            Create Session Insight
           </button>
         </form>
       </div>

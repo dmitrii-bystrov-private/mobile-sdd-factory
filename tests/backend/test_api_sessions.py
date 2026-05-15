@@ -24,6 +24,8 @@ try:
     from backend.api.routes_operator import complete_doc_harvest
     from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
+    from backend.api.routes_operator import create_review_knowledge
+    from backend.api.routes_operator import create_session_insight_knowledge
     from backend.api.routes_operator import send_to_test
     from backend.api.routes_operator import start_subtask_graph
     from backend.api.routes_operator import ingest_mr_comments
@@ -31,6 +33,7 @@ try:
     from backend.api.schemas import (
         CompleteDocHarvestRequest,
         CompleteSelfReviewRequest,
+        CreateKnowledgeRequest,
         CreateMrRequest,
         IngestMrCommentsRequest,
         PollSessionOutputRequest,
@@ -130,6 +133,7 @@ class SessionApiTests(unittest.TestCase):
             gitlab_adapter=FakeGitLabAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
             workdir_root=Path(self.temp_dir.name),
+            knowledge_root=Path(self.temp_dir.name) / "knowledge",
             event_bus=event_bus,
         )
         loop_runner = CoordinatorLoopRunner(
@@ -485,6 +489,74 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("subtask_implementation_requested", first_response.session.current_stage)
         self.assertEqual("verification_requested", second_response.followup_event_type)
         self.assertEqual("verification_requested", second_response.session.current_stage)
+
+    def test_create_review_knowledge_route_writes_repo_visible_file(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        prepare_response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005KNOW"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+        ingest_mr_comments(
+            IngestMrCommentsRequest(
+                session_id=prepare_response.session.id,
+                platform="ios",
+                mr_id="42",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = create_review_knowledge(
+            CreateKnowledgeRequest(
+                session_id=prepare_response.session.id,
+                title="Reuse existing navigation assembly",
+                guidance="Prefer the existing assembly instead of adding a new navigation helper.",
+                scope="navigation",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        knowledge_files = list((Path(self.temp_dir.name) / "knowledge").rglob("*.md"))
+        self.assertTrue(response.created)
+        self.assertEqual("review_knowledge_created", response.event_type)
+        self.assertTrue(any("Reuse existing navigation assembly" in path.read_text() for path in knowledge_files))
+
+    def test_create_session_insight_knowledge_route_returns_created_event(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        prepare_response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40006KNOW"),
+            dependencies=self.dependencies,
+        )
+
+        response = create_session_insight_knowledge(
+            CreateKnowledgeRequest(
+                session_id=prepare_response.session.id,
+                title="Presenter cache owns the state",
+                guidance="Treat presenter cache as the durable source of truth in this feature area.",
+                scope="card-details",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        self.assertEqual("session_insight_knowledge_created", response.event_type)
 
     def test_verification_failed_event_returns_correction_handoff(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

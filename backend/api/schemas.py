@@ -261,6 +261,19 @@ class StartSubtaskGraphResponse(BaseModel):
     followup_event_type: str
 
 
+class CreateKnowledgeRequest(BaseModel):
+    session_id: int
+    title: str
+    guidance: str
+    scope: str | None = None
+
+
+class CreateKnowledgeResponse(BaseModel):
+    created: bool
+    session: SessionResponse
+    event_type: str
+
+
 class CompleteDocHarvestRequest(BaseModel):
     session_id: int
     summary: str

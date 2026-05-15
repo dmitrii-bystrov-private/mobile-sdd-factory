@@ -8,6 +8,8 @@ from backend.api.routes_sessions import to_session_response
 from backend.api.schemas import (
     CompleteDocHarvestRequest,
     CompleteDocHarvestResponse,
+    CreateKnowledgeRequest,
+    CreateKnowledgeResponse,
     CompleteSelfReviewRequest,
     CompleteSelfReviewResponse,
     CreateMrRequest,
@@ -247,6 +249,50 @@ def start_subtask_graph(
         session=to_session_response(session),
         event_type=event.event_type,
         followup_event_type=followup_event.event_type,
+    )
+
+
+@router.post("/create-review-knowledge", response_model=CreateKnowledgeResponse)
+def create_review_knowledge(
+    payload: CreateKnowledgeRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> CreateKnowledgeResponse:
+    try:
+        session, event = dependencies.coordinator_service.create_review_knowledge(
+            session_id=payload.session_id,
+            title=payload.title,
+            guidance=payload.guidance,
+            scope=payload.scope,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return CreateKnowledgeResponse(
+        created=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+    )
+
+
+@router.post("/create-session-insight-knowledge", response_model=CreateKnowledgeResponse)
+def create_session_insight_knowledge(
+    payload: CreateKnowledgeRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> CreateKnowledgeResponse:
+    try:
+        session, event = dependencies.coordinator_service.create_session_insight_knowledge(
+            session_id=payload.session_id,
+            title=payload.title,
+            guidance=payload.guidance,
+            scope=payload.scope,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return CreateKnowledgeResponse(
+        created=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
     )
 
 

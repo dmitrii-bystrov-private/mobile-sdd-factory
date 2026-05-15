@@ -26,6 +26,9 @@ const STREAM_EVENT_TYPES = [
   "subtask_graph_requested",
   "subtask_implementation_requested",
   "subtask_completed",
+  "review_knowledge_created",
+  "session_insight_knowledge_created",
+  "knowledge_attached",
   "implementation_requested",
   "implementation_completed",
   "self_review_requested",
@@ -270,6 +273,48 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify({
         session_id: sessionId,
+      }),
+    });
+  },
+
+  createReviewKnowledge(
+    sessionId: number,
+    title: string,
+    guidance: string,
+    scope: string,
+  ): Promise<{
+    created: boolean;
+    event_type: string;
+    session: Session;
+  }> {
+    return request("/operator/create-review-knowledge", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        title,
+        guidance,
+        scope: scope || null,
+      }),
+    });
+  },
+
+  createSessionInsightKnowledge(
+    sessionId: number,
+    title: string,
+    guidance: string,
+    scope: string,
+  ): Promise<{
+    created: boolean;
+    event_type: string;
+    session: Session;
+  }> {
+    return request("/operator/create-session-insight-knowledge", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        title,
+        guidance,
+        scope: scope || null,
       }),
     });
   },

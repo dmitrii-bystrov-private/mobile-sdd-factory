@@ -5,10 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import json
+from pathlib import Path
 
 from backend.api.sse import SessionEventBus
 from backend.coordinator.artifacts import write_text_artifact
 from backend.coordinator.intake import IntakeError, classify_task_readiness
+from backend.knowledge.store import KnowledgeStore
 from backend.coordinator.subtasks import read_snapshot_subtasks, unresolved_subtasks
 from backend.coordinator.hydration import build_role_hydration
 from backend.models.event import Event
@@ -52,6 +54,7 @@ class CoordinatorService:
     gitlab_adapter: GitLabAdapter | None = None
     artifacts_root: Path | None = None
     workdir_root: Path | None = None
+    knowledge_root: Path | None = None
     event_bus: SessionEventBus | None = None
 
     def create_task_session(
@@ -207,21 +210,25 @@ class CoordinatorService:
             "followup_event_type": None,
         }
         if snapshot_result.ok and readiness == "ready_for_execution":
+            knowledge_context = self._attach_matching_knowledge(session)
             if session.workflow_profile == "bug_full":
                 details["followup_event_type"] = self._enqueue_bug_analysis(
                     session=session,
                     source_event=event,
+                    additional_context=knowledge_context,
                 ).event_type
             elif session.workflow_profile == "story_full":
                 details["followup_event_type"] = self._enqueue_story_spec(
                     session=session,
                     source_event=event,
+                    additional_context=knowledge_context,
                 ).event_type
             else:
                 details["followup_event_type"] = self._enqueue_initial_implementation(
                     session=session,
                     resolved_task_key=resolved_task_key,
                     source_event=event,
+                    additional_context=knowledge_context,
                 ).event_type
             session = self._get_session_or_raise(session.id)
         return session, event, created, details
@@ -670,6 +677,99 @@ class CoordinatorService:
         )
         refreshed = self._get_session_or_raise(session.id)
         return refreshed, event, followup_event
+
+    def create_review_knowledge(
+        self,
+        session_id: int,
+        title: str,
+        guidance: str,
+        scope: str | None = None,
+    ) -> tuple[Session, Event]:
+        session = self._get_session_or_raise(session_id)
+        knowledge_store = self._knowledge_store_or_raise()
+        if not any(
+            event.event_type == "mr_comments_received"
+            for event in self.event_repository.list_for_session(session.id)
+        ):
+            raise IntakeError(
+                f"Session {session_id} has no MR review feedback context for review knowledge capture"
+            )
+        item = knowledge_store.create_item(
+            title=title,
+            source_type="review_feedback",
+            platform=self._platform_for_task_key(session.task_key),
+            workflow_profiles=[session.workflow_profile],
+            task_key=session.task_key,
+            guidance=guidance,
+            scope=scope,
+            source_summary=f"Derived from MR feedback for {session.task_key}",
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="knowledge",
+            artifact_type="knowledge_reference_markdown",
+            path=str(item.path),
+            metadata={
+                "knowledge_id": item.id,
+                "source_type": item.source_type,
+                "scope": item.scope,
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="review_knowledge_created",
+            producer_type="operator",
+            payload={
+                "knowledge_id": item.id,
+                "title": item.title,
+                "scope": item.scope,
+                "path": str(item.path),
+            },
+        )
+        return session, event
+
+    def create_session_insight_knowledge(
+        self,
+        session_id: int,
+        title: str,
+        guidance: str,
+        scope: str | None = None,
+    ) -> tuple[Session, Event]:
+        session = self._get_session_or_raise(session_id)
+        knowledge_store = self._knowledge_store_or_raise()
+        item = knowledge_store.create_item(
+            title=title,
+            source_type="session_insight",
+            platform=self._platform_for_task_key(session.task_key),
+            workflow_profiles=[session.workflow_profile],
+            task_key=session.task_key,
+            guidance=guidance,
+            scope=scope,
+            source_summary=f"Derived from session insight for {session.task_key}",
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="knowledge",
+            artifact_type="knowledge_reference_markdown",
+            path=str(item.path),
+            metadata={
+                "knowledge_id": item.id,
+                "source_type": item.source_type,
+                "scope": item.scope,
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_insight_knowledge_created",
+            producer_type="operator",
+            payload={
+                "knowledge_id": item.id,
+                "title": item.title,
+                "scope": item.scope,
+                "path": str(item.path),
+            },
+        )
+        return session, event
 
     def start_subtask_graph(
         self,
@@ -1173,6 +1273,7 @@ class CoordinatorService:
         self,
         session: Session,
         source_event: Event,
+        additional_context: str | None = None,
     ) -> Event:
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         if implementer_role is None:
@@ -1197,6 +1298,8 @@ class CoordinatorService:
             "Identify probable root cause, expected fix direction, and whether a regression test should be added. "
             f"Test policy for this session: {test_policy}."
         )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
         self._dispatch_role_work(
             session=session,
             role=implementer_role,
@@ -1221,6 +1324,7 @@ class CoordinatorService:
         self,
         session: Session,
         source_event: Event,
+        additional_context: str | None = None,
     ) -> Event:
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         if implementer_role is None:
@@ -1243,6 +1347,8 @@ class CoordinatorService:
             f"Prepare a concise implementation spec for story {session.task_key} before coding. "
             "Clarify the intended scope, key constraints, and an implementation approach that will guide the next coding step."
         )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
         self._dispatch_role_work(
             session=session,
             role=implementer_role,
@@ -2202,6 +2308,57 @@ class CoordinatorService:
         if stage_name == "qa_reopen_requested":
             return f"Apply QA reopen follow-up changes for {task_key}."
         return None
+
+    def _knowledge_store_or_raise(self) -> KnowledgeStore:
+        if self.knowledge_root is None:
+            raise IntakeError("Coordinator is missing knowledge root")
+        return KnowledgeStore(self.knowledge_root)
+
+    def _attach_matching_knowledge(self, session: Session) -> str | None:
+        if self.knowledge_root is None or self.artifacts_root is None:
+            return None
+
+        knowledge_store = KnowledgeStore(self.knowledge_root)
+        matches = knowledge_store.match(
+            platform=self._platform_for_task_key(session.task_key),
+            workflow_profile=session.workflow_profile,
+            limit=3,
+        )
+        if not matches:
+            return None
+
+        lines = ["Relevant shared knowledge from previous work:"]
+        for item in matches:
+            lines.append(f"- {item.title}: {item.guidance}")
+        content = "\n".join(lines)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "knowledge",
+            "attached-knowledge.md",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="knowledge",
+            artifact_type="attached_knowledge_markdown",
+            path=str(artifact_path),
+            metadata={
+                "knowledge_ids": [item.id for item in matches],
+                "knowledge_count": len(matches),
+            },
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="knowledge_attached",
+            producer_type="coordinator",
+            payload={
+                "knowledge_ids": [item.id for item in matches],
+                "knowledge_count": len(matches),
+                "workflow_profile": session.workflow_profile,
+            },
+        )
+        return content
 
     def _count_mr_discussions(self, markdown: str) -> int:
         return sum(1 for line in markdown.splitlines() if line.startswith("## Discussion "))

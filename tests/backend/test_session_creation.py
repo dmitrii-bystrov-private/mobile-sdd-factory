@@ -108,6 +108,7 @@ class SessionCreationTests(unittest.TestCase):
             gitlab_adapter=FakeGitLabAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
             workdir_root=Path(self.temp_dir.name),
+            knowledge_root=Path(self.temp_dir.name) / "knowledge",
             event_bus=self.event_bus,
         )
 
@@ -414,6 +415,62 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Start implementation work for IOS-30003STORY.", sent_inputs[-1])
         self.assertIn("Story spec summary: Need a new screen plus navigation wiring", sent_inputs[-1])
+
+    def test_review_knowledge_is_repo_visible_and_attached_on_later_prepare(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003KNOW")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.ingest_mr_comments(
+            session_id=session.id,
+            platform="ios",
+            mr_id="42",
+        )
+
+        _, event = self.coordinator.create_review_knowledge(
+            session_id=session.id,
+            title="Reuse existing formatter helper",
+            guidance="Do not add a new helper here; reuse the shared formatter already used in this module.",
+            scope="shared-formatting",
+        )
+
+        knowledge_files = list((Path(self.temp_dir.name) / "knowledge").rglob("*.md"))
+        self.assertEqual("review_knowledge_created", event.event_type)
+        self.assertTrue(any("Reuse existing formatter helper" in path.read_text() for path in knowledge_files))
+
+        new_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004KNOW")
+        artifacts = self.artifact_repository.list_for_session(new_session.id)
+        implementer_role = self.role_repository.get_by_name(new_session.id, "implementer")
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertTrue(
+            any(artifact.artifact_type == "attached_knowledge_markdown" for artifact in artifacts)
+        )
+        self.assertIn("Relevant shared knowledge from previous work:", sent_inputs[-1])
+        self.assertIn("Reuse existing formatter helper", sent_inputs[-1])
+
+    def test_session_insight_knowledge_writes_repo_visible_markdown(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30005KNOW")
+
+        _, event = self.coordinator.create_session_insight_knowledge(
+            session_id=session.id,
+            title="Presenter cache is the real state source",
+            guidance="Treat presenter cache as the source of truth; direct VC state updates will drift.",
+            scope="card-details",
+        )
+
+        knowledge_files = list((Path(self.temp_dir.name) / "knowledge").rglob("*.md"))
+        self.assertEqual("session_insight_knowledge_created", event.event_type)
+        self.assertTrue(
+            any("Presenter cache is the real state source" in path.read_text() for path in knowledge_files)
+        )
 
     def test_start_subtask_graph_converts_story_implementation_into_subtask_lane(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
