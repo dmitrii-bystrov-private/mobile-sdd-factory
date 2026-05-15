@@ -2,12 +2,14 @@ import { startTransition, useEffect, useRef, useState } from "react";
 
 import { apiClient, openSessionEventStream } from "../api/client";
 import { SessionDetail } from "../components/SessionDetail";
+import { KnowledgePanel } from "../components/KnowledgePanel";
 import { SessionList } from "../components/SessionList";
 import { SessionStartForm } from "../components/SessionStartForm";
 import type {
   Artifact,
   EventItem,
   FollowupContext,
+  KnowledgeItem,
   Session,
   SessionBundle,
 } from "../types";
@@ -65,6 +67,7 @@ export function SessionsPage(): JSX.Element {
   const [bundle, setBundle] = useState<SessionBundle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [streamState, setStreamState] = useState<"idle" | "live" | "reconnecting">("idle");
   const [lastStreamEventType, setLastStreamEventType] = useState<string | null>(null);
   const [lastStreamEventId, setLastStreamEventId] = useState<number | null>(null);
@@ -78,7 +81,9 @@ export function SessionsPage(): JSX.Element {
     setError(null);
     try {
       const sessionResponse = await apiClient.listSessions();
+      const knowledgeResponse = await apiClient.listKnowledge();
       setSessions(sessionResponse.items);
+      setKnowledgeItems(knowledgeResponse.items);
       startTransition(() => {
         setSelectedSessionId((current) => current ?? sessionResponse.items[0]?.id ?? null);
       });
@@ -226,6 +231,7 @@ export function SessionsPage(): JSX.Element {
             selectedSessionId={selectedSessionId}
             sessions={sessions}
           />
+          <KnowledgePanel items={knowledgeItems} />
         </div>
         {loading ? (
           <section className="panel panel-empty">

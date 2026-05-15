@@ -2,6 +2,7 @@ import type {
   Artifact,
   ArtifactDetail,
   EventItem,
+  KnowledgeItem,
   Role,
   SessionPolicyValue,
   Session,
@@ -120,6 +121,10 @@ export const apiClient = {
 
   listArtifacts(sessionId: number): Promise<{ items: Artifact[] }> {
     return request(`/artifacts?session_id=${sessionId}`);
+  },
+
+  listKnowledge(): Promise<{ items: KnowledgeItem[] }> {
+    return request("/knowledge");
   },
 
   getArtifact(artifactId: number): Promise<ArtifactDetail> {

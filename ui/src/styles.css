@@ -225,6 +225,24 @@ input {
   gap: 12px;
 }
 
+.knowledge-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-strong);
+  padding: 14px;
+}
+
+.knowledge-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.knowledge-card p {
+  margin: 8px 0 0;
+}
+
 .session-card,
 .action-button {
   border: 1px solid var(--line);

@@ -6,6 +6,7 @@ import unittest
 try:
     from backend.api.sse import SessionEventBus
     from backend.api.routes_sessions import create_session, list_sessions
+    from backend.api.routes_knowledge import list_knowledge
     from backend.api.schemas import CreateSessionRequest, PrepareSessionRequest
     from backend.api.routes_events import inject_event, list_events
     from backend.api.routes_work_items import list_work_items
@@ -604,6 +605,27 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(response.created)
         self.assertEqual("qa_knowledge_created", response.event_type)
         self.assertTrue(any("Preserve empty-state CTA after refresh" in path.read_text() for path in knowledge_files))
+
+    def test_list_knowledge_route_returns_repo_visible_items(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        prepare_response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008KNOW"),
+            dependencies=self.dependencies,
+        )
+        create_session_insight_knowledge(
+            CreateKnowledgeRequest(
+                session_id=prepare_response.session.id,
+                title="Presenter cache owns the state",
+                guidance="Treat presenter cache as the durable source of truth in this feature area.",
+                scope="card-details",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = list_knowledge(dependencies=self.dependencies)
+
+        self.assertTrue(any(item.title == "Presenter cache owns the state" for item in response.items))
 
     def test_verification_failed_event_returns_correction_handoff(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

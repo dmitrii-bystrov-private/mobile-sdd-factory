@@ -131,6 +131,24 @@ class ArtifactDetailResponse(BaseModel):
     content: str | None = None
 
 
+class KnowledgeItemResponse(BaseModel):
+    id: str
+    title: str
+    source_type: str
+    platform: str
+    workflow_profiles: list[str]
+    task_key: str
+    guidance: str
+    scope: str | None = None
+    source_summary: str | None = None
+    created_at: str
+    path: str
+
+
+class KnowledgeItemsResponse(BaseModel):
+    items: list[KnowledgeItemResponse]
+
+
 class WorkItemResponse(BaseModel):
     id: int
     session_id: int
