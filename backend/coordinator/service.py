@@ -2382,6 +2382,82 @@ class CoordinatorService:
             paths.append(artifact.path)
         return paths
 
+    def _latest_artifact_path(
+        self,
+        session_id: int,
+        artifact_type: str,
+        *,
+        role_name: str | None = None,
+    ) -> str | None:
+        role_id = None
+        if role_name is not None:
+            role = self.role_repository.get_by_name(session_id, role_name)
+            if role is None:
+                return None
+            role_id = role.id
+
+        latest_path: str | None = None
+        for artifact in self.artifact_repository.list_for_session(session_id):
+            if artifact.artifact_type != artifact_type:
+                continue
+            if role_id is not None and artifact.role_id != role_id:
+                continue
+            latest_path = artifact.path
+        return latest_path
+
+    def _bug_analysis_report_path(self, task_key: str) -> str | None:
+        if self.workdir_root is None:
+            return None
+        return str(self.workdir_root / task_key / "spec" / "bug-analysis.md")
+
+    def _default_extra_hydration_for_dispatch(
+        self,
+        session: Session,
+        role: Role,
+        stage_name: str,
+    ) -> dict[str, str | int | None]:
+        if session.workflow_profile != "bug_full" or role.role_name != BUG_FIXER_ROLE:
+            return {}
+
+        payload: dict[str, str | int | None] = {
+            "bug_analysis_report_path": self._bug_analysis_report_path(session.task_key),
+        }
+        mode_by_stage = {
+            "bug_analysis_requested": "analysis-only",
+            "implementation_requested": "fix-only",
+            "verification_correction_requested": "fix-only",
+            "self_review_correction_requested": "fix-only",
+            "mr_followup_requested": "fix-only",
+            "qa_reopen_requested": "fix-only",
+        }
+        if stage_name in mode_by_stage:
+            payload["bug_mode"] = mode_by_stage[stage_name]
+        if stage_name == "bug_analysis_requested":
+            payload["primary_bug_inputs"] = "description.md + comments.md"
+        if stage_name == "verification_correction_requested":
+            payload["issues_file_path"] = self._latest_artifact_path(
+                session.id,
+                "role_output_summary",
+                role_name=VERIFICATION_COORDINATOR_ROLE,
+            )
+        if stage_name == "self_review_correction_requested":
+            payload["issues_file_path"] = self._latest_artifact_path(
+                session.id,
+                "role_output_summary",
+                role_name=CODE_REVIEWER_ROLE,
+            )
+        if stage_name == "mr_followup_requested":
+            payload["followup_comments_path"] = self._latest_artifact_path(
+                session.id,
+                "mr_comments_markdown",
+            )
+        if stage_name == "qa_reopen_requested":
+            payload["followup_comments_path"] = self._latest_artifact_path(
+                session.id,
+                "qa_reopen_comments",
+            )
+        return payload
+
     def _find_operator_pending_work_item(self, session_id: int) -> WorkItem | None:
         for item in self.work_item_repository.list_for_session(session_id):
             if item.status != WorkItemStatus.WAITING_FOR_OPERATOR:
@@ -2634,13 +2710,20 @@ class CoordinatorService:
         instruction: str,
         extra_hydration: dict[str, str | int | None] | None = None,
     ) -> None:
+        merged_hydration = self._default_extra_hydration_for_dispatch(
+            session,
+            role,
+            stage_name,
+        )
+        if extra_hydration:
+            merged_hydration.update(extra_hydration)
         prompt_mode = self._prompt_mode_for_dispatch(role)
         hydration = build_role_hydration(
             role_name=role.role_name,
             task_key=session.task_key,
             current_stage=session.current_stage,
             active_work_item=work_item,
-            extra_payload=extra_hydration,
+            extra_payload=merged_hydration or None,
         )
         prompt_text = role_handoff_prompt(
             role_name=role.role_name,

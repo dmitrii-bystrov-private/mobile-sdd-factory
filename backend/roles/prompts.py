@@ -23,6 +23,17 @@ def role_runtime_rules(role_name: str) -> str:
             "- Do not run workflow-level build/test/lint gates here unless the routed work explicitly requires a narrow task-specific check.\n"
             "- Final test+lint gate remains deferred to the coordinator.\n\n"
         )
+    if role_name == "bug-fixer":
+        return (
+            "Role-specific rules:\n"
+            "- Preserve bug-specific context across analysis, fix, and follow-up rounds inside this same persistent role session.\n"
+            "- In `analysis-only` mode, read task description/comments first, investigate the code path, write or update `spec/bug-analysis.md`, and stop before product-code changes when confidence is low or the routed pass is analysis-only.\n"
+            "- In `fix-only` mode, read the saved `spec/bug-analysis.md` first and use it as the durable bug context for the fix.\n"
+            "- If an `Issues file:` path is routed, treat it as the primary narrow-scope input for this round.\n"
+            "- If `Follow-up comments:` are routed, prioritize the latest follow-up comments over redoing the original bug analysis from scratch.\n"
+            "- Keep bug-fix follow-up and correction rounds tightly scoped to the routed issues/comments unless a tiny directly-related adjustment is required.\n"
+            "- Leave workflow-level test+lint verification to the coordinator.\n\n"
+        )
     if role_name == "code-reviewer":
         return (
             "Role-specific rules:\n"

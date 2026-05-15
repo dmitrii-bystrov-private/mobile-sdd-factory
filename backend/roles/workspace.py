@@ -40,6 +40,8 @@ def _role_relevant_paths(role_name: str) -> list[str]:
         return [
             "- Task repo worktree: `{task_repo_root}`",
             "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Task description and comments: `{task_snapshot_root}/description.md`, `{task_snapshot_root}/comments.md`",
+            "- Bug analysis report target: `{task_snapshot_root}/spec/bug-analysis.md`",
             "- Task artifacts and bug analysis outputs: `{task_artifacts_root}`",
             "- Main repo scripts: `{repo_root}/scripts`",
             "- Project conventions: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
@@ -126,7 +128,13 @@ def _role_operating_rules(role_name: str) -> list[str]:
     if role_name == "bug-fixer":
         return [
             "- Preserve bug-specific context across analysis, fix, and follow-up rounds.",
-            "- Keep the current bug task scoped to the routed pass and latest follow-up context.",
+            "- Support the routed bug modes inside one runtime identity: `analysis-only` before code changes, then `fix-only` for implementation, correction, and follow-up rounds.",
+            "- In `analysis-only` mode, read task description/comments first, investigate the code path, write or update `spec/bug-analysis.md`, and stop before product-code changes when confidence is low or when the coordinator routed an analysis-only pass.",
+            "- In `fix-only` mode, read the saved `spec/bug-analysis.md` first and treat it as the durable bug context unless a routed issues file or follow-up comments narrow the scope further.",
+            "- If an `Issues file:` path is routed, treat it as the primary narrow-scope input for this round and keep the fix limited to those listed issues unless a tiny directly-related adjustment is required.",
+            "- If `Follow-up comments:` are routed, prioritize the latest follow-up comments over redoing the original bug analysis from scratch.",
+            "- Keep the current bug task scoped to the routed pass, saved bug analysis, and latest follow-up context.",
+            "- Write or update `spec/bug-analysis.md` in bug-analysis rounds; keep final workflow-level verification deferred to the coordinator.",
             "- Treat final test+lint verification as deferred to the coordinator.",
         ]
     if role_name == "verification-coordinator":

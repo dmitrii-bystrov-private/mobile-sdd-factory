@@ -210,6 +210,30 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Project conventions:", reviewer_agents)
         self.assertIn("Read previous review summaries first when they are provided", reviewer_agents)
         self.assertIn("Keep outputs compact and fixer-oriented.", reviewer_agents)
+
+    def test_create_task_session_creates_bug_fixer_workspace_contract(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30000BUGW",
+            workflow_profile="bug_full",
+            policy={"test_policy": "required"},
+        )
+
+        self.assertIsNotNone(session.id)
+        bug_fixer_agents = (
+            Path(self.temp_dir.name)
+            / "runtime"
+            / "role-workspaces"
+            / "IOS-30000BUGW"
+            / BUG_FIXER_ROLE
+            / "AGENTS.md"
+        ).read_text()
+        self.assertIn("Task description and comments:", bug_fixer_agents)
+        self.assertIn("Bug analysis report target:", bug_fixer_agents)
+        self.assertIn("Support the routed bug modes inside one runtime identity", bug_fixer_agents)
+        self.assertIn("In `analysis-only` mode, read task description/comments first", bug_fixer_agents)
+        self.assertIn("If an `Issues file:` path is routed, treat it as the primary narrow-scope input", bug_fixer_agents)
+        self.assertIn("If `Follow-up comments:` are routed, prioritize the latest follow-up comments", bug_fixer_agents)
+
     def test_create_task_session_creates_role_launch_scripts(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30000L",
@@ -473,6 +497,11 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Mode: analysis-only", sent_inputs[0])
         self.assertIn("Analyze bug IOS-30002BUG before implementation.", sent_inputs[0])
         self.assertIn("Test policy for this session: required.", sent_inputs[0])
+        self.assertIn("Role-specific rules:", sent_inputs[0])
+        self.assertIn("In `analysis-only` mode, read task description/comments first", sent_inputs[0])
+        self.assertIn('"bug_analysis_report_path"', sent_inputs[0])
+        self.assertIn('"bug_mode": "analysis-only"', sent_inputs[0])
+        self.assertIn('"primary_bug_inputs": "description.md + comments.md"', sent_inputs[0])
 
     def test_implementation_completed_moves_session_to_verification(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003")
@@ -691,6 +720,9 @@ class SessionCreationTests(unittest.TestCase):
             bug_fixer_inputs[-1],
         )
         self.assertIn("Continue from your existing bug-fixer role context", bug_fixer_inputs[-1])
+        self.assertIn('"bug_analysis_report_path"', bug_fixer_inputs[-1])
+        self.assertIn('"bug_mode": "fix-only"', bug_fixer_inputs[-1])
+        self.assertIn("In `fix-only` mode, read the saved `spec/bug-analysis.md` first", bug_fixer_inputs[-1])
 
     def test_prepare_task_session_routes_story_full_into_story_spec(self) -> None:
         session, _, created = self.coordinator.create_task_session(
@@ -989,6 +1021,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Mode: fix-only", sent_inputs[-1])
         self.assertIn("Apply verification corrections for IOS-30004BUG.", sent_inputs[-1])
         self.assertIn("narrow bug-fix correction pass", sent_inputs[-1])
+        self.assertIn('"issues_file_path"', sent_inputs[-1])
+        self.assertIn('"bug_analysis_report_path"', sent_inputs[-1])
 
     def test_second_verification_dispatch_uses_continuation_prompt(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004V2")
@@ -1493,6 +1527,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Mode: fix-only", sent_inputs[-1])
         self.assertIn("Apply QA reopen follow-up changes for IOS-30021BUG.", sent_inputs[-1])
         self.assertIn("highest-priority follow-up scope", sent_inputs[-1])
+        self.assertIn('"followup_comments_path"', sent_inputs[-1])
+        self.assertIn('"bug_analysis_report_path"', sent_inputs[-1])
 
     def test_create_mr_handoff_marks_completed_session_as_handed_off(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021A")
