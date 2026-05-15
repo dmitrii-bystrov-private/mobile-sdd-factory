@@ -49,6 +49,13 @@ def role_runtime_rules(role_name: str) -> str:
             "- Read snapshot description/comments first; read repo sources only when they are directly needed to ground the proposal/context result.\n"
             "- Keep the output compact and downstream-oriented so the later story-spec worker can build on it instead of redoing the same discovery.\n\n"
         )
+    if role_name == "requirements-clarifier-worker":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded one-shot worker: clarify requirements, write the routed result, and exit.\n"
+            "- Start from the proposal/context foundations and resolve ambiguities, assumptions, edge cases, and out-of-scope boundaries needed for implementation.\n"
+            "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than unresolved requirements.\n\n"
+        )
     if role_name == "verification-coordinator":
         return (
             "Role-specific rules:\n"

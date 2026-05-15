@@ -26,6 +26,7 @@ from backend.roles.contracts import (
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
     PROPOSAL_CONTEXT_WORKER_ROLE,
+    REQUIREMENTS_CLARIFIER_WORKER_ROLE,
     IMPLEMENTER_ROLE,
     STORY_SPEC_WORKER_ROLE,
     TASK_COORDINATOR_ROLE,
@@ -275,6 +276,9 @@ class CoordinatorService:
             return session, followup_event
         if event_type == "proposal_context_completed":
             session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "requirements_completed":
+            session, followup_event = self._handle_requirements_completed(session, accepted_event)
             return session, followup_event
         if event_type == "story_spec_completed":
             session, followup_event = self._handle_story_spec_completed(session, accepted_event)
@@ -840,6 +844,8 @@ class CoordinatorService:
             session, followup_event = self._handle_bug_analysis_completed(session, accepted_event)
         elif mapped_event_type == "proposal_context_completed":
             session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
+        elif mapped_event_type == "requirements_completed":
+            session, followup_event = self._handle_requirements_completed(session, accepted_event)
         elif mapped_event_type == "story_spec_completed":
             session, followup_event = self._handle_story_spec_completed(session, accepted_event)
         elif mapped_event_type == "subtask_completed":
@@ -1420,6 +1426,52 @@ class CoordinatorService:
             },
         )
 
+    def _enqueue_requirements(
+        self,
+        session: Session,
+        source_event: Event,
+        additional_context: str | None = None,
+    ) -> Event:
+        requirements_role = self._ensure_on_demand_role(session, REQUIREMENTS_CLARIFIER_WORKER_ROLE)
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements",
+            title=f"Requirements clarification for {session.task_key}",
+            owner_role_id=requirements_role.id,
+            source_event_id=source_event.id,
+            priority=102,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_requested",
+            current_owner=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        instruction = (
+            f"Clarify the implementation requirements for story {session.task_key}. "
+            "Resolve assumptions, edge cases, and out-of-scope boundaries so the later story-spec step can focus on implementation structure."
+        )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
+        self._dispatch_role_work(
+            session=session,
+            role=requirements_role,
+            work_item=work_item,
+            stage_name="requirements_requested",
+            instruction=instruction,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="requirements_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
     def _handle_bug_analysis_completed(
         self,
         session: Session,
@@ -1478,6 +1530,40 @@ class CoordinatorService:
             context_lines.append(f"Proposal/context summary: {summary}")
         if context_findings:
             context_lines.append(f"Key context findings: {context_findings}")
+        additional_context = "\n".join(context_lines) if context_lines else None
+
+        event = self._enqueue_requirements(
+            session=session,
+            source_event=source_event,
+            additional_context=additional_context,
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event
+
+    def _handle_requirements_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        requirements_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "requirements" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not requirements_items:
+            raise IntakeError("No active requirements work item found for the session")
+
+        active_item = requirements_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, REQUIREMENTS_CLARIFIER_WORKER_ROLE)
+
+        summary = str(source_event.payload.get("summary") or "").strip()
+        assumptions = str(source_event.payload.get("assumptions") or "").strip()
+        context_lines: list[str] = []
+        if summary:
+            context_lines.append(f"Requirements summary: {summary}")
+        if assumptions:
+            context_lines.append(f"Explicit assumptions: {assumptions}")
         additional_context = "\n".join(context_lines) if context_lines else None
 
         event = self._enqueue_story_spec(
@@ -2124,6 +2210,9 @@ class CoordinatorService:
         if role_name == PROPOSAL_CONTEXT_WORKER_ROLE and session.current_stage == "proposal_context_requested":
             if output_type in {"passed", "completed"}:
                 return "proposal_context_completed"
+        if role_name == REQUIREMENTS_CLARIFIER_WORKER_ROLE and session.current_stage == "requirements_requested":
+            if output_type in {"passed", "completed"}:
+                return "requirements_completed"
         if role_name == STORY_SPEC_WORKER_ROLE and session.current_stage == "story_spec_requested":
             if output_type in {"passed", "completed"}:
                 return "story_spec_completed"
@@ -2635,6 +2724,11 @@ class CoordinatorService:
                 f"Collect proposal and context foundations for story {task_key}. "
                 "Extract the compact problem statement, key clarifications, and the smallest useful project/context findings for the later story-spec step."
             )
+        if stage_name == "requirements_requested":
+            return (
+                f"Clarify the implementation requirements for story {task_key}. "
+                "Resolve assumptions, edge cases, and out-of-scope boundaries before the final story-spec step."
+            )
         if stage_name == "story_spec_requested":
             return (
                 f"Prepare a concise implementation spec for story {task_key} before coding. "
@@ -2696,6 +2790,7 @@ class CoordinatorService:
         stage_to_work_type = {
             "bug_analysis_requested": "bug_analysis",
             "proposal_context_requested": "proposal_context",
+            "requirements_requested": "requirements",
             "story_spec_requested": "story_spec",
             "subtask_implementation_requested": "subtask_implementation",
             "implementation_requested": "implementation",
