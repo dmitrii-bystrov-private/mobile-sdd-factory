@@ -50,6 +50,7 @@ try:
     from backend.dependencies import AppDependencies
     from backend.roles.contracts import (
         ALLOWED_STAGE_ROLE_TARGETS,
+        BUG_FIXER_ROLE,
         CODE_REVIEWER_ROLE,
         DEFAULT_SESSION_ROLES,
     )
@@ -320,6 +321,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("bug_full", response.session.workflow_profile)
         self.assertEqual("bug_analysis_requested", response.followup_event_type)
         self.assertEqual("bug_analysis_requested", response.session.current_stage)
+        self.assertEqual(BUG_FIXER_ROLE, response.session.current_owner)
 
     def test_event_and_work_item_routes_reflect_verification_handoff(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
@@ -378,6 +380,7 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertEqual("implementation_requested", response.followup_event_type)
         self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertEqual(BUG_FIXER_ROLE, response.session.current_owner)
         self.assertEqual(2, len(work_items_response.items))
 
     def test_prepare_session_route_uses_story_spec_for_story_full(self) -> None:

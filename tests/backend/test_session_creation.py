@@ -7,6 +7,7 @@ from backend.coordinator.intake import IntakeError
 from backend.coordinator.service import CoordinatorService
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
+    BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
     DEFAULT_SESSION_ROLES,
     STORY_SPEC_WORKER_ROLE,
@@ -149,7 +150,10 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("active", session.status.value)
         self.assertEqual("bug_full", session.workflow_profile)
         self.assertEqual("required", session.policy["test_policy"])
-        self.assertEqual(DEFAULT_SESSION_ROLES + [CODE_REVIEWER_ROLE], [role.role_name for role in roles])
+        self.assertEqual(
+            DEFAULT_SESSION_ROLES + [BUG_FIXER_ROLE, CODE_REVIEWER_ROLE],
+            [role.role_name for role in roles],
+        )
 
     def test_create_task_session_creates_role_workspaces(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -321,8 +325,8 @@ class SessionCreationTests(unittest.TestCase):
         prepared_session, event, prepared_created, details = self.coordinator.prepare_task_session("IOS-30002BUG")
         work_items = self.work_item_repository.list_for_session(prepared_session.id)
         events = self.event_repository.list_for_session(prepared_session.id)
-        implementer_role = self.role_repository.get_by_name(prepared_session.id, "implementer")
-        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        bug_fixer_role = self.role_repository.get_by_name(prepared_session.id, BUG_FIXER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(bug_fixer_role.runtime_handle)
 
         self.assertTrue(created)
         self.assertFalse(prepared_created)
@@ -330,7 +334,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("task_prepared", event.event_type)
         self.assertEqual("bug_analysis_requested", details["followup_event_type"])
         self.assertEqual("bug_analysis_requested", prepared_session.current_stage)
-        self.assertEqual("implementer", prepared_session.current_owner)
+        self.assertEqual(BUG_FIXER_ROLE, prepared_session.current_owner)
         self.assertEqual("bug_analysis", work_items[0].work_type)
         self.assertEqual(
             [
@@ -491,11 +495,11 @@ class SessionCreationTests(unittest.TestCase):
         )
         work_items = self.work_item_repository.list_for_session(session.id)
         events = self.event_repository.list_for_session(session.id)
-        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
-        implementer_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        bug_fixer_role = self.role_repository.get_by_name(session.id, BUG_FIXER_ROLE)
+        bug_fixer_inputs = self.session_backend.get_sent_inputs(bug_fixer_role.runtime_handle)
 
         self.assertEqual("implementation_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertEqual(BUG_FIXER_ROLE, updated_session.current_owner)
         self.assertEqual("implementation_requested", followup_event.event_type)
         self.assertEqual(
             ["completed", "assigned"],
@@ -514,12 +518,13 @@ class SessionCreationTests(unittest.TestCase):
             ],
             [item.event_type for item in events],
         )
-        self.assertEqual(2, len(implementer_inputs))
-        self.assertIn("Start implementation work for IOS-30003BUG.", implementer_inputs[-1])
+        self.assertEqual(2, len(bug_fixer_inputs))
+        self.assertIn("Implement the bug fix for IOS-30003BUG", bug_fixer_inputs[-1])
         self.assertIn(
             "Bug analysis summary: Likely missing state reset in coordinator",
-            implementer_inputs[-1],
+            bug_fixer_inputs[-1],
         )
+        self.assertIn("Continue from your existing bug-fixer role context", bug_fixer_inputs[-1])
 
     def test_prepare_task_session_routes_story_full_into_story_spec(self) -> None:
         session, _, created = self.coordinator.create_task_session(
@@ -877,7 +882,7 @@ class SessionCreationTests(unittest.TestCase):
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
-            role_name="implementer",
+            role_name=BUG_FIXER_ROLE,
             output_type="completed",
             payload={"summary": "Root cause isolated"},
         )
@@ -886,6 +891,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("bug_analysis_completed", mapped_event.event_type)
         self.assertEqual("implementation_requested", followup_event.event_type)
         self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual(BUG_FIXER_ROLE, updated_session.current_owner)
         self.assertEqual(
             [
                 "task_started",

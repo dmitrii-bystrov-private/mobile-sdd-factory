@@ -1,6 +1,7 @@
 """Role names and coordinator-facing contracts."""
 
 IMPLEMENTER_ROLE = "implementer"
+BUG_FIXER_ROLE = "bug-fixer"
 TASK_COORDINATOR_ROLE = "task-coordinator"
 VERIFICATION_COORDINATOR_ROLE = "verification-coordinator"
 CODE_REVIEWER_ROLE = "code-reviewer"
@@ -14,7 +15,7 @@ DEFAULT_SESSION_ROLES = [
 
 ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     "bug_analysis_requested": {
-        IMPLEMENTER_ROLE,
+        BUG_FIXER_ROLE,
     },
     "story_spec_requested": {
         STORY_SPEC_WORKER_ROLE,
@@ -24,17 +25,20 @@ ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     },
     "implementation_requested": {
         IMPLEMENTER_ROLE,
+        BUG_FIXER_ROLE,
     },
     "verification_requested": {
         VERIFICATION_COORDINATOR_ROLE,
     },
     "verification_correction_requested": {
         IMPLEMENTER_ROLE,
+        BUG_FIXER_ROLE,
     },
     "self_review_requested": {
         CODE_REVIEWER_ROLE,
     },
     "self_review_correction_requested": {
         IMPLEMENTER_ROLE,
+        BUG_FIXER_ROLE,
     },
 }

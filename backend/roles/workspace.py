@@ -36,6 +36,15 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Main repo scripts: `{repo_root}/scripts`",
             "- Shared knowledge base: `{repo_root}/knowledge`",
         ]
+    if role_name == "bug-fixer":
+        return [
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Task artifacts and bug analysis outputs: `{task_artifacts_root}`",
+            "- Main repo scripts: `{repo_root}/scripts`",
+            "- Project conventions: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
+            "- Shared knowledge base: `{repo_root}/knowledge`",
+        ]
     if role_name == "verification-coordinator":
         return [
             "- Task repo worktree: `{task_repo_root}`",
@@ -71,6 +80,12 @@ def _role_responsibility(role_name: str) -> list[str]:
         return [
             "- You execute routed implementation work for one task session.",
             "- You focus only on the currently assigned work item.",
+            "- You should not reason about other agents or hidden orchestration concerns.",
+        ]
+    if role_name == "bug-fixer":
+        return [
+            "- You execute unified bug work for one bug task session.",
+            "- You retain bug-specific context across analysis, fix, and follow-up rounds.",
             "- You should not reason about other agents or hidden orchestration concerns.",
         ]
     if role_name == "verification-coordinator":

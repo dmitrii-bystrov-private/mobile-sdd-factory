@@ -23,6 +23,7 @@ from backend.roles.launcher import RoleLauncherManager
 from backend.roles.workspace import RoleWorkspaceManager
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
+    BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
     IMPLEMENTER_ROLE,
     STORY_SPEC_WORKER_ROLE,
@@ -103,7 +104,11 @@ class CoordinatorService:
             policy=normalized_policy.policy,
         )
         runtime_session = self.session_backend.create_task_session(task_key)
-        for role_name in self._effective_role_names(normalized_policy.policy):
+        effective_roles = self._effective_role_names(
+            normalized_policy.workflow_profile,
+            normalized_policy.policy,
+        )
+        for role_name in effective_roles:
             start_directory = None
             launch_command = None
             if self.role_workspace_manager is not None:
@@ -139,7 +144,7 @@ class CoordinatorService:
                 "workflow_profile": session.workflow_profile,
                 "policy": session.policy or {},
                 "runtime_session_id": runtime_session.session_id,
-                "roles": self._effective_role_names(normalized_policy.policy),
+                "roles": effective_roles,
             },
         )
         return session, event, True
@@ -750,7 +755,7 @@ class CoordinatorService:
             raise IntakeError(
                 f"Session {session_id} must be at implementation_requested before starting subtask graph"
             )
-        active_item = self._find_active_implementer_work_item(session)
+        active_item = self._find_active_primary_coding_work_item(session)
         if active_item is None or active_item.work_type != "implementation":
             raise IntakeError("No active implementation work item found for subtask graph start")
 
@@ -1193,29 +1198,30 @@ class CoordinatorService:
         source_event: Event,
         additional_context: str | None = None,
     ) -> Event:
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        if implementer_role is None:
-            raise IntakeError("Implementer role is missing for the session")
+        coding_role = self._primary_coding_role_for_work_type(session, "implementation")
 
         work_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="implementation",
             title=f"Initial implementation for {resolved_task_key}",
-            owner_role_id=implementer_role.id,
+            owner_role_id=coding_role.id,
             source_event_id=source_event.id,
             priority=100,
         )
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage="implementation_requested",
-            current_owner=IMPLEMENTER_ROLE,
+            current_owner=coding_role.role_name,
         )
-        instruction = f"Start implementation work for {resolved_task_key}."
+        if coding_role.role_name == BUG_FIXER_ROLE:
+            instruction = f"Implement the bug fix for {resolved_task_key} using your current bug context."
+        else:
+            instruction = f"Start implementation work for {resolved_task_key}."
         if additional_context:
             instruction = f"{instruction}\n\n{additional_context}"
         self._dispatch_role_work(
             session=session,
-            role=implementer_role,
+            role=coding_role,
             work_item=work_item,
             stage_name="implementation_requested",
             instruction=instruction,
@@ -1226,7 +1232,7 @@ class CoordinatorService:
             producer_type="coordinator",
             payload={
                 "task_key": resolved_task_key,
-                "role_name": IMPLEMENTER_ROLE,
+                "role_name": coding_role.role_name,
                 "work_item_id": work_item.id,
                 "current_stage": session.current_stage,
             },
@@ -1238,22 +1244,20 @@ class CoordinatorService:
         source_event: Event,
         additional_context: str | None = None,
     ) -> Event:
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        if implementer_role is None:
-            raise IntakeError("Implementer role is missing for the session")
+        coding_role = self._primary_coding_role_for_work_type(session, "bug_analysis")
 
         work_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="bug_analysis",
             title=f"Bug analysis for {session.task_key}",
-            owner_role_id=implementer_role.id,
+            owner_role_id=coding_role.id,
             source_event_id=source_event.id,
             priority=105,
         )
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage="bug_analysis_requested",
-            current_owner=IMPLEMENTER_ROLE,
+            current_owner=coding_role.role_name,
         )
         test_policy = (session.policy or {}).get("test_policy", "enabled")
         instruction = (
@@ -1265,7 +1269,7 @@ class CoordinatorService:
             instruction = f"{instruction}\n\n{additional_context}"
         self._dispatch_role_work(
             session=session,
-            role=implementer_role,
+            role=coding_role,
             work_item=work_item,
             stage_name="bug_analysis_requested",
             instruction=instruction,
@@ -1276,7 +1280,7 @@ class CoordinatorService:
             producer_type="coordinator",
             payload={
                 "task_key": session.task_key,
-                "role_name": IMPLEMENTER_ROLE,
+                "role_name": coding_role.role_name,
                 "work_item_id": work_item.id,
                 "current_stage": session.current_stage,
                 "test_policy": test_policy,
@@ -1467,7 +1471,7 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
-        active_item = self._find_active_implementer_work_item(session)
+        active_item = self._find_active_primary_coding_work_item(session)
         if active_item is None or active_item.work_type != "subtask_implementation":
             raise IntakeError("No active subtask implementation work item found for the session")
 
@@ -1528,9 +1532,9 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
-        active_item = self._find_active_implementer_work_item(session)
+        active_item = self._find_active_primary_coding_work_item(session)
         if active_item is None:
-            raise IntakeError("No active implementer work item found for the session")
+            raise IntakeError("No active coding work item found for the session")
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
 
         return self._advance_after_coding_completion(
@@ -1618,26 +1622,24 @@ class CoordinatorService:
         active_item = verification_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
 
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        if implementer_role is None:
-            raise IntakeError("Implementer role is missing for the session")
+        coding_role = self._primary_coding_role_for_work_type(session, "verification_correction")
 
         correction_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="verification_correction",
             title=f"Verification corrections for {session.task_key}",
-            owner_role_id=implementer_role.id,
+            owner_role_id=coding_role.id,
             source_event_id=source_event.id,
             priority=95,
         )
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage="verification_correction_requested",
-            current_owner=IMPLEMENTER_ROLE,
+            current_owner=coding_role.role_name,
         )
         self._dispatch_role_work(
             session=session,
-            role=implementer_role,
+            role=coding_role,
             work_item=correction_item,
             stage_name="verification_correction_requested",
             instruction=f"Apply verification corrections for {session.task_key}.",
@@ -1648,7 +1650,7 @@ class CoordinatorService:
             producer_type="coordinator",
             payload={
                 "task_key": session.task_key,
-                "role_name": IMPLEMENTER_ROLE,
+                "role_name": coding_role.role_name,
                 "work_item_id": correction_item.id,
                 "current_stage": session.current_stage,
             },
@@ -1763,27 +1765,25 @@ class CoordinatorService:
         priority: int,
         payload: dict,
     ) -> Event:
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        if implementer_role is None:
-            raise IntakeError("Implementer role is missing for the session")
+        coding_role = self._primary_coding_role_for_work_type(session, "followup_implementation")
 
         work_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="followup_implementation",
             title=title,
-            owner_role_id=implementer_role.id,
+            owner_role_id=coding_role.id,
             source_event_id=source_event.id,
             priority=priority,
         )
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage=stage_name,
-            current_owner=IMPLEMENTER_ROLE,
+            current_owner=coding_role.role_name,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         self._dispatch_role_work(
             session=session,
-            role=implementer_role,
+            role=coding_role,
             work_item=work_item,
             stage_name=stage_name,
             instruction=instruction,
@@ -1794,7 +1794,7 @@ class CoordinatorService:
             producer_type="coordinator",
             payload={
                 "task_key": session.task_key,
-                "role_name": IMPLEMENTER_ROLE,
+                "role_name": coding_role.role_name,
                 "work_item_id": work_item.id,
                 "current_stage": session.current_stage,
                 **payload,
@@ -1806,27 +1806,25 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        if implementer_role is None:
-            raise IntakeError("Implementer role is missing for the session")
+        coding_role = self._primary_coding_role_for_work_type(session, "self_review_correction")
 
         correction_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="self_review_correction",
             title=f"Self review corrections for {session.task_key}",
-            owner_role_id=implementer_role.id,
+            owner_role_id=coding_role.id,
             source_event_id=source_event.id,
             priority=92,
         )
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage="self_review_correction_requested",
-            current_owner=IMPLEMENTER_ROLE,
+            current_owner=coding_role.role_name,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         self._dispatch_role_work(
             session=session,
-            role=implementer_role,
+            role=coding_role,
             work_item=correction_item,
             stage_name="self_review_correction_requested",
             instruction=f"Apply self review corrections for {session.task_key}.",
@@ -1837,7 +1835,7 @@ class CoordinatorService:
             producer_type="coordinator",
             payload={
                 "task_key": session.task_key,
-                "role_name": IMPLEMENTER_ROLE,
+                "role_name": coding_role.role_name,
                 "work_item_id": correction_item.id,
                 "current_stage": session.current_stage,
             },
@@ -1922,7 +1920,7 @@ class CoordinatorService:
         role_name: str,
         output_type: str,
     ) -> str:
-        if role_name == IMPLEMENTER_ROLE and output_type == "completed":
+        if role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE} and output_type == "completed":
             if session.current_stage == "bug_analysis_requested":
                 return "bug_analysis_completed"
             if session.current_stage == "story_spec_requested":
@@ -2245,14 +2243,14 @@ class CoordinatorService:
             return item
         return None
 
-    def _find_active_implementer_work_item(
+    def _find_active_primary_coding_work_item(
         self,
         session: Session,
     ) -> WorkItem | None:
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        if implementer_role is None:
+        active_role = self._primary_coding_role_for_stage(session)
+        if active_role is None:
             return None
-        active_item = self._find_active_work_item_for_role(session.id, implementer_role.id)
+        active_item = self._find_active_work_item_for_role(session.id, active_role.id)
         if active_item is None:
             return None
         if active_item.work_type not in {
@@ -2346,11 +2344,52 @@ class CoordinatorService:
             return f"Apply QA reopen follow-up changes for {task_key}."
         return None
 
-    def _effective_role_names(self, policy: dict[str, str] | None) -> list[str]:
+    def _effective_role_names(self, workflow_profile: str, policy: dict[str, str] | None) -> list[str]:
         role_names = list(self.default_roles)
+        if workflow_profile == "bug_full" and BUG_FIXER_ROLE not in role_names:
+            role_names.append(BUG_FIXER_ROLE)
         if (policy or {}).get("self_review_policy") != "disabled" and CODE_REVIEWER_ROLE not in role_names:
             role_names.append(CODE_REVIEWER_ROLE)
         return role_names
+
+    def _primary_coding_role_name_for_work_type(self, session: Session, work_type: str) -> str:
+        if session.workflow_profile != "bug_full":
+            return IMPLEMENTER_ROLE
+        if work_type in {
+            "bug_analysis",
+            "implementation",
+            "followup_implementation",
+            "self_review_correction",
+            "verification_correction",
+        }:
+            return BUG_FIXER_ROLE
+        return IMPLEMENTER_ROLE
+
+    def _primary_coding_role_for_work_type(self, session: Session, work_type: str) -> Role:
+        role_name = self._primary_coding_role_name_for_work_type(session, work_type)
+        role = self.role_repository.get_by_name(session.id, role_name)
+        if role is None:
+            raise IntakeError(f"{role_name} role is missing for the session")
+        return role
+
+    def _primary_coding_role_for_stage(self, session: Session) -> Role | None:
+        stage_to_work_type = {
+            "bug_analysis_requested": "bug_analysis",
+            "story_spec_requested": "story_spec",
+            "subtask_implementation_requested": "subtask_implementation",
+            "implementation_requested": "implementation",
+            "self_review_correction_requested": "self_review_correction",
+            "verification_correction_requested": "verification_correction",
+            "mr_followup_requested": "followup_implementation",
+            "qa_reopen_requested": "followup_implementation",
+        }
+        work_type = stage_to_work_type.get(session.current_stage)
+        if work_type is None:
+            return None
+        try:
+            return self._primary_coding_role_for_work_type(session, work_type)
+        except IntakeError:
+            return None
 
     def _ensure_on_demand_role(self, session: Session, role_name: str) -> Role:
         existing = self.role_repository.get_by_name(session.id, role_name)
@@ -2518,7 +2557,7 @@ class CoordinatorService:
         )
 
     def _prompt_mode_for_dispatch(self, role: Role) -> str:
-        if role.role_name in {IMPLEMENTER_ROLE, VERIFICATION_COORDINATOR_ROLE}:
+        if role.role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE, VERIFICATION_COORDINATOR_ROLE}:
             return "bootstrap" if role.last_hydration_version == 0 else "continuation"
         return "full"
 
