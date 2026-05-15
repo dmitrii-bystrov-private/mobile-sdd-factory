@@ -22,6 +22,7 @@ from backend.roles.prompts import role_handoff_prompt
 from backend.roles.workspace import RoleWorkspaceManager
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
+    CODE_REVIEWER_ROLE,
     IMPLEMENTER_ROLE,
     TASK_COORDINATOR_ROLE,
     VERIFICATION_COORDINATOR_ROLE,
@@ -99,7 +100,7 @@ class CoordinatorService:
             policy=normalized_policy.policy,
         )
         runtime_session = self.session_backend.create_task_session(task_key)
-        for role_name in self.default_roles:
+        for role_name in self._effective_role_names(normalized_policy.policy):
             start_directory = None
             if self.role_workspace_manager is not None:
                 workspace = self.role_workspace_manager.ensure_role_workspace(task_key, role_name)
@@ -127,7 +128,7 @@ class CoordinatorService:
                 "workflow_profile": session.workflow_profile,
                 "policy": session.policy or {},
                 "runtime_session_id": runtime_session.session_id,
-                "roles": self.default_roles,
+                "roles": self._effective_role_names(normalized_policy.policy),
             },
         )
         return session, event, True
@@ -531,10 +532,7 @@ class CoordinatorService:
                     "status": session.status.value,
                 },
             )
-            session, followup_event = self._enqueue_verification(
-                session=session,
-                source_event=event,
-            )
+            session, followup_event = self._handle_self_review_passed(session, event)
             return session, event, followup_event
 
         event = self._append_event(
@@ -548,10 +546,7 @@ class CoordinatorService:
                 "status": session.status.value,
             },
         )
-        session, followup_event = self._enqueue_self_review_correction(
-            session=session,
-            source_event=event,
-        )
+        session, followup_event = self._handle_self_review_issues_found(session, event)
         return session, event, followup_event
 
     def send_to_test_handoff(
@@ -833,6 +828,10 @@ class CoordinatorService:
             session, followup_event = self._handle_verification_failed(session, accepted_event)
         elif mapped_event_type == "verification_passed":
             session, followup_event = self._handle_verification_passed(session, accepted_event)
+        elif mapped_event_type == "self_review_passed":
+            session, followup_event = self._handle_self_review_passed(session, accepted_event)
+        elif mapped_event_type == "self_review_issues_found":
+            session, followup_event = self._handle_self_review_issues_found(session, accepted_event)
         return session, accepted_event, followup_event
 
     def collect_role_output(
@@ -1541,26 +1540,57 @@ class CoordinatorService:
             completed_work_type in {"implementation", "subtask_implementation"}
             and (session.policy or {}).get("self_review_policy") == "required"
         ):
-            session = self.session_repository.update_stage_and_owner(
-                session.id,
-                current_stage="self_review_requested",
-                current_owner=None,
-            )
-            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-            event = self._append_event(
-                session_id=session.id,
-                event_type="self_review_requested",
-                producer_type="coordinator",
-                payload={
-                    "task_key": session.task_key,
-                    "source_event_id": source_event.id,
-                    "current_stage": session.current_stage,
-                    "status": session.status.value,
-                },
-            )
-            return session, event
+            return self._enqueue_self_review(session=session, source_event=source_event)
 
         return self._enqueue_verification(session=session, source_event=source_event)
+
+    def _enqueue_self_review(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        if reviewer_role is None:
+            raise IntakeError("Code reviewer role is missing for the session")
+
+        review_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="self_review",
+            title=f"Self review for {session.task_key}",
+            owner_role_id=reviewer_role.id,
+            source_event_id=source_event.id,
+            priority=89,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="self_review_requested",
+            current_owner=CODE_REVIEWER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._dispatch_role_work(
+            session=session,
+            role=reviewer_role,
+            work_item=review_item,
+            stage_name="self_review_requested",
+            instruction=(
+                f"Review the current task changes for {session.task_key}. "
+                "Report a clean pass or remaining issues."
+            ),
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="self_review_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": CODE_REVIEWER_ROLE,
+                "work_item_id": review_item.id,
+                "source_event_id": source_event.id,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event
 
     def _handle_verification_failed(
         self,
@@ -1804,6 +1834,28 @@ class CoordinatorService:
         )
         return session, event
 
+    def _handle_self_review_passed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        self._complete_active_self_review_work_item(session)
+        return self._enqueue_verification(
+            session=session,
+            source_event=source_event,
+        )
+
+    def _handle_self_review_issues_found(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        self._complete_active_self_review_work_item(session)
+        return self._enqueue_self_review_correction(
+            session=session,
+            source_event=source_event,
+        )
+
     def _enqueue_verification(
         self,
         session: Session,
@@ -1880,6 +1932,11 @@ class CoordinatorService:
                 return "verification_passed"
             if output_type == "failed" and session.current_stage == "verification_requested":
                 return "verification_failed"
+        if role_name == CODE_REVIEWER_ROLE and session.current_stage == "self_review_requested":
+            if output_type in {"passed", "completed"}:
+                return "self_review_passed"
+            if output_type == "failed":
+                return "self_review_issues_found"
         raise IntakeError(
             f"Unsupported role output: role={role_name}, output_type={output_type}, stage={session.current_stage}"
         )
@@ -2197,6 +2254,15 @@ class CoordinatorService:
             return None
         return active_item
 
+    def _complete_active_self_review_work_item(self, session: Session) -> None:
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        if reviewer_role is None:
+            raise IntakeError("Code reviewer role is missing for the session")
+        active_item = self._find_active_work_item_for_role(session.id, reviewer_role.id)
+        if active_item is None or active_item.work_type != "self_review":
+            raise IntakeError("No active self review work item found for the session")
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+
     def _find_operator_pending_work_item(self, session_id: int) -> WorkItem | None:
         for item in self.work_item_repository.list_for_session(session_id):
             if item.status != WorkItemStatus.WAITING_FOR_OPERATOR:
@@ -2254,6 +2320,11 @@ class CoordinatorService:
             return f"Run deterministic verification for {task_key}."
         if stage_name == "verification_correction_requested":
             return f"Apply verification corrections for {task_key}."
+        if stage_name == "self_review_requested":
+            return (
+                f"Review the current task changes for {task_key}. "
+                "Emit passed if the review is clean, or failed if issues still require correction."
+            )
         if stage_name == "self_review_correction_requested":
             return f"Apply self review corrections for {task_key}."
         if stage_name == "mr_followup_requested":
@@ -2261,6 +2332,12 @@ class CoordinatorService:
         if stage_name == "qa_reopen_requested":
             return f"Apply QA reopen follow-up changes for {task_key}."
         return None
+
+    def _effective_role_names(self, policy: dict[str, str] | None) -> list[str]:
+        role_names = list(self.default_roles)
+        if (policy or {}).get("self_review_policy") != "disabled" and CODE_REVIEWER_ROLE not in role_names:
+            role_names.append(CODE_REVIEWER_ROLE)
+        return role_names
 
     def _knowledge_store_or_raise(self) -> KnowledgeStore:
         if self.knowledge_root is None:

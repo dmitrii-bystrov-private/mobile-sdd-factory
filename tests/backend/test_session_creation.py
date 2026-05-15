@@ -5,7 +5,11 @@ import unittest
 from backend.api.sse import SessionEventBus
 from backend.coordinator.intake import IntakeError
 from backend.coordinator.service import CoordinatorService
-from backend.roles.contracts import ALLOWED_STAGE_ROLE_TARGETS, DEFAULT_SESSION_ROLES
+from backend.roles.contracts import (
+    ALLOWED_STAGE_ROLE_TARGETS,
+    CODE_REVIEWER_ROLE,
+    DEFAULT_SESSION_ROLES,
+)
 from backend.roles.workspace import RoleWorkspaceManager
 from backend.session_backend.tmux_backend import TmuxSessionBackend
 from backend.state.artifact_repository import ArtifactRepository
@@ -139,7 +143,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("active", session.status.value)
         self.assertEqual("bug_full", session.workflow_profile)
         self.assertEqual("required", session.policy["test_policy"])
-        self.assertEqual(DEFAULT_SESSION_ROLES, [role.role_name for role in roles])
+        self.assertEqual(DEFAULT_SESSION_ROLES + [CODE_REVIEWER_ROLE], [role.role_name for role in roles])
 
     def test_create_task_session_creates_role_workspaces(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -149,7 +153,7 @@ class SessionCreationTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(session.id)
-        for role_name in DEFAULT_SESSION_ROLES:
+        for role_name in DEFAULT_SESSION_ROLES + [CODE_REVIEWER_ROLE]:
             role_dir = Path(self.temp_dir.name) / "runtime" / "role-workspaces" / "IOS-30000W" / role_name
             agents_path = role_dir / "AGENTS.md"
             claude_path = role_dir / "CLAUDE.md"
@@ -179,6 +183,15 @@ class SessionCreationTests(unittest.TestCase):
             / "AGENTS.md"
         ).read_text()
         self.assertIn("run-test.sh", verification_agents)
+        reviewer_agents = (
+            Path(self.temp_dir.name)
+            / "runtime"
+            / "role-workspaces"
+            / "IOS-30000W"
+            / CODE_REVIEWER_ROLE
+            / "AGENTS.md"
+        ).read_text()
+        self.assertIn("Project conventions:", reviewer_agents)
 
     def test_create_task_session_is_idempotent_for_existing_key(self) -> None:
         first_session, _, _ = self.coordinator.create_task_session(
@@ -196,7 +209,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(created)
         self.assertEqual(first_session.id, second_session.id)
         self.assertEqual("task_session_reused", event.event_type)
-        self.assertEqual(3, len(roles))
+        self.assertEqual(4, len(roles))
 
     def test_create_task_session_rejects_conflicting_existing_policy(self) -> None:
         self.coordinator.create_task_session(
@@ -336,6 +349,96 @@ class SessionCreationTests(unittest.TestCase):
         sent_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Run deterministic verification for IOS-30003.", sent_inputs[0])
+
+    def test_implementation_completed_routes_to_reviewer_when_self_review_required(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003R",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003R")
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        review_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "self_review"
+        ]
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
+
+        self.assertEqual("self_review_requested", updated_session.current_stage)
+        self.assertEqual(CODE_REVIEWER_ROLE, updated_session.current_owner)
+        self.assertEqual("self_review_requested", followup_event.event_type)
+        self.assertEqual(1, len(review_items))
+        self.assertEqual(1, len(sent_inputs))
+        self.assertIn("Review the current task changes for IOS-30003R.", sent_inputs[0])
+
+    def test_reviewer_output_passed_routes_self_review_to_verification(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RP",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RP")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="passed",
+            payload={"summary": "clean review"},
+        )
+
+        self.assertEqual("self_review_passed", mapped_event.event_type)
+        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+
+    def test_reviewer_output_failed_routes_self_review_to_correction(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RF",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RF")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="failed",
+            payload={"summary": "issues remain"},
+        )
+
+        self.assertEqual("self_review_issues_found", mapped_event.event_type)
+        self.assertEqual("self_review_correction_requested", followup_event.event_type)
+        self.assertEqual("self_review_correction_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
 
     def test_bug_analysis_completed_moves_session_to_implementation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -789,7 +892,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertEqual("session_output_polled", event.event_type)
-        self.assertEqual(3, role_count)
+        self.assertEqual(4, role_count)
         self.assertEqual(2, chunk_count)
         self.assertEqual(
             2,
@@ -1168,7 +1271,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual("active", updated_session.status.value)
         self.assertEqual("self_review_requested", updated_session.current_stage)
-        self.assertIsNone(updated_session.current_owner)
+        self.assertEqual("code-reviewer", updated_session.current_owner)
         self.assertEqual("self_review_requested", followup_event.event_type)
 
     def test_complete_self_review_passed_routes_to_verification(self) -> None:

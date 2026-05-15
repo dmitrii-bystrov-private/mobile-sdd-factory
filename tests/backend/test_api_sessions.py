@@ -48,7 +48,11 @@ try:
     from backend.coordinator.service import CoordinatorService
     from backend.coordinator.loop_runner import CoordinatorLoopRunner
     from backend.dependencies import AppDependencies
-    from backend.roles.contracts import ALLOWED_STAGE_ROLE_TARGETS, DEFAULT_SESSION_ROLES
+    from backend.roles.contracts import (
+        ALLOWED_STAGE_ROLE_TARGETS,
+        CODE_REVIEWER_ROLE,
+        DEFAULT_SESSION_ROLES,
+    )
     from backend.roles.workspace import RoleWorkspaceManager
     from backend.session_backend.tmux_backend import TmuxSessionBackend
     from backend.state.artifact_repository import ArtifactRepository
@@ -194,7 +198,7 @@ class SessionApiTests(unittest.TestCase):
         )
 
         self.assertTrue(response.created)
-        for role_name in DEFAULT_SESSION_ROLES:
+        for role_name in DEFAULT_SESSION_ROLES + [CODE_REVIEWER_ROLE]:
             role_dir = Path(self.temp_dir.name) / "runtime" / "role-workspaces" / "IOS-40000W" / role_name
             self.assertTrue(role_dir.is_dir())
             self.assertTrue((role_dir / "AGENTS.md").is_file())
@@ -754,7 +758,7 @@ class SessionApiTests(unittest.TestCase):
         )
 
         self.assertTrue(response.polled)
-        self.assertEqual(3, response.role_count)
+        self.assertEqual(4, response.role_count)
         self.assertEqual(2, response.chunk_count)
         self.assertEqual("session_output_polled", response.event_type)
         runtime_outputs = [a for a in artifacts_response.items if a.artifact_type == "runtime_output"]

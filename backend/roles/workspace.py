@@ -43,6 +43,14 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Build/test/lint wrappers: `{repo_root}/scripts/run-build.sh`, `{repo_root}/scripts/run-test.sh`, `{repo_root}/scripts/run-lint.sh`",
             "- Shared knowledge base: `{repo_root}/knowledge`",
         ]
+    if role_name == "code-reviewer":
+        return [
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Task artifacts and review outputs: `{task_artifacts_root}`",
+            "- Project conventions: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
+            "- Shared knowledge base: `{repo_root}/knowledge`",
+        ]
     return [
         "- Task snapshot metadata: `{task_snapshot_root}`",
         "- Task artifacts: `{task_artifacts_root}`",
@@ -62,6 +70,12 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You execute routed verification work for one task session.",
             "- You validate changes through deterministic checks and review the resulting evidence.",
             "- You should not take ownership of implementation work except through explicit coordinator routing.",
+        ]
+    if role_name == "code-reviewer":
+        return [
+            "- You execute routed code review work for one task session.",
+            "- You review only the routed task changes and produce compact review outcomes.",
+            "- Across repeated passes, retain reviewer context for the same task instead of reinitializing from zero.",
         ]
     return [
         "- You operate only on coordinator-routed work for one task session.",
