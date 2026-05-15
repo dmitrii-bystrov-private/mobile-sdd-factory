@@ -728,6 +728,56 @@ class CoordinatorService:
         )
         return session, event
 
+    def create_qa_knowledge(
+        self,
+        session_id: int,
+        title: str,
+        guidance: str,
+        scope: str | None = None,
+    ) -> tuple[Session, Event]:
+        session = self._get_session_or_raise(session_id)
+        knowledge_store = self._knowledge_store_or_raise()
+        if not any(
+            event.event_type == "qa_reopened"
+            for event in self.event_repository.list_for_session(session.id)
+        ):
+            raise IntakeError(
+                f"Session {session_id} has no QA feedback context for QA knowledge capture"
+            )
+        item = knowledge_store.create_item(
+            title=title,
+            source_type="qa_feedback",
+            platform=self._platform_for_task_key(session.task_key),
+            workflow_profiles=[session.workflow_profile],
+            task_key=session.task_key,
+            guidance=guidance,
+            scope=scope,
+            source_summary=f"Derived from QA feedback for {session.task_key}",
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="knowledge",
+            artifact_type="knowledge_reference_markdown",
+            path=str(item.path),
+            metadata={
+                "knowledge_id": item.id,
+                "source_type": item.source_type,
+                "scope": item.scope,
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="qa_knowledge_created",
+            producer_type="operator",
+            payload={
+                "knowledge_id": item.id,
+                "title": item.title,
+                "scope": item.scope,
+                "path": str(item.path),
+            },
+        )
+        return session, event
+
     def create_session_insight_knowledge(
         self,
         session_id: int,

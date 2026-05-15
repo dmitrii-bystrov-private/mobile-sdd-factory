@@ -25,6 +25,7 @@ try:
     from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
     from backend.api.routes_operator import create_review_knowledge
+    from backend.api.routes_operator import create_qa_knowledge
     from backend.api.routes_operator import create_session_insight_knowledge
     from backend.api.routes_operator import send_to_test
     from backend.api.routes_operator import start_subtask_graph
@@ -557,6 +558,52 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertTrue(response.created)
         self.assertEqual("session_insight_knowledge_created", response.event_type)
+
+    def test_create_qa_knowledge_route_writes_repo_visible_file(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        prepare_response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40007QAKNOW"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+        reopen_from_qa(
+            ReopenFromQaRequest(
+                session_id=prepare_response.session.id,
+                comment_text="QA: CTA disappears after refresh",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = create_qa_knowledge(
+            CreateKnowledgeRequest(
+                session_id=prepare_response.session.id,
+                title="Preserve empty-state CTA after refresh",
+                guidance="Keep the CTA visible after refresh; stale cache can rebuild the wrong branch.",
+                scope="empty-state",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        knowledge_files = list((Path(self.temp_dir.name) / "knowledge").rglob("*.md"))
+        self.assertTrue(response.created)
+        self.assertEqual("qa_knowledge_created", response.event_type)
+        self.assertTrue(any("Preserve empty-state CTA after refresh" in path.read_text() for path in knowledge_files))
 
     def test_verification_failed_event_returns_correction_handoff(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

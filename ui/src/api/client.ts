@@ -27,6 +27,7 @@ const STREAM_EVENT_TYPES = [
   "subtask_implementation_requested",
   "subtask_completed",
   "review_knowledge_created",
+  "qa_knowledge_created",
   "session_insight_knowledge_created",
   "knowledge_attached",
   "implementation_requested",
@@ -309,6 +310,27 @@ export const apiClient = {
     session: Session;
   }> {
     return request("/operator/create-session-insight-knowledge", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        title,
+        guidance,
+        scope: scope || null,
+      }),
+    });
+  },
+
+  createQaKnowledge(
+    sessionId: number,
+    title: string,
+    guidance: string,
+    scope: string,
+  ): Promise<{
+    created: boolean;
+    event_type: string;
+    session: Session;
+  }> {
+    return request("/operator/create-qa-knowledge", {
       method: "POST",
       body: JSON.stringify({
         session_id: sessionId,

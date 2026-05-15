@@ -10,6 +10,7 @@ import re
 
 SOURCE_DIRECTORY = {
     "review_feedback": "review",
+    "qa_feedback": "qa",
     "session_insight": "session-insights",
 }
 

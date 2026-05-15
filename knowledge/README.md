@@ -12,4 +12,5 @@ Principles:
 Suggested subdirectories:
 
 - `review/`
+- `qa/`
 - `session-insights/`

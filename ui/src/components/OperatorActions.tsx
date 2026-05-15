@@ -25,6 +25,9 @@ export function OperatorActions({
   const [reviewKnowledgeTitle, setReviewKnowledgeTitle] = useState("");
   const [reviewKnowledgeScope, setReviewKnowledgeScope] = useState("");
   const [reviewKnowledgeGuidance, setReviewKnowledgeGuidance] = useState("");
+  const [qaKnowledgeTitle, setQaKnowledgeTitle] = useState("");
+  const [qaKnowledgeScope, setQaKnowledgeScope] = useState("");
+  const [qaKnowledgeGuidance, setQaKnowledgeGuidance] = useState("");
   const [sessionInsightTitle, setSessionInsightTitle] = useState("");
   const [sessionInsightScope, setSessionInsightScope] = useState("");
   const [sessionInsightGuidance, setSessionInsightGuidance] = useState("");
@@ -134,6 +137,27 @@ export function OperatorActions({
       setSessionInsightTitle("");
       setSessionInsightScope("");
       setSessionInsightGuidance("");
+    });
+  }
+
+  async function handleQaKnowledge(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const normalizedTitle = qaKnowledgeTitle.trim();
+    const normalizedGuidance = qaKnowledgeGuidance.trim();
+    if (normalizedTitle.length === 0 || normalizedGuidance.length === 0) {
+      setError("QA knowledge title and guidance are required");
+      return;
+    }
+    await run(async () => {
+      await apiClient.createQaKnowledge(
+        session.id,
+        normalizedTitle,
+        normalizedGuidance,
+        qaKnowledgeScope.trim(),
+      );
+      setQaKnowledgeTitle("");
+      setQaKnowledgeScope("");
+      setQaKnowledgeGuidance("");
     });
   }
 
@@ -454,6 +478,55 @@ export function OperatorActions({
           </label>
           <button className="action-button" disabled={busy} type="submit">
             Create Session Insight
+          </button>
+        </form>
+      </div>
+
+      <div className="operator-followup-stack">
+        <div className="operator-followup-copy">
+          <p className="eyebrow">Knowledge</p>
+          <h4>Promote QA Feedback</h4>
+          <p className="path-label">
+            Capture a reusable repo-visible rule from QA feedback after a reopen cycle.
+          </p>
+        </div>
+
+        <form className="followup-form" onSubmit={(event) => void handleQaKnowledge(event)}>
+          <div className="followup-form-grid">
+            <label className="form-field">
+              <span>Knowledge Title</span>
+              <input
+                className="text-input"
+                disabled={busy}
+                onChange={(event) => setQaKnowledgeTitle(event.target.value)}
+                placeholder="Preserve empty-state CTA after refresh"
+                value={qaKnowledgeTitle}
+              />
+            </label>
+            <label className="form-field">
+              <span>Scope</span>
+              <input
+                className="text-input"
+                disabled={busy}
+                onChange={(event) => setQaKnowledgeScope(event.target.value)}
+                placeholder="empty-state"
+                value={qaKnowledgeScope}
+              />
+            </label>
+          </div>
+          <label className="form-field">
+            <span>Guidance</span>
+            <textarea
+              className="text-area-input"
+              disabled={busy}
+              onChange={(event) => setQaKnowledgeGuidance(event.target.value)}
+              placeholder="Keep the CTA visible after refresh; the bug reproduces when the empty-state branch is rebuilt from stale cache."
+              rows={4}
+              value={qaKnowledgeGuidance}
+            />
+          </label>
+          <button className="action-button" disabled={busy} type="submit">
+            Create QA Knowledge
           </button>
         </form>
       </div>
