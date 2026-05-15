@@ -27,7 +27,10 @@ class RoleLauncherManager:
 
     def __init__(self, repo_root: Path, launcher_command: list[str] | None = None) -> None:
         self.repo_root = repo_root
-        self.launcher_command = list(launcher_command or ["sh"])
+        if launcher_command is None or launcher_command == ["auto"]:
+            self.launcher_command = [str(repo_root / "scripts" / "run-role-agent.sh")]
+        else:
+            self.launcher_command = list(launcher_command)
 
     def ensure_launch_plan(
         self,
@@ -69,6 +72,7 @@ class RoleLauncherManager:
                 f'export SDD_FACTORY_ROLE_WORKSPACE={_shell_escape(str(workspace.directory))}',
                 f'export SDD_FACTORY_ROLE_AGENTS_MD={_shell_escape(str(workspace.agents_path))}',
                 f'export SDD_FACTORY_REPO_ROOT={_shell_escape(str(self.repo_root))}',
+                f'export SDD_FACTORY_WORKDIR_ROOT={_shell_escape(str(self.repo_root / "workdir"))}',
                 f"cd {_shell_escape(str(workspace.directory))}",
                 'printf "SDD_FACTORY_ROLE_LAUNCHER_READY role=%s task=%s\\n" "$SDD_FACTORY_ROLE_NAME" "$SDD_FACTORY_TASK_KEY"',
                 f"exec {launcher_exec}",

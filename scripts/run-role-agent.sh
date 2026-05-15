@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+launcher_name="${SDD_FACTORY_AGENT_EXECUTABLE:-}"
+
+if [[ -z "$launcher_name" ]]; then
+  if command -v claude >/dev/null 2>&1; then
+    launcher_name="claude"
+  elif command -v codex >/dev/null 2>&1; then
+    launcher_name="codex"
+  else
+    launcher_name="sh"
+  fi
+fi
+
+role_name="${SDD_FACTORY_ROLE_NAME:-role}"
+task_key="${SDD_FACTORY_TASK_KEY:-task}"
+repo_root="${SDD_FACTORY_REPO_ROOT:-}"
+workdir_root="${SDD_FACTORY_WORKDIR_ROOT:-}"
+settings_file=""
+
+if [[ -n "$repo_root" ]]; then
+  if [[ -f "$repo_root/.claude/settings.local.json" ]]; then
+    settings_file="$repo_root/.claude/settings.local.json"
+  elif [[ -f "$repo_root/.claude/settings.json" ]]; then
+    settings_file="$repo_root/.claude/settings.json"
+  fi
+fi
+
+printf "SDD_FACTORY_AGENT_BOOTSTRAP launcher=%s role=%s task=%s\n" "$launcher_name" "$role_name" "$task_key"
+
+case "$launcher_name" in
+  claude)
+    args=(
+      "--permission-mode" "auto"
+      "--name" "${role_name}:${task_key}"
+    )
+    if [[ -n "$repo_root" ]]; then
+      args+=("--add-dir" "$repo_root")
+    fi
+    if [[ -n "$workdir_root" ]]; then
+      args+=("--add-dir" "$workdir_root")
+    fi
+    if [[ -n "$settings_file" ]]; then
+      args+=("--settings" "$settings_file")
+    fi
+    exec claude "${args[@]}"
+    ;;
+  codex)
+    exec codex
+    ;;
+  sh)
+    exec sh
+    ;;
+  *)
+    exec "$launcher_name"
+    ;;
+esac

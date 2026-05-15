@@ -42,7 +42,7 @@ def load_config() -> AppConfig:
             os.environ.get("SDD_FACTORY_RUNTIME_ROOT", default_workdir_root / "factory-runtime")
         ),
         agent_launcher_command=tuple(
-            os.environ.get("SDD_FACTORY_AGENT_LAUNCHER", "sh").split()
+            os.environ.get("SDD_FACTORY_AGENT_LAUNCHER", "auto").split()
         ),
         loop_interval_seconds=float(os.environ.get("SDD_FACTORY_LOOP_INTERVAL_SECONDS", "1.0")),
         host=os.environ.get("SDD_FACTORY_HOST", "127.0.0.1"),

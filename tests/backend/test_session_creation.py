@@ -236,6 +236,26 @@ class SessionCreationTests(unittest.TestCase):
         spawn_command = self.session_backend.get_spawn_command(implementer_role.runtime_handle)
         self.assertEqual([str(launch_script)], spawn_command)
 
+    def test_default_role_launcher_uses_repo_bootstrap_script(self) -> None:
+        workspace_manager = RoleWorkspaceManager(
+            runtime_root=Path(self.temp_dir.name) / "runtime-default-launcher",
+            repo_root=Path(self.temp_dir.name) / "repo-root-default-launcher",
+            workdir_root=Path(self.temp_dir.name),
+        )
+        launcher_manager = RoleLauncherManager(
+            repo_root=Path(self.temp_dir.name) / "repo-root-default-launcher",
+        )
+        workspace = workspace_manager.ensure_role_workspace("IOS-30000AUTO", "implementer")
+        launch_plan = launcher_manager.ensure_launch_plan(
+            task_key="IOS-30000AUTO",
+            workspace=workspace,
+        )
+
+        script_text = launch_plan.launcher_script.read_text()
+        self.assertIn("SDD_FACTORY_WORKDIR_ROOT=", script_text)
+        self.assertIn("/scripts/run-role-agent.sh", script_text)
+        self.assertIn("SDD_FACTORY_ROLE_LAUNCHER_READY", script_text)
+
     def test_create_task_session_is_idempotent_for_existing_key(self) -> None:
         first_session, _, _ = self.coordinator.create_task_session(
             "IOS-30001",
