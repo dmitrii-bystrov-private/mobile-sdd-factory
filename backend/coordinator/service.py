@@ -1005,7 +1005,12 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
             },
         )
-        instruction = self._stage_instruction(session.current_stage, session.task_key)
+        instruction = self._stage_instruction(
+            session.current_stage,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=role.role_name,
+        )
         if instruction is None:
             raise IntakeError(f"Session {session.id} cannot be resumed from stage {session.current_stage}")
         dispatch_event = self._dispatch_role_work(
@@ -1045,7 +1050,12 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
             },
         )
-        instruction = self._stage_instruction(session.current_stage, session.task_key)
+        instruction = self._stage_instruction(
+            session.current_stage,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=role.role_name,
+        )
         if instruction is None:
             raise IntakeError(f"Session {session.id} cannot be resumed from stage {session.current_stage}")
         dispatch_event = self._dispatch_role_work(
@@ -1101,7 +1111,12 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
             },
         )
-        instruction = self._stage_instruction(session.current_stage, session.task_key)
+        instruction = self._stage_instruction(
+            session.current_stage,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=role.role_name,
+        )
         if instruction is None:
             raise IntakeError(f"Session {session_id} cannot be retried from stage {session.current_stage}")
         dispatch_event = self._dispatch_role_work(
@@ -1179,7 +1194,12 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
             },
         )
-        instruction = self._stage_instruction(session.current_stage, session.task_key)
+        instruction = self._stage_instruction(
+            session.current_stage,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=target_role.role_name,
+        )
         if instruction is None:
             raise IntakeError(f"Session {session_id} cannot be redirected from stage {session.current_stage}")
         dispatch_event = self._dispatch_role_work(
@@ -1213,10 +1233,16 @@ class CoordinatorService:
             current_stage="implementation_requested",
             current_owner=coding_role.role_name,
         )
-        if coding_role.role_name == BUG_FIXER_ROLE:
-            instruction = f"Implement the bug fix for {resolved_task_key} using your current bug context."
-        else:
-            instruction = f"Start implementation work for {resolved_task_key}."
+        instruction = self._stage_instruction(
+            "implementation_requested",
+            resolved_task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+        )
+        if instruction is None:
+            raise IntakeError(
+                f"No implementation instruction is available for role {coding_role.role_name}"
+            )
         if additional_context:
             instruction = f"{instruction}\n\n{additional_context}"
         self._dispatch_role_work(
@@ -1260,9 +1286,18 @@ class CoordinatorService:
             current_owner=coding_role.role_name,
         )
         test_policy = (session.policy or {}).get("test_policy", "enabled")
+        base_instruction = self._stage_instruction(
+            "bug_analysis_requested",
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+        )
+        if base_instruction is None:
+            raise IntakeError(
+                f"No bug analysis instruction is available for role {coding_role.role_name}"
+            )
         instruction = (
-            f"Analyze bug {session.task_key} before implementation. "
-            "Identify probable root cause, expected fix direction, and whether a regression test should be added. "
+            f"{base_instruction}\n"
             f"Test policy for this session: {test_policy}."
         )
         if additional_context:
@@ -1637,12 +1672,22 @@ class CoordinatorService:
             current_stage="verification_correction_requested",
             current_owner=coding_role.role_name,
         )
+        instruction = self._stage_instruction(
+            "verification_correction_requested",
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+        )
+        if instruction is None:
+            raise IntakeError(
+                f"No verification correction instruction is available for role {coding_role.role_name}"
+            )
         self._dispatch_role_work(
             session=session,
             role=coding_role,
             work_item=correction_item,
             stage_name="verification_correction_requested",
-            instruction=f"Apply verification corrections for {session.task_key}.",
+            instruction=instruction,
         )
         event = self._append_event(
             session_id=session.id,
@@ -1781,12 +1826,20 @@ class CoordinatorService:
             current_owner=coding_role.role_name,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        effective_instruction = self._stage_instruction(
+            stage_name,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+        )
+        if effective_instruction is None:
+            effective_instruction = instruction
         self._dispatch_role_work(
             session=session,
             role=coding_role,
             work_item=work_item,
             stage_name=stage_name,
-            instruction=instruction,
+            instruction=effective_instruction,
         )
         return self._append_event(
             session_id=session.id,
@@ -1822,12 +1875,22 @@ class CoordinatorService:
             current_owner=coding_role.role_name,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = self._stage_instruction(
+            "self_review_correction_requested",
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+        )
+        if instruction is None:
+            raise IntakeError(
+                f"No self review correction instruction is available for role {coding_role.role_name}"
+            )
         self._dispatch_role_work(
             session=session,
             role=coding_role,
             work_item=correction_item,
             stage_name="self_review_correction_requested",
-            instruction=f"Apply self review corrections for {session.task_key}.",
+            instruction=instruction,
         )
         event = self._append_event(
             session_id=session.id,
@@ -2205,7 +2268,12 @@ class CoordinatorService:
         ):
             return False
 
-        instruction = self._stage_instruction(session.current_stage, session.task_key)
+        instruction = self._stage_instruction(
+            session.current_stage,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=role.role_name,
+        )
         if instruction is None:
             return False
 
@@ -2309,7 +2377,49 @@ class CoordinatorService:
             return True
         return False
 
-    def _stage_instruction(self, stage_name: str, task_key: str) -> str | None:
+    def _stage_instruction(
+        self,
+        stage_name: str,
+        task_key: str,
+        workflow_profile: str | None = None,
+        role_name: str | None = None,
+    ) -> str | None:
+        if workflow_profile == "bug_full" and role_name == BUG_FIXER_ROLE:
+            if stage_name == "bug_analysis_requested":
+                return (
+                    f"Mode: analysis-only\n"
+                    f"Analyze bug {task_key} before implementation. "
+                    "Identify probable root cause, expected fix direction, and whether a regression test should be added."
+                )
+            if stage_name == "implementation_requested":
+                return (
+                    f"Mode: fix-only\n"
+                    f"Implement the bug fix for {task_key} using your current bug context and the saved bug analysis."
+                )
+            if stage_name == "verification_correction_requested":
+                return (
+                    f"Mode: fix-only\n"
+                    f"Apply verification corrections for {task_key}. "
+                    "Treat the verification report as a narrow bug-fix correction pass."
+                )
+            if stage_name == "self_review_correction_requested":
+                return (
+                    f"Mode: fix-only\n"
+                    f"Apply self review corrections for {task_key}. "
+                    "Treat the review findings as a narrow bug-fix correction pass."
+                )
+            if stage_name == "mr_followup_requested":
+                return (
+                    f"Mode: fix-only\n"
+                    f"Apply MR follow-up changes for {task_key}. "
+                    "Prioritize the latest MR comments as the highest-priority follow-up scope."
+                )
+            if stage_name == "qa_reopen_requested":
+                return (
+                    f"Mode: fix-only\n"
+                    f"Apply QA reopen follow-up changes for {task_key}. "
+                    "Prioritize the latest QA comments as the highest-priority follow-up scope."
+                )
         if stage_name == "bug_analysis_requested":
             return (
                 f"Analyze bug {task_key} before implementation. "

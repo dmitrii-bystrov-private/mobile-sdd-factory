@@ -347,6 +347,7 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
         self.assertEqual(1, len(sent_inputs))
+        self.assertIn("Mode: analysis-only", sent_inputs[0])
         self.assertIn("Analyze bug IOS-30002BUG before implementation.", sent_inputs[0])
         self.assertIn("Test policy for this session: required.", sent_inputs[0])
 
@@ -519,6 +520,7 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
         self.assertEqual(2, len(bug_fixer_inputs))
+        self.assertIn("Mode: fix-only", bug_fixer_inputs[-1])
         self.assertIn("Implement the bug fix for IOS-30003BUG", bug_fixer_inputs[-1])
         self.assertIn(
             "Bug analysis summary: Likely missing state reset in coordinator",
@@ -767,6 +769,39 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Apply verification corrections for IOS-30004.", sent_inputs[-1])
         self.assertIn("Continue from your existing implementer role context", sent_inputs[-1])
         self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
+
+    def test_bug_full_verification_failed_routes_back_to_bug_fixer_with_fix_only_mode(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004BUG",
+            workflow_profile="bug_full",
+            policy={"test_policy": "enabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004BUG")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="bug_analysis_completed",
+            payload={"summary": "root cause found"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "bug fix done"},
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_failed",
+            payload={"failures": ["test"]},
+        )
+        bug_fixer_role = self.role_repository.get_by_name(session.id, BUG_FIXER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(bug_fixer_role.runtime_handle)
+
+        self.assertEqual("verification_correction_requested", updated_session.current_stage)
+        self.assertEqual(BUG_FIXER_ROLE, updated_session.current_owner)
+        self.assertEqual("verification_correction_requested", followup_event.event_type)
+        self.assertIn("Mode: fix-only", sent_inputs[-1])
+        self.assertIn("Apply verification corrections for IOS-30004BUG.", sent_inputs[-1])
+        self.assertIn("narrow bug-fix correction pass", sent_inputs[-1])
 
     def test_second_verification_dispatch_uses_continuation_prompt(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004V2")
@@ -1232,6 +1267,45 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.assertTrue(any(item.event_type == "qa_reopened" for item in events))
         self.assertTrue(any(item.event_type == "qa_reopen_requested" for item in events))
+
+    def test_bug_full_qa_reopen_uses_bug_fixer_fix_only_followup(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BUG",
+            workflow_profile="bug_full",
+            policy={"test_policy": "enabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BUG")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="bug_analysis_completed",
+            payload={"summary": "root cause found"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        updated_session, event, followup_event = self.coordinator.reopen_from_qa(
+            session_id=session.id,
+            comment_text="QA: still broken on edge case",
+        )
+        bug_fixer_role = self.role_repository.get_by_name(session.id, BUG_FIXER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(bug_fixer_role.runtime_handle)
+
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("qa_reopen_requested", updated_session.current_stage)
+        self.assertEqual(BUG_FIXER_ROLE, updated_session.current_owner)
+        self.assertEqual("qa_reopened", event.event_type)
+        self.assertEqual("qa_reopen_requested", followup_event.event_type)
+        self.assertIn("Mode: fix-only", sent_inputs[-1])
+        self.assertIn("Apply QA reopen follow-up changes for IOS-30021BUG.", sent_inputs[-1])
+        self.assertIn("highest-priority follow-up scope", sent_inputs[-1])
 
     def test_create_mr_handoff_marks_completed_session_as_handed_off(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021A")
