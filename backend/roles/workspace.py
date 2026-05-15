@@ -50,6 +50,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task repo worktree: `{task_repo_root}`",
             "- Task artifacts and verification outputs: `{task_artifacts_root}`",
             "- Build/test/lint wrappers: `{repo_root}/scripts/run-build.sh`, `{repo_root}/scripts/run-test.sh`, `{repo_root}/scripts/run-lint.sh`",
+            "- Final verification report target: `{task_snapshot_root}/spec/final-verification.md`",
             "- Shared knowledge base: `{repo_root}/knowledge`",
         ]
     if role_name == "code-reviewer":
@@ -130,6 +131,9 @@ def _role_operating_rules(role_name: str) -> list[str]:
     if role_name == "verification-coordinator":
         return [
             "- Run only deterministic verification work for the routed task session.",
+            "- Treat `run-test.sh` and `run-lint.sh` as the workflow-level verification gate; do not run `run-build.sh` here.",
+            "- Always treat each verification round as a fresh deterministic gate and refresh the verification evidence.",
+            "- Keep the role evidence-first: summarize failures, but do not attempt fixes.",
             "- Do not modify product code.",
         ]
     if role_name == "code-reviewer":

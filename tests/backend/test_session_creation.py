@@ -196,6 +196,9 @@ class SessionCreationTests(unittest.TestCase):
             / "AGENTS.md"
         ).read_text()
         self.assertIn("run-test.sh", verification_agents)
+        self.assertIn("Final verification report target:", verification_agents)
+        self.assertIn("do not run `run-build.sh` here", verification_agents)
+        self.assertIn("Do not modify product code.", verification_agents)
         reviewer_agents = (
             Path(self.temp_dir.name)
             / "runtime"
@@ -395,6 +398,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Run deterministic verification for IOS-30003.", sent_inputs[0])
         self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[0])
+        self.assertIn("Role-specific rules:", sent_inputs[0])
+        self.assertIn("Use `run-test.sh` and `run-lint.sh`; do not run `run-build.sh` here.", sent_inputs[0])
+        self.assertIn("verification_report_path", sent_inputs[0])
 
     def test_implementation_completed_routes_to_reviewer_when_self_review_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

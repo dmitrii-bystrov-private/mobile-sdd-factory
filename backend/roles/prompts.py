@@ -31,6 +31,14 @@ def role_runtime_rules(role_name: str) -> str:
             "- Read only the convention sources relevant to the touched diff area.\n"
             "- Keep the output compact and optimized for a narrow fixer pass.\n\n"
         )
+    if role_name == "verification-coordinator":
+        return (
+            "Role-specific rules:\n"
+            "- Run only the workflow-level deterministic verification gate for the current task.\n"
+            "- Use `run-test.sh` and `run-lint.sh`; do not run `run-build.sh` here.\n"
+            "- Treat every verification round as a fresh gate and refresh the verification evidence.\n"
+            "- Do not modify code, tests, docs, or prompts; summarize failures and stop.\n\n"
+        )
     return ""
 
 

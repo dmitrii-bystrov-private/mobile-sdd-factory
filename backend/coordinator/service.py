@@ -1964,12 +1964,25 @@ class CoordinatorService:
             current_owner=VERIFICATION_COORDINATOR_ROLE,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        verification_report_path = None
+        if self.workdir_root is not None:
+            verification_report_path = str(
+                self.workdir_root / session.task_key / "spec" / "final-verification.md"
+            )
         self._dispatch_role_work(
             session=session,
             role=verification_role,
             work_item=verification_item,
             stage_name="verification_requested",
-            instruction=f"Run deterministic verification for {session.task_key}.",
+            instruction=(
+                f"Run deterministic verification for {session.task_key}. "
+                "Treat this as a fresh workflow-level gate: run `run-test.sh` and `run-lint.sh`, "
+                "do not run `run-build.sh`, do not modify code, and refresh the final verification evidence."
+            ),
+            extra_hydration={
+                "verification_gate": "run-test.sh + run-lint.sh",
+                "verification_report_path": verification_report_path,
+            },
         )
         event = self._append_event(
             session_id=session.id,
