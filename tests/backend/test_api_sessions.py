@@ -53,6 +53,7 @@ try:
         CODE_REVIEWER_ROLE,
         DEFAULT_SESSION_ROLES,
     )
+    from backend.roles.launcher import RoleLauncherManager
     from backend.roles.workspace import RoleWorkspaceManager
     from backend.session_backend.tmux_backend import TmuxSessionBackend
     from backend.state.artifact_repository import ArtifactRepository
@@ -145,6 +146,10 @@ class SessionApiTests(unittest.TestCase):
                 repo_root=Path(self.temp_dir.name) / "repo-root",
                 workdir_root=Path(self.temp_dir.name),
             ),
+            role_launcher_manager=RoleLauncherManager(
+                repo_root=Path(self.temp_dir.name) / "repo-root",
+                launcher_command=["sh"],
+            ),
         )
         loop_runner = CoordinatorLoopRunner(
             callback=coordinator.run_loop_once,
@@ -203,6 +208,31 @@ class SessionApiTests(unittest.TestCase):
             self.assertTrue(role_dir.is_dir())
             self.assertTrue((role_dir / "AGENTS.md").is_file())
             self.assertTrue((role_dir / "CLAUDE.md").is_symlink())
+
+    def test_create_session_route_creates_role_launch_scripts(self) -> None:
+        response = create_session(
+            CreateSessionRequest(task_key="IOS-40000L", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            response.session.id,
+            "implementer",
+        )
+        launch_script = (
+            Path(self.temp_dir.name)
+            / "runtime"
+            / "role-workspaces"
+            / "IOS-40000L"
+            / "implementer"
+            / "launch-role.sh"
+        )
+        self.assertTrue(launch_script.is_file())
+        self.assertEqual(
+            [str(launch_script)],
+            self.dependencies.session_backend.get_spawn_command(implementer_role.runtime_handle),
+        )
 
     def test_list_sessions_route_returns_created_session(self) -> None:
         create_session(

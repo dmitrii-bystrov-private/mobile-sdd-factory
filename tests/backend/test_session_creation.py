@@ -10,6 +10,7 @@ from backend.roles.contracts import (
     CODE_REVIEWER_ROLE,
     DEFAULT_SESSION_ROLES,
 )
+from backend.roles.launcher import RoleLauncherManager
 from backend.roles.workspace import RoleWorkspaceManager
 from backend.session_backend.tmux_backend import TmuxSessionBackend
 from backend.state.artifact_repository import ArtifactRepository
@@ -120,6 +121,10 @@ class SessionCreationTests(unittest.TestCase):
                 repo_root=Path(self.temp_dir.name) / "repo-root",
                 workdir_root=Path(self.temp_dir.name),
             ),
+            role_launcher_manager=RoleLauncherManager(
+                repo_root=Path(self.temp_dir.name) / "repo-root",
+                launcher_command=["sh"],
+            ),
         )
 
     def tearDown(self) -> None:
@@ -192,6 +197,31 @@ class SessionCreationTests(unittest.TestCase):
             / "AGENTS.md"
         ).read_text()
         self.assertIn("Project conventions:", reviewer_agents)
+
+    def test_create_task_session_creates_role_launch_scripts(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30000L",
+            workflow_profile="oneshot",
+            policy=None,
+        )
+
+        self.assertIsNotNone(session.id)
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        launch_script = (
+            Path(self.temp_dir.name)
+            / "runtime"
+            / "role-workspaces"
+            / "IOS-30000L"
+            / "implementer"
+            / "launch-role.sh"
+        )
+        self.assertTrue(launch_script.is_file())
+        script_text = launch_script.read_text()
+        self.assertIn("SDD_FACTORY_TASK_KEY=IOS-30000L", script_text)
+        self.assertIn("SDD_FACTORY_ROLE_NAME=implementer", script_text)
+        self.assertIn('exec sh', script_text)
+        spawn_command = self.session_backend.get_spawn_command(implementer_role.runtime_handle)
+        self.assertEqual([str(launch_script)], spawn_command)
 
     def test_create_task_session_is_idempotent_for_existing_key(self) -> None:
         first_session, _, _ = self.coordinator.create_task_session(

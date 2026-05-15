@@ -24,6 +24,7 @@ class TmuxSessionBackend(SessionBackend):
         self.sent_inputs: dict[str, list[str]] = defaultdict(list)
         self.pending_outputs: dict[str, list[str]] = defaultdict(list)
         self.last_captured_output: dict[str, str] = {}
+        self.last_spawn_commands: dict[str, list[str]] = {}
         self._available = shutil.which("tmux") is not None
         self._effective_mode = self._resolve_mode(mode)
 
@@ -67,9 +68,11 @@ class TmuxSessionBackend(SessionBackend):
         session: RuntimeSessionHandle,
         role_name: str,
         start_directory: Path | None = None,
+        launch_command: list[str] | None = None,
     ) -> RuntimeRoleHandle:
         role_window = self._sanitize(role_name)
         role_id = f"{session.session_id}:{role_window}"
+        role_command = list(launch_command or ["sh"])
         if start_directory is not None:
             start_directory.mkdir(parents=True, exist_ok=True)
         if self._effective_mode == "tmux":
@@ -84,10 +87,11 @@ class TmuxSessionBackend(SessionBackend):
             ]
             if start_directory is not None:
                 args.extend(["-c", str(start_directory)])
-            args.append("sh")
+            args.extend(role_command)
             result = self._tmux(socket_path, *args)
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to create tmux window")
+        self.last_spawn_commands[role_id] = role_command
         if start_directory is not None:
             self.last_captured_output.setdefault(role_id, "")
         return RuntimeRoleHandle(
@@ -143,3 +147,6 @@ class TmuxSessionBackend(SessionBackend):
 
     def simulate_output(self, role_id: str, text: str) -> None:
         self.pending_outputs[role_id].append(text)
+
+    def get_spawn_command(self, role_id: str) -> list[str]:
+        return list(self.last_spawn_commands.get(role_id, []))

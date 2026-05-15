@@ -21,6 +21,7 @@ class SessionBackend(ABC):
         session: RuntimeSessionHandle,
         role_name: str,
         start_directory: Path | None = None,
+        launch_command: list[str] | None = None,
     ) -> RuntimeRoleHandle:
         raise NotImplementedError
 

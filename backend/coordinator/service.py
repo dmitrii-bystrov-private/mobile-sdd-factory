@@ -19,6 +19,7 @@ from backend.models.session import Session
 from backend.models.role import Role
 from backend.models.work_item import WorkItem
 from backend.roles.prompts import role_handoff_prompt
+from backend.roles.launcher import RoleLauncherManager
 from backend.roles.workspace import RoleWorkspaceManager
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
@@ -59,6 +60,7 @@ class CoordinatorService:
     knowledge_root: Path | None = None
     event_bus: SessionEventBus | None = None
     role_workspace_manager: RoleWorkspaceManager | None = None
+    role_launcher_manager: RoleLauncherManager | None = None
 
     def create_task_session(
         self,
@@ -102,13 +104,21 @@ class CoordinatorService:
         runtime_session = self.session_backend.create_task_session(task_key)
         for role_name in self._effective_role_names(normalized_policy.policy):
             start_directory = None
+            launch_command = None
             if self.role_workspace_manager is not None:
                 workspace = self.role_workspace_manager.ensure_role_workspace(task_key, role_name)
                 start_directory = workspace.directory
+                if self.role_launcher_manager is not None:
+                    launch_plan = self.role_launcher_manager.ensure_launch_plan(
+                        task_key=task_key,
+                        workspace=workspace,
+                    )
+                    launch_command = launch_plan.command
             runtime_role = self.session_backend.spawn_role(
                 runtime_session,
                 role_name,
                 start_directory=start_directory,
+                launch_command=launch_command,
             )
             self.role_repository.create(
                 session_id=session.id,

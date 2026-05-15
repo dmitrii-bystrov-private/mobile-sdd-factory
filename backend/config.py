@@ -16,6 +16,7 @@ class AppConfig:
     database_path: Path
     runtime_backend: str
     runtime_root: Path
+    agent_launcher_command: tuple[str, ...]
     loop_interval_seconds: float
     host: str = "127.0.0.1"
     port: int = 8000
@@ -39,6 +40,9 @@ def load_config() -> AppConfig:
         runtime_backend=os.environ.get("SDD_FACTORY_RUNTIME_BACKEND", "auto"),
         runtime_root=Path(
             os.environ.get("SDD_FACTORY_RUNTIME_ROOT", default_workdir_root / "factory-runtime")
+        ),
+        agent_launcher_command=tuple(
+            os.environ.get("SDD_FACTORY_AGENT_LAUNCHER", "sh").split()
         ),
         loop_interval_seconds=float(os.environ.get("SDD_FACTORY_LOOP_INTERVAL_SECONDS", "1.0")),
         host=os.environ.get("SDD_FACTORY_HOST", "127.0.0.1"),
