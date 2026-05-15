@@ -256,6 +256,99 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("/scripts/run-role-agent.sh", script_text)
         self.assertIn("SDD_FACTORY_ROLE_LAUNCHER_READY", script_text)
 
+    def test_real_launcher_backed_runtime_keeps_persistent_role_context_across_rounds(self) -> None:
+        runtime_root = Path(self.temp_dir.name) / "runtime-real-launcher"
+        repo_root = Path(self.temp_dir.name) / "repo-root-real-launcher"
+        session_backend = TmuxSessionBackend(mode="recording", runtime_root=runtime_root)
+        coordinator = CoordinatorService(
+            session_repository=self.session_repository,
+            role_repository=self.role_repository,
+            event_repository=self.event_repository,
+            artifact_repository=self.artifact_repository,
+            work_item_repository=self.work_item_repository,
+            session_backend=session_backend,
+            default_roles=DEFAULT_SESSION_ROLES,
+            jira_adapter=FakeJiraAdapter(),
+            snapshot_adapter=FakeSnapshotAdapter(),
+            gitlab_adapter=FakeGitLabAdapter(),
+            artifacts_root=Path(self.temp_dir.name) / "artifacts-real-launcher",
+            workdir_root=Path(self.temp_dir.name),
+            knowledge_root=Path(self.temp_dir.name) / "knowledge-real-launcher",
+            event_bus=self.event_bus,
+            role_workspace_manager=RoleWorkspaceManager(
+                runtime_root=runtime_root,
+                repo_root=repo_root,
+                workdir_root=Path(self.temp_dir.name),
+            ),
+            role_launcher_manager=RoleLauncherManager(repo_root=repo_root),
+        )
+
+        session, _, _ = coordinator.create_task_session(
+            "IOS-30000E2E",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+        prepared_session, _, _, _ = coordinator.prepare_task_session("IOS-30000E2E")
+
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        verifier_role = self.role_repository.get_by_name(session.id, "verification-coordinator")
+
+        for role in (implementer_role, reviewer_role, verifier_role):
+            spawn_command = session_backend.get_spawn_command(role.runtime_handle)
+            self.assertEqual(1, len(spawn_command))
+            launch_script_text = Path(spawn_command[0]).read_text()
+            self.assertIn("/scripts/run-role-agent.sh", launch_script_text)
+
+        coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="passed",
+            payload={"summary": "clean review"},
+        )
+        coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name="verification-coordinator",
+            output_type="failed",
+            payload={"summary": "verification failed", "failures": ["lint"]},
+        )
+        coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "verification correction done"},
+        )
+
+        implementer_inputs = session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        reviewer_inputs = session_backend.get_sent_inputs(reviewer_role.runtime_handle)
+        verifier_inputs = session_backend.get_sent_inputs(verifier_role.runtime_handle)
+
+        self.assertEqual(2, len(implementer_inputs))
+        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", implementer_inputs[0])
+        self.assertIn(
+            "Continue from your existing implementer role context in this persistent task session.",
+            implementer_inputs[1],
+        )
+
+        self.assertEqual(1, len(reviewer_inputs))
+        self.assertIn("Role-specific rules:", reviewer_inputs[0])
+        self.assertIn("review_scope", reviewer_inputs[0])
+
+        self.assertEqual(2, len(verifier_inputs))
+        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", verifier_inputs[0])
+        self.assertIn(
+            "Continue from your existing verification-coordinator role context in this persistent task session.",
+            verifier_inputs[1],
+        )
+
     def test_create_task_session_is_idempotent_for_existing_key(self) -> None:
         first_session, _, _ = self.coordinator.create_task_session(
             "IOS-30001",
