@@ -17,9 +17,25 @@ def role_handoff_prompt(
     role_name: str,
     instruction: str,
     hydration_payload: dict[str, str | int | None],
+    prompt_mode: str = "full",
 ) -> str:
+    if prompt_mode == "bootstrap":
+        prefix = (
+            f"{base_role_prompt(role_name)}\n"
+            "Bootstrap instructions:\n"
+            "- Read AGENTS.md/CLAUDE.md in the current directory now.\n"
+            "- Establish your role context from that durable file and keep it across later routed work.\n"
+            "- On later rounds, do not reread the whole world from zero unless the coordinator explicitly tells you to.\n\n"
+        )
+    elif prompt_mode == "continuation":
+        prefix = (
+            f"Continue from your existing {role_name} role context in this persistent task session.\n"
+            "Do not reinitialize from scratch. Use your existing role context plus the new routed work below.\n\n"
+        )
+    else:
+        prefix = f"{base_role_prompt(role_name)}\n"
     return (
-        f"{base_role_prompt(role_name)}\n"
+        f"{prefix}"
         "Current routed work:\n"
         f"{instruction}\n\n"
         "For intermediate progress updates, you may emit:\n"

@@ -257,6 +257,7 @@ class SessionCreationTests(unittest.TestCase):
         sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Start implementation work for IOS-30002.", sent_inputs[0])
+        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[0])
 
     def test_prepare_task_session_reuses_existing_policy_aware_session(self) -> None:
         session, _, created = self.coordinator.create_task_session(
@@ -719,6 +720,8 @@ class SessionCreationTests(unittest.TestCase):
         sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Apply verification corrections for IOS-30004.", sent_inputs[-1])
+        self.assertIn("Continue from your existing implementer role context", sent_inputs[-1])
+        self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
 
     def test_verification_passed_completes_session(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30005")

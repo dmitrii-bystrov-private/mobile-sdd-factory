@@ -2372,6 +2372,7 @@ class CoordinatorService:
         stage_name: str,
         instruction: str,
     ) -> None:
+        prompt_mode = self._prompt_mode_for_dispatch(role)
         hydration = build_role_hydration(
             role_name=role.role_name,
             task_key=session.task_key,
@@ -2382,6 +2383,7 @@ class CoordinatorService:
             role_name=role.role_name,
             instruction=instruction,
             hydration_payload=hydration,
+            prompt_mode=prompt_mode,
         )
         hydration_path = write_text_artifact(
             self.artifacts_root,
@@ -2408,6 +2410,7 @@ class CoordinatorService:
                 "role_name": role.role_name,
                 "work_item_id": work_item.id,
                 "hydration_version": updated_role.last_hydration_version,
+                "prompt_mode": prompt_mode,
             },
         )
         self.artifact_repository.create(
@@ -2420,6 +2423,7 @@ class CoordinatorService:
                 "role_name": role.role_name,
                 "work_item_id": work_item.id,
                 "hydration_version": updated_role.last_hydration_version,
+                "prompt_mode": prompt_mode,
             },
         )
         runtime_role = RuntimeRoleHandle(
@@ -2437,8 +2441,14 @@ class CoordinatorService:
                 "work_item_id": work_item.id,
                 "stage_name": stage_name,
                 "hydration_version": updated_role.last_hydration_version,
+                "prompt_mode": prompt_mode,
             },
         )
+
+    def _prompt_mode_for_dispatch(self, role: Role) -> str:
+        if role.role_name == IMPLEMENTER_ROLE:
+            return "bootstrap" if role.last_hydration_version == 0 else "continuation"
+        return "full"
 
     def _append_event(
         self,
