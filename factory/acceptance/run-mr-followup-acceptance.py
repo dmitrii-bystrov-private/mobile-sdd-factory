@@ -97,7 +97,7 @@ def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDepend
 
 
 def main() -> None:
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parents[2]
     with tempfile.TemporaryDirectory(prefix="sdd-factory-mr-followup-acceptance.") as temp_dir:
         deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=Path(temp_dir))
 

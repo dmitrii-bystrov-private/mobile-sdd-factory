@@ -39,7 +39,7 @@ class RoleLauncherManager:
     def __init__(self, repo_root: Path, launcher_command: list[str] | None = None) -> None:
         self.repo_root = repo_root
         if launcher_command is None or launcher_command == ["auto"]:
-            self.launcher_command = [str(repo_root / "scripts" / "run-role-agent.sh")]
+            self.launcher_command = [str(repo_root / "factory" / "scripts" / "run-role-agent.sh")]
         else:
             self.launcher_command = list(launcher_command)
 

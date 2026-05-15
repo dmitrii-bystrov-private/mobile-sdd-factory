@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run follow-up reopen acceptance through the operator route layer without binding a port."""
+"""Run delivery acceptance through the operator route layer without binding a port."""
 
 from __future__ import annotations
 
@@ -7,16 +7,16 @@ from pathlib import Path
 import tempfile
 
 from backend.api.routes_artifacts import list_artifacts
-from backend.api.routes_events import inject_event, list_events
-from backend.api.routes_operator import reopen_from_qa
+from backend.api.routes_events import list_events
+from backend.api.routes_operator import create_mr, send_to_test
 from backend.api.routes_roles import submit_role_output
 from backend.api.routes_sessions import create_session, prepare_session
 from backend.api.schemas import (
+    CreateMrRequest,
     CreateSessionRequest,
-    InjectEventRequest,
     PrepareSessionRequest,
-    ReopenFromQaRequest,
     RoleOutputRequest,
+    SendToTestRequest,
 )
 from backend.api.sse import SessionEventBus
 from backend.coordinator.loop_runner import CoordinatorLoopRunner
@@ -97,13 +97,13 @@ def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDepend
 
 
 def main() -> None:
-    repo_root = Path(__file__).resolve().parent.parent
-    with tempfile.TemporaryDirectory(prefix="sdd-factory-followup-acceptance.") as temp_dir:
+    repo_root = Path(__file__).resolve().parents[2]
+    with tempfile.TemporaryDirectory(prefix="sdd-factory-delivery-acceptance.") as temp_dir:
         deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=Path(temp_dir))
 
         create_response = create_session(
             CreateSessionRequest(
-                task_key="IOS-ACCEPT-REOPEN-001",
+                task_key="IOS-ACCEPT-DELIVERY-001",
                 workflow_profile="oneshot",
                 policy={
                     "self_review_policy": "required",
@@ -116,7 +116,7 @@ def main() -> None:
         session_id = create_response.session.id
 
         prepare_response = prepare_session(
-            PrepareSessionRequest(task_key="IOS-ACCEPT-REOPEN-001"),
+            PrepareSessionRequest(task_key="IOS-ACCEPT-DELIVERY-001"),
             dependencies=deps,
         )
         assert prepare_response.followup_event_type == "implementation_requested"
@@ -155,39 +155,21 @@ def main() -> None:
         assert verification_passed_response.followup_event_type == "task_completed"
         assert verification_passed_response.session.status == "completed"
 
-        reopen_response = reopen_from_qa(
-            ReopenFromQaRequest(
-                session_id=session_id,
-                comment_text="QA: still failing on edge case",
-            ),
+        mr_response = create_mr(
+            CreateMrRequest(session_id=session_id),
             dependencies=deps,
         )
-        assert reopen_response.event_type == "qa_reopened"
-        assert reopen_response.followup_event_type == "qa_reopen_requested"
-        assert reopen_response.session.current_stage == "qa_reopen_requested"
-        assert reopen_response.session.status == "active"
+        assert mr_response.event_type == "mr_handoff_completed"
+        assert mr_response.session.current_stage == "mr_handoff_completed"
+        assert mr_response.mr_url == "https://gitlab.example.com/mobile/IOS-ACCEPT-DELIVERY-001/-/merge_requests/42"
 
-        followup_response = inject_event(
-            InjectEventRequest(
-                session_id=session_id,
-                event_type="implementation_completed",
-                payload={"summary": "qa fix done"},
-            ),
+        send_to_test_response = send_to_test(
+            SendToTestRequest(session_id=session_id),
             dependencies=deps,
         )
-        assert followup_response.followup_event_type == "verification_requested"
-
-        final_verification_response = submit_role_output(
-            RoleOutputRequest(
-                session_id=session_id,
-                role_name="verification-coordinator",
-                output_type="passed",
-                payload={"summary": "verification passed after qa reopen"},
-            ),
-            dependencies=deps,
-        )
-        assert final_verification_response.followup_event_type == "task_completed"
-        assert final_verification_response.session.status == "completed"
+        assert send_to_test_response.event_type == "send_to_test_completed"
+        assert send_to_test_response.session.current_stage == "send_to_test_completed"
+        assert send_to_test_response.session.status == "completed"
 
         events_response = list_events(session_id=session_id, dependencies=deps)
         assert [item.event_type for item in events_response.items] == [
@@ -204,23 +186,18 @@ def main() -> None:
             "verification_requested",
             "verification_passed",
             "task_completed",
-            "qa_reopened",
-            "role_input_dispatched",
-            "qa_reopen_requested",
-            "implementation_completed",
-            "role_input_dispatched",
-            "verification_requested",
-            "verification_passed",
-            "task_completed",
+            "mr_handoff_completed",
+            "send_to_test_completed",
         ]
 
         artifacts_response = list_artifacts(session_id=session_id, dependencies=deps)
         artifact_types = [item.artifact_type for item in artifacts_response.items]
-        assert "qa_reopen_comments" in artifact_types
-        assert "role_prompt" in artifact_types
-        assert "role_output_summary" in artifact_types
+        assert "mr_handoff_stdout" in artifact_types
+        assert "mr_handoff_stderr" in artifact_types
+        assert "send_to_test_stdout" in artifact_types
+        assert "send_to_test_stderr" in artifact_types
 
-        print(f"Follow-up reopen operator acceptance passed for session {session_id}.")
+        print(f"Delivery operator acceptance passed for session {session_id}.")
 
 
 if __name__ == "__main__":

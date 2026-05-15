@@ -279,7 +279,7 @@ class SessionCreationTests(unittest.TestCase):
 
         script_text = launch_plan.launcher_script.read_text()
         self.assertIn("SDD_FACTORY_WORKDIR_ROOT=", script_text)
-        self.assertIn("/scripts/run-role-agent.sh", script_text)
+        self.assertIn("/factory/scripts/run-role-agent.sh", script_text)
         self.assertIn("SDD_FACTORY_ROLE_LAUNCHER_READY", script_text)
 
     def test_real_launcher_backed_runtime_keeps_persistent_role_context_across_rounds(self) -> None:
@@ -328,7 +328,7 @@ class SessionCreationTests(unittest.TestCase):
             spawn_command = session_backend.get_spawn_command(role.runtime_handle)
             self.assertEqual(1, len(spawn_command))
             launch_script_text = Path(spawn_command[0]).read_text()
-            self.assertIn("/scripts/run-role-agent.sh", launch_script_text)
+            self.assertIn("/factory/scripts/run-role-agent.sh", launch_script_text)
 
         coordinator.handle_operator_event(
             session_id=prepared_session.id,
