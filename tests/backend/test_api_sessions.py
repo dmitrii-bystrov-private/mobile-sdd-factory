@@ -49,6 +49,7 @@ try:
     from backend.coordinator.loop_runner import CoordinatorLoopRunner
     from backend.dependencies import AppDependencies
     from backend.roles.contracts import ALLOWED_STAGE_ROLE_TARGETS, DEFAULT_SESSION_ROLES
+    from backend.roles.workspace import RoleWorkspaceManager
     from backend.session_backend.tmux_backend import TmuxSessionBackend
     from backend.state.artifact_repository import ArtifactRepository
     from backend.state.db import Database
@@ -135,6 +136,11 @@ class SessionApiTests(unittest.TestCase):
             workdir_root=Path(self.temp_dir.name),
             knowledge_root=Path(self.temp_dir.name) / "knowledge",
             event_bus=event_bus,
+            role_workspace_manager=RoleWorkspaceManager(
+                runtime_root=Path(self.temp_dir.name) / "runtime",
+                repo_root=Path(self.temp_dir.name) / "repo-root",
+                workdir_root=Path(self.temp_dir.name),
+            ),
         )
         loop_runner = CoordinatorLoopRunner(
             callback=coordinator.run_loop_once,
@@ -180,6 +186,19 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("bug_full", response.session.workflow_profile)
         self.assertEqual("required", response.session.policy["test_policy"])
         self.assertEqual("task_started", response.event_type)
+
+    def test_create_session_route_creates_role_workspaces(self) -> None:
+        response = create_session(
+            CreateSessionRequest(task_key="IOS-40000W", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        for role_name in DEFAULT_SESSION_ROLES:
+            role_dir = Path(self.temp_dir.name) / "runtime" / "role-workspaces" / "IOS-40000W" / role_name
+            self.assertTrue(role_dir.is_dir())
+            self.assertTrue((role_dir / "AGENTS.md").is_file())
+            self.assertTrue((role_dir / "CLAUDE.md").is_symlink())
 
     def test_list_sessions_route_returns_created_session(self) -> None:
         create_session(
