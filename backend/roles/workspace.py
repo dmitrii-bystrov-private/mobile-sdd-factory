@@ -82,6 +82,17 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Project conventions and templates: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
             "- Shared knowledge base: `{repo_root}/knowledge`",
         ]
+    if role_name == "acceptance-criteria-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Proposal input: `{task_snapshot_root}/spec/proposal.md`",
+            "- Requirements input: `{task_snapshot_root}/spec/requirements.md`",
+            "- Acceptance criteria target: `{task_snapshot_root}/spec/acceptance_criteria.md`",
+            "- Context directory: `{task_snapshot_root}/spec/context`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Project conventions and templates: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
+            "- Shared knowledge base: `{repo_root}/knowledge`",
+        ]
     if role_name == "story-spec-worker":
         return [
             "- Task repo worktree: `{task_repo_root}`",
@@ -133,6 +144,12 @@ def _role_responsibility(role_name: str) -> list[str]:
         return [
             "- You execute one bounded requirements-clarification task for one story session.",
             "- Produce the routed requirements result and then stop; you do not remain the owner of later planning or implementation work.",
+            "- You should not assume persistence across unrelated tasks or later implementation rounds.",
+        ]
+    if role_name == "acceptance-criteria-worker":
+        return [
+            "- You execute one bounded acceptance-criteria preparation task for one story session.",
+            "- Produce the routed acceptance-criteria result and then stop; you do not remain the owner of later planning or implementation work.",
             "- You should not assume persistence across unrelated tasks or later implementation rounds.",
         ]
     if role_name == "story-spec-worker":
@@ -195,6 +212,12 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Treat this role as a bounded one-shot worker: clarify requirements, write the routed result, and exit.",
             "- Start from the proposal/context foundations and resolve ambiguities, assumptions, edge cases, and out-of-scope boundaries needed for implementation.",
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than unresolved requirements.",
+        ]
+    if role_name == "acceptance-criteria-worker":
+        return [
+            "- Treat this role as a bounded one-shot worker: prepare acceptance criteria, write the routed result, and exit.",
+            "- Start from the proposal plus clarified requirements and cover happy paths, edge cases, and error scenarios needed for later implementation and verification.",
+            "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than behavioral coverage gaps.",
         ]
     if role_name == "story-spec-worker":
         return [

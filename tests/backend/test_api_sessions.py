@@ -49,6 +49,7 @@ try:
     from backend.coordinator.loop_runner import CoordinatorLoopRunner
     from backend.dependencies import AppDependencies
     from backend.roles.contracts import (
+        ACCEPTANCE_CRITERIA_WORKER_ROLE,
         ALLOWED_STAGE_ROLE_TARGETS,
         BUG_FIXER_ROLE,
         CODE_REVIEWER_ROLE,
@@ -432,7 +433,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("requirements_requested", response.followup_event_type)
         self.assertEqual("requirements_requested", response.session.current_stage)
 
-    def test_requirements_completed_event_returns_story_spec_handoff(self) -> None:
+    def test_requirements_completed_event_returns_acceptance_criteria_handoff(self) -> None:
         prepare_response = create_session(
             CreateSessionRequest(
                 task_key="IOS-40003REQ",
@@ -458,6 +459,47 @@ class SessionApiTests(unittest.TestCase):
                 session_id=prepare_response.session.id,
                 event_type="requirements_completed",
                 payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("acceptance_criteria_requested", response.followup_event_type)
+        self.assertEqual("acceptance_criteria_requested", response.session.current_stage)
+
+    def test_acceptance_criteria_completed_event_returns_story_spec_handoff(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003ACC",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003ACC"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="requirements_completed",
+                payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="acceptance_criteria_completed",
+                payload={"summary": "Acceptance prepared"},
             ),
             dependencies=self.dependencies,
         )
@@ -493,6 +535,14 @@ class SessionApiTests(unittest.TestCase):
             ),
             dependencies=self.dependencies,
         )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="acceptance_criteria_completed",
+                payload={"summary": "Acceptance prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
 
         response = inject_event(
             InjectEventRequest(
@@ -509,7 +559,7 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertEqual("implementation_requested", response.followup_event_type)
         self.assertEqual("implementation_requested", response.session.current_stage)
-        self.assertEqual(4, len(work_items_response.items))
+        self.assertEqual(5, len(work_items_response.items))
 
     def test_start_subtask_graph_route_converts_story_session(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -538,6 +588,14 @@ class SessionApiTests(unittest.TestCase):
                 session_id=create_response.session.id,
                 event_type="requirements_completed",
                 payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="acceptance_criteria_completed",
+                payload={"summary": "Acceptance prepared"},
             ),
             dependencies=self.dependencies,
         )
@@ -575,7 +633,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("subtask_graph_requested", response.event_type)
         self.assertEqual("subtask_implementation_requested", response.followup_event_type)
         self.assertEqual("subtask_implementation_requested", response.session.current_stage)
-        self.assertEqual(5, len(work_items_response.items))
+        self.assertEqual(6, len(work_items_response.items))
 
     def test_subtask_completed_event_keeps_story_session_in_subtask_lane(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -605,6 +663,14 @@ class SessionApiTests(unittest.TestCase):
                 session_id=create_response.session.id,
                 event_type="requirements_completed",
                 payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="acceptance_criteria_completed",
+                payload={"summary": "Acceptance prepared"},
             ),
             dependencies=self.dependencies,
         )

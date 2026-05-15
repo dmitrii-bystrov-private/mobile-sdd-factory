@@ -56,6 +56,13 @@ def role_runtime_rules(role_name: str) -> str:
             "- Start from the proposal/context foundations and resolve ambiguities, assumptions, edge cases, and out-of-scope boundaries needed for implementation.\n"
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than unresolved requirements.\n\n"
         )
+    if role_name == "acceptance-criteria-worker":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded one-shot worker: prepare acceptance criteria, write the routed result, and exit.\n"
+            "- Start from the proposal plus clarified requirements and cover happy paths, edge cases, and error scenarios needed for later implementation and verification.\n"
+            "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than behavioral coverage gaps.\n\n"
+        )
     if role_name == "verification-coordinator":
         return (
             "Role-specific rules:\n"
