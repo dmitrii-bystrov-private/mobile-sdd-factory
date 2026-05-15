@@ -29,13 +29,11 @@ def list_knowledge(
             KnowledgeItemResponse(
                 id=item.id,
                 title=item.title,
-                source_type=item.source_type,
                 platform=item.platform,
                 workflow_profiles=list(item.workflow_profiles),
                 task_key=item.task_key,
                 guidance=item.guidance,
                 scope=item.scope,
-                source_summary=item.source_summary,
                 created_at=item.created_at,
                 path=str(item.path),
             )

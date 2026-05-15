@@ -25,9 +25,7 @@ try:
     from backend.api.routes_operator import complete_doc_harvest
     from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
-    from backend.api.routes_operator import create_review_knowledge
-    from backend.api.routes_operator import create_qa_knowledge
-    from backend.api.routes_operator import create_session_insight_knowledge
+    from backend.api.routes_operator import create_knowledge
     from backend.api.routes_operator import send_to_test
     from backend.api.routes_operator import start_subtask_graph
     from backend.api.routes_operator import ingest_mr_comments
@@ -492,39 +490,14 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("verification_requested", second_response.followup_event_type)
         self.assertEqual("verification_requested", second_response.session.current_stage)
 
-    def test_create_review_knowledge_route_writes_repo_visible_file(self) -> None:
+    def test_create_knowledge_route_writes_repo_visible_file(self) -> None:
         from backend.api.routes_sessions import prepare_session
 
         prepare_response = prepare_session(
             PrepareSessionRequest(task_key="IOS-40005KNOW"),
             dependencies=self.dependencies,
         )
-        inject_event(
-            InjectEventRequest(
-                session_id=prepare_response.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "done"},
-            ),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=prepare_response.session.id,
-                event_type="verification_passed",
-                payload={"summary": "all green"},
-            ),
-            dependencies=self.dependencies,
-        )
-        ingest_mr_comments(
-            IngestMrCommentsRequest(
-                session_id=prepare_response.session.id,
-                platform="ios",
-                mr_id="42",
-            ),
-            dependencies=self.dependencies,
-        )
-
-        response = create_review_knowledge(
+        response = create_knowledge(
             CreateKnowledgeRequest(
                 session_id=prepare_response.session.id,
                 title="Reuse existing navigation assembly",
@@ -536,75 +509,8 @@ class SessionApiTests(unittest.TestCase):
 
         knowledge_files = list((Path(self.temp_dir.name) / "knowledge").rglob("*.md"))
         self.assertTrue(response.created)
-        self.assertEqual("review_knowledge_created", response.event_type)
+        self.assertEqual("knowledge_created", response.event_type)
         self.assertTrue(any("Reuse existing navigation assembly" in path.read_text() for path in knowledge_files))
-
-    def test_create_session_insight_knowledge_route_returns_created_event(self) -> None:
-        from backend.api.routes_sessions import prepare_session
-
-        prepare_response = prepare_session(
-            PrepareSessionRequest(task_key="IOS-40006KNOW"),
-            dependencies=self.dependencies,
-        )
-
-        response = create_session_insight_knowledge(
-            CreateKnowledgeRequest(
-                session_id=prepare_response.session.id,
-                title="Presenter cache owns the state",
-                guidance="Treat presenter cache as the durable source of truth in this feature area.",
-                scope="card-details",
-            ),
-            dependencies=self.dependencies,
-        )
-
-        self.assertTrue(response.created)
-        self.assertEqual("session_insight_knowledge_created", response.event_type)
-
-    def test_create_qa_knowledge_route_writes_repo_visible_file(self) -> None:
-        from backend.api.routes_sessions import prepare_session
-
-        prepare_response = prepare_session(
-            PrepareSessionRequest(task_key="IOS-40007QAKNOW"),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=prepare_response.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "done"},
-            ),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=prepare_response.session.id,
-                event_type="verification_passed",
-                payload={"summary": "all green"},
-            ),
-            dependencies=self.dependencies,
-        )
-        reopen_from_qa(
-            ReopenFromQaRequest(
-                session_id=prepare_response.session.id,
-                comment_text="QA: CTA disappears after refresh",
-            ),
-            dependencies=self.dependencies,
-        )
-
-        response = create_qa_knowledge(
-            CreateKnowledgeRequest(
-                session_id=prepare_response.session.id,
-                title="Preserve empty-state CTA after refresh",
-                guidance="Keep the CTA visible after refresh; stale cache can rebuild the wrong branch.",
-                scope="empty-state",
-            ),
-            dependencies=self.dependencies,
-        )
-
-        knowledge_files = list((Path(self.temp_dir.name) / "knowledge").rglob("*.md"))
-        self.assertTrue(response.created)
-        self.assertEqual("qa_knowledge_created", response.event_type)
-        self.assertTrue(any("Preserve empty-state CTA after refresh" in path.read_text() for path in knowledge_files))
 
     def test_list_knowledge_route_returns_repo_visible_items(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -613,7 +519,7 @@ class SessionApiTests(unittest.TestCase):
             PrepareSessionRequest(task_key="IOS-40008KNOW"),
             dependencies=self.dependencies,
         )
-        create_session_insight_knowledge(
+        create_knowledge(
             CreateKnowledgeRequest(
                 session_id=prepare_response.session.id,
                 title="Presenter cache owns the state",

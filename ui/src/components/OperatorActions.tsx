@@ -22,15 +22,9 @@ export function OperatorActions({
   const [docHarvestSummary, setDocHarvestSummary] = useState("");
   const [selfReviewOutcome, setSelfReviewOutcome] = useState<"passed" | "issues_found">("passed");
   const [selfReviewSummary, setSelfReviewSummary] = useState("");
-  const [reviewKnowledgeTitle, setReviewKnowledgeTitle] = useState("");
-  const [reviewKnowledgeScope, setReviewKnowledgeScope] = useState("");
-  const [reviewKnowledgeGuidance, setReviewKnowledgeGuidance] = useState("");
-  const [qaKnowledgeTitle, setQaKnowledgeTitle] = useState("");
-  const [qaKnowledgeScope, setQaKnowledgeScope] = useState("");
-  const [qaKnowledgeGuidance, setQaKnowledgeGuidance] = useState("");
-  const [sessionInsightTitle, setSessionInsightTitle] = useState("");
-  const [sessionInsightScope, setSessionInsightScope] = useState("");
-  const [sessionInsightGuidance, setSessionInsightGuidance] = useState("");
+  const [knowledgeTitle, setKnowledgeTitle] = useState("");
+  const [knowledgeScope, setKnowledgeScope] = useState("");
+  const [knowledgeGuidance, setKnowledgeGuidance] = useState("");
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
@@ -98,66 +92,24 @@ export function OperatorActions({
     });
   }
 
-  async function handleReviewKnowledge(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+  async function handleKnowledge(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    const normalizedTitle = reviewKnowledgeTitle.trim();
-    const normalizedGuidance = reviewKnowledgeGuidance.trim();
+    const normalizedTitle = knowledgeTitle.trim();
+    const normalizedGuidance = knowledgeGuidance.trim();
     if (normalizedTitle.length === 0 || normalizedGuidance.length === 0) {
-      setError("Review knowledge title and guidance are required");
+      setError("Knowledge title and guidance are required");
       return;
     }
     await run(async () => {
-      await apiClient.createReviewKnowledge(
+      await apiClient.createKnowledge(
         session.id,
         normalizedTitle,
         normalizedGuidance,
-        reviewKnowledgeScope.trim(),
+        knowledgeScope.trim(),
       );
-      setReviewKnowledgeTitle("");
-      setReviewKnowledgeScope("");
-      setReviewKnowledgeGuidance("");
-    });
-  }
-
-  async function handleSessionInsightKnowledge(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const normalizedTitle = sessionInsightTitle.trim();
-    const normalizedGuidance = sessionInsightGuidance.trim();
-    if (normalizedTitle.length === 0 || normalizedGuidance.length === 0) {
-      setError("Session insight title and guidance are required");
-      return;
-    }
-    await run(async () => {
-      await apiClient.createSessionInsightKnowledge(
-        session.id,
-        normalizedTitle,
-        normalizedGuidance,
-        sessionInsightScope.trim(),
-      );
-      setSessionInsightTitle("");
-      setSessionInsightScope("");
-      setSessionInsightGuidance("");
-    });
-  }
-
-  async function handleQaKnowledge(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const normalizedTitle = qaKnowledgeTitle.trim();
-    const normalizedGuidance = qaKnowledgeGuidance.trim();
-    if (normalizedTitle.length === 0 || normalizedGuidance.length === 0) {
-      setError("QA knowledge title and guidance are required");
-      return;
-    }
-    await run(async () => {
-      await apiClient.createQaKnowledge(
-        session.id,
-        normalizedTitle,
-        normalizedGuidance,
-        qaKnowledgeScope.trim(),
-      );
-      setQaKnowledgeTitle("");
-      setQaKnowledgeScope("");
-      setQaKnowledgeGuidance("");
+      setKnowledgeTitle("");
+      setKnowledgeScope("");
+      setKnowledgeGuidance("");
     });
   }
 
@@ -387,32 +339,32 @@ export function OperatorActions({
       <div className="operator-followup-stack">
         <div className="operator-followup-copy">
           <p className="eyebrow">Knowledge</p>
-          <h4>Promote Review Feedback</h4>
+          <h4>Capture Project Knowledge</h4>
           <p className="path-label">
-            Capture a reusable repo-visible rule from merge request review feedback.
+            Record a useful project convention, hidden constraint, or non-obvious implementation finding in the shared knowledge base.
           </p>
         </div>
 
-        <form className="followup-form" onSubmit={(event) => void handleReviewKnowledge(event)}>
+        <form className="followup-form" onSubmit={(event) => void handleKnowledge(event)}>
           <div className="followup-form-grid">
             <label className="form-field">
-              <span>Knowledge Title</span>
+              <span>Entry Title</span>
               <input
                 className="text-input"
                 disabled={busy}
-                onChange={(event) => setReviewKnowledgeTitle(event.target.value)}
+                onChange={(event) => setKnowledgeTitle(event.target.value)}
                 placeholder="Reuse existing formatter helper"
-                value={reviewKnowledgeTitle}
+                value={knowledgeTitle}
               />
             </label>
             <label className="form-field">
-              <span>Scope</span>
+              <span>Directory / Scope</span>
               <input
                 className="text-input"
                 disabled={busy}
-                onChange={(event) => setReviewKnowledgeScope(event.target.value)}
+                onChange={(event) => setKnowledgeScope(event.target.value)}
                 placeholder="shared-formatting"
-                value={reviewKnowledgeScope}
+                value={knowledgeScope}
               />
             </label>
           </div>
@@ -421,112 +373,14 @@ export function OperatorActions({
             <textarea
               className="text-area-input"
               disabled={busy}
-              onChange={(event) => setReviewKnowledgeGuidance(event.target.value)}
+              onChange={(event) => setKnowledgeGuidance(event.target.value)}
               placeholder="Do not introduce a new helper here; use the existing shared formatter already used in this module."
               rows={4}
-              value={reviewKnowledgeGuidance}
+              value={knowledgeGuidance}
             />
           </label>
           <button className="action-button" disabled={busy} type="submit">
-            Create Review Knowledge
-          </button>
-        </form>
-      </div>
-
-      <div className="operator-followup-stack">
-        <div className="operator-followup-copy">
-          <p className="eyebrow">Knowledge</p>
-          <h4>Capture Session Insight</h4>
-          <p className="path-label">
-            Record a non-obvious discovery from the current session so it becomes visible in later similar work.
-          </p>
-        </div>
-
-        <form className="followup-form" onSubmit={(event) => void handleSessionInsightKnowledge(event)}>
-          <div className="followup-form-grid">
-            <label className="form-field">
-              <span>Insight Title</span>
-              <input
-                className="text-input"
-                disabled={busy}
-                onChange={(event) => setSessionInsightTitle(event.target.value)}
-                placeholder="State actually lives in presenter cache"
-                value={sessionInsightTitle}
-              />
-            </label>
-            <label className="form-field">
-              <span>Scope</span>
-              <input
-                className="text-input"
-                disabled={busy}
-                onChange={(event) => setSessionInsightScope(event.target.value)}
-                placeholder="card-details"
-                value={sessionInsightScope}
-              />
-            </label>
-          </div>
-          <label className="form-field">
-            <span>Guidance</span>
-            <textarea
-              className="text-area-input"
-              disabled={busy}
-              onChange={(event) => setSessionInsightGuidance(event.target.value)}
-              placeholder="Treat the presenter cache as the real source of truth; direct VC state updates will drift."
-              rows={4}
-              value={sessionInsightGuidance}
-            />
-          </label>
-          <button className="action-button" disabled={busy} type="submit">
-            Create Session Insight
-          </button>
-        </form>
-      </div>
-
-      <div className="operator-followup-stack">
-        <div className="operator-followup-copy">
-          <p className="eyebrow">Knowledge</p>
-          <h4>Promote QA Feedback</h4>
-          <p className="path-label">
-            Capture a reusable repo-visible rule from QA feedback after a reopen cycle.
-          </p>
-        </div>
-
-        <form className="followup-form" onSubmit={(event) => void handleQaKnowledge(event)}>
-          <div className="followup-form-grid">
-            <label className="form-field">
-              <span>Knowledge Title</span>
-              <input
-                className="text-input"
-                disabled={busy}
-                onChange={(event) => setQaKnowledgeTitle(event.target.value)}
-                placeholder="Preserve empty-state CTA after refresh"
-                value={qaKnowledgeTitle}
-              />
-            </label>
-            <label className="form-field">
-              <span>Scope</span>
-              <input
-                className="text-input"
-                disabled={busy}
-                onChange={(event) => setQaKnowledgeScope(event.target.value)}
-                placeholder="empty-state"
-                value={qaKnowledgeScope}
-              />
-            </label>
-          </div>
-          <label className="form-field">
-            <span>Guidance</span>
-            <textarea
-              className="text-area-input"
-              disabled={busy}
-              onChange={(event) => setQaKnowledgeGuidance(event.target.value)}
-              placeholder="Keep the CTA visible after refresh; the bug reproduces when the empty-state branch is rebuilt from stale cache."
-              rows={4}
-              value={qaKnowledgeGuidance}
-            />
-          </label>
-          <button className="action-button" disabled={busy} type="submit">
-            Create QA Knowledge
+            Create Knowledge Entry
           </button>
         </form>
       </div>

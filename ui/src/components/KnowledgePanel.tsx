@@ -19,10 +19,9 @@ export function KnowledgePanel({ items }: KnowledgePanelProps): JSX.Element {
           <div className="knowledge-card" key={item.path}>
             <div className="knowledge-card-head">
               <strong>{item.title}</strong>
-              <span className="badge badge-muted">{item.source_type}</span>
             </div>
             <p className="path-label">
-              {item.platform} · {item.workflow_profiles.join(", ")} · {item.scope ?? "global"}
+              {item.scope ?? "general"} · {item.platform} · {item.workflow_profiles.join(", ")}
             </p>
             <p>{item.guidance}</p>
             <small className="path-label">{item.path}</small>

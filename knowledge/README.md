@@ -7,10 +7,11 @@ Principles:
 - knowledge is shared with developers and the system
 - knowledge is reviewable through normal git history
 - knowledge should stay short, reusable, and workflow-relevant
-- the first accepted sources are review feedback and session insights
+- knowledge should be organized by project meaning, not by where it was discovered
 
 Suggested subdirectories:
 
-- `review/`
-- `qa/`
-- `session-insights/`
+- `general/`
+- `architecture/`
+- `patterns/`
+- feature- or subsystem-specific directories when they add clarity
