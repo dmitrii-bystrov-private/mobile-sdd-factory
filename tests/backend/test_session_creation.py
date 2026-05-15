@@ -10,6 +10,7 @@ from backend.roles.contracts import (
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
     DEFAULT_SESSION_ROLES,
+    PROPOSAL_CONTEXT_WORKER_ROLE,
     STORY_SPEC_WORKER_ROLE,
 )
 from backend.roles.launcher import RoleLauncherManager
@@ -724,7 +725,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn('"bug_mode": "fix-only"', bug_fixer_inputs[-1])
         self.assertIn("In `fix-only` mode, read the saved `spec/bug-analysis.md` first", bug_fixer_inputs[-1])
 
-    def test_prepare_task_session_routes_story_full_into_story_spec(self) -> None:
+    def test_prepare_task_session_routes_story_full_into_proposal_context(self) -> None:
         session, _, created = self.coordinator.create_task_session(
             "IOS-30002STORY",
             workflow_profile="story_full",
@@ -734,51 +735,82 @@ class SessionCreationTests(unittest.TestCase):
         prepared_session, event, prepared_created, details = self.coordinator.prepare_task_session("IOS-30002STORY")
         work_items = self.work_item_repository.list_for_session(prepared_session.id)
         events = self.event_repository.list_for_session(prepared_session.id)
-        spec_role = self.role_repository.get_by_name(prepared_session.id, STORY_SPEC_WORKER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(spec_role.runtime_handle)
+        proposal_role = self.role_repository.get_by_name(prepared_session.id, PROPOSAL_CONTEXT_WORKER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(proposal_role.runtime_handle)
 
         self.assertTrue(created)
         self.assertFalse(prepared_created)
         self.assertEqual(session.id, prepared_session.id)
         self.assertEqual("task_prepared", event.event_type)
-        self.assertEqual("story_spec_requested", details["followup_event_type"])
-        self.assertEqual("story_spec_requested", prepared_session.current_stage)
-        self.assertEqual(STORY_SPEC_WORKER_ROLE, prepared_session.current_owner)
-        self.assertEqual("story_spec", work_items[0].work_type)
+        self.assertEqual("proposal_context_requested", details["followup_event_type"])
+        self.assertEqual("proposal_context_requested", prepared_session.current_stage)
+        self.assertEqual(PROPOSAL_CONTEXT_WORKER_ROLE, prepared_session.current_owner)
+        self.assertEqual("proposal_context", work_items[0].work_type)
         self.assertEqual(
             [
                 "task_started",
                 "task_session_reused",
                 "task_prepared",
                 "role_input_dispatched",
-                "story_spec_requested",
+                "proposal_context_requested",
             ],
             [item.event_type for item in events],
         )
         self.assertEqual(1, len(sent_inputs))
-        self.assertIn("Prepare a concise implementation spec for story IOS-30002STORY before coding.", sent_inputs[0])
+        self.assertIn("Collect compact proposal and context foundations for story IOS-30002STORY before final story spec.", sent_inputs[0])
+        self.assertIn("Role-specific rules:", sent_inputs[0])
         launch_script = (
             Path(self.temp_dir.name)
             / "runtime"
             / "role-workspaces"
             / "IOS-30002STORY"
-            / STORY_SPEC_WORKER_ROLE
+            / PROPOSAL_CONTEXT_WORKER_ROLE
             / "launch-role.sh"
         )
         self.assertTrue(launch_script.is_file())
         launch_script_text = launch_script.read_text()
-        spec_agents = (
+        proposal_agents = (
             Path(self.temp_dir.name)
             / "runtime"
             / "role-workspaces"
             / "IOS-30002STORY"
-            / STORY_SPEC_WORKER_ROLE
+            / PROPOSAL_CONTEXT_WORKER_ROLE
             / "AGENTS.md"
         ).read_text()
-        self.assertIn("Completion boundary: stop after producing the routed planning/spec result", spec_agents)
-        self.assertIn("bounded one-shot worker", spec_agents)
+        self.assertIn("Proposal target:", proposal_agents)
+        self.assertIn("Context directory:", proposal_agents)
+        self.assertIn("bounded one-shot worker", proposal_agents)
         self.assertIn("SDD_FACTORY_ROLE_LIFECYCLE=one-shot", launch_script_text)
         self.assertIn("lifecycle=%s", launch_script_text)
+
+    def test_proposal_context_completed_moves_story_session_to_story_spec(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003PC",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003PC")
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Scope clarified", "context_findings": "Reuse existing presenter flow"},
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        spec_role = self.role_repository.get_by_name(session.id, STORY_SPEC_WORKER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(spec_role.runtime_handle)
+
+        self.assertEqual("story_spec_requested", updated_session.current_stage)
+        self.assertEqual(STORY_SPEC_WORKER_ROLE, updated_session.current_owner)
+        self.assertEqual("story_spec_requested", followup_event.event_type)
+        self.assertEqual(
+            [("proposal_context", "completed"), ("story_spec", "assigned")],
+            sorted((item.work_type, item.status.value) for item in work_items),
+        )
+        self.assertEqual(1, len(sent_inputs))
+        self.assertIn("Prepare a concise implementation spec for story IOS-30003PC before coding.", sent_inputs[0])
+        self.assertIn("Proposal/context summary: Scope clarified", sent_inputs[0])
+        self.assertIn("Key context findings: Reuse existing presenter flow", sent_inputs[0])
 
     def test_story_spec_completed_moves_session_to_implementation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -787,6 +819,11 @@ class SessionCreationTests(unittest.TestCase):
             policy=None,
         )
         self.coordinator.prepare_task_session("IOS-30003STORY")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Scope clarified"},
+        )
 
         updated_session, followup_event = self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -807,14 +844,21 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("implementation_requested", followup_event.event_type)
         self.assertEqual("stopped", spec_role.status.value)
         self.assertEqual(
-            ["completed", "assigned"],
-            [work_items[0].status.value, work_items[1].status.value],
+            [
+                ("implementation", "assigned"),
+                ("proposal_context", "completed"),
+                ("story_spec", "completed"),
+            ],
+            sorted((item.work_type, item.status.value) for item in work_items),
         )
         self.assertEqual(
             [
                 "task_started",
                 "task_session_reused",
                 "task_prepared",
+                "role_input_dispatched",
+                "proposal_context_requested",
+                "proposal_context_completed",
                 "role_input_dispatched",
                 "story_spec_requested",
                 "story_spec_completed",
@@ -853,6 +897,11 @@ class SessionCreationTests(unittest.TestCase):
         self.coordinator.prepare_task_session("IOS-30003SUBTASK")
         self.coordinator.handle_operator_event(
             session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Context prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
             event_type="story_spec_completed",
             payload={"summary": "Split into focused subtasks"},
         )
@@ -880,6 +929,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("implementer", updated_session.current_owner)
         self.assertEqual(
             [
+                ("proposal_context", "completed"),
                 ("story_spec", "completed"),
                 ("subtask_implementation", "assigned"),
                 ("subtask_implementation", "unassigned"),
@@ -895,6 +945,11 @@ class SessionCreationTests(unittest.TestCase):
             policy={"self_review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30004SUBTASK")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Context prepared"},
+        )
         self.coordinator.handle_operator_event(
             session_id=session.id,
             event_type="story_spec_completed",
@@ -923,7 +978,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("subtask_implementation_requested", followup_event.event_type)
         self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
         self.assertEqual(
-            ["assigned", "completed", "completed"],
+            ["assigned", "completed", "completed", "completed"],
             sorted(item.status.value for item in work_items),
         )
 
@@ -1169,6 +1224,16 @@ class SessionCreationTests(unittest.TestCase):
             policy=None,
         )
         self.coordinator.prepare_task_session("IOS-30006STORY")
+        proposal_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=PROPOSAL_CONTEXT_WORKER_ROLE,
+            output_type="completed",
+            payload={"summary": "Context prepared"},
+        )
+
+        self.assertEqual("proposal_context_completed", mapped_event.event_type)
+        self.assertEqual("story_spec_requested", followup_event.event_type)
+        self.assertEqual("story_spec_requested", proposal_session.current_stage)
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
@@ -1186,6 +1251,9 @@ class SessionCreationTests(unittest.TestCase):
                 "task_started",
                 "task_session_reused",
                 "task_prepared",
+                "role_input_dispatched",
+                "proposal_context_requested",
+                "proposal_context_completed",
                 "role_input_dispatched",
                 "story_spec_requested",
                 "story_spec_completed",

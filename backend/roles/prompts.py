@@ -42,6 +42,13 @@ def role_runtime_rules(role_name: str) -> str:
             "- Read only the convention sources relevant to the touched diff area.\n"
             "- Keep the output compact and optimized for a narrow fixer pass.\n\n"
         )
+    if role_name == "proposal-context-worker":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded one-shot worker: collect proposal/context foundations, write the routed result, and exit.\n"
+            "- Read snapshot description/comments first; read repo sources only when they are directly needed to ground the proposal/context result.\n"
+            "- Keep the output compact and downstream-oriented so the later story-spec worker can build on it instead of redoing the same discovery.\n\n"
+        )
     if role_name == "verification-coordinator":
         return (
             "Role-specific rules:\n"

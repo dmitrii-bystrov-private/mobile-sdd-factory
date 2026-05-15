@@ -53,6 +53,7 @@ try:
         BUG_FIXER_ROLE,
         CODE_REVIEWER_ROLE,
         DEFAULT_SESSION_ROLES,
+        PROPOSAL_CONTEXT_WORKER_ROLE,
     )
     from backend.roles.launcher import RoleLauncherManager
     from backend.roles.workspace import RoleWorkspaceManager
@@ -383,7 +384,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(BUG_FIXER_ROLE, response.session.current_owner)
         self.assertEqual(2, len(work_items_response.items))
 
-    def test_prepare_session_route_uses_story_spec_for_story_full(self) -> None:
+    def test_prepare_session_route_uses_proposal_context_for_story_full(self) -> None:
         from backend.api.routes_sessions import prepare_session
 
         create_response = create_session(
@@ -402,6 +403,31 @@ class SessionApiTests(unittest.TestCase):
         self.assertFalse(response.created)
         self.assertEqual(create_response.session.id, response.session.id)
         self.assertEqual("story_full", response.session.workflow_profile)
+        self.assertEqual("proposal_context_requested", response.followup_event_type)
+        self.assertEqual("proposal_context_requested", response.session.current_stage)
+
+    def test_proposal_context_completed_event_returns_story_spec_handoff(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003PCTX",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003PCTX"),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
         self.assertEqual("story_spec_requested", response.followup_event_type)
         self.assertEqual("story_spec_requested", response.session.current_stage)
 
@@ -415,6 +441,14 @@ class SessionApiTests(unittest.TestCase):
         )
         __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40003STORY"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
             dependencies=self.dependencies,
         )
 
@@ -433,7 +467,7 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertEqual("implementation_requested", response.followup_event_type)
         self.assertEqual("implementation_requested", response.session.current_stage)
-        self.assertEqual(2, len(work_items_response.items))
+        self.assertEqual(3, len(work_items_response.items))
 
     def test_start_subtask_graph_route_converts_story_session(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -447,6 +481,14 @@ class SessionApiTests(unittest.TestCase):
         )
         prepare_session(
             PrepareSessionRequest(task_key="IOS-40003SUBTASK"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
             dependencies=self.dependencies,
         )
         inject_event(
@@ -483,7 +525,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("subtask_graph_requested", response.event_type)
         self.assertEqual("subtask_implementation_requested", response.followup_event_type)
         self.assertEqual("subtask_implementation_requested", response.session.current_stage)
-        self.assertEqual(3, len(work_items_response.items))
+        self.assertEqual(4, len(work_items_response.items))
 
     def test_subtask_completed_event_keeps_story_session_in_subtask_lane(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -498,6 +540,14 @@ class SessionApiTests(unittest.TestCase):
         )
         prepare_session(
             PrepareSessionRequest(task_key="IOS-40004SUBTASK"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
             dependencies=self.dependencies,
         )
         inject_event(

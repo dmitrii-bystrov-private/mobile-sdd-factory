@@ -25,6 +25,7 @@ from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
+    PROPOSAL_CONTEXT_WORKER_ROLE,
     IMPLEMENTER_ROLE,
     STORY_SPEC_WORKER_ROLE,
     TASK_COORDINATOR_ROLE,
@@ -243,7 +244,7 @@ class CoordinatorService:
                     source_event=event,
                 ).event_type
             elif session.workflow_profile == "story_full":
-                details["followup_event_type"] = self._enqueue_story_spec(
+                details["followup_event_type"] = self._enqueue_proposal_context(
                     session=session,
                     source_event=event,
                 ).event_type
@@ -271,6 +272,9 @@ class CoordinatorService:
         )
         if event_type == "bug_analysis_completed":
             session, followup_event = self._handle_bug_analysis_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "proposal_context_completed":
+            session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
             return session, followup_event
         if event_type == "story_spec_completed":
             session, followup_event = self._handle_story_spec_completed(session, accepted_event)
@@ -834,6 +838,8 @@ class CoordinatorService:
         followup_event: Event | None = None
         if mapped_event_type == "bug_analysis_completed":
             session, followup_event = self._handle_bug_analysis_completed(session, accepted_event)
+        elif mapped_event_type == "proposal_context_completed":
+            session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
         elif mapped_event_type == "story_spec_completed":
             session, followup_event = self._handle_story_spec_completed(session, accepted_event)
         elif mapped_event_type == "subtask_completed":
@@ -1368,6 +1374,52 @@ class CoordinatorService:
             },
         )
 
+    def _enqueue_proposal_context(
+        self,
+        session: Session,
+        source_event: Event,
+        additional_context: str | None = None,
+    ) -> Event:
+        proposal_role = self._ensure_on_demand_role(session, PROPOSAL_CONTEXT_WORKER_ROLE)
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="proposal_context",
+            title=f"Proposal and context preparation for {session.task_key}",
+            owner_role_id=proposal_role.id,
+            source_event_id=source_event.id,
+            priority=103,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="proposal_context_requested",
+            current_owner=PROPOSAL_CONTEXT_WORKER_ROLE,
+        )
+        instruction = (
+            f"Collect compact proposal and context foundations for story {session.task_key} before final story spec. "
+            "Synthesize the key problem statement, any conflicts or clarifications from the snapshot, and the smallest useful project/context findings for the later story-spec worker."
+        )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
+        self._dispatch_role_work(
+            session=session,
+            role=proposal_role,
+            work_item=work_item,
+            stage_name="proposal_context_requested",
+            instruction=instruction,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="proposal_context_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": PROPOSAL_CONTEXT_WORKER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
     def _handle_bug_analysis_completed(
         self,
         session: Session,
@@ -1396,6 +1448,40 @@ class CoordinatorService:
         event = self._enqueue_initial_implementation(
             session=session,
             resolved_task_key=session.task_key,
+            source_event=source_event,
+            additional_context=additional_context,
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event
+
+    def _handle_proposal_context_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        proposal_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "proposal_context" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not proposal_items:
+            raise IntakeError("No active proposal/context work item found for the session")
+
+        active_item = proposal_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, PROPOSAL_CONTEXT_WORKER_ROLE)
+
+        summary = str(source_event.payload.get("summary") or "").strip()
+        context_findings = str(source_event.payload.get("context_findings") or "").strip()
+        context_lines: list[str] = []
+        if summary:
+            context_lines.append(f"Proposal/context summary: {summary}")
+        if context_findings:
+            context_lines.append(f"Key context findings: {context_findings}")
+        additional_context = "\n".join(context_lines) if context_lines else None
+
+        event = self._enqueue_story_spec(
+            session=session,
             source_event=source_event,
             additional_context=additional_context,
         )
@@ -2035,6 +2121,9 @@ class CoordinatorService:
                 return "self_review_passed"
             if output_type == "failed":
                 return "self_review_issues_found"
+        if role_name == PROPOSAL_CONTEXT_WORKER_ROLE and session.current_stage == "proposal_context_requested":
+            if output_type in {"passed", "completed"}:
+                return "proposal_context_completed"
         if role_name == STORY_SPEC_WORKER_ROLE and session.current_stage == "story_spec_requested":
             if output_type in {"passed", "completed"}:
                 return "story_spec_completed"
@@ -2541,6 +2630,11 @@ class CoordinatorService:
                 f"Analyze bug {task_key} before implementation. "
                 "Identify probable root cause, expected fix direction, and whether a regression test should be added."
             )
+        if stage_name == "proposal_context_requested":
+            return (
+                f"Collect proposal and context foundations for story {task_key}. "
+                "Extract the compact problem statement, key clarifications, and the smallest useful project/context findings for the later story-spec step."
+            )
         if stage_name == "story_spec_requested":
             return (
                 f"Prepare a concise implementation spec for story {task_key} before coding. "
@@ -2601,6 +2695,7 @@ class CoordinatorService:
     def _primary_coding_role_for_stage(self, session: Session) -> Role | None:
         stage_to_work_type = {
             "bug_analysis_requested": "bug_analysis",
+            "proposal_context_requested": "proposal_context",
             "story_spec_requested": "story_spec",
             "subtask_implementation_requested": "subtask_implementation",
             "implementation_requested": "implementation",

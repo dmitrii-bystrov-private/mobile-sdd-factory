@@ -23,7 +23,7 @@ def _shell_escape(value: str) -> str:
 
 
 def _role_lifecycle_mode(role_name: str) -> str:
-    if role_name == "story-spec-worker":
+    if role_name in {"story-spec-worker", "proposal-context-worker"}:
         return "one-shot"
     return "persistent"
 

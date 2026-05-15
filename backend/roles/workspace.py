@@ -63,6 +63,15 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Project conventions: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
             "- Shared knowledge base: `{repo_root}/knowledge`",
         ]
+    if role_name == "proposal-context-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Proposal target: `{task_snapshot_root}/spec/proposal.md`",
+            "- Context directory: `{task_snapshot_root}/spec/context`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Project conventions and templates: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
+            "- Shared knowledge base: `{repo_root}/knowledge`",
+        ]
     if role_name == "story-spec-worker":
         return [
             "- Task repo worktree: `{task_repo_root}`",
@@ -103,6 +112,12 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You execute routed code review work for one task session.",
             "- You review only the routed task changes and produce compact review outcomes.",
             "- Across repeated passes, retain reviewer context for the same task instead of reinitializing from zero.",
+        ]
+    if role_name == "proposal-context-worker":
+        return [
+            "- You execute one bounded proposal/context preparation task for one story session.",
+            "- Produce the routed proposal/context result and then stop; you do not remain the owner of later planning or implementation work.",
+            "- You should not assume persistence across unrelated tasks or later implementation rounds.",
         ]
     if role_name == "story-spec-worker":
         return [
@@ -152,6 +167,12 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Read only the convention files relevant to the touched diff area; do not broaden the review scope speculatively.",
             "- Keep outputs compact and fixer-oriented.",
             "- Do not re-flag issues that were already raised in previous review passes when that context is provided.",
+        ]
+    if role_name == "proposal-context-worker":
+        return [
+            "- Treat this role as a bounded one-shot worker: collect proposal/context foundations, write the routed result, and exit.",
+            "- Read snapshot description/comments first; read repo sources only when they are directly needed to ground the proposal/context result.",
+            "- Keep the output compact and downstream-oriented so the later story-spec worker can build on it instead of redoing the same discovery.",
         ]
     if role_name == "story-spec-worker":
         return [
