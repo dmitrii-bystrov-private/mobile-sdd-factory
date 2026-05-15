@@ -2446,7 +2446,7 @@ class CoordinatorService:
         )
 
     def _prompt_mode_for_dispatch(self, role: Role) -> str:
-        if role.role_name == IMPLEMENTER_ROLE:
+        if role.role_name in {IMPLEMENTER_ROLE, VERIFICATION_COORDINATOR_ROLE}:
             return "bootstrap" if role.last_hydration_version == 0 else "continuation"
         return "full"
 

@@ -350,6 +350,7 @@ class SessionCreationTests(unittest.TestCase):
         sent_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Run deterministic verification for IOS-30003.", sent_inputs[0])
+        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[0])
 
     def test_implementation_completed_routes_to_reviewer_when_self_review_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -721,6 +722,35 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Apply verification corrections for IOS-30004.", sent_inputs[-1])
         self.assertIn("Continue from your existing implementer role context", sent_inputs[-1])
+        self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
+
+    def test_second_verification_dispatch_uses_continuation_prompt(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004V2")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_failed",
+            payload={"failures": ["test"]},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "corrections done"},
+        )
+
+        verification_role = self.role_repository.get_by_name(session.id, "verification-coordinator")
+        sent_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
+
+        self.assertEqual(2, len(sent_inputs))
+        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[0])
+        self.assertIn(
+            "Continue from your existing verification-coordinator role context",
+            sent_inputs[-1],
+        )
         self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
 
     def test_verification_passed_completes_session(self) -> None:
