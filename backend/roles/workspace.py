@@ -59,14 +59,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Project conventions and templates: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
             "- Shared knowledge base: `{repo_root}/knowledge`",
         ]
-    if role_name == "bug-analysis-worker":
-        return [
-            "- Task repo worktree: `{task_repo_root}`",
-            "- Task snapshot metadata: `{task_snapshot_root}`",
-            "- Task artifacts and bug-analysis outputs: `{task_artifacts_root}`",
-            "- Project conventions and templates: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
-            "- Shared knowledge base: `{repo_root}/knowledge`",
-        ]
     return [
         "- Task snapshot metadata: `{task_snapshot_root}`",
         "- Task artifacts: `{task_artifacts_root}`",
@@ -97,12 +89,6 @@ def _role_responsibility(role_name: str) -> list[str]:
         return [
             "- You execute one bounded story-spec preparation task for one task session.",
             "- Produce the routed planning/spec result and then stop; you do not remain the owner of later implementation work.",
-            "- You should not assume persistence across unrelated tasks or later implementation rounds.",
-        ]
-    if role_name == "bug-analysis-worker":
-        return [
-            "- You execute one bounded bug-analysis task for one task session.",
-            "- Produce the routed analysis result and then stop; you do not remain the owner of later implementation work.",
             "- You should not assume persistence across unrelated tasks or later implementation rounds.",
         ]
     return [

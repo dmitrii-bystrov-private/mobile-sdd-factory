@@ -5,7 +5,6 @@ TASK_COORDINATOR_ROLE = "task-coordinator"
 VERIFICATION_COORDINATOR_ROLE = "verification-coordinator"
 CODE_REVIEWER_ROLE = "code-reviewer"
 STORY_SPEC_WORKER_ROLE = "story-spec-worker"
-BUG_ANALYSIS_WORKER_ROLE = "bug-analysis-worker"
 
 DEFAULT_SESSION_ROLES = [
     TASK_COORDINATOR_ROLE,
@@ -15,7 +14,7 @@ DEFAULT_SESSION_ROLES = [
 
 ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     "bug_analysis_requested": {
-        BUG_ANALYSIS_WORKER_ROLE,
+        IMPLEMENTER_ROLE,
     },
     "story_spec_requested": {
         STORY_SPEC_WORKER_ROLE,
