@@ -25,12 +25,13 @@ from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
     CODE_REVIEWER_ROLE,
     IMPLEMENTER_ROLE,
+    STORY_SPEC_WORKER_ROLE,
     TASK_COORDINATOR_ROLE,
     VERIFICATION_COORDINATOR_ROLE,
 )
 from backend.session_backend.base import SessionBackend
 from backend.session_policy import infer_workflow_profile, normalize_session_policy
-from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle
+from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle, RuntimeSessionHandle
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.event_repository import EventRepository
 from backend.state.role_repository import RoleRepository
@@ -1288,22 +1289,20 @@ class CoordinatorService:
         source_event: Event,
         additional_context: str | None = None,
     ) -> Event:
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        if implementer_role is None:
-            raise IntakeError("Implementer role is missing for the session")
+        story_spec_role = self._ensure_on_demand_role(session, STORY_SPEC_WORKER_ROLE)
 
         work_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="story_spec",
             title=f"Story planning and spec for {session.task_key}",
-            owner_role_id=implementer_role.id,
+            owner_role_id=story_spec_role.id,
             source_event_id=source_event.id,
             priority=104,
         )
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage="story_spec_requested",
-            current_owner=IMPLEMENTER_ROLE,
+            current_owner=STORY_SPEC_WORKER_ROLE,
         )
         instruction = (
             f"Prepare a concise implementation spec for story {session.task_key} before coding. "
@@ -1313,7 +1312,7 @@ class CoordinatorService:
             instruction = f"{instruction}\n\n{additional_context}"
         self._dispatch_role_work(
             session=session,
-            role=implementer_role,
+            role=story_spec_role,
             work_item=work_item,
             stage_name="story_spec_requested",
             instruction=instruction,
@@ -1324,7 +1323,7 @@ class CoordinatorService:
             producer_type="coordinator",
             payload={
                 "task_key": session.task_key,
-                "role_name": IMPLEMENTER_ROLE,
+                "role_name": STORY_SPEC_WORKER_ROLE,
                 "work_item_id": work_item.id,
                 "current_stage": session.current_stage,
             },
@@ -1379,6 +1378,7 @@ class CoordinatorService:
 
         active_item = spec_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, STORY_SPEC_WORKER_ROLE)
 
         summary = str(source_event.payload.get("summary") or "").strip()
         constraints = str(source_event.payload.get("constraints") or "").strip()
@@ -1947,6 +1947,9 @@ class CoordinatorService:
                 return "self_review_passed"
             if output_type == "failed":
                 return "self_review_issues_found"
+        if role_name == STORY_SPEC_WORKER_ROLE and session.current_stage == "story_spec_requested":
+            if output_type in {"passed", "completed"}:
+                return "story_spec_completed"
         raise IntakeError(
             f"Unsupported role output: role={role_name}, output_type={output_type}, stage={session.current_stage}"
         )
@@ -2348,6 +2351,65 @@ class CoordinatorService:
         if (policy or {}).get("self_review_policy") != "disabled" and CODE_REVIEWER_ROLE not in role_names:
             role_names.append(CODE_REVIEWER_ROLE)
         return role_names
+
+    def _ensure_on_demand_role(self, session: Session, role_name: str) -> Role:
+        existing = self.role_repository.get_by_name(session.id, role_name)
+        if existing is not None and existing.status != RoleStatus.STOPPED:
+            return existing
+
+        runtime_session = self._runtime_session_handle_for_session(session)
+        start_directory = None
+        launch_command = None
+        if self.role_workspace_manager is not None:
+            workspace = self.role_workspace_manager.ensure_role_workspace(session.task_key, role_name)
+            start_directory = workspace.directory
+            if self.role_launcher_manager is not None:
+                launch_plan = self.role_launcher_manager.ensure_launch_plan(
+                    task_key=session.task_key,
+                    workspace=workspace,
+                )
+                launch_command = launch_plan.command
+
+        runtime_role = self.session_backend.spawn_role(
+            runtime_session,
+            role_name,
+            start_directory=start_directory,
+            launch_command=launch_command,
+        )
+        if existing is not None:
+            return self.role_repository.create(
+                session_id=session.id,
+                role_name=role_name,
+                runtime_backend=runtime_role.backend_name,
+                runtime_handle=runtime_role.role_id,
+                status=RoleStatus.RUNNING,
+            )
+        return self.role_repository.create(
+            session_id=session.id,
+            role_name=role_name,
+            runtime_backend=runtime_role.backend_name,
+            runtime_handle=runtime_role.role_id,
+            status=RoleStatus.RUNNING,
+        )
+
+    def _stop_on_demand_role(self, session: Session, role_name: str) -> None:
+        role = self.role_repository.get_by_name(session.id, role_name)
+        if role is None or role.runtime_handle is None:
+            return
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_handle_for_session(session).session_id,
+            backend_name=role.runtime_backend,
+        )
+        self.session_backend.stop_role(runtime_role)
+        self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+
+    def _runtime_session_handle_for_session(self, session: Session) -> RuntimeSessionHandle:
+        for role in self.role_repository.list_for_session(session.id):
+            if role.runtime_handle and ":" in role.runtime_handle:
+                runtime_session_id = role.runtime_handle.split(":", 1)[0]
+                return RuntimeSessionHandle(session_id=runtime_session_id)
+        raise IntakeError(f"Could not infer runtime session handle for session {session.id}")
 
     def _knowledge_store_or_raise(self) -> KnowledgeStore:
         if self.knowledge_root is None:

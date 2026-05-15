@@ -9,6 +9,7 @@ from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
     CODE_REVIEWER_ROLE,
     DEFAULT_SESSION_ROLES,
+    STORY_SPEC_WORKER_ROLE,
 )
 from backend.roles.launcher import RoleLauncherManager
 from backend.roles.workspace import RoleWorkspaceManager
@@ -491,7 +492,7 @@ class SessionCreationTests(unittest.TestCase):
         work_items = self.work_item_repository.list_for_session(session.id)
         events = self.event_repository.list_for_session(session.id)
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
-        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        implementer_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
 
         self.assertEqual("implementation_requested", updated_session.current_stage)
         self.assertEqual("implementer", updated_session.current_owner)
@@ -513,9 +514,12 @@ class SessionCreationTests(unittest.TestCase):
             ],
             [item.event_type for item in events],
         )
-        self.assertEqual(2, len(sent_inputs))
-        self.assertIn("Start implementation work for IOS-30003BUG.", sent_inputs[-1])
-        self.assertIn("Bug analysis summary: Likely missing state reset in coordinator", sent_inputs[-1])
+        self.assertEqual(2, len(implementer_inputs))
+        self.assertIn("Start implementation work for IOS-30003BUG.", implementer_inputs[-1])
+        self.assertIn(
+            "Bug analysis summary: Likely missing state reset in coordinator",
+            implementer_inputs[-1],
+        )
 
     def test_prepare_task_session_routes_story_full_into_story_spec(self) -> None:
         session, _, created = self.coordinator.create_task_session(
@@ -527,8 +531,8 @@ class SessionCreationTests(unittest.TestCase):
         prepared_session, event, prepared_created, details = self.coordinator.prepare_task_session("IOS-30002STORY")
         work_items = self.work_item_repository.list_for_session(prepared_session.id)
         events = self.event_repository.list_for_session(prepared_session.id)
-        implementer_role = self.role_repository.get_by_name(prepared_session.id, "implementer")
-        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        spec_role = self.role_repository.get_by_name(prepared_session.id, STORY_SPEC_WORKER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(spec_role.runtime_handle)
 
         self.assertTrue(created)
         self.assertFalse(prepared_created)
@@ -536,7 +540,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("task_prepared", event.event_type)
         self.assertEqual("story_spec_requested", details["followup_event_type"])
         self.assertEqual("story_spec_requested", prepared_session.current_stage)
-        self.assertEqual("implementer", prepared_session.current_owner)
+        self.assertEqual(STORY_SPEC_WORKER_ROLE, prepared_session.current_owner)
         self.assertEqual("story_spec", work_items[0].work_type)
         self.assertEqual(
             [
@@ -570,11 +574,13 @@ class SessionCreationTests(unittest.TestCase):
         work_items = self.work_item_repository.list_for_session(session.id)
         events = self.event_repository.list_for_session(session.id)
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
-        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        implementer_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        spec_role = self.role_repository.get_by_name(session.id, STORY_SPEC_WORKER_ROLE)
 
         self.assertEqual("implementation_requested", updated_session.current_stage)
         self.assertEqual("implementer", updated_session.current_owner)
         self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual("stopped", spec_role.status.value)
         self.assertEqual(
             ["completed", "assigned"],
             [work_items[0].status.value, work_items[1].status.value],
@@ -592,9 +598,12 @@ class SessionCreationTests(unittest.TestCase):
             ],
             [item.event_type for item in events],
         )
-        self.assertEqual(2, len(sent_inputs))
-        self.assertIn("Start implementation work for IOS-30003STORY.", sent_inputs[-1])
-        self.assertIn("Story spec summary: Need a new screen plus navigation wiring", sent_inputs[-1])
+        self.assertEqual(1, len(implementer_inputs))
+        self.assertIn("Start implementation work for IOS-30003STORY.", implementer_inputs[0])
+        self.assertIn(
+            "Story spec summary: Need a new screen plus navigation wiring",
+            implementer_inputs[0],
+        )
 
     def test_knowledge_is_repo_visible_markdown(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003KNOW")
@@ -901,7 +910,7 @@ class SessionCreationTests(unittest.TestCase):
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
-            role_name="implementer",
+            role_name=STORY_SPEC_WORKER_ROLE,
             output_type="completed",
             payload={"summary": "Scope clarified"},
         )

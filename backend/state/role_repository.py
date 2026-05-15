@@ -47,7 +47,7 @@ class RoleRepository:
     def get_by_name(self, session_id: int, role_name: str) -> Role | None:
         with self.db.connect() as connection:
             row = connection.execute(
-                "SELECT * FROM roles WHERE session_id = ? AND role_name = ?",
+                "SELECT * FROM roles WHERE session_id = ? AND role_name = ? ORDER BY id DESC LIMIT 1",
                 (session_id, role_name),
             ).fetchone()
         if row is None:
@@ -74,6 +74,22 @@ class RoleRepository:
                 WHERE id = ?
                 """,
                 (role_id,),
+            )
+            row = connection.execute(
+                "SELECT * FROM roles WHERE id = ?",
+                (role_id,),
+            ).fetchone()
+        return role_from_row(row)
+
+    def update_status(self, role_id: int, status: RoleStatus) -> Role:
+        with self.db.connect() as connection:
+            connection.execute(
+                """
+                UPDATE roles
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (status.value, role_id),
             )
             row = connection.execute(
                 "SELECT * FROM roles WHERE id = ?",

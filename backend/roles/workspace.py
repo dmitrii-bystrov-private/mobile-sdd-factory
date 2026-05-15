@@ -51,6 +51,14 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Project conventions: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
             "- Shared knowledge base: `{repo_root}/knowledge`",
         ]
+    if role_name == "story-spec-worker":
+        return [
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Task artifacts and planning outputs: `{task_artifacts_root}`",
+            "- Project conventions and templates: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
+            "- Shared knowledge base: `{repo_root}/knowledge`",
+        ]
     return [
         "- Task snapshot metadata: `{task_snapshot_root}`",
         "- Task artifacts: `{task_artifacts_root}`",
@@ -76,6 +84,12 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You execute routed code review work for one task session.",
             "- You review only the routed task changes and produce compact review outcomes.",
             "- Across repeated passes, retain reviewer context for the same task instead of reinitializing from zero.",
+        ]
+    if role_name == "story-spec-worker":
+        return [
+            "- You execute one bounded story-spec preparation task for one task session.",
+            "- Produce the routed planning/spec result and then stop; you do not remain the owner of later implementation work.",
+            "- You should not assume persistence across unrelated tasks or later implementation rounds.",
         ]
     return [
         "- You operate only on coordinator-routed work for one task session.",
