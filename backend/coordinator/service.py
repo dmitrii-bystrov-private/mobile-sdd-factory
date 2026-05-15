@@ -23,6 +23,7 @@ from backend.roles.launcher import RoleLauncherManager
 from backend.roles.workspace import RoleWorkspaceManager
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
+    BUG_ANALYSIS_WORKER_ROLE,
     CODE_REVIEWER_ROLE,
     IMPLEMENTER_ROLE,
     STORY_SPEC_WORKER_ROLE,
@@ -1238,22 +1239,20 @@ class CoordinatorService:
         source_event: Event,
         additional_context: str | None = None,
     ) -> Event:
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        if implementer_role is None:
-            raise IntakeError("Implementer role is missing for the session")
+        bug_analysis_role = self._ensure_on_demand_role(session, BUG_ANALYSIS_WORKER_ROLE)
 
         work_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="bug_analysis",
             title=f"Bug analysis for {session.task_key}",
-            owner_role_id=implementer_role.id,
+            owner_role_id=bug_analysis_role.id,
             source_event_id=source_event.id,
             priority=105,
         )
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage="bug_analysis_requested",
-            current_owner=IMPLEMENTER_ROLE,
+            current_owner=BUG_ANALYSIS_WORKER_ROLE,
         )
         test_policy = (session.policy or {}).get("test_policy", "enabled")
         instruction = (
@@ -1265,7 +1264,7 @@ class CoordinatorService:
             instruction = f"{instruction}\n\n{additional_context}"
         self._dispatch_role_work(
             session=session,
-            role=implementer_role,
+            role=bug_analysis_role,
             work_item=work_item,
             stage_name="bug_analysis_requested",
             instruction=instruction,
@@ -1276,7 +1275,7 @@ class CoordinatorService:
             producer_type="coordinator",
             payload={
                 "task_key": session.task_key,
-                "role_name": IMPLEMENTER_ROLE,
+                "role_name": BUG_ANALYSIS_WORKER_ROLE,
                 "work_item_id": work_item.id,
                 "current_stage": session.current_stage,
                 "test_policy": test_policy,
@@ -1344,6 +1343,7 @@ class CoordinatorService:
 
         active_item = analysis_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, BUG_ANALYSIS_WORKER_ROLE)
 
         summary = str(source_event.payload.get("summary") or "").strip()
         proposed_test = str(source_event.payload.get("test_strategy") or "").strip()
@@ -1923,8 +1923,6 @@ class CoordinatorService:
         output_type: str,
     ) -> str:
         if role_name == IMPLEMENTER_ROLE and output_type == "completed":
-            if session.current_stage == "bug_analysis_requested":
-                return "bug_analysis_completed"
             if session.current_stage == "story_spec_requested":
                 return "story_spec_completed"
             if session.current_stage == "subtask_implementation_requested":
@@ -1950,6 +1948,9 @@ class CoordinatorService:
         if role_name == STORY_SPEC_WORKER_ROLE and session.current_stage == "story_spec_requested":
             if output_type in {"passed", "completed"}:
                 return "story_spec_completed"
+        if role_name == BUG_ANALYSIS_WORKER_ROLE and session.current_stage == "bug_analysis_requested":
+            if output_type in {"passed", "completed"}:
+                return "bug_analysis_completed"
         raise IntakeError(
             f"Unsupported role output: role={role_name}, output_type={output_type}, stage={session.current_stage}"
         )
