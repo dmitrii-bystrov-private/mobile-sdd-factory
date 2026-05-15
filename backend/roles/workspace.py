@@ -68,6 +68,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task artifacts and planning outputs: `{task_artifacts_root}`",
             "- Project conventions and templates: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
             "- Shared knowledge base: `{repo_root}/knowledge`",
+            "- Completion boundary: stop after producing the routed planning/spec result for this task session.",
         ]
     return [
         "- Task snapshot metadata: `{task_snapshot_root}`",
@@ -143,6 +144,12 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Read only the convention files relevant to the touched diff area; do not broaden the review scope speculatively.",
             "- Keep outputs compact and fixer-oriented.",
             "- Do not re-flag issues that were already raised in previous review passes when that context is provided.",
+        ]
+    if role_name == "story-spec-worker":
+        return [
+            "- Treat this role as a bounded one-shot worker: launch, produce the routed spec result, and exit.",
+            "- Read only the planning/spec inputs relevant to the current task.",
+            "- Do not retain ownership after the planning/spec result is produced.",
         ]
     return [
         "- Stay within the routed task scope and use coordinator instructions as the active payload.",

@@ -22,6 +22,12 @@ def _shell_escape(value: str) -> str:
     return shlex.quote(value)
 
 
+def _role_lifecycle_mode(role_name: str) -> str:
+    if role_name == "story-spec-worker":
+        return "one-shot"
+    return "persistent"
+
+
 class RoleLauncherManager:
     """Create explicit launcher scripts for persistent role runtimes."""
 
@@ -73,8 +79,9 @@ class RoleLauncherManager:
                 f'export SDD_FACTORY_ROLE_AGENTS_MD={_shell_escape(str(workspace.agents_path))}',
                 f'export SDD_FACTORY_REPO_ROOT={_shell_escape(str(self.repo_root))}',
                 f'export SDD_FACTORY_WORKDIR_ROOT={_shell_escape(str(self.repo_root / "workdir"))}',
+                f'export SDD_FACTORY_ROLE_LIFECYCLE={_shell_escape(_role_lifecycle_mode(role_name))}',
                 f"cd {_shell_escape(str(workspace.directory))}",
-                'printf "SDD_FACTORY_ROLE_LAUNCHER_READY role=%s task=%s\\n" "$SDD_FACTORY_ROLE_NAME" "$SDD_FACTORY_TASK_KEY"',
+                'printf "SDD_FACTORY_ROLE_LAUNCHER_READY role=%s task=%s lifecycle=%s\\n" "$SDD_FACTORY_ROLE_NAME" "$SDD_FACTORY_TASK_KEY" "$SDD_FACTORY_ROLE_LIFECYCLE"',
                 f"exec {launcher_exec}",
                 "",
             ]

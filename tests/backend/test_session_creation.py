@@ -210,7 +210,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Project conventions:", reviewer_agents)
         self.assertIn("Read previous review summaries first when they are provided", reviewer_agents)
         self.assertIn("Keep outputs compact and fixer-oriented.", reviewer_agents)
-
     def test_create_task_session_creates_role_launch_scripts(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30000L",
@@ -726,6 +725,28 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Prepare a concise implementation spec for story IOS-30002STORY before coding.", sent_inputs[0])
+        launch_script = (
+            Path(self.temp_dir.name)
+            / "runtime"
+            / "role-workspaces"
+            / "IOS-30002STORY"
+            / STORY_SPEC_WORKER_ROLE
+            / "launch-role.sh"
+        )
+        self.assertTrue(launch_script.is_file())
+        launch_script_text = launch_script.read_text()
+        spec_agents = (
+            Path(self.temp_dir.name)
+            / "runtime"
+            / "role-workspaces"
+            / "IOS-30002STORY"
+            / STORY_SPEC_WORKER_ROLE
+            / "AGENTS.md"
+        ).read_text()
+        self.assertIn("Completion boundary: stop after producing the routed planning/spec result", spec_agents)
+        self.assertIn("bounded one-shot worker", spec_agents)
+        self.assertIn("SDD_FACTORY_ROLE_LIFECYCLE=one-shot", launch_script_text)
+        self.assertIn("lifecycle=%s", launch_script_text)
 
     def test_story_spec_completed_moves_session_to_implementation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

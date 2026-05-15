@@ -17,6 +17,7 @@ role_name="${SDD_FACTORY_ROLE_NAME:-role}"
 task_key="${SDD_FACTORY_TASK_KEY:-task}"
 repo_root="${SDD_FACTORY_REPO_ROOT:-}"
 workdir_root="${SDD_FACTORY_WORKDIR_ROOT:-}"
+lifecycle="${SDD_FACTORY_ROLE_LIFECYCLE:-persistent}"
 settings_file=""
 
 if [[ -n "$repo_root" ]]; then
@@ -27,7 +28,7 @@ if [[ -n "$repo_root" ]]; then
   fi
 fi
 
-printf "SDD_FACTORY_AGENT_BOOTSTRAP launcher=%s role=%s task=%s\n" "$launcher_name" "$role_name" "$task_key"
+printf "SDD_FACTORY_AGENT_BOOTSTRAP launcher=%s role=%s task=%s lifecycle=%s\n" "$launcher_name" "$role_name" "$task_key" "$lifecycle"
 
 case "$launcher_name" in
   claude)
