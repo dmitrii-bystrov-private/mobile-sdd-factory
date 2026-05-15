@@ -112,6 +112,36 @@ def _role_responsibility(role_name: str) -> list[str]:
     ]
 
 
+def _role_operating_rules(role_name: str) -> list[str]:
+    if role_name == "implementer":
+        return [
+            "- Read all routed spec inputs before writing code.",
+            "- Use RAG tools first for code exploration; fall back to filesystem search only for structural queries.",
+            "- If the routed input is a narrow correction pass, keep scope limited to the listed issues unless a tiny directly related change is required.",
+            "- Do not run workflow-level `run-build.sh`, `run-test.sh`, or `run-lint.sh` unless the routed work explicitly requires a narrow task-specific check.",
+            "- Treat final test+lint verification as deferred to the coordinator.",
+        ]
+    if role_name == "bug-fixer":
+        return [
+            "- Preserve bug-specific context across analysis, fix, and follow-up rounds.",
+            "- Keep the current bug task scoped to the routed pass and latest follow-up context.",
+            "- Treat final test+lint verification as deferred to the coordinator.",
+        ]
+    if role_name == "verification-coordinator":
+        return [
+            "- Run only deterministic verification work for the routed task session.",
+            "- Do not modify product code.",
+        ]
+    if role_name == "code-reviewer":
+        return [
+            "- Review only the routed diff and conventions relevant to that diff.",
+            "- Do not re-flag issues that were already raised in previous review passes when that context is provided.",
+        ]
+    return [
+        "- Stay within the routed task scope and use coordinator instructions as the active payload.",
+    ]
+
+
 def build_role_agents_md(
     *,
     role_name: str,
@@ -129,6 +159,7 @@ def build_role_agents_md(
         for line in _role_relevant_paths(role_name)
     ]
     responsibility = _role_responsibility(role_name)
+    operating_rules = _role_operating_rules(role_name)
     return "\n".join(
         [
             f"# {role_name} AGENTS",
@@ -152,6 +183,10 @@ def build_role_agents_md(
             "- Re-read this file after context compaction or if role boundaries become unclear.",
             "- Use coordinator hydration and routed work instructions as the current task payload.",
             "- Treat this file as durable role context; treat routed handoff prompts as per-work instructions.",
+            "",
+            "## Operating Rules",
+            "",
+            *operating_rules,
         ]
     ) + "\n"
 

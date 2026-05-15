@@ -184,6 +184,9 @@ class SessionCreationTests(unittest.TestCase):
             / "AGENTS.md"
         ).read_text()
         self.assertIn("Task repo worktree:", implementer_agents)
+        self.assertIn("Use RAG tools first for code exploration", implementer_agents)
+        self.assertIn("Read all routed spec inputs before writing code.", implementer_agents)
+        self.assertIn("Treat final test+lint verification as deferred to the coordinator.", implementer_agents)
         verification_agents = (
             Path(self.temp_dir.name)
             / "runtime"
@@ -293,6 +296,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Start implementation work for IOS-30002.", sent_inputs[0])
         self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[0])
+        self.assertIn("Role-specific rules:", sent_inputs[0])
+        self.assertIn("Use RAG tools first for code exploration", sent_inputs[0])
+        self.assertIn("Final test+lint gate remains deferred to the coordinator.", sent_inputs[0])
 
     def test_prepare_task_session_reuses_existing_policy_aware_session(self) -> None:
         session, _, created = self.coordinator.create_task_session(
@@ -768,6 +774,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Apply verification corrections for IOS-30004.", sent_inputs[-1])
         self.assertIn("Continue from your existing implementer role context", sent_inputs[-1])
+        self.assertIn("If the routed work is a narrow correction pass", sent_inputs[-1])
         self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
 
     def test_bug_full_verification_failed_routes_back_to_bug_fixer_with_fix_only_mode(self) -> None:

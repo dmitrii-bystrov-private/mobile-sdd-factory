@@ -13,6 +13,19 @@ def base_role_prompt(role_name: str) -> str:
     )
 
 
+def role_runtime_rules(role_name: str) -> str:
+    if role_name == "implementer":
+        return (
+            "Role-specific rules:\n"
+            "- Read all routed spec inputs completely before writing code.\n"
+            "- Use RAG tools first for code exploration; use plain filesystem search only for structural queries.\n"
+            "- If the routed work is a narrow correction pass, keep scope limited to the listed issues unless a tiny directly-related change is required.\n"
+            "- Do not run workflow-level build/test/lint gates here unless the routed work explicitly requires a narrow task-specific check.\n"
+            "- Final test+lint gate remains deferred to the coordinator.\n\n"
+        )
+    return ""
+
+
 def role_handoff_prompt(
     role_name: str,
     instruction: str,
@@ -36,6 +49,7 @@ def role_handoff_prompt(
         prefix = f"{base_role_prompt(role_name)}\n"
     return (
         f"{prefix}"
+        f"{role_runtime_rules(role_name)}"
         "Current routed work:\n"
         f"{instruction}\n\n"
         "For intermediate progress updates, you may emit:\n"
