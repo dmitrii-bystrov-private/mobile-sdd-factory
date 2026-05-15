@@ -6,6 +6,7 @@ from backend.api.sse import SessionEventBus
 from backend.coordinator.intake import IntakeError
 from backend.coordinator.service import CoordinatorService
 from backend.roles.contracts import ALLOWED_STAGE_ROLE_TARGETS, DEFAULT_SESSION_ROLES
+from backend.roles.workspace import RoleWorkspaceManager
 from backend.session_backend.tmux_backend import TmuxSessionBackend
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.db import Database
@@ -110,6 +111,11 @@ class SessionCreationTests(unittest.TestCase):
             workdir_root=Path(self.temp_dir.name),
             knowledge_root=Path(self.temp_dir.name) / "knowledge",
             event_bus=self.event_bus,
+            role_workspace_manager=RoleWorkspaceManager(
+                runtime_root=Path(self.temp_dir.name) / "runtime",
+                repo_root=Path(self.temp_dir.name) / "repo-root",
+                workdir_root=Path(self.temp_dir.name),
+            ),
         )
 
     def tearDown(self) -> None:
@@ -134,6 +140,45 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("bug_full", session.workflow_profile)
         self.assertEqual("required", session.policy["test_policy"])
         self.assertEqual(DEFAULT_SESSION_ROLES, [role.role_name for role in roles])
+
+    def test_create_task_session_creates_role_workspaces(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30000W",
+            workflow_profile="oneshot",
+            policy=None,
+        )
+
+        self.assertIsNotNone(session.id)
+        for role_name in DEFAULT_SESSION_ROLES:
+            role_dir = Path(self.temp_dir.name) / "runtime" / "role-workspaces" / "IOS-30000W" / role_name
+            agents_path = role_dir / "AGENTS.md"
+            claude_path = role_dir / "CLAUDE.md"
+            self.assertTrue(role_dir.is_dir())
+            self.assertTrue(agents_path.is_file())
+            self.assertTrue(claude_path.is_symlink())
+            self.assertEqual("AGENTS.md", claude_path.readlink().as_posix())
+            agents_text = agents_path.read_text()
+            self.assertIn(f"Role name: `{role_name}`", agents_text)
+            self.assertIn("Task session: `IOS-30000W`", agents_text)
+
+        implementer_agents = (
+            Path(self.temp_dir.name)
+            / "runtime"
+            / "role-workspaces"
+            / "IOS-30000W"
+            / "implementer"
+            / "AGENTS.md"
+        ).read_text()
+        self.assertIn("Task repo worktree:", implementer_agents)
+        verification_agents = (
+            Path(self.temp_dir.name)
+            / "runtime"
+            / "role-workspaces"
+            / "IOS-30000W"
+            / "verification-coordinator"
+            / "AGENTS.md"
+        ).read_text()
+        self.assertIn("run-test.sh", verification_agents)
 
     def test_create_task_session_is_idempotent_for_existing_key(self) -> None:
         first_session, _, _ = self.coordinator.create_task_session(

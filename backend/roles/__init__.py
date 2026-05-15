@@ -1,2 +1,2 @@
-"""Role-level interaction contracts."""
+"""Role helpers and runtime workspace scaffolding."""
 

@@ -10,6 +10,7 @@ from backend.api.sse import SessionEventBus
 from backend.coordinator.loop_runner import CoordinatorLoopRunner
 from backend.coordinator.service import CoordinatorService
 from backend.roles.contracts import DEFAULT_SESSION_ROLES
+from backend.roles.workspace import RoleWorkspaceManager
 from backend.session_backend.tmux_backend import TmuxSessionBackend
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.db import Database
@@ -80,6 +81,11 @@ def build_dependencies() -> AppDependencies:
         workdir_root=config.workdir_root,
         knowledge_root=config.repo_root / "knowledge",
         event_bus=event_bus,
+        role_workspace_manager=RoleWorkspaceManager(
+            runtime_root=config.runtime_root,
+            repo_root=config.repo_root,
+            workdir_root=config.workdir_root,
+        ),
     )
     loop_runner = CoordinatorLoopRunner(
         callback=coordinator_service.run_loop_once,

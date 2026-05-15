@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle, RuntimeSessionHandle
 
@@ -15,7 +16,12 @@ class SessionBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def spawn_role(self, session: RuntimeSessionHandle, role_name: str) -> RuntimeRoleHandle:
+    def spawn_role(
+        self,
+        session: RuntimeSessionHandle,
+        role_name: str,
+        start_directory: Path | None = None,
+    ) -> RuntimeRoleHandle:
         raise NotImplementedError
 
     @abstractmethod

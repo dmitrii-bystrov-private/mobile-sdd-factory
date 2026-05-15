@@ -62,23 +62,34 @@ class TmuxSessionBackend(SessionBackend):
                 raise RuntimeError(result.stderr or result.stdout or "Failed to create tmux session")
         return RuntimeSessionHandle(session_id=session_name)
 
-    def spawn_role(self, session: RuntimeSessionHandle, role_name: str) -> RuntimeRoleHandle:
+    def spawn_role(
+        self,
+        session: RuntimeSessionHandle,
+        role_name: str,
+        start_directory: Path | None = None,
+    ) -> RuntimeRoleHandle:
         role_window = self._sanitize(role_name)
         role_id = f"{session.session_id}:{role_window}"
+        if start_directory is not None:
+            start_directory.mkdir(parents=True, exist_ok=True)
         if self._effective_mode == "tmux":
             socket_path = self._socket_path(session.session_id)
-            result = self._tmux(
-                socket_path,
+            args = [
                 "new-window",
                 "-d",
                 "-t",
                 session.session_id,
                 "-n",
                 role_window,
-                "sh",
-            )
+            ]
+            if start_directory is not None:
+                args.extend(["-c", str(start_directory)])
+            args.append("sh")
+            result = self._tmux(socket_path, *args)
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to create tmux window")
+        if start_directory is not None:
+            self.last_captured_output.setdefault(role_id, "")
         return RuntimeRoleHandle(
             role_id=role_id,
             session_id=session.session_id,
