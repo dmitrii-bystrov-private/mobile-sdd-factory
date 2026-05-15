@@ -17,6 +17,7 @@ class AppConfig:
     runtime_backend: str
     runtime_root: Path
     agent_launcher_command: tuple[str, ...]
+    use_fake_adapters: bool
     loop_interval_seconds: float
     host: str = "127.0.0.1"
     port: int = 8000
@@ -32,6 +33,12 @@ def load_config() -> AppConfig:
     database_path = Path(
         os.environ.get("SDD_FACTORY_DB_PATH", default_workdir_root / "factory.sqlite3")
     )
+    use_fake_adapters = os.environ.get("SDD_FACTORY_USE_FAKE_ADAPTERS", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
     return AppConfig(
         repo_root=repo_root,
@@ -44,6 +51,7 @@ def load_config() -> AppConfig:
         agent_launcher_command=tuple(
             os.environ.get("SDD_FACTORY_AGENT_LAUNCHER", "auto").split()
         ),
+        use_fake_adapters=use_fake_adapters,
         loop_interval_seconds=float(os.environ.get("SDD_FACTORY_LOOP_INTERVAL_SECONDS", "1.0")),
         host=os.environ.get("SDD_FACTORY_HOST", "127.0.0.1"),
         port=int(os.environ.get("SDD_FACTORY_PORT", "8000")),

@@ -1,0 +1,101 @@
+"""Fake adapters for live acceptance and local operator-surface validation."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from backend.tools.command_runner import CommandResult
+
+
+class FakeJiraAdapter:
+    def __init__(self, repo_root: Path) -> None:
+        self.repo_root = repo_root
+
+    def resolve_parent(self, task_key: str) -> CommandResult:
+        return CommandResult(
+            command=["fake_resolve_parent", task_key],
+            returncode=0,
+            stdout=f"{task_key}\n",
+            stderr="",
+        )
+
+    def get_issue_type(self, task_key: str) -> CommandResult:
+        return CommandResult(
+            command=["fake_get_issue_type", task_key],
+            returncode=0,
+            stdout="Story\n",
+            stderr="",
+        )
+
+    def send_to_test(self, task_key: str) -> CommandResult:
+        return CommandResult(
+            command=["fake_send_to_test", task_key],
+            returncode=0,
+            stdout=f"Done: {task_key} -> Ready for test\n",
+            stderr="",
+        )
+
+
+class FakeSnapshotAdapter:
+    def __init__(self, repo_root: Path, workdir_root: Path) -> None:
+        self.repo_root = repo_root
+        self.workdir_root = workdir_root
+
+    def run(self, task_key: str) -> CommandResult:
+        task_dir = self.workdir_root / task_key
+        repo_dir = task_dir / "repo"
+        spec_dir = task_dir / "spec"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        spec_dir.mkdir(parents=True, exist_ok=True)
+
+        statuses_path = task_dir / "statuses.md"
+        if not statuses_path.exists():
+            statuses_path.write_text("- [ ] Subtask 1\n- [x] Subtask 2\n")
+
+        diff_path = spec_dir / "diff.md"
+        if not diff_path.exists():
+            diff_path.write_text(
+                "# Structured Diff\n\n"
+                "## Summary\n\n"
+                "- Placeholder acceptance diff for live operator validation.\n\n"
+                "## Raw Diff\n\n"
+                "```diff\n"
+                "+ placeholder change\n"
+                "```\n"
+            )
+
+        return CommandResult(
+            command=["fake_snapshot", task_key],
+            returncode=0,
+            stdout="snapshot ok\n",
+            stderr="",
+        )
+
+
+class FakeGitLabAdapter:
+    def __init__(self, repo_root: Path) -> None:
+        self.repo_root = repo_root
+
+    def create_mr(self, task_key: str) -> CommandResult:
+        return CommandResult(
+            command=["fake_create_mr", task_key],
+            returncode=0,
+            stdout=(
+                f"Pushing branch for {task_key}\n"
+                f"https://gitlab.example.com/mobile/{task_key}/-/merge_requests/42\n"
+            ),
+            stderr="",
+        )
+
+    def fetch_mr_comments(self, platform: str, mr_id: str) -> CommandResult:
+        return CommandResult(
+            command=["fake_fetch_mr_comments", platform, mr_id],
+            returncode=0,
+            stdout=(
+                f"# Unresolved MR discussions: !{mr_id} (1 total)\n\n"
+                "## Discussion 1 — file.swift:10\n\n"
+                "**Reviewer:** Placeholder MR follow-up comment\n\n"
+            ),
+            stderr="",
+        )

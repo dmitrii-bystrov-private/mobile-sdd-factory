@@ -20,6 +20,7 @@ from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.command_runner import CommandRunner
+from backend.tools.fake_adapters import FakeGitLabAdapter, FakeJiraAdapter, FakeSnapshotAdapter
 from backend.tools.gitlab_adapter import GitLabAdapter
 from backend.tools.jira_adapter import JiraAdapter
 from backend.tools.snapshot_adapter import SnapshotAdapter
@@ -62,10 +63,15 @@ def build_dependencies() -> AppDependencies:
         mode=config.runtime_backend,
         runtime_root=config.runtime_root,
     )
-    runner = CommandRunner()
-    jira_adapter = JiraAdapter(runner, config.repo_root)
-    snapshot_adapter = SnapshotAdapter(runner, config.repo_root)
-    gitlab_adapter = GitLabAdapter(runner, config.repo_root)
+    if config.use_fake_adapters:
+        jira_adapter = FakeJiraAdapter(config.repo_root)
+        snapshot_adapter = FakeSnapshotAdapter(config.repo_root, config.workdir_root)
+        gitlab_adapter = FakeGitLabAdapter(config.repo_root)
+    else:
+        runner = CommandRunner()
+        jira_adapter = JiraAdapter(runner, config.repo_root)
+        snapshot_adapter = SnapshotAdapter(runner, config.repo_root)
+        gitlab_adapter = GitLabAdapter(runner, config.repo_root)
     event_bus = SessionEventBus()
     coordinator_service = CoordinatorService(
         session_repository=session_repository,
