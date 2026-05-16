@@ -18,6 +18,22 @@ Each entry should include:
 
 - date: `2026-05-16`
   - done:
+    - tightened the default Claude launcher path with `--strict-mcp-config`
+    - removed default external MCP noise from the launcher-backed role path unless explicit MCP config is provided
+    - revalidated:
+      - `run-real-launcher-pty-probe.sh`
+      - `run-real-launcher-file-handoff-probe.sh`
+      - backend suite `Ran 151 tests`, `OK`
+  - current_state:
+    - launcher-backed roles now start with a cleaner Claude runtime surface that is closer to the factory's actual workflow needs
+    - the remaining `Phase 42` gap is still live routed-work continuation and terminal `SDD_*` completion, not default MCP integration
+  - next:
+    - continue `Phase 42` on true live completion after file-backed routed handoff
+  - blockers:
+    - real launched roles still do not consistently finish routed work under the current live continuation contract
+
+- date: `2026-05-16`
+  - done:
     - added a reproducible live probe for file-backed routed handoff:
       - `factory/acceptance/run-real-launcher-file-handoff-probe.py`
       - `factory/acceptance/run-real-launcher-file-handoff-probe.sh`

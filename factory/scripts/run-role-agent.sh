@@ -43,6 +43,7 @@ case "$launcher_name" in
   claude)
     args=(
       "--permission-mode" "auto"
+      "--strict-mcp-config"
       "--name" "${role_name}:${task_key}"
     )
     if [[ -n "$repo_root" ]]; then
