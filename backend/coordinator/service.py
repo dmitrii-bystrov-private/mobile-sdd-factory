@@ -2264,28 +2264,8 @@ class CoordinatorService:
         initial_work_item: WorkItem,
         decomposition_artifact: Artifact,
     ) -> tuple[Event, Event]:
-        if self.artifacts_root is None or self.workdir_root is None:
-            raise IntakeError("Coordinator is missing workdir root or artifact root")
-
         unresolved = unresolved_subtasks(subtasks)
-        statuses_file = self.workdir_root / session.task_key / "statuses.md"
-        artifact_path = write_text_artifact(
-            self.artifacts_root,
-            session.task_key,
-            "subtask-graph",
-            "statuses.md",
-            statuses_file.read_text(),
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="subtask-graph",
-            artifact_type="subtask_statuses_markdown",
-            path=str(artifact_path),
-            metadata={
-                "subtask_count": len(subtasks),
-                "unresolved_count": len(unresolved),
-            },
-        )
+        self._record_subtask_statuses_artifact(session, subtasks)
         event = self._append_event(
             session_id=session.id,
             event_type="subtask_graph_requested",
@@ -2315,6 +2295,7 @@ class CoordinatorService:
             raise IntakeError("No active subtask implementation work item found for the session")
 
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._refresh_subtask_snapshot(session)
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         if implementer_role is None:
             raise IntakeError("Implementer role is missing for the session")
@@ -3554,6 +3535,95 @@ class CoordinatorService:
         if subtasks is None:
             raise IntakeError(f"statuses.md not found for session {task_key}")
         return subtasks
+
+    def _refresh_subtask_snapshot(self, session: Session) -> None:
+        if self.snapshot_adapter is None:
+            return
+
+        result = self.snapshot_adapter.run(session.task_key)
+        if self.artifacts_root is not None:
+            stdout_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "subtask-graph",
+                "snapshot-refresh.stdout.txt",
+                result.stdout,
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="subtask-graph",
+                artifact_type="subtask_snapshot_refresh_stdout",
+                path=str(stdout_path),
+                metadata={"exit_code": result.returncode},
+            )
+            stderr_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "subtask-graph",
+                "snapshot-refresh.stderr.txt",
+                result.stderr,
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="subtask-graph",
+                artifact_type="subtask_snapshot_refresh_stderr",
+                path=str(stderr_path),
+                metadata={"exit_code": result.returncode},
+            )
+
+        if not result.ok:
+            self._append_event(
+                session_id=session.id,
+                event_type="subtask_snapshot_refresh_failed",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "snapshot_exit_code": result.returncode,
+                },
+            )
+            return
+
+        subtasks = self._read_snapshot_subtasks(session.task_key)
+        if subtasks is None:
+            return
+
+        self._record_subtask_statuses_artifact(session, subtasks)
+        unresolved = unresolved_subtasks(subtasks)
+        self._append_event(
+            session_id=session.id,
+            event_type="subtask_snapshot_refreshed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "snapshot_exit_code": result.returncode,
+                "subtask_count": len(subtasks),
+                "unresolved_count": len(unresolved),
+            },
+        )
+
+    def _record_subtask_statuses_artifact(self, session: Session, subtasks: list) -> None:
+        if self.artifacts_root is None or self.workdir_root is None:
+            raise IntakeError("Coordinator is missing workdir root or artifact root")
+
+        unresolved = unresolved_subtasks(subtasks)
+        statuses_file = self.workdir_root / session.task_key / "statuses.md"
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "subtask-graph",
+            "statuses.md",
+            statuses_file.read_text(),
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="subtask-graph",
+            artifact_type="subtask_statuses_markdown",
+            path=str(artifact_path),
+            metadata={
+                "subtask_count": len(subtasks),
+                "unresolved_count": len(unresolved),
+            },
+        )
 
     def _latest_artifact_for_session_type(
         self,

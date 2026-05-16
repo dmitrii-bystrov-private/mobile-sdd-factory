@@ -65,7 +65,20 @@ class FakeJiraAdapter:
 
 
 class FakeSnapshotAdapter:
+    def __init__(self, workdir_root: Path | None = None) -> None:
+        self.workdir_root = workdir_root
+        self.calls: list[str] = []
+        self.statuses_by_task: dict[str, str] = {}
+
+    def set_statuses_output(self, task_key: str, content: str) -> None:
+        self.statuses_by_task[task_key] = content
+
     def run(self, task_key: str) -> CommandResult:
+        self.calls.append(task_key)
+        if self.workdir_root is not None and task_key in self.statuses_by_task:
+            task_dir = self.workdir_root / task_key
+            task_dir.mkdir(parents=True, exist_ok=True)
+            (task_dir / "statuses.md").write_text(self.statuses_by_task[task_key])
         return CommandResult(
             command=["snapshot", task_key],
             returncode=0,
@@ -117,6 +130,7 @@ class SessionCreationTests(unittest.TestCase):
         self.work_item_repository = WorkItemRepository(self.database)
         self.session_backend = TmuxSessionBackend()
         self.event_bus = SessionEventBus()
+        self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
         self.coordinator = CoordinatorService(
             session_repository=self.session_repository,
             role_repository=self.role_repository,
@@ -126,7 +140,7 @@ class SessionCreationTests(unittest.TestCase):
             session_backend=self.session_backend,
             default_roles=DEFAULT_SESSION_ROLES,
             jira_adapter=FakeJiraAdapter(),
-            snapshot_adapter=FakeSnapshotAdapter(),
+            snapshot_adapter=self.snapshot_adapter,
             gitlab_adapter=FakeGitLabAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
             workdir_root=Path(self.temp_dir.name),
@@ -1599,6 +1613,99 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual("verification_requested", final_followup.event_type)
         self.assertEqual("verification_requested", final_session.current_stage)
+
+    def test_subtask_completion_refreshes_snapshot_and_rewrites_graph(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004SUBREFRESH",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004SUBREFRESH")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Context prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="requirements_completed",
+            payload={"summary": "Requirements clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="acceptance_criteria_completed",
+            payload={"summary": "Acceptance prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning verified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="story_spec_completed",
+            payload={"summary": "Split into focused subtasks"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload={"summary": "Execution chunks prepared"},
+        )
+        self.write_statuses_file(
+            "IOS-30004SUBREFRESH",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004SUBREFRESH | Story | Parent story | In Progress |
+| IOS-30030 | Sub-task | Add data source | To Do |
+| IOS-30031 | Sub-task | Wire view state | To Do |
+""",
+        )
+        self.coordinator.start_subtask_graph(session.id)
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-30004SUBREFRESH",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004SUBREFRESH | Story | Parent story | In Progress |
+| IOS-30030 | Sub-task | Add data source | Ready for test |
+| IOS-30031 | Sub-task | Wire view state | To Do |
+""",
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="subtask_completed",
+            payload={"summary": "First subtask implemented"},
+        )
+
+        artifacts = self.artifact_repository.list_for_session(session.id)
+        subtask_graph_artifacts = [
+            artifact for artifact in artifacts if artifact.artifact_type == "subtask_statuses_markdown"
+        ]
+        refresh_stdout_artifacts = [
+            artifact for artifact in artifacts if artifact.artifact_type == "subtask_snapshot_refresh_stdout"
+        ]
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertGreaterEqual(
+            self.snapshot_adapter.calls.count("IOS-30004SUBREFRESH"),
+            2,
+        )
+        self.assertGreaterEqual(len(subtask_graph_artifacts), 2)
+        self.assertEqual(1, len(refresh_stdout_artifacts))
+        self.assertTrue(
+            any(event.event_type == "subtask_snapshot_refreshed" for event in events)
+        )
 
     def test_verification_failed_moves_session_back_to_implementer(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")

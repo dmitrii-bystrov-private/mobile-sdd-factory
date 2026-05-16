@@ -97,7 +97,20 @@ class FakeJiraAdapter:
 
 
 class FakeSnapshotAdapter:
+    def __init__(self, workdir_root: Path | None = None) -> None:
+        self.workdir_root = workdir_root
+        self.calls: list[str] = []
+        self.statuses_by_task: dict[str, str] = {}
+
+    def set_statuses_output(self, task_key: str, content: str) -> None:
+        self.statuses_by_task[task_key] = content
+
     def run(self, task_key: str) -> "CommandResult":
+        self.calls.append(task_key)
+        if self.workdir_root is not None and task_key in self.statuses_by_task:
+            task_dir = self.workdir_root / task_key
+            task_dir.mkdir(parents=True, exist_ok=True)
+            (task_dir / "statuses.md").write_text(self.statuses_by_task[task_key])
         return CommandResult(["snapshot", task_key], 0, "snapshot ok\n", "")
 
 
@@ -142,6 +155,7 @@ class SessionApiTests(unittest.TestCase):
         work_item_repository = WorkItemRepository(self.database)
         session_backend = TmuxSessionBackend()
         event_bus = SessionEventBus()
+        self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
         coordinator = CoordinatorService(
             session_repository=session_repository,
             role_repository=role_repository,
@@ -151,7 +165,7 @@ class SessionApiTests(unittest.TestCase):
             session_backend=session_backend,
             default_roles=DEFAULT_SESSION_ROLES,
             jira_adapter=FakeJiraAdapter(),
-            snapshot_adapter=FakeSnapshotAdapter(),
+            snapshot_adapter=self.snapshot_adapter,
             gitlab_adapter=FakeGitLabAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
             workdir_root=Path(self.temp_dir.name),
@@ -181,7 +195,7 @@ class SessionApiTests(unittest.TestCase):
             work_item_repository=work_item_repository,
             session_backend=session_backend,
             jira_adapter=FakeJiraAdapter(),
-            snapshot_adapter=FakeSnapshotAdapter(),
+            snapshot_adapter=self.snapshot_adapter,
             gitlab_adapter=FakeGitLabAdapter(),
             event_bus=event_bus,
             loop_runner=loop_runner,
