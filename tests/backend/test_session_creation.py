@@ -1321,9 +1321,11 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertEqual("jira_subtasks_created", event.event_type)
+        self.assertEqual(["IOS-90001"], event.payload["created_subtask_keys"])
         self.assertIsNone(followup_event)
         self.assertTrue(any(item.artifact_type == "jira_subtasks_stdout" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "jira_subtasks_stderr" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "jira_subtasks_summary" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stdout" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stderr" for item in artifacts))
         self.assertEqual(0, event.payload["snapshot_refresh_exit_code"])

@@ -1067,6 +1067,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(response.created)
         self.assertEqual("jira_subtasks_created", response.event_type)
         self.assertTrue(any(item.artifact_type == "jira_subtasks_stdout" for item in artifacts_response.items))
+        self.assertTrue(any(item.artifact_type == "jira_subtasks_summary" for item in artifacts_response.items))
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stdout" for item in artifacts_response.items))
 
     def test_create_subtasks_from_plan_route_can_auto_start_subtask_lane(self) -> None:

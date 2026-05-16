@@ -736,6 +736,25 @@ class CoordinatorService:
                 "returncode": result.returncode,
             },
         )
+        created_subtask_keys = self._extract_created_subtask_keys(result.stdout)
+        if created_subtask_keys:
+            summary_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "subtasks-batch",
+                "created-subtasks.md",
+                self._jira_subtasks_summary_markdown(created_subtask_keys),
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="subtasks-batch",
+                artifact_type="jira_subtasks_summary",
+                path=str(summary_path),
+                metadata={
+                    "task_key": session.task_key,
+                    "created_subtask_keys": created_subtask_keys,
+                },
+            )
 
         snapshot_refresh_exit_code: int | None = None
         if result.ok:
@@ -786,6 +805,7 @@ class CoordinatorService:
             payload={
                 "task_key": session.task_key,
                 "returncode": result.returncode,
+                "created_subtask_keys": created_subtask_keys,
                 "snapshot_refresh_exit_code": snapshot_refresh_exit_code,
                 "current_stage": session.current_stage,
                 "status": session.status.value,
@@ -3577,6 +3597,23 @@ class CoordinatorService:
                 "task_files": normalized_task_files,
             },
         )
+
+    def _jira_subtasks_summary_markdown(self, subtask_keys: list[str]) -> str:
+        lines = ["# Created Jira Subtasks", ""]
+        for key in subtask_keys:
+            lines.append(f"- {key}")
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _extract_created_subtask_keys(self, stdout: str) -> list[str]:
+        keys: list[str] = []
+        for line in stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and "-" in parts[1]:
+                candidate = parts[1].strip()
+                prefix, _, suffix = candidate.partition("-")
+                if prefix.isalpha() and suffix.isdigit():
+                    keys.append(candidate)
+        return keys
 
     def _count_mr_discussions(self, markdown: str) -> int:
         return sum(1 for line in markdown.splitlines() if line.startswith("## Discussion "))
