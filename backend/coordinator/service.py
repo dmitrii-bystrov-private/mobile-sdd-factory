@@ -19,6 +19,7 @@ from backend.models.enums import RoleStatus, SessionStatus, WorkItemStatus
 from backend.models.session import Session
 from backend.models.role import Role
 from backend.models.work_item import WorkItem
+from backend.role_runtime_config import normalize_role_runtime_config
 from backend.roles.prompts import role_handoff_prompt
 from backend.roles.launcher import RoleLauncherManager
 from backend.roles.workspace import RoleWorkspaceManager
@@ -76,10 +77,20 @@ class CoordinatorService:
         task_key: str,
         workflow_profile: str,
         policy: dict[str, str] | None = None,
+        role_config: dict[str, dict[str, str]] | None = None,
     ) -> tuple[Session, Event, bool]:
         """Create or reuse a task session and emit the initial session event."""
 
         normalized_policy = normalize_session_policy(workflow_profile, policy)
+        effective_roles = self._effective_role_names(
+            normalized_policy.workflow_profile,
+            normalized_policy.policy,
+        )
+        normalized_role_config = normalize_role_runtime_config(
+            repo_root=self._repo_root(),
+            role_names=effective_roles,
+            provided=role_config,
+        )
         existing = self.session_repository.get_by_task_key(task_key)
         if existing is not None:
             if existing.workflow_profile != normalized_policy.workflow_profile:
@@ -91,6 +102,10 @@ class CoordinatorService:
                 raise IntakeError(
                     f"Session {task_key} already exists with different stored policy"
                 )
+            if (existing.role_config or {}) != normalized_role_config:
+                raise IntakeError(
+                    f"Session {task_key} already exists with different stored role runtime config"
+                )
             event = self._append_event(
                 session_id=existing.id,
                 event_type="task_session_reused",
@@ -100,6 +115,7 @@ class CoordinatorService:
                     "current_stage": existing.current_stage,
                     "workflow_profile": existing.workflow_profile,
                     "policy": existing.policy or {},
+                    "role_config": existing.role_config or {},
                 },
             )
             return existing, event, False
@@ -109,12 +125,9 @@ class CoordinatorService:
             current_stage="intake",
             workflow_profile=normalized_policy.workflow_profile,
             policy=normalized_policy.policy,
+            role_config=normalized_role_config,
         )
         runtime_session = self.session_backend.create_task_session(task_key)
-        effective_roles = self._effective_role_names(
-            normalized_policy.workflow_profile,
-            normalized_policy.policy,
-        )
         for role_name in effective_roles:
             start_directory = None
             launch_command = None
@@ -125,6 +138,7 @@ class CoordinatorService:
                     launch_plan = self.role_launcher_manager.ensure_launch_plan(
                         task_key=task_key,
                         workspace=workspace,
+                        role_config=normalized_role_config.get(role_name),
                     )
                     launch_command = launch_plan.command
             runtime_role = self.session_backend.spawn_role(
@@ -150,6 +164,7 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
                 "workflow_profile": session.workflow_profile,
                 "policy": session.policy or {},
+                "role_config": session.role_config or {},
                 "runtime_session_id": runtime_session.session_id,
                 "roles": effective_roles,
             },
@@ -188,6 +203,7 @@ class CoordinatorService:
                 else infer_workflow_profile(issue_type)
             ),
             policy=existing.policy if existing is not None else None,
+            role_config=existing.role_config if existing is not None else None,
         )
 
         snapshot_result = self.snapshot_adapter.run(resolved_task_key)
@@ -4260,6 +4276,11 @@ class CoordinatorService:
         if role.role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE, VERIFICATION_COORDINATOR_ROLE}:
             return "bootstrap" if role.last_hydration_version == 0 else "continuation"
         return "full"
+
+    def _repo_root(self) -> Path:
+        if self.workdir_root is not None:
+            return self.workdir_root.parent
+        return Path(__file__).resolve().parents[2]
 
     def _append_event(
         self,

@@ -20,12 +20,13 @@ class SessionRepository:
         current_stage: str,
         workflow_profile: str,
         policy: dict[str, str],
+        role_config: dict[str, dict[str, str]] | None = None,
     ) -> Session:
         with self.db.connect() as connection:
             cursor = connection.execute(
                 """
-                INSERT INTO sessions (task_key, status, current_stage, workflow_profile, policy_json)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sessions (task_key, status, current_stage, workflow_profile, policy_json, role_config_json)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task_key,
@@ -33,6 +34,7 @@ class SessionRepository:
                     current_stage,
                     workflow_profile,
                     json.dumps(policy, sort_keys=True),
+                    json.dumps(role_config or {}, sort_keys=True),
                 ),
             )
             row = connection.execute(
@@ -118,15 +120,21 @@ class SessionRepository:
         session_id: int,
         workflow_profile: str,
         policy: dict[str, str],
+        role_config: dict[str, dict[str, str]] | None = None,
     ) -> Session:
         with self.db.connect() as connection:
             connection.execute(
                 """
                 UPDATE sessions
-                SET workflow_profile = ?, policy_json = ?, updated_at = CURRENT_TIMESTAMP
+                SET workflow_profile = ?, policy_json = ?, role_config_json = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
                 """,
-                (workflow_profile, json.dumps(policy, sort_keys=True), session_id),
+                (
+                    workflow_profile,
+                    json.dumps(policy, sort_keys=True),
+                    json.dumps(role_config or {}, sort_keys=True),
+                    session_id,
+                ),
             )
             row = connection.execute(
                 "SELECT * FROM sessions WHERE id = ?",

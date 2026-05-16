@@ -35,6 +35,7 @@ def to_session_response(session) -> SessionResponse:
         current_owner=session.current_owner,
         workflow_profile=session.workflow_profile,
         policy=session.policy or {},
+        role_config=session.role_config or {},
     )
 
 
@@ -56,6 +57,14 @@ def create_session(
             task_key=payload.task_key,
             workflow_profile=payload.workflow_profile,
             policy=payload.policy.model_dump(exclude_none=True) if payload.policy else None,
+            role_config=(
+                {
+                    role_name: config.model_dump(exclude_none=True)
+                    for role_name, config in payload.role_config.items()
+                }
+                if payload.role_config
+                else None
+            ),
         )
     except IntakeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

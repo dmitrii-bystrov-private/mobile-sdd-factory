@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-launcher_name="${SDD_FACTORY_AGENT_EXECUTABLE:-}"
+launcher_name="${SDD_FACTORY_ROLE_RUNNER:-${SDD_FACTORY_AGENT_EXECUTABLE:-}}"
 
 if [[ -z "$launcher_name" ]]; then
   if command -v claude >/dev/null 2>&1; then
@@ -19,6 +19,8 @@ repo_root="${SDD_FACTORY_REPO_ROOT:-}"
 task_repo_root="${SDD_FACTORY_TASK_REPO_ROOT:-}"
 workdir_root="${SDD_FACTORY_WORKDIR_ROOT:-}"
 lifecycle="${SDD_FACTORY_ROLE_LIFECYCLE:-persistent}"
+role_model="${SDD_FACTORY_ROLE_MODEL:-}"
+role_effort="${SDD_FACTORY_ROLE_EFFORT:-}"
 settings_file=""
 
 if [[ -n "$task_repo_root" ]]; then
@@ -46,6 +48,12 @@ case "$launcher_name" in
       "--strict-mcp-config"
       "--name" "${role_name}:${task_key}"
     )
+    if [[ -n "$role_model" ]]; then
+      args+=("--model" "$role_model")
+    fi
+    if [[ -n "$role_effort" ]]; then
+      args+=("--effort" "$role_effort")
+    fi
     if [[ -n "$repo_root" ]]; then
       args+=("--add-dir" "$repo_root")
     fi
@@ -61,7 +69,14 @@ case "$launcher_name" in
     exec claude "${args[@]}"
     ;;
   codex)
-    exec codex
+    args=()
+    if [[ -n "$role_model" ]]; then
+      args+=("-m" "$role_model")
+    fi
+    if [[ -n "$role_effort" ]]; then
+      args+=("-c" "model_reasoning_effort=\"$role_effort\"")
+    fi
+    exec codex "${args[@]}"
     ;;
   sh)
     exec sh

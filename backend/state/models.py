@@ -24,6 +24,7 @@ def session_from_row(row: sqlite3.Row) -> Session:
         current_owner=row["current_owner"],
         workflow_profile=row["workflow_profile"],
         policy=json.loads(row["policy_json"]),
+        role_config=json.loads(row["role_config_json"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         ended_at=row["ended_at"],

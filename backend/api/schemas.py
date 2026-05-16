@@ -12,10 +12,17 @@ class SessionPolicyPayload(BaseModel):
     doc_harvest_policy: str | None = None
 
 
+class RoleRuntimeConfigPayload(BaseModel):
+    runner: str | None = None
+    model: str | None = None
+    effort: str | None = None
+
+
 class CreateSessionRequest(BaseModel):
     task_key: str
     workflow_profile: str
     policy: SessionPolicyPayload | None = None
+    role_config: dict[str, RoleRuntimeConfigPayload] | None = None
 
 
 class SessionResponse(BaseModel):
@@ -26,6 +33,7 @@ class SessionResponse(BaseModel):
     current_owner: str | None = None
     workflow_profile: str
     policy: dict[str, str]
+    role_config: dict[str, dict[str, str]]
 
 
 class CreateSessionResponse(BaseModel):

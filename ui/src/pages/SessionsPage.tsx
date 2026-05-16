@@ -528,6 +528,7 @@ export function SessionsPage(): JSX.Element {
               setSelectedSessionId(sessionId);
               await loadBundle(sessionId);
             }}
+            runtimeCapabilities={runtimeCapabilitiesSummary}
           />
           <SessionList
             onSelect={(sessionId) => setSelectedSessionId(sessionId)}

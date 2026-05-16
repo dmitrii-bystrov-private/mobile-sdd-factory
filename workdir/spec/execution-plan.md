@@ -31,7 +31,7 @@ Status markers:
 
 ## Current Immediate Next Step
 
-- `[in_progress]` begin `Phase 44` by implementing `Role Runtime Configuration Baseline`
+- `[in_progress]` continue `Phase 44` by implementing `Role-Scoped MCP Baseline`
 
 ## Reserved Next Phase
 

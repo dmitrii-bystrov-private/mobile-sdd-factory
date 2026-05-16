@@ -75,6 +75,7 @@ type CreateSessionPayload = {
     doc_harvest_policy: SessionPolicyValue;
     test_policy?: SessionPolicyValue;
   };
+  role_config?: Record<string, { runner: string; model: string; effort: string }>;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

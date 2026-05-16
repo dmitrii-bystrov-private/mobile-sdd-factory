@@ -18,6 +18,21 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - implemented `Role Runtime Configuration Baseline`
+    - added session-scoped `role_config`
+    - normalized role runner/model/effort choices against live runtime capabilities
+    - wired role runtime config into launcher env for both `claude` and `codex`
+    - exposed per-role runner/model/effort controls in `SessionStartForm`
+  - current_state:
+    - the product can now choose real runtime options per role instead of relying on stale hardcoded values
+    - the next practical gap is MCP isolation, not model/effort discovery
+  - next:
+    - implement `Role-Scoped MCP Baseline`
+  - blockers:
+    - none for the role-runtime-config slice
+
+- date: `2026-05-17`
+  - done:
     - implemented `Runtime Capabilities Baseline`
     - added a live capability surface for:
       - available runners

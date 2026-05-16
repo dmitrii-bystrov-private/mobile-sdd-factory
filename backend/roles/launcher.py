@@ -57,6 +57,7 @@ class RoleLauncherManager:
         *,
         task_key: str,
         workspace: RoleWorkspace,
+        role_config: dict[str, str] | None = None,
     ) -> RoleLaunchPlan:
         launcher_script = workspace.directory / "launch-role.sh"
         launcher_script.write_text(
@@ -64,6 +65,7 @@ class RoleLauncherManager:
                 task_key=task_key,
                 role_name=workspace.role_name,
                 workspace=workspace,
+                role_config=role_config,
             )
         )
         launcher_script.chmod(0o755)
@@ -80,8 +82,12 @@ class RoleLauncherManager:
         task_key: str,
         role_name: str,
         workspace: RoleWorkspace,
+        role_config: dict[str, str] | None = None,
     ) -> str:
         launcher_exec = " ".join(_shell_escape(part) for part in self.launcher_command)
+        runner = (role_config or {}).get("runner", "")
+        model = (role_config or {}).get("model", "")
+        effort = (role_config or {}).get("effort", "")
         return "\n".join(
             [
                 "#!/usr/bin/env bash",
@@ -95,6 +101,9 @@ class RoleLauncherManager:
                 f'export SDD_FACTORY_WORKDIR_ROOT={_shell_escape(str(self.workdir_root))}',
                 f'export SDD_FACTORY_TASK_REPO_ROOT={_shell_escape(str(self.workdir_root / task_key / "repo"))}',
                 f'export SDD_FACTORY_ROLE_LIFECYCLE={_shell_escape(_role_lifecycle_mode(role_name))}',
+                f'export SDD_FACTORY_ROLE_RUNNER={_shell_escape(runner)}',
+                f'export SDD_FACTORY_ROLE_MODEL={_shell_escape(model)}',
+                f'export SDD_FACTORY_ROLE_EFFORT={_shell_escape(effort)}',
                 f"cd {_shell_escape(str(workspace.directory))}",
                 'printf "SDD_FACTORY_ROLE_LAUNCHER_READY role=%s task=%s lifecycle=%s\\n" "$SDD_FACTORY_ROLE_NAME" "$SDD_FACTORY_TASK_KEY" "$SDD_FACTORY_ROLE_LIFECYCLE"',
                 f"exec {launcher_exec}",

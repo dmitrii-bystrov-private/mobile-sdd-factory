@@ -9,6 +9,7 @@ export type Session = {
   current_owner: string | null;
   workflow_profile: WorkflowProfile;
   policy: Record<string, SessionPolicyValue>;
+  role_config: Record<string, { runner: string; model: string; effort: string }>;
 };
 
 export type Role = {
