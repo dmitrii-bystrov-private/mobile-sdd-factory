@@ -796,6 +796,8 @@ Status markers:
   - `[done]` remove the live multi-line paste transport by materializing routed work into `ROUTED_WORK.md`
   - `[done]` implement and run the `Real Launcher File Handoff Probe` slice
   - `[done]` document file-handoff results in `workdir/spec/phase42-real-launcher-file-handoff-probe.md`
+  - `[done]` implement and run the `Real Launcher Minimal Completion Probe` slice
+  - `[done]` document minimal live completion in `workdir/spec/phase42-real-launcher-minimal-completion-probe.md`
   - `[pending]` implement and run the `Implementer Two-Round Live Validation` slice
   - `[pending]` document the validation result and resulting operational gaps
 

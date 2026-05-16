@@ -16,6 +16,26 @@ Each entry should include:
 
 ## Entries
 
+- date: `2026-05-17`
+  - done:
+    - fixed the PTY launcher submit semantics for live Claude roles:
+      - routed command is written first
+      - delayed carriage return is sent as the actual submit
+    - proved with a reproducible probe that a real launcher-backed Claude session now reaches terminal protocol completion:
+      - `factory/acceptance/run-real-launcher-minimal-completion-probe.sh`
+      - emits real `SDD_OUTPUT`
+    - validation passed:
+      - targeted backend tests `Ran 142 tests`, `OK`
+      - real launcher minimal completion probe `OK`
+  - current_state:
+    - `Phase 42` is no longer blocked on basic live terminal completion
+    - the live path can now reach a real `SDD_OUTPUT` under the new file-backed handoff plus delayed submit contract
+  - next:
+    - move from minimal completion to full coordinator-driven completion on real routed work
+    - then push into real multi-round continuation
+  - blockers:
+    - full coordinator-driven routed work is still broader and noisier than the minimal completion probe
+
 - date: `2026-05-16`
   - done:
     - tightened the default Claude launcher path with `--strict-mcp-config`

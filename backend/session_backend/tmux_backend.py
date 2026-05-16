@@ -9,6 +9,7 @@ import pty
 import re
 import shutil
 import subprocess
+import time
 
 from backend.session_backend.base import SessionBackend
 from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle, RuntimeSessionHandle
@@ -491,4 +492,8 @@ class TmuxSessionBackend(SessionBackend):
         payload_text = text
         if "\n" in text:
             payload_text = self._materialize_routed_input(role_id, text)
-        os.write(master_fd, (payload_text + "\n").encode())
+        # Launcher-backed interactive roles expect a real submit keypress rather than
+        # relying on a single text+LF write, which can leave the input staged in the prompt.
+        os.write(master_fd, payload_text.encode())
+        time.sleep(0.25)
+        os.write(master_fd, b"\r")
