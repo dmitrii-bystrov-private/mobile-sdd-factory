@@ -364,7 +364,7 @@ class TmuxBackendTests(unittest.TestCase):
 
             backend.stop_session(session)
 
-    def test_pty_mode_emits_generic_pre_ready_blocker_for_unknown_interactive_output(self) -> None:
+    def test_pty_mode_keeps_buffered_work_during_unknown_pre_ready_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir)
             backend = TmuxSessionBackend(
@@ -400,15 +400,16 @@ class TmuxBackendTests(unittest.TestCase):
 
             backend.send_input(role, "first routed work")
 
-            blocker_output = self._wait_for_output(
+            pre_ready_output = self._wait_for_output(
                 backend,
                 role,
-                timeout_seconds=3.0,
-                expected_substring='SDD_ERROR: {"summary":"interactive operator input required"',
+                timeout_seconds=1.5,
+                expected_substring="SDD_FACTORY_AGENT_BOOTSTRAP",
             )
-            self.assertIn('SDD_ERROR: {"summary":"interactive operator input required"', blocker_output)
-            self.assertIn("before ready:", blocker_output)
-            self.assertIn("6 6 6", blocker_output)
+            self.assertIn("SDD_FACTORY_AGENT_BOOTSTRAP", pre_ready_output)
+            self.assertNotIn("SDD_OUTPUT", pre_ready_output)
+            self.assertFalse(backend.pty_role_ready[role.role_id])
+            self.assertEqual(["first routed work"], backend.pty_buffered_inputs[role.role_id])
 
             backend.stop_session(session)
 

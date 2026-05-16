@@ -816,6 +816,10 @@ Status markers:
   - `[done]` document the baseline in `workdir/spec/phase43-environment-doctor-baseline.md`
   - `[done]` expose the doctor baseline through backend/UI surface
   - `[done]` document the surface in `workdir/spec/phase43-doctor-surface.md`
+  - `[done]` choose the next concrete `Phase 43` slice
+  - `[done]` implement the `Bootstrap Guidance Baseline` slice
+  - `[done]` validate the `Bootstrap Guidance Baseline` slice
+  - `[done]` document the baseline in `workdir/spec/phase43-bootstrap-guidance-baseline.md`
   - `[pending]` choose the next concrete `Phase 43` slice
 
 ## Immediate Next Steps
@@ -982,7 +986,10 @@ Status markers:
 162. `[done]` Implement the `Environment Doctor Baseline` slice.
 163. `[done]` Validate the `Environment Doctor Baseline` slice.
 164. `[done]` Expose the doctor baseline through backend/UI surface.
-165. `[pending]` Choose the next concrete `Phase 43` slice.
+165. `[done]` Choose the next concrete `Phase 43` slice.
+166. `[done]` Implement the `Bootstrap Guidance Baseline` slice.
+167. `[done]` Validate the `Bootstrap Guidance Baseline` slice.
+168. `[pending]` Choose the next concrete `Phase 43` slice.
 
 ## What Was Going Wrong
 

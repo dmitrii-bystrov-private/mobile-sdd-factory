@@ -18,6 +18,45 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - implemented `Bootstrap Guidance Baseline`
+    - added:
+      - `factory/doctor/bootstrap_guidance.py`
+      - `factory/doctor/run-bootstrap-guide.py`
+      - `factory/doctor/run-bootstrap-guide.sh`
+    - the guidance layer now turns doctor status into:
+      - required actions
+      - optional improvements
+      - prioritized next step
+    - rewrote the PTY pre-ready edge-case test to assert the behavior we actually need:
+      - unknown pre-ready noise must not falsely mark a role as ready
+      - buffered work must remain buffered until real readiness
+    - validated:
+      - `./.venv/bin/python -m unittest tests.backend.test_tmux_backend tests.backend.test_bootstrap_guidance tests.backend.test_environment_doctor`
+      - `./.venv/bin/python -m unittest discover -s tests/backend -p 'test_*.py'`
+      - `bash factory/doctor/run-bootstrap-guide.sh`
+      - `bash factory/doctor/run-bootstrap-guide.sh --json`
+  - current_state:
+    - `Phase 43` now includes diagnosis, operator visibility, and first actionable bootstrap guidance
+    - the next remaining step in the phase should move either toward richer checks or setup automation
+  - next:
+    - choose the next concrete `Phase 43` slice
+  - blockers:
+    - none after the PTY regression fix
+
+- date: `2026-05-17`
+  - done:
+    - chose the next concrete `Phase 43` slice
+    - selected `Bootstrap Guidance Baseline`
+  - current_state:
+    - the doctor can already diagnose environment state
+    - the next missing layer is actionable setup guidance generated from that state
+  - next:
+    - implement `Bootstrap Guidance Baseline`
+  - blockers:
+    - none at the planning level
+
+- date: `2026-05-17`
+  - done:
     - exposed the environment doctor through product surfaces
     - added backend route:
       - `GET /operator/environment-doctor`
