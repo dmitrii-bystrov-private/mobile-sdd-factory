@@ -18,6 +18,25 @@ Each entry should include:
 
 - date: `2026-05-16`
   - done:
+    - added a reproducible live probe for file-backed routed handoff:
+      - `factory/acceptance/run-real-launcher-file-handoff-probe.py`
+      - `factory/acceptance/run-real-launcher-file-handoff-probe.sh`
+    - validated that a real launcher-backed role:
+      - creates `ROUTED_WORK.md`
+      - receives the full routed handoff through that file
+      - no longer shows the old `Pasted text #...` / `paste again to expand` UI
+    - regression checks passed: targeted PTY tests `OK`, backend suite `Ran 151 tests`, `OK`
+  - current_state:
+    - live file-backed routed work is now reproducibly proven, not only observed in ad-hoc debugging
+    - the remaining gap is still real launched-agent continuation after that handoff is delivered
+  - next:
+    - continue `Phase 42` on the first real launcher-backed routed-work completion path
+    - keep transport work closed unless a new live runner regression reopens it
+  - blockers:
+    - real launcher-backed sessions still do not consistently reach terminal `SDD_OUTPUT` after file-backed handoff
+
+- date: `2026-05-16`
+  - done:
     - switched live multi-line routed work delivery away from terminal paste blocks
     - materialized launcher-backed multi-line handoffs into role-local `ROUTED_WORK.md`
     - proved with targeted tests that PTY launcher inputs now use the same file-backed path both for direct sends and for buffered post-ready flush
