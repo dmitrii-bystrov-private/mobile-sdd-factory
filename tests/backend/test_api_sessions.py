@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import tempfile
 import time
 import unittest
@@ -1562,6 +1563,38 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "implementation_completed" for item in events_response.items))
         self.assertTrue(any(item.event_type == "verification_requested" for item in events_response.items))
 
+    def test_collect_role_output_route_consumes_result_json(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008B"),
+            dependencies=self.dependencies,
+        )
+        role_workspace = self.dependencies.coordinator_service.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            "IOS-40008B",
+            "implementer",
+        )
+        result_path = role_workspace / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {"summary": "done from file"},
+                }
+            )
+        )
+
+        response = collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+        self.assertTrue(response.collected)
+        self.assertEqual(1, response.chunk_count)
+        self.assertEqual("role_output_collected", response.event_type)
+        self.assertEqual("verification_requested", response.session.current_stage)
+        self.assertFalse(result_path.exists())
+
     def test_poll_session_output_route_collects_all_role_chunks(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40008"),
@@ -1593,6 +1626,37 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("session_output_polled", response.event_type)
         runtime_outputs = [a for a in artifacts_response.items if a.artifact_type == "runtime_output"]
         self.assertEqual(2, len(runtime_outputs))
+
+    def test_poll_session_output_route_consumes_result_json(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008C"),
+            dependencies=self.dependencies,
+        )
+        role_workspace = self.dependencies.coordinator_service.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            "IOS-40008C",
+            "implementer",
+        )
+        result_path = role_workspace / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {"summary": "done from file"},
+                }
+            )
+        )
+
+        response = poll_session_output(
+            PollSessionOutputRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.polled)
+        self.assertEqual(4, response.role_count)
+        self.assertEqual(1, response.chunk_count)
+        self.assertEqual("session_output_polled", response.event_type)
+        self.assertEqual("verification_requested", response.session.current_stage)
+        self.assertFalse(result_path.exists())
 
     def test_event_bus_recent_events_reflect_api_actions(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

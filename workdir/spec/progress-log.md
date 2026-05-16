@@ -18,6 +18,47 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - implemented the `File-Based Result Contract`
+    - taught the coordinator to consume `RESULT.json` from role workspaces
+    - kept terminal `SDD_OUTPUT` as compatibility fallback
+    - added unit and API coverage for `RESULT.json` via:
+      - `collect_role_output`
+      - `poll_session_output`
+    - added a real launcher-backed `RESULT.json` probe
+    - added and passed a real launcher-backed two-round implementer validation harness
+    - assessed `Phase 42` as `complete with deferred items`
+  - current_state:
+    - live launcher-backed implementer validation now works across two coordinator-driven rounds
+    - the runtime-proof phase is complete
+  - next:
+    - move to `Phase 43. Environment Setup, Doctor, And Permanent Documentation`
+    - begin with `Environment Doctor Baseline`
+  - blockers:
+    - none for closing `Phase 42`
+
+- date: `2026-05-17`
+  - done:
+    - worked through a cleaner runtime-contract direction for live roles
+    - separated:
+      - terminal as wake-up / transport
+      - files as protocol surface
+    - fixed a concrete proposed file set for role workspaces:
+      - `ROUTED_WORK.md`
+      - `RESULT.json`
+      - `QUESTIONS.json`
+      - `ANSWERS.json`
+    - chose `File-Based Result Contract` as the best next bounded slice on top of the already working `ROUTED_WORK.md` path
+  - current_state:
+    - `Phase 42` no longer needs to grow into an ever-larger terminal parsing system
+    - the next cleaner direction is a runner-agnostic file protocol over the existing live transport
+  - next:
+    - implement `RESULT.json`-based completion as the first file-protocol slice
+    - rerun real implementer validation against that contract
+  - blockers:
+    - none at the direction/spec level
+
+- date: `2026-05-17`
+  - done:
     - fixed the PTY launcher submit semantics for live Claude roles:
       - routed command is written first
       - delayed carriage return is sent as the actual submit

@@ -20,9 +20,9 @@ Status markers:
 
 ## Current Position
 
-- Current phase: `Phase 42. Authenticated Live Agent Execution`
-- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, first real agent-process bootstrap proof, local repeated routed-work proof under a persistent process host, specialized-role fidelity, broader story-planning helper expansion, filesystem/runtime path alignment, bounded planning verification, explicit decomposition before execution, decomposition-aware subtask integration, and subtask operator surfaces are complete; next active gap is live continuation of true launcher-backed \`claude\`/\`codex\` roles after file-backed routed work delivery`
-- Current implementation mode: `use the new local process host as the non-tmux persistent runtime fallback, drive true launched agents through PTY-backed interactive handling, and deliver multi-line routed work through role-local files instead of terminal paste blocks`
+- Current phase: `Phase 43. Environment Setup, Doctor, And Permanent Documentation`
+- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer completion, file-backed role result handling, and real two-round live implementer validation are complete; the next active track is environment setup, doctor, and permanent documentation`
+- Current implementation mode: `launcher-backed live roles now use PTY transport plus file-backed handoff/result semantics; the next work should shift from runtime proof to environment/productization`
 - Primary source of truth for next work: `this file`
 - Filesystem/runtime source of truth: `workdir/spec/filesystem-runtime-model.md`
 - External runner session cleanup policy: `workdir/spec/external-runner-session-cleanup-policy.md`
@@ -31,14 +31,11 @@ Status markers:
 
 ## Current Immediate Next Step
 
-- `[in_progress]` keep `Phase 42` open and move from launcher bootstrap plus file-backed handoff to reliable live continuation and terminal \`SDD_*\` outcomes from true launched agents
+- `[in_progress]` open `Phase 43` and start with `Environment Doctor Baseline`
 
 ## Reserved Next Phase
 
-- `[pending]` `Phase 43. Environment Setup, Doctor, And Permanent Documentation`
-  - status: `planned, not active`
-  - first intended slice: `Environment Doctor Baseline`
-  - note: this phase must follow implementation reconciliation and should start only after the current live-runtime / driver track is stable enough to document truthfully
+- `[pending]` no later named phase reserved yet
 
 ## Phase 1. Architecture Contract
 
@@ -782,7 +779,7 @@ Status markers:
 
 ## Phase 42. Authenticated Live Agent Execution
 
-- Status: `[in_progress]`
+- Status: `[complete_with_deferred_items]`
 - Goal: validate repeated routed work against real launched agents
 - Exit criteria:
   - the next named phase after `Phase 41` is chosen
@@ -798,8 +795,11 @@ Status markers:
   - `[done]` document file-handoff results in `workdir/spec/phase42-real-launcher-file-handoff-probe.md`
   - `[done]` implement and run the `Real Launcher Minimal Completion Probe` slice
   - `[done]` document minimal live completion in `workdir/spec/phase42-real-launcher-minimal-completion-probe.md`
-  - `[pending]` implement and run the `Implementer Two-Round Live Validation` slice
-  - `[pending]` document the validation result and resulting operational gaps
+  - `[done]` implement the `File-Based Result Contract` slice
+  - `[done]` document file-based result behavior in `workdir/spec/phase42-file-based-result-contract.md`
+  - `[done]` rerun real launcher-backed implementer validation through file-backed completion
+  - `[done]` document the validation result in `workdir/spec/phase42-real-implementer-two-round-validation.md`
+  - `[done]` assess `Phase 42` completion in `workdir/spec/phase42-assessment.md`
 
 ## Immediate Next Steps
 

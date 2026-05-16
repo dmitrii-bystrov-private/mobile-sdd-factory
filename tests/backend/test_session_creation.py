@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import tempfile
 import time
 import unittest
@@ -2339,6 +2340,35 @@ class SessionCreationTests(unittest.TestCase):
             len([artifact for artifact in artifacts if artifact.artifact_type == "runtime_output"]),
         )
 
+    def test_poll_session_output_consumes_result_json_from_role_workspace(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30008B")
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            "implementer",
+        )
+        result_path = role_workspace / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {"summary": "done from file"},
+                }
+            )
+        )
+
+        updated_session, event, role_count, chunk_count = self.coordinator.poll_session_output(
+            session_id=session.id,
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(session.id, updated_session.id)
+        self.assertEqual("session_output_polled", event.event_type)
+        self.assertEqual(4, role_count)
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(any(artifact.artifact_type == "role_result_json" for artifact in artifacts))
+
     def test_collect_role_output_normalizes_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
@@ -2358,6 +2388,36 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertTrue(any(item.event_type == "implementation_completed" for item in events))
         self.assertTrue(any(item.event_type == "verification_requested" for item in events))
+
+    def test_collect_role_output_consumes_result_json_from_role_workspace(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009B")
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            "implementer",
+        )
+        result_path = role_workspace / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {"summary": "done from file"},
+                }
+            )
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        events = self.event_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(any(item.event_type == "implementation_completed" for item in events))
+        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
 
     def test_collect_role_output_records_progress_marker_without_stage_transition(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30010")

@@ -1338,21 +1338,31 @@ class CoordinatorService:
             backend_name=role.runtime_backend,
         )
         chunks = self.session_backend.read_output(runtime_role)
-        if not chunks:
+        file_result = self._consume_role_result_file(session, role)
+        if not chunks and file_result is None:
             return session, None, 0
 
-        self._record_runtime_output_artifacts(session, role, chunks)
-        session = self._apply_runtime_output_markers(session, role, chunks)
+        if chunks:
+            self._record_runtime_output_artifacts(session, role, chunks)
+            session = self._apply_runtime_output_markers(session, role, chunks)
+        if file_result is not None:
+            output_type, output_payload = file_result
+            session, _, _ = self.handle_role_output(
+                session_id=session.id,
+                role_name=role.role_name,
+                output_type=output_type,
+                payload=output_payload,
+            )
         event = self._append_event(
             session_id=session.id,
             event_type="role_output_collected",
             producer_type="coordinator",
             payload={
                 "role_name": role_name,
-                "chunk_count": len(chunks),
+                "chunk_count": len(chunks) + (1 if file_result is not None else 0),
             },
         )
-        return session, event, len(chunks)
+        return session, event, len(chunks) + (1 if file_result is not None else 0)
 
     def poll_session_output(
         self,
@@ -1372,11 +1382,21 @@ class CoordinatorService:
                 backend_name=role.runtime_backend,
             )
             chunks = self.session_backend.read_output(runtime_role)
-            if not chunks:
+            file_result = self._consume_role_result_file(session, role)
+            if not chunks and file_result is None:
                 continue
-            self._record_runtime_output_artifacts(session, role, chunks)
-            session = self._apply_runtime_output_markers(session, role, chunks)
-            total_chunks += len(chunks)
+            if chunks:
+                self._record_runtime_output_artifacts(session, role, chunks)
+                session = self._apply_runtime_output_markers(session, role, chunks)
+            if file_result is not None:
+                output_type, output_payload = file_result
+                session, _, _ = self.handle_role_output(
+                    session_id=session.id,
+                    role_name=role.role_name,
+                    output_type=output_type,
+                    payload=output_payload,
+                )
+            total_chunks += len(chunks) + (1 if file_result is not None else 0)
 
         if total_chunks == 0:
             return session, None, len(roles), 0
@@ -1391,6 +1411,49 @@ class CoordinatorService:
             },
         )
         return session, event, len(roles), total_chunks
+
+    def _consume_role_result_file(
+        self,
+        session: Session,
+        role: Role,
+    ) -> tuple[str, dict] | None:
+        if self.role_workspace_manager is None:
+            return None
+        result_path = self.role_workspace_manager.role_directory(session.task_key, role.role_name) / "RESULT.json"
+        if not result_path.is_file():
+            return None
+        raw_text = result_path.read_text()
+        try:
+            parsed = json.loads(raw_text)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        output_type = parsed.get("output_type")
+        output_payload = parsed.get("payload")
+        if not isinstance(output_type, str) or not isinstance(output_payload, dict):
+            return None
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            f"role-result-{role.role_name}",
+            "RESULT.json",
+            json.dumps(parsed, indent=2, sort_keys=True),
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            stage_name=f"role-result-{role.role_name}",
+            artifact_type="role_result_json",
+            path=str(artifact_path),
+            metadata={
+                "role_name": role.role_name,
+                "current_stage": session.current_stage,
+                "source_path": str(result_path),
+            },
+        )
+        result_path.unlink(missing_ok=True)
+        return output_type, output_payload
 
     def run_loop_once(self) -> tuple[Event | None, int, int]:
         active_sessions = self.session_repository.list_by_status(SessionStatus.ACTIVE)
