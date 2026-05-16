@@ -288,6 +288,12 @@ input {
   line-height: 1.45;
 }
 
+.subtask-graph-meta {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
 .session-card,
 .action-button {
   border: 1px solid var(--line);

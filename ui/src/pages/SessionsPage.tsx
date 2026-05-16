@@ -16,6 +16,8 @@ import type {
   PlanningStepSummary,
   Session,
   SessionBundle,
+  SubtaskGraphRow,
+  SubtaskGraphSummary,
 } from "../types";
 
 const FOLLOWUP_ARTIFACT_TYPES = new Set(["mr_comments_markdown", "qa_reopen_comments"]);
@@ -152,6 +154,52 @@ async function buildJiraSubtasksSummary(
   };
 }
 
+function parseSubtaskGraphRows(content: string | null | undefined): SubtaskGraphRow[] {
+  if (content === null || content === undefined) {
+    return [];
+  }
+
+  const tableRows = content
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("|"));
+
+  if (tableRows.length < 3) {
+    return [];
+  }
+
+  return tableRows
+    .slice(2)
+    .map((row) => row.trim().replace(/^\||\|$/g, "").split("|").map((part) => part.trim()))
+    .filter((parts) => parts.length >= 4)
+    .map(([key, issueType, title, status]) => ({
+      key,
+      issueType,
+      title,
+      status,
+    }))
+    .slice(1);
+}
+
+async function buildSubtaskGraphSummary(
+  artifacts: Artifact[],
+): Promise<SubtaskGraphSummary | null> {
+  const graphArtifact = [...artifacts]
+    .reverse()
+    .find((artifact) => artifact.artifact_type === "subtask_statuses_markdown");
+
+  if (graphArtifact === undefined) {
+    return null;
+  }
+
+  const artifactDetail = await apiClient.getArtifact(graphArtifact.id);
+  return {
+    artifactType: graphArtifact.artifact_type,
+    artifactDetail,
+    rows: parseSubtaskGraphRows(artifactDetail.content),
+  };
+}
+
 function buildFollowupContext(
   artifacts: Artifact[],
   events: EventItem[],
@@ -242,6 +290,7 @@ export function SessionsPage(): JSX.Element {
       const followupContext = await buildFollowupContext(artifacts.items, events.items);
       const planningSummary = await buildPlanningSummary(artifacts.items, events.items);
       const jiraSubtasksSummary = await buildJiraSubtasksSummary(artifacts.items);
+      const subtaskGraphSummary = await buildSubtaskGraphSummary(artifacts.items);
       setBundle({
         roles: roles.items,
         artifacts: artifacts.items,
@@ -250,6 +299,7 @@ export function SessionsPage(): JSX.Element {
         followupContext,
         planningSummary,
         jiraSubtasksSummary,
+        subtaskGraphSummary,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load session detail");

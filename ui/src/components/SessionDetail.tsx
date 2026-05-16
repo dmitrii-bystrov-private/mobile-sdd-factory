@@ -5,6 +5,7 @@ import { OperatorActions } from "./OperatorActions";
 import { PlanningArtifactPanel } from "./PlanningArtifactPanel";
 import { PlanningSummaryPanel } from "./PlanningSummaryPanel";
 import { RoleStatusPanel } from "./RoleStatusPanel";
+import { SubtaskGraphPanel } from "./SubtaskGraphPanel";
 import type { Session, SessionBundle } from "../types";
 
 type SessionDetailProps = {
@@ -85,6 +86,7 @@ export function SessionDetail({
 
       <FollowupContextPanel followupContext={bundle.followupContext} />
       <JiraSubtasksPanel jiraSubtasksSummary={bundle.jiraSubtasksSummary} />
+      <SubtaskGraphPanel subtaskGraphSummary={bundle.subtaskGraphSummary} />
       <PlanningArtifactPanel
         planningSummary={bundle.planningSummary}
         workflowProfile={session.workflow_profile}

@@ -104,6 +104,19 @@ export type JiraSubtasksSummary = {
   artifactDetail: ArtifactDetail | null;
 };
 
+export type SubtaskGraphRow = {
+  key: string;
+  issueType: string;
+  title: string;
+  status: string;
+};
+
+export type SubtaskGraphSummary = {
+  artifactType: string;
+  artifactDetail: ArtifactDetail | null;
+  rows: SubtaskGraphRow[];
+};
+
 export type SessionBundle = {
   roles: Role[];
   artifacts: Artifact[];
@@ -112,4 +125,5 @@ export type SessionBundle = {
   followupContext: FollowupContext | null;
   planningSummary: PlanningSummary | null;
   jiraSubtasksSummary: JiraSubtasksSummary | null;
+  subtaskGraphSummary: SubtaskGraphSummary | null;
 };
