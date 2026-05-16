@@ -5,7 +5,13 @@ import unittest
 
 try:
     from backend.api.sse import SessionEventBus
-    from backend.api.routes_sessions import create_session, get_subtask_graph, list_sessions
+    from backend.api.routes_sessions import (
+        create_session,
+        get_subtask_graph,
+        get_subtask_progress,
+        list_sessions,
+        prepare_session,
+    )
     from backend.api.routes_knowledge import list_knowledge
     from backend.api.schemas import CreateSessionRequest, PrepareSessionRequest
     from backend.api.routes_events import inject_event, list_events
@@ -300,6 +306,59 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(1, summary.completed_count)
         self.assertEqual(1, summary.unresolved_count)
         self.assertEqual(["IOS-40002", "IOS-40003"], [row.key for row in summary.rows])
+
+    def test_get_subtask_progress_route_returns_queue_state(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40001P", workflow_profile="story_full"),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40001P"),
+            dependencies=self.dependencies,
+        )
+        for event_type, summary in [
+            ("proposal_context_completed", "Proposal ready"),
+            ("requirements_completed", "Requirements ready"),
+            ("acceptance_criteria_completed", "Acceptance ready"),
+            ("constraints_completed", "Constraints ready"),
+            ("spec_verification_completed", "Spec verified"),
+            ("story_spec_completed", "Story spec complete"),
+            ("task_decomposition_completed", "Decomposition complete"),
+        ]:
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": summary},
+                ),
+                dependencies=self.dependencies,
+            )
+        self.write_statuses_file(
+            "IOS-40001P",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40001P | Story | Parent story | In Progress |",
+                    "| IOS-40120 | Sub-task | Wire API | In Progress |",
+                    "| IOS-40121 | Sub-task | Add tests | To Do |",
+                ]
+            ),
+        )
+        start_subtask_graph(
+            StartSubtaskGraphRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        summary = get_subtask_progress(create_response.session.id, dependencies=self.dependencies)
+
+        self.assertTrue(summary.available)
+        self.assertEqual("IOS-40120", summary.current_subtask_key)
+        self.assertEqual("Wire API", summary.current_subtask_title)
+        self.assertEqual(2, summary.total_count)
+        self.assertEqual(0, summary.completed_count)
+        self.assertEqual(2, summary.remaining_count)
+        self.assertEqual(["assigned", "unassigned"], [item.status for item in summary.items])
 
     def test_create_session_route_rejects_irrelevant_policy_for_profile(self) -> None:
         from fastapi import HTTPException

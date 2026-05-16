@@ -130,6 +130,24 @@ export const apiClient = {
     return request(`/sessions/${sessionId}/subtask-graph`);
   },
 
+  getSubtaskProgress(sessionId: number): Promise<{
+    available: boolean;
+    current_subtask_key: string | null;
+    current_subtask_title: string | null;
+    total_count: number;
+    completed_count: number;
+    remaining_count: number;
+    items: Array<{
+      work_item_id: number;
+      key: string | null;
+      title: string;
+      status: string;
+      queue_position: number;
+    }>;
+  }> {
+    return request(`/sessions/${sessionId}/subtask-progress`);
+  },
+
   listKnowledge(): Promise<{ items: KnowledgeItem[] }> {
     return request("/knowledge");
   },

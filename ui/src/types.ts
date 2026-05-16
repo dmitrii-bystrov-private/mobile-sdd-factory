@@ -119,6 +119,24 @@ export type SubtaskGraphSummary = {
   rows: SubtaskGraphRow[];
 };
 
+export type SubtaskProgressItem = {
+  workItemId: number;
+  key: string | null;
+  title: string;
+  status: string;
+  queuePosition: number;
+};
+
+export type SubtaskProgressSummary = {
+  available: boolean;
+  currentSubtaskKey: string | null;
+  currentSubtaskTitle: string | null;
+  totalCount: number;
+  completedCount: number;
+  remainingCount: number;
+  items: SubtaskProgressItem[];
+};
+
 export type SessionBundle = {
   roles: Role[];
   artifacts: Artifact[];
@@ -128,4 +146,5 @@ export type SessionBundle = {
   planningSummary: PlanningSummary | null;
   jiraSubtasksSummary: JiraSubtasksSummary | null;
   subtaskGraphSummary: SubtaskGraphSummary | null;
+  subtaskProgressSummary: SubtaskProgressSummary | null;
 };

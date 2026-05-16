@@ -296,6 +296,57 @@ class CoordinatorService:
             "unresolved_count": len(unresolved),
         }
 
+    def get_subtask_progress_summary(self, session_id: int) -> dict[str, object]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} does not exist")
+
+        items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "subtask_implementation"
+        ]
+        if not items:
+            return {
+                "available": False,
+                "current_subtask_key": None,
+                "current_subtask_title": None,
+                "total_count": 0,
+                "completed_count": 0,
+                "remaining_count": 0,
+                "items": [],
+            }
+
+        progress_items: list[dict[str, object]] = []
+        for index, item in enumerate(items, start=1):
+            parsed = self._parse_subtask_work_item_title(item.title)
+            progress_items.append(
+                {
+                    "work_item_id": item.id,
+                    "key": parsed["key"],
+                    "title": parsed["title"],
+                    "status": item.status.value,
+                    "queue_position": index,
+                }
+            )
+
+        current = next((item for item in progress_items if item["status"] == WorkItemStatus.ASSIGNED.value), None)
+        completed_count = sum(1 for item in progress_items if item["status"] == WorkItemStatus.COMPLETED.value)
+        remaining_count = sum(
+            1
+            for item in progress_items
+            if item["status"] in {WorkItemStatus.ASSIGNED.value, WorkItemStatus.UNASSIGNED.value}
+        )
+        return {
+            "available": True,
+            "current_subtask_key": current["key"] if current is not None else None,
+            "current_subtask_title": current["title"] if current is not None else None,
+            "total_count": len(progress_items),
+            "completed_count": completed_count,
+            "remaining_count": remaining_count,
+            "items": progress_items,
+        }
+
     def handle_operator_event(
         self,
         session_id: int,
@@ -3535,6 +3586,19 @@ class CoordinatorService:
         if subtasks is None:
             raise IntakeError(f"statuses.md not found for session {task_key}")
         return subtasks
+
+    def _parse_subtask_work_item_title(self, title: str) -> dict[str, str | None]:
+        prefix = "Subtask implementation for "
+        if not title.startswith(prefix):
+            return {"key": None, "title": title}
+        payload = title[len(prefix):]
+        if ": " not in payload:
+            return {"key": payload.strip() or None, "title": title}
+        key, item_title = payload.split(": ", 1)
+        return {
+            "key": key.strip() or None,
+            "title": item_title.strip() or title,
+        }
 
     def _refresh_subtask_snapshot(self, session: Session) -> None:
         if self.snapshot_adapter is None:

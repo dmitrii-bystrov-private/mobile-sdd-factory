@@ -17,6 +17,7 @@ import type {
   Session,
   SessionBundle,
   SubtaskGraphSummary,
+  SubtaskProgressSummary,
 } from "../types";
 
 const FOLLOWUP_ARTIFACT_TYPES = new Set(["mr_comments_markdown", "qa_reopen_comments"]);
@@ -174,6 +175,30 @@ async function buildSubtaskGraphSummary(
   };
 }
 
+async function buildSubtaskProgressSummary(
+  sessionId: number,
+): Promise<SubtaskProgressSummary | null> {
+  const response = await apiClient.getSubtaskProgress(sessionId);
+  if (!response.available || response.total_count === 0) {
+    return null;
+  }
+  return {
+    available: response.available,
+    currentSubtaskKey: response.current_subtask_key,
+    currentSubtaskTitle: response.current_subtask_title,
+    totalCount: response.total_count,
+    completedCount: response.completed_count,
+    remainingCount: response.remaining_count,
+    items: response.items.map((item) => ({
+      workItemId: item.work_item_id,
+      key: item.key,
+      title: item.title,
+      status: item.status,
+      queuePosition: item.queue_position,
+    })),
+  };
+}
+
 function buildFollowupContext(
   artifacts: Artifact[],
   events: EventItem[],
@@ -261,10 +286,19 @@ export function SessionsPage(): JSX.Element {
         apiClient.listEvents(sessionId),
         apiClient.listWorkItems(sessionId),
       ]);
-      const followupContext = await buildFollowupContext(artifacts.items, events.items);
-      const planningSummary = await buildPlanningSummary(artifacts.items, events.items);
-      const jiraSubtasksSummary = await buildJiraSubtasksSummary(artifacts.items);
-        const subtaskGraphSummary = await buildSubtaskGraphSummary(sessionId);
+      const [
+        followupContext,
+        planningSummary,
+        jiraSubtasksSummary,
+        subtaskGraphSummary,
+        subtaskProgressSummary,
+      ] = await Promise.all([
+        Promise.resolve(buildFollowupContext(artifacts.items, events.items)),
+        buildPlanningSummary(artifacts.items, events.items),
+        buildJiraSubtasksSummary(artifacts.items),
+        buildSubtaskGraphSummary(sessionId),
+        buildSubtaskProgressSummary(sessionId),
+      ]);
       setBundle({
         roles: roles.items,
         artifacts: artifacts.items,
@@ -274,6 +308,7 @@ export function SessionsPage(): JSX.Element {
         planningSummary,
         jiraSubtasksSummary,
         subtaskGraphSummary,
+        subtaskProgressSummary,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load session detail");

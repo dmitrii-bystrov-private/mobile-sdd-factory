@@ -68,6 +68,24 @@ class SubtaskGraphSummaryResponse(BaseModel):
     rows: list[SubtaskGraphRowResponse]
 
 
+class SubtaskProgressItemResponse(BaseModel):
+    work_item_id: int
+    key: str | None = None
+    title: str
+    status: str
+    queue_position: int
+
+
+class SubtaskProgressSummaryResponse(BaseModel):
+    available: bool
+    current_subtask_key: str | None = None
+    current_subtask_title: str | None = None
+    total_count: int
+    completed_count: int
+    remaining_count: int
+    items: list[SubtaskProgressItemResponse]
+
+
 class RoleResponse(BaseModel):
     id: int
     session_id: int
