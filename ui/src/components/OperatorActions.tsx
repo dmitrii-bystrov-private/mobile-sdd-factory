@@ -25,6 +25,7 @@ export function OperatorActions({
   const [knowledgeTitle, setKnowledgeTitle] = useState("");
   const [knowledgeScope, setKnowledgeScope] = useState("");
   const [knowledgeGuidance, setKnowledgeGuidance] = useState("");
+  const [runtimeInput, setRuntimeInput] = useState("");
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
@@ -110,6 +111,19 @@ export function OperatorActions({
       setKnowledgeTitle("");
       setKnowledgeScope("");
       setKnowledgeGuidance("");
+    });
+  }
+
+  async function handleRuntimeInput(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const normalizedInput = runtimeInput.trim();
+    if (normalizedInput.length === 0) {
+      setError("Runtime input is required");
+      return;
+    }
+    await run(async () => {
+      await apiClient.sendRuntimeInput(session.id, normalizedInput);
+      setRuntimeInput("");
     });
   }
 
@@ -218,6 +232,37 @@ export function OperatorActions({
         >
           Send To Test
         </button>
+      </div>
+
+      <div className="operator-followup-stack">
+        <div className="operator-followup-copy">
+          <p className="eyebrow">Interactive Recovery</p>
+          <h4>Runtime Input</h4>
+          <p className="path-label">
+            Send a direct reply into the live role session after an interactive blocker escalates the task to operator.
+          </p>
+        </div>
+
+        <form className="followup-form" onSubmit={(event) => void handleRuntimeInput(event)}>
+          <label className="form-field">
+            <span>Runtime Input</span>
+            <textarea
+              className="text-area-input"
+              disabled={busy || session.status !== "waiting_for_operator"}
+              onChange={(event) => setRuntimeInput(event.target.value)}
+              placeholder="Examples: 1, /mcp, or another direct reply required by the live agent session."
+              rows={3}
+              value={runtimeInput}
+            />
+          </label>
+          <button
+            className="action-button"
+            disabled={busy || session.status !== "waiting_for_operator"}
+            type="submit"
+          >
+            Send Runtime Input
+          </button>
+        </form>
       </div>
 
       <div className="operator-followup-stack">

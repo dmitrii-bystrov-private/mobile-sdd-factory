@@ -60,6 +60,7 @@ const STREAM_EVENT_TYPES = [
   "session_paused_by_operator",
   "session_resumed_by_operator",
   "session_retried_by_operator",
+  "operator_runtime_input_sent",
   "session_escalated_to_operator",
   "session_dispatch_reconciled",
   "coordinator_loop_ran",
@@ -198,6 +199,16 @@ export const apiClient = {
     return request("/operator/retry-session", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId }),
+    });
+  },
+
+  sendRuntimeInput(
+    sessionId: number,
+    text: string,
+  ): Promise<{ event_type: string; session: Session }> {
+    return request("/operator/send-runtime-input", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, text }),
     });
   },
 
