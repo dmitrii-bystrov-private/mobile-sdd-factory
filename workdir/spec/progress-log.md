@@ -18,6 +18,35 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - implemented `Environment Doctor Baseline`
+    - added a factory-specific doctor surface:
+      - `factory/doctor/run-doctor.sh`
+      - `factory/doctor/run-doctor.py`
+      - `factory/doctor/environment_doctor.py`
+    - taught the baseline doctor to check:
+      - required env vars
+      - required CLI tools
+      - available live runners
+      - auth state for `acli jira`, `glab`, `claude`, and `codex`
+      - required MCP servers
+      - optional runtime pieces like `tmux`
+    - added unit coverage in:
+      - `tests/backend/test_environment_doctor.py`
+    - validated:
+      - `./.venv/bin/python -m unittest tests.backend.test_environment_doctor`
+      - `bash factory/doctor/run-doctor.sh`
+      - `bash factory/doctor/run-doctor.sh --json`
+  - current_state:
+    - `Phase 43` is now active in code, not just in planning
+    - the project has its first real environment/status verification surface
+  - next:
+    - choose the next concrete `Phase 43` slice
+    - likely move next into bootstrap/setup guidance or a richer doctor contract
+  - blockers:
+    - none for the baseline slice
+
+- date: `2026-05-17`
+  - done:
     - implemented the `File-Based Result Contract`
     - taught the coordinator to consume `RESULT.json` from role workspaces
     - kept terminal `SDD_OUTPUT` as compatibility fallback

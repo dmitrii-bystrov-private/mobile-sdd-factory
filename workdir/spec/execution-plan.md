@@ -21,8 +21,8 @@ Status markers:
 ## Current Position
 
 - Current phase: `Phase 43. Environment Setup, Doctor, And Permanent Documentation`
-- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer completion, file-backed role result handling, and real two-round live implementer validation are complete; the next active track is environment setup, doctor, and permanent documentation`
-- Current implementation mode: `launcher-backed live roles now use PTY transport plus file-backed handoff/result semantics; the next work should shift from runtime proof to environment/productization`
+- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer completion, file-backed role result handling, real two-round live implementer validation, and the first environment doctor baseline are complete; the next active track remains environment setup, doctor, and permanent documentation`
+- Current implementation mode: `launcher-backed live roles now use PTY transport plus file-backed handoff/result semantics; the first doctor/status surface now exists and the next work should widen environment productization beyond the baseline`
 - Primary source of truth for next work: `this file`
 - Filesystem/runtime source of truth: `workdir/spec/filesystem-runtime-model.md`
 - External runner session cleanup policy: `workdir/spec/external-runner-session-cleanup-policy.md`
@@ -31,7 +31,7 @@ Status markers:
 
 ## Current Immediate Next Step
 
-- `[in_progress]` open `Phase 43` and start with `Environment Doctor Baseline`
+- `[in_progress]` continue `Phase 43` after completing `Environment Doctor Baseline`
 
 ## Reserved Next Phase
 
@@ -801,6 +801,21 @@ Status markers:
   - `[done]` document the validation result in `workdir/spec/phase42-real-implementer-two-round-validation.md`
   - `[done]` assess `Phase 42` completion in `workdir/spec/phase42-assessment.md`
 
+## Phase 43. Environment Setup, Doctor, And Permanent Documentation
+
+- Status: `[in_progress]`
+- Goal: produce the first durable environment tooling and later reconcile it into permanent docs
+- Exit criteria:
+  - the first concrete doctor slice is implemented and validated
+  - the next concrete setup/docs slice is chosen
+  - permanent documentation work is still deferred until implementation reconciliation
+- Remaining:
+  - `[done]` choose the first concrete `Phase 43` slice
+  - `[done]` implement the `Environment Doctor Baseline` slice
+  - `[done]` validate the `Environment Doctor Baseline` slice
+  - `[done]` document the baseline in `workdir/spec/phase43-environment-doctor-baseline.md`
+  - `[pending]` choose the next concrete `Phase 43` slice
+
 ## Immediate Next Steps
 
 1. `[done]` Complete the roadmap through `Phase 16. Knowledge Base Structure And Curation`.
@@ -960,8 +975,11 @@ Status markers:
 157. `[done]` Choose the first concrete `Phase 42` slice.
 158. `[done]` Implement and run the `Live Agent Readiness Probe` groundwork slice.
 159. `[done]` Document readiness results and environmental blockers.
-160. `[pending]` Implement and run the `Implementer Two-Round Live Validation` slice.
-161. `[pending]` Document the validation result and resulting operational gaps.
+160. `[done]` Implement and run the `Implementer Two-Round Live Validation` slice.
+161. `[done]` Document the validation result and resulting operational gaps.
+162. `[done]` Implement the `Environment Doctor Baseline` slice.
+163. `[done]` Validate the `Environment Doctor Baseline` slice.
+164. `[pending]` Choose the next concrete `Phase 43` slice.
 
 ## What Was Going Wrong
 
