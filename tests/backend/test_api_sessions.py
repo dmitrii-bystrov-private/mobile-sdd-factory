@@ -57,6 +57,7 @@ try:
         DEFAULT_SESSION_ROLES,
         PROPOSAL_CONTEXT_WORKER_ROLE,
         REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        SPEC_VERIFIER_WORKER_ROLE,
     )
     from backend.roles.launcher import RoleLauncherManager
     from backend.roles.workspace import RoleWorkspaceManager
@@ -508,7 +509,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("constraints_requested", response.followup_event_type)
         self.assertEqual("constraints_requested", response.session.current_stage)
 
-    def test_constraints_completed_event_returns_story_spec_handoff(self) -> None:
+    def test_constraints_completed_event_returns_spec_verification_handoff(self) -> None:
         prepare_response = create_session(
             CreateSessionRequest(
                 task_key="IOS-40003CONSTR",
@@ -550,6 +551,63 @@ class SessionApiTests(unittest.TestCase):
                 session_id=prepare_response.session.id,
                 event_type="constraints_completed",
                 payload={"summary": "Constraints prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("spec_verification_requested", response.followup_event_type)
+        self.assertEqual("spec_verification_requested", response.session.current_stage)
+
+    def test_spec_verification_completed_event_returns_story_spec_handoff(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003VERIFY",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003VERIFY"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="requirements_completed",
+                payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="acceptance_criteria_completed",
+                payload={"summary": "Acceptance prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="constraints_completed",
+                payload={"summary": "Constraints prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="spec_verification_completed",
+                payload={"summary": "Planning verified"},
             ),
             dependencies=self.dependencies,
         )
@@ -601,6 +659,14 @@ class SessionApiTests(unittest.TestCase):
             ),
             dependencies=self.dependencies,
         )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="spec_verification_completed",
+                payload={"summary": "Planning verified"},
+            ),
+            dependencies=self.dependencies,
+        )
 
         response = inject_event(
             InjectEventRequest(
@@ -617,7 +683,7 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertEqual("implementation_requested", response.followup_event_type)
         self.assertEqual("implementation_requested", response.session.current_stage)
-        self.assertEqual(6, len(work_items_response.items))
+        self.assertEqual(7, len(work_items_response.items))
 
     def test_start_subtask_graph_route_converts_story_session(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -668,6 +734,14 @@ class SessionApiTests(unittest.TestCase):
         inject_event(
             InjectEventRequest(
                 session_id=create_response.session.id,
+                event_type="spec_verification_completed",
+                payload={"summary": "Planning verified"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
                 event_type="story_spec_completed",
                 payload={"summary": "Split work into subtasks"},
             ),
@@ -699,7 +773,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("subtask_graph_requested", response.event_type)
         self.assertEqual("subtask_implementation_requested", response.followup_event_type)
         self.assertEqual("subtask_implementation_requested", response.session.current_stage)
-        self.assertEqual(7, len(work_items_response.items))
+        self.assertEqual(8, len(work_items_response.items))
 
     def test_subtask_completed_event_keeps_story_session_in_subtask_lane(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -745,6 +819,14 @@ class SessionApiTests(unittest.TestCase):
                 session_id=create_response.session.id,
                 event_type="constraints_completed",
                 payload={"summary": "Constraints prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="spec_verification_completed",
+                payload={"summary": "Planning verified"},
             ),
             dependencies=self.dependencies,
         )

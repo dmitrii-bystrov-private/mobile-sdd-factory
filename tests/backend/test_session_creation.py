@@ -14,6 +14,7 @@ from backend.roles.contracts import (
     CONSTRAINTS_WORKER_ROLE,
     PROPOSAL_CONTEXT_WORKER_ROLE,
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+    SPEC_VERIFIER_WORKER_ROLE,
     STORY_SPEC_WORKER_ROLE,
 )
 from backend.roles.launcher import RoleLauncherManager
@@ -900,7 +901,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Acceptance criteria summary: Acceptance prepared", sent_inputs[0])
         self.assertIn("Highlighted cases: Retry + empty state", sent_inputs[0])
 
-    def test_constraints_completed_moves_story_session_to_story_spec(self) -> None:
+    def test_constraints_completed_moves_story_session_to_spec_verification(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003CONSTR",
             workflow_profile="story_full",
@@ -929,6 +930,62 @@ class SessionCreationTests(unittest.TestCase):
             payload={"summary": "Respect analytics + assembly conventions", "key_constraints": "Reuse existing assembly pattern and analytics hooks"},
         )
         work_items = self.work_item_repository.list_for_session(session.id)
+        verifier_role = self.role_repository.get_by_name(session.id, SPEC_VERIFIER_WORKER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(verifier_role.runtime_handle)
+
+        self.assertEqual("spec_verification_requested", updated_session.current_stage)
+        self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, updated_session.current_owner)
+        self.assertEqual("spec_verification_requested", followup_event.event_type)
+        self.assertEqual(
+            [
+                ("acceptance_criteria", "completed"),
+                ("constraints", "completed"),
+                ("proposal_context", "completed"),
+                ("requirements", "completed"),
+                ("spec_verification", "assigned"),
+            ],
+            sorted((item.work_type, item.status.value) for item in work_items),
+        )
+        self.assertEqual("running", verifier_role.status.value)
+        self.assertEqual(1, len(sent_inputs))
+        self.assertIn("Verify the assembled planning package for story IOS-30003CONSTR", sent_inputs[0])
+        self.assertIn("Constraints summary: Respect analytics + assembly conventions", sent_inputs[0])
+        self.assertIn("Key constraints: Reuse existing assembly pattern and analytics hooks", sent_inputs[0])
+
+    def test_spec_verification_completed_moves_story_session_to_story_spec(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003VERIFY",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003VERIFY")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Scope clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="requirements_completed",
+            payload={"summary": "Requirements clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="acceptance_criteria_completed",
+            payload={"summary": "Acceptance prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning package is coherent", "verified_focus": "navigation + state ownership"},
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
         spec_role = self.role_repository.get_by_name(session.id, STORY_SPEC_WORKER_ROLE)
         sent_inputs = self.session_backend.get_sent_inputs(spec_role.runtime_handle)
 
@@ -941,15 +998,15 @@ class SessionCreationTests(unittest.TestCase):
                 ("constraints", "completed"),
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
+                ("spec_verification", "completed"),
                 ("story_spec", "assigned"),
             ],
             sorted((item.work_type, item.status.value) for item in work_items),
         )
-        self.assertEqual("running", spec_role.status.value)
         self.assertEqual(1, len(sent_inputs))
-        self.assertIn("Prepare a concise implementation spec for story IOS-30003CONSTR before coding.", sent_inputs[0])
-        self.assertIn("Constraints summary: Respect analytics + assembly conventions", sent_inputs[0])
-        self.assertIn("Key constraints: Reuse existing assembly pattern and analytics hooks", sent_inputs[0])
+        self.assertIn("Prepare a concise implementation spec for story IOS-30003VERIFY before coding.", sent_inputs[0])
+        self.assertIn("Planning verification summary: Planning package is coherent", sent_inputs[0])
+        self.assertIn("Verified focus: navigation + state ownership", sent_inputs[0])
 
     def test_story_spec_completed_moves_session_to_implementation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -978,6 +1035,11 @@ class SessionCreationTests(unittest.TestCase):
             event_type="constraints_completed",
             payload={"summary": "Constraints prepared"},
         )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning verified"},
+        )
 
         updated_session, followup_event = self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -1004,6 +1066,7 @@ class SessionCreationTests(unittest.TestCase):
                 ("implementation", "assigned"),
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
+                ("spec_verification", "completed"),
                 ("story_spec", "completed"),
             ],
             sorted((item.work_type, item.status.value) for item in work_items),
@@ -1025,6 +1088,9 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "constraints_requested",
                 "constraints_completed",
+                "role_input_dispatched",
+                "spec_verification_requested",
+                "spec_verification_completed",
                 "role_input_dispatched",
                 "story_spec_requested",
                 "story_spec_completed",
@@ -1085,6 +1151,11 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.coordinator.handle_operator_event(
             session_id=session.id,
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning verified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
             event_type="story_spec_completed",
             payload={"summary": "Split into focused subtasks"},
         )
@@ -1116,6 +1187,7 @@ class SessionCreationTests(unittest.TestCase):
                 ("constraints", "completed"),
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
+                ("spec_verification", "completed"),
                 ("story_spec", "completed"),
                 ("subtask_implementation", "assigned"),
                 ("subtask_implementation", "unassigned"),
@@ -1153,6 +1225,11 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.coordinator.handle_operator_event(
             session_id=session.id,
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning verified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
             event_type="story_spec_completed",
             payload={"summary": "Split into focused subtasks"},
         )
@@ -1179,7 +1256,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("subtask_implementation_requested", followup_event.event_type)
         self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
         self.assertEqual(
-            ["assigned", "completed", "completed", "completed", "completed", "completed", "completed"],
+            ["assigned", "completed", "completed", "completed", "completed", "completed", "completed", "completed"],
             sorted(item.status.value for item in work_items),
         )
 
@@ -1466,8 +1543,19 @@ class SessionCreationTests(unittest.TestCase):
         )
 
         self.assertEqual("constraints_completed", mapped_event.event_type)
+        self.assertEqual("spec_verification_requested", followup_event.event_type)
+        self.assertEqual("spec_verification_requested", constraints_session.current_stage)
+
+        verifier_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=SPEC_VERIFIER_WORKER_ROLE,
+            output_type="completed",
+            payload={"summary": "Planning verified"},
+        )
+
+        self.assertEqual("spec_verification_completed", mapped_event.event_type)
         self.assertEqual("story_spec_requested", followup_event.event_type)
-        self.assertEqual("story_spec_requested", constraints_session.current_stage)
+        self.assertEqual("story_spec_requested", verifier_session.current_stage)
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
@@ -1497,6 +1585,9 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "constraints_requested",
                 "constraints_completed",
+                "role_input_dispatched",
+                "spec_verification_requested",
+                "spec_verification_completed",
                 "role_input_dispatched",
                 "story_spec_requested",
                 "story_spec_completed",

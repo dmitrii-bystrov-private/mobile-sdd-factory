@@ -134,6 +134,21 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
             "- Project knowledge base: `{task_knowledge_root}`",
         ]
+    if role_name == "spec-verifier-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Proposal input: `{task_snapshot_root}/spec/proposal.md`",
+            "- Requirements input: `{task_snapshot_root}/spec/requirements.md`",
+            "- Acceptance criteria input: `{task_snapshot_root}/spec/acceptance_criteria.md`",
+            "- Constraints input: `{task_snapshot_root}/spec/constraints.md`",
+            "- Verification target: `{task_snapshot_root}/spec/spec_verification.md`",
+            "- Context directory: `{task_snapshot_root}/spec/context`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            "- Project knowledge base: `{task_knowledge_root}`",
+        ]
     if role_name == "story-spec-worker":
         return [
             "- Task repo worktree: `{task_repo_root}`",
@@ -199,6 +214,12 @@ def _role_responsibility(role_name: str) -> list[str]:
         return [
             "- You execute one bounded constraints-preparation task for one story session.",
             "- Produce the routed constraints result and then stop; you do not remain the owner of later planning or implementation work.",
+            "- You should not assume persistence across unrelated tasks or later implementation rounds.",
+        ]
+    if role_name == "spec-verifier-worker":
+        return [
+            "- You execute one bounded planning-verification task for one story session.",
+            "- Produce the routed verification result and then stop; you do not remain the owner of later planning or implementation work.",
             "- You should not assume persistence across unrelated tasks or later implementation rounds.",
         ]
     if role_name == "story-spec-worker":
@@ -273,6 +294,12 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Treat this role as a bounded one-shot worker: prepare implementation constraints, write the routed result, and exit.",
             "- Start from the proposal, clarified requirements, and acceptance criteria and surface architecture, convention, dependency, and integration constraints that should shape the final story spec.",
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than rediscovering constraints.",
+        ]
+    if role_name == "spec-verifier-worker":
+        return [
+            "- Treat this role as a bounded one-shot worker: verify the assembled planning package, write the routed result, and exit.",
+            "- Start from the proposal, requirements, acceptance criteria, and constraints and check that the package is coherent, complete enough for implementation, and free of obvious contradictions.",
+            "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than re-checking the planning package.",
         ]
     if role_name == "story-spec-worker":
         return [
