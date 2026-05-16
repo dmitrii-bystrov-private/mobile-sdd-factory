@@ -375,11 +375,16 @@ class TmuxBackendTests(unittest.TestCase):
         ready = backend._normalize_terminal_text(
             "❯  try \"fix lint errors\"\n⏵⏵ auto mode on (shift+tab to cycle) ◐ medium · /effort [sonnet 4.6]"
         )
+        status_signal = backend._normalize_terminal_text(
+            "❯ .\n\n✻ Churned for 5s"
+        )
 
         self.assertTrue(backend._contains_claude_trust_prompt(trust))
         self.assertTrue(backend._contains_claude_auth_blocker(auth))
         self.assertTrue(backend._contains_generic_confirmation_blocker(confirmation))
         self.assertTrue(backend._contains_claude_ready_prompt(ready))
+        self.assertTrue(backend._contains_runner_status_signal(status_signal))
+        self.assertTrue(backend._contains_claude_ready_prompt(status_signal))
 
 
 if __name__ == "__main__":

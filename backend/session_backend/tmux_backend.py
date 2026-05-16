@@ -61,6 +61,7 @@ class TmuxSessionBackend(SessionBackend):
     _ANSI_CSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
     _ANSI_OSC_RE = re.compile(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\\\)")
     _ANSI_ESC_RE = re.compile(r"\x1B[@-_]")
+    _RUNNER_STATUS_SIGNAL_RE = re.compile(r"✻\s+\S+\s+for\s+\d+s")
 
     def _sanitize(self, value: str) -> str:
         return re.sub(r"[^A-Za-z0-9_-]+", "-", value)
@@ -440,6 +441,7 @@ class TmuxSessionBackend(SessionBackend):
             ("auto mode on" in normalized_text and "ctrl+g to edit in vim" in normalized_text)
             or ("auto mode on" in normalized_text and "shift+tab to cycle" in normalized_text)
             or ("ctrl+g to edit in vim" in normalized_text)
+            or ("❯" in normalized_text and self._contains_runner_status_signal(normalized_text))
         )
 
     def _contains_claude_auth_blocker(self, normalized_text: str) -> bool:
@@ -451,3 +453,6 @@ class TmuxSessionBackend(SessionBackend):
             and "esc to cancel" in normalized_text
             and "trust this folder" not in normalized_text
         )
+
+    def _contains_runner_status_signal(self, normalized_text: str) -> bool:
+        return self._RUNNER_STATUS_SIGNAL_RE.search(normalized_text) is not None
