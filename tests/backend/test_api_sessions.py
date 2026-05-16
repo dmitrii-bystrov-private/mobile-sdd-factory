@@ -1067,6 +1067,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(response.created)
         self.assertEqual("jira_subtasks_created", response.event_type)
         self.assertTrue(any(item.artifact_type == "jira_subtasks_stdout" for item in artifacts_response.items))
+        self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stdout" for item in artifacts_response.items))
 
     def test_list_knowledge_route_returns_repo_visible_items(self) -> None:
         from backend.api.routes_sessions import prepare_session

@@ -681,8 +681,13 @@ class CoordinatorService:
         self,
         session_id: int,
     ) -> tuple[Session, Event]:
-        if self.jira_adapter is None or self.artifacts_root is None or self.workdir_root is None:
-            raise IntakeError("Coordinator is missing Jira adapter, workdir root, or artifact root")
+        if (
+            self.jira_adapter is None
+            or self.snapshot_adapter is None
+            or self.artifacts_root is None
+            or self.workdir_root is None
+        ):
+            raise IntakeError("Coordinator is missing Jira adapter, snapshot adapter, workdir root, or artifact root")
 
         session = self._get_session_or_raise(session_id)
         if session.workflow_profile != "story_full":
@@ -732,6 +737,47 @@ class CoordinatorService:
             },
         )
 
+        snapshot_refresh_exit_code: int | None = None
+        if result.ok:
+            refresh_result = self.snapshot_adapter.run(session.task_key)
+            snapshot_refresh_exit_code = refresh_result.returncode
+            refresh_stdout_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "subtasks-batch",
+                "refresh-snapshot.stdout.log",
+                refresh_result.stdout,
+            )
+            refresh_stderr_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "subtasks-batch",
+                "refresh-snapshot.stderr.log",
+                refresh_result.stderr,
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="subtasks-batch",
+                artifact_type="subtasks_snapshot_stdout",
+                path=str(refresh_stdout_path),
+                metadata={
+                    "task_key": session.task_key,
+                    "command": refresh_result.command,
+                    "returncode": refresh_result.returncode,
+                },
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="subtasks-batch",
+                artifact_type="subtasks_snapshot_stderr",
+                path=str(refresh_stderr_path),
+                metadata={
+                    "task_key": session.task_key,
+                    "command": refresh_result.command,
+                    "returncode": refresh_result.returncode,
+                },
+            )
+
         event_type = "jira_subtasks_created" if result.ok else "jira_subtasks_creation_failed"
         event = self._append_event(
             session_id=session.id,
@@ -740,6 +786,7 @@ class CoordinatorService:
             payload={
                 "task_key": session.task_key,
                 "returncode": result.returncode,
+                "snapshot_refresh_exit_code": snapshot_refresh_exit_code,
                 "current_stage": session.current_stage,
                 "status": session.status.value,
             },

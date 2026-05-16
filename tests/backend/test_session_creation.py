@@ -1323,6 +1323,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("jira_subtasks_created", event.event_type)
         self.assertTrue(any(item.artifact_type == "jira_subtasks_stdout" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "jira_subtasks_stderr" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stdout" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stderr" for item in artifacts))
+        self.assertEqual(0, event.payload["snapshot_refresh_exit_code"])
 
     def test_knowledge_is_repo_visible_markdown(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003KNOW")
