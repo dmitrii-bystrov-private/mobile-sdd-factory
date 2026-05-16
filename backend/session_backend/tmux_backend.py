@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 import os
+import pty
 import re
 import shutil
 import subprocess
@@ -28,6 +29,7 @@ class TmuxSessionBackend(SessionBackend):
         self.last_spawn_commands: dict[str, list[str]] = {}
         self.session_runtime_roots: dict[str, Path] = {}
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
+        self.pty_master_fds: dict[str, int] = {}
         self.session_role_ids: dict[str, set[str]] = defaultdict(set)
         self._available = shutil.which("tmux") is not None
         self._effective_mode = self._resolve_mode(mode)
@@ -41,6 +43,8 @@ class TmuxSessionBackend(SessionBackend):
             return "recording"
         if mode == "process":
             return "process"
+        if mode == "pty":
+            return "pty"
         if mode == "tmux":
             return "tmux"
         return "tmux" if self._available else "process"
@@ -115,6 +119,21 @@ class TmuxSessionBackend(SessionBackend):
             os.set_blocking(process.stdout.fileno(), False)
             self.processes[role_id] = process
             self.session_role_ids[session.session_id].add(role_id)
+        elif self._effective_mode == "pty":
+            master_fd, slave_fd = pty.openpty()
+            process = subprocess.Popen(
+                role_command,
+                cwd=start_directory,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                close_fds=True,
+            )
+            os.close(slave_fd)
+            os.set_blocking(master_fd, False)
+            self.processes[role_id] = process
+            self.pty_master_fds[role_id] = master_fd
+            self.session_role_ids[session.session_id].add(role_id)
         self.last_spawn_commands[role_id] = role_command
         if start_directory is not None:
             self.last_captured_output.setdefault(role_id, "")
@@ -137,6 +156,11 @@ class TmuxSessionBackend(SessionBackend):
                 raise RuntimeError(f"Unknown process role runtime: {role.role_id}")
             process.stdin.write((text + "\n").encode())
             process.stdin.flush()
+        elif self._effective_mode == "pty":
+            master_fd = self.pty_master_fds.get(role.role_id)
+            if master_fd is None:
+                raise RuntimeError(f"Unknown PTY role runtime: {role.role_id}")
+            os.write(master_fd, (text + "\n").encode())
 
     def read_output(self, role: RuntimeRoleHandle) -> list[RuntimeOutputChunk]:
         if self._effective_mode == "recording":
@@ -151,6 +175,24 @@ class TmuxSessionBackend(SessionBackend):
                 try:
                     data = os.read(process.stdout.fileno(), 65536)
                 except BlockingIOError:
+                    break
+                if not data:
+                    break
+                text = data.decode(errors="replace")
+                if text:
+                    chunks.append(RuntimeOutputChunk(role_id=role.role_id, text=text))
+            return chunks
+        if self._effective_mode == "pty":
+            master_fd = self.pty_master_fds.get(role.role_id)
+            if master_fd is None:
+                return []
+            chunks: list[RuntimeOutputChunk] = []
+            while True:
+                try:
+                    data = os.read(master_fd, 65536)
+                except BlockingIOError:
+                    break
+                except OSError:
                     break
                 if not data:
                     break
@@ -195,6 +237,20 @@ class TmuxSessionBackend(SessionBackend):
                 if process.stdout is not None:
                     process.stdout.close()
             self.session_role_ids.get(role.session_id, set()).discard(role.role_id)
+        elif self._effective_mode == "pty":
+            process = self.processes.pop(role.role_id, None)
+            master_fd = self.pty_master_fds.pop(role.role_id, None)
+            if process is not None:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+            if master_fd is not None:
+                os.close(master_fd)
+            self.session_role_ids.get(role.session_id, set()).discard(role.role_id)
 
     def stop_session(self, session: RuntimeSessionHandle) -> None:
         if self._effective_mode == "tmux":
@@ -217,6 +273,21 @@ class TmuxSessionBackend(SessionBackend):
                         process.stdin.close()
                     if process.stdout is not None:
                         process.stdout.close()
+            self.session_role_ids.pop(session.session_id, None)
+        elif self._effective_mode == "pty":
+            for role_id in list(self.session_role_ids.get(session.session_id, set())):
+                process = self.processes.pop(role_id, None)
+                master_fd = self.pty_master_fds.pop(role_id, None)
+                if process is not None:
+                    if process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=5)
+                if master_fd is not None:
+                    os.close(master_fd)
             self.session_role_ids.pop(session.session_id, None)
         self.session_runtime_roots.pop(session.session_id, None)
 
