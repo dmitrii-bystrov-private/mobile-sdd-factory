@@ -18,6 +18,28 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - promoted the runtime-management and role-configuration gaps into the plan as an explicit future phase
+    - reserved:
+      - `Phase 44. Runtime Management, Role Configuration, And MCP Isolation`
+    - selected the next concrete `Phase 43` slice:
+      - `Runtime Capabilities Baseline`
+    - recorded that permanent docs remain deferred until the end and should not drive current implementation order
+  - current_state:
+    - setup/doctor is still the active phase
+    - the next practical work item is to expose real runner/model/effort capability data instead of hardcoded or legacy values
+    - the next reserved phase now explicitly covers:
+      - runtime session management
+      - stop/restart semantics
+      - per-role runtime config
+      - role-scoped MCP isolation
+      - codex parity
+  - next:
+    - implement `Runtime Capabilities Baseline`
+  - blockers:
+    - none at the planning level
+
+- date: `2026-05-17`
+  - done:
     - implemented `Local Toolchain Doctor Expansion`
     - extended doctor checks with:
       - local `.venv`

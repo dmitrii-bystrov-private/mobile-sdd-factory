@@ -21,8 +21,8 @@ Status markers:
 ## Current Position
 
 - Current phase: `Phase 43. Environment Setup, Doctor, And Permanent Documentation`
-- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer completion, file-backed role result handling, real two-round live implementer validation, and the first environment doctor/baseline guidance layers are complete; the next active track remains environment setup, doctor, and permanent documentation`
-- Current implementation mode: `launcher-backed live roles now use PTY transport plus file-backed handoff/result semantics; the first doctor/status surface now exists and the next work should widen environment productization beyond the baseline`
+- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer completion, file-backed role result handling, real two-round live implementer validation, and the first environment doctor/bootstrap surfaces are complete; the next active track remains environment setup plus runtime capability productization, while permanent docs stay deferred until the end`
+- Current implementation mode: `launcher-backed live roles now use PTY transport plus file-backed handoff/result semantics; doctor and bootstrap guidance exist; the next useful work should expose real runner/model/effort capability data and then move into runtime management, role configuration, MCP isolation, and codex parity`
 - Primary source of truth for next work: `this file`
 - Filesystem/runtime source of truth: `workdir/spec/filesystem-runtime-model.md`
 - External runner session cleanup policy: `workdir/spec/external-runner-session-cleanup-policy.md`
@@ -31,11 +31,11 @@ Status markers:
 
 ## Current Immediate Next Step
 
-- `[in_progress]` continue `Phase 43` after completing the baseline doctor and its first operator-facing surface
+- `[in_progress]` continue `Phase 43` by implementing `Runtime Capabilities Baseline`
 
 ## Reserved Next Phase
 
-- `[pending]` no later named phase reserved yet
+- `[pending]` `Phase 44. Runtime Management, Role Configuration, And MCP Isolation`
 
 ## Phase 1. Architecture Contract
 
