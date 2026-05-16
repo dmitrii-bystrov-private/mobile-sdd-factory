@@ -57,6 +57,18 @@ class TmuxBackendTests(unittest.TestCase):
             self.assertEqual(["first line", "second line"], [chunk.text for chunk in chunks])
             self.assertEqual([], backend.read_output(role))
 
+    def test_normalize_terminal_text_strips_ansi_noise(self) -> None:
+        backend = TmuxSessionBackend(mode="recording")
+        noisy = (
+            "\x1b[1CQuick\x1b[1Csafety\x1b[1Ccheck:\x1b[1CIs\x1b[1Cthis\x1b[1Ca\x1b[1Cproject\n"
+            "\x1b]8;id=zaxmda;https://code.claude.com/docs/en/security\x07Security guide\x1b]8;;\x07\n"
+            "\x1b[1CEnter\x1b[1Cto\x1b[1Cconfirm\x1b[1C·\x1b[1CEsc\x1b[1Cto\x1b[1Ccancel\n"
+        )
+        normalized = backend._normalize_terminal_text(noisy)
+        self.assertIn("quick safety check", normalized)
+        self.assertIn("enter to confirm", normalized)
+        self.assertIn("esc to cancel", normalized)
+
     def test_process_mode_keeps_persistent_subprocess_across_rounds(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir)
@@ -300,6 +312,22 @@ class TmuxBackendTests(unittest.TestCase):
             self.assertIn("SDD_OUTPUT", completion)
 
             backend.stop_session(session)
+
+    def test_ansi_normalized_prompt_detection_helpers(self) -> None:
+        backend = TmuxSessionBackend(mode="recording")
+        trust = backend._normalize_terminal_text(
+            "\x1b[1CQuick\x1b[1Csafety\x1b[1Ccheck\x1b[1Ctrust\x1b[1Cthis\x1b[1Cfolder"
+        )
+        auth = backend._normalize_terminal_text(
+            "\x1b[39C1\x1b[1Cclaude.ai\x1b[1Cconnector\x1b[1Cneeds\x1b[1Cauth\x1b[1C·\x1b[1C/mcp"
+        )
+        confirmation = backend._normalize_terminal_text(
+            "Confirm tool execution?\nEnter to confirm · Esc to cancel"
+        )
+
+        self.assertTrue(backend._contains_claude_trust_prompt(trust))
+        self.assertTrue(backend._contains_claude_auth_blocker(auth))
+        self.assertTrue(backend._contains_generic_confirmation_blocker(confirmation))
 
 
 if __name__ == "__main__":

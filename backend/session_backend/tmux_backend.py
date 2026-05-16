@@ -56,8 +56,19 @@ class TmuxSessionBackend(SessionBackend):
             return "tmux"
         return "tmux" if self._available else "process"
 
+    _ANSI_CSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+    _ANSI_OSC_RE = re.compile(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\\\)")
+    _ANSI_ESC_RE = re.compile(r"\x1B[@-_]")
+
     def _sanitize(self, value: str) -> str:
         return re.sub(r"[^A-Za-z0-9_-]+", "-", value)
+
+    def _normalize_terminal_text(self, text: str) -> str:
+        without_osc = self._ANSI_OSC_RE.sub(" ", text)
+        without_csi = self._ANSI_CSI_RE.sub(" ", without_osc)
+        without_esc = self._ANSI_ESC_RE.sub(" ", without_csi)
+        without_controls = without_esc.replace("\r", " ").replace("\n", " ")
+        return re.sub(r"\s+", " ", without_controls).strip().lower()
 
     def _task_runtime_root(self, task_key: str) -> Path:
         return self.runtime_root / task_key / "runtime"
@@ -344,20 +355,22 @@ class TmuxSessionBackend(SessionBackend):
         synthetic_markers: list[str] = []
         blocker_detected = False
 
+        normalized = self._normalize_terminal_text(accumulated)
+
         if not self.pty_role_ready.get(role_id, False):
             if (
                 not self.pty_trust_prompt_handled.get(role_id, False)
-                and self._contains_claude_trust_prompt(accumulated)
+                and self._contains_claude_trust_prompt(normalized)
             ):
                 master_fd = self.pty_master_fds.get(role_id)
                 if master_fd is not None:
                     os.write(master_fd, b"1\n")
                     self.pty_trust_prompt_handled[role_id] = True
-            if self._contains_claude_ready_prompt(accumulated):
+            if self._contains_claude_ready_prompt(normalized):
                 self.pty_role_ready[role_id] = True
         if (
             not self.pty_auth_blocker_emitted.get(role_id, False)
-            and self._contains_claude_auth_blocker(accumulated)
+            and self._contains_claude_auth_blocker(normalized)
         ):
             self.pty_auth_blocker_emitted[role_id] = True
             blocker_detected = True
@@ -367,7 +380,7 @@ class TmuxSessionBackend(SessionBackend):
         elif (
             self.pty_role_ready.get(role_id, False)
             and not self.pty_confirmation_blocker_emitted.get(role_id, False)
-            and self._contains_generic_confirmation_blocker(accumulated)
+            and self._contains_generic_confirmation_blocker(normalized)
         ):
             self.pty_confirmation_blocker_emitted[role_id] = True
             blocker_detected = True
@@ -381,21 +394,25 @@ class TmuxSessionBackend(SessionBackend):
                     os.write(master_fd, (buffered_text + "\n").encode())
         return synthetic_markers
 
-    def _contains_claude_trust_prompt(self, text: str) -> bool:
-        return "Quick" in text and "safety" in text and "trust" in text and "folder" in text
-
-    def _contains_claude_ready_prompt(self, text: str) -> bool:
+    def _contains_claude_trust_prompt(self, normalized_text: str) -> bool:
         return (
-            ("auto mode on" in text and "ctrl+g to edit in Vim" in text)
-            or ("[Sonnet" in text and "ctrl+g to edit in Vim" in text)
+            "quick safety check" in normalized_text
+            and "trust" in normalized_text
+            and "folder" in normalized_text
         )
 
-    def _contains_claude_auth_blocker(self, text: str) -> bool:
-        return "needs auth" in text and "/mcp" in text
-
-    def _contains_generic_confirmation_blocker(self, text: str) -> bool:
+    def _contains_claude_ready_prompt(self, normalized_text: str) -> bool:
         return (
-            "Enter to confirm" in text
-            and "Esc to cancel" in text
-            and "trust this folder" not in text
+            ("auto mode on" in normalized_text and "ctrl+g to edit in vim" in normalized_text)
+            or ("sonnet" in normalized_text and "ctrl+g to edit in vim" in normalized_text)
+        )
+
+    def _contains_claude_auth_blocker(self, normalized_text: str) -> bool:
+        return "needs auth" in normalized_text and "/mcp" in normalized_text
+
+    def _contains_generic_confirmation_blocker(self, normalized_text: str) -> bool:
+        return (
+            "enter to confirm" in normalized_text
+            and "esc to cancel" in normalized_text
+            and "trust this folder" not in normalized_text
         )
