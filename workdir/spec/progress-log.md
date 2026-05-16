@@ -18,6 +18,28 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - exposed the environment doctor through product surfaces
+    - added backend route:
+      - `GET /operator/environment-doctor`
+    - added typed doctor response schema
+    - added UI sidebar panel:
+      - `EnvironmentDoctorPanel`
+    - integrated doctor loading into the operator console session page
+    - validated:
+      - `./.venv/bin/python -m unittest tests.backend.test_environment_doctor tests.backend.test_api_sessions`
+      - `./.venv/bin/python -m unittest discover -s tests/backend -p 'test_*.py'`
+      - `npm run build` in `ui/`
+  - current_state:
+    - `Phase 43` now has both CLI doctor and operator-facing doctor surface
+    - environment health is visible from the UI without leaving the factory console
+  - next:
+    - choose the next concrete `Phase 43` slice
+    - likely move next into setup/bootstrap guidance or stronger doctor semantics
+  - blockers:
+    - none for the doctor surface slice
+
+- date: `2026-05-17`
+  - done:
     - implemented `Environment Doctor Baseline`
     - added a factory-specific doctor surface:
       - `factory/doctor/run-doctor.sh`

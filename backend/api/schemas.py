@@ -110,6 +110,27 @@ class InteractiveStateSummaryResponse(BaseModel):
     needs_operator_input: bool = False
 
 
+class EnvironmentDoctorCheckResponse(BaseModel):
+    id: str
+    category: str
+    label: str
+    required: bool
+    status: str
+    details: str
+    value: str | None = None
+    source: str | None = None
+    hint: str | None = None
+
+
+class EnvironmentDoctorResponse(BaseModel):
+    overall_status: str
+    repo_root: str
+    required_ok: int
+    required_total: int
+    optional_warnings: int
+    checks: list[EnvironmentDoctorCheckResponse]
+
+
 class RoleResponse(BaseModel):
     id: int
     session_id: int

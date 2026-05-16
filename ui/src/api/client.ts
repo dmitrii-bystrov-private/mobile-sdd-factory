@@ -177,6 +177,27 @@ export const apiClient = {
     return request(`/sessions/${sessionId}/interactive-state`);
   },
 
+  getEnvironmentDoctor(): Promise<{
+    overall_status: string;
+    repo_root: string;
+    required_ok: number;
+    required_total: number;
+    optional_warnings: number;
+    checks: Array<{
+      id: string;
+      category: string;
+      label: string;
+      required: boolean;
+      status: string;
+      details: string;
+      value: string | null;
+      source: string | null;
+      hint: string | null;
+    }>;
+  }> {
+    return request("/operator/environment-doctor");
+  },
+
   listKnowledge(): Promise<{ items: KnowledgeItem[] }> {
     return request("/knowledge");
   },

@@ -1,6 +1,7 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 
 import { apiClient, openSessionEventStream } from "../api/client";
+import { EnvironmentDoctorPanel } from "../components/EnvironmentDoctorPanel";
 import { SessionDetail } from "../components/SessionDetail";
 import { KnowledgePanel } from "../components/KnowledgePanel";
 import { SessionList } from "../components/SessionList";
@@ -8,6 +9,7 @@ import { SessionStartForm } from "../components/SessionStartForm";
 import type {
   Artifact,
   ArtifactDetail,
+  EnvironmentDoctorSummary,
   EventItem,
   FollowupContext,
   InteractiveStateSummary,
@@ -273,6 +275,7 @@ export function SessionsPage(): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
+  const [doctorSummary, setDoctorSummary] = useState<EnvironmentDoctorSummary | null>(null);
   const [streamState, setStreamState] = useState<"idle" | "live" | "reconnecting">("idle");
   const [lastStreamEventType, setLastStreamEventType] = useState<string | null>(null);
   const [lastStreamEventId, setLastStreamEventId] = useState<number | null>(null);
@@ -287,8 +290,27 @@ export function SessionsPage(): JSX.Element {
     try {
       const sessionResponse = await apiClient.listSessions();
       const knowledgeResponse = await apiClient.listKnowledge();
+      const doctorResponse = await apiClient.getEnvironmentDoctor();
       setSessions(sessionResponse.items);
       setKnowledgeItems(knowledgeResponse.items);
+      setDoctorSummary({
+        overallStatus: doctorResponse.overall_status,
+        repoRoot: doctorResponse.repo_root,
+        requiredOk: doctorResponse.required_ok,
+        requiredTotal: doctorResponse.required_total,
+        optionalWarnings: doctorResponse.optional_warnings,
+        checks: doctorResponse.checks.map((check) => ({
+          id: check.id,
+          category: check.category,
+          label: check.label,
+          required: check.required,
+          status: check.status,
+          details: check.details,
+          value: check.value,
+          source: check.source,
+          hint: check.hint,
+        })),
+      });
       startTransition(() => {
         setSelectedSessionId((current) => current ?? sessionResponse.items[0]?.id ?? null);
       });
@@ -455,6 +477,7 @@ export function SessionsPage(): JSX.Element {
             selectedSessionId={selectedSessionId}
             sessions={sessions}
           />
+          <EnvironmentDoctorPanel doctorSummary={doctorSummary} />
           <KnowledgePanel items={knowledgeItems} />
         </div>
         {loading ? (

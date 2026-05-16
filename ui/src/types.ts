@@ -109,6 +109,27 @@ export type InteractiveStateSummary = {
   needsOperatorInput: boolean;
 };
 
+export type EnvironmentDoctorCheck = {
+  id: string;
+  category: string;
+  label: string;
+  required: boolean;
+  status: string;
+  details: string;
+  value?: string | null;
+  source?: string | null;
+  hint?: string | null;
+};
+
+export type EnvironmentDoctorSummary = {
+  overallStatus: string;
+  repoRoot: string;
+  requiredOk: number;
+  requiredTotal: number;
+  optionalWarnings: number;
+  checks: EnvironmentDoctorCheck[];
+};
+
 export type JiraSubtasksSummary = {
   available: boolean;
   totalCount: number;

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.api.routes_sessions import to_session_response
 from backend.api.schemas import (
     CompleteDocHarvestRequest,
     CompleteDocHarvestResponse,
+    EnvironmentDoctorResponse,
     CreateSubtasksFromPlanRequest,
     CreateSubtasksFromPlanResponse,
     RefreshSubtaskStateRequest,
@@ -44,12 +47,26 @@ from backend.api.schemas import (
 )
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
+from factory.doctor.environment_doctor import build_report
 
 router = APIRouter(prefix="/operator", tags=["operator"])
 
 
 def get_dependencies(request: Request) -> AppDependencies:
     return request.app.state.dependencies
+
+
+@router.get("/environment-doctor", response_model=EnvironmentDoctorResponse)
+def get_environment_doctor(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> EnvironmentDoctorResponse:
+    repo_root = (
+        dependencies.config.repo_root
+        if dependencies.config is not None
+        else Path(__file__).resolve().parents[2]
+    )
+    report = build_report(repo_root=repo_root)
+    return EnvironmentDoctorResponse(**report)
 
 
 @router.post("/pause-session", response_model=PauseSessionResponse)

@@ -31,7 +31,7 @@ Status markers:
 
 ## Current Immediate Next Step
 
-- `[in_progress]` continue `Phase 43` after completing `Environment Doctor Baseline`
+- `[in_progress]` continue `Phase 43` after completing the baseline doctor and its first operator-facing surface
 
 ## Reserved Next Phase
 
@@ -814,6 +814,8 @@ Status markers:
   - `[done]` implement the `Environment Doctor Baseline` slice
   - `[done]` validate the `Environment Doctor Baseline` slice
   - `[done]` document the baseline in `workdir/spec/phase43-environment-doctor-baseline.md`
+  - `[done]` expose the doctor baseline through backend/UI surface
+  - `[done]` document the surface in `workdir/spec/phase43-doctor-surface.md`
   - `[pending]` choose the next concrete `Phase 43` slice
 
 ## Immediate Next Steps
@@ -979,7 +981,8 @@ Status markers:
 161. `[done]` Document the validation result and resulting operational gaps.
 162. `[done]` Implement the `Environment Doctor Baseline` slice.
 163. `[done]` Validate the `Environment Doctor Baseline` slice.
-164. `[pending]` Choose the next concrete `Phase 43` slice.
+164. `[done]` Expose the doctor baseline through backend/UI surface.
+165. `[pending]` Choose the next concrete `Phase 43` slice.
 
 ## What Was Going Wrong
 

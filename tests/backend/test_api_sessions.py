@@ -3,6 +3,7 @@ import json
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 try:
     from backend.api.sse import SessionEventBus
@@ -36,6 +37,7 @@ try:
     from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
     from backend.api.routes_operator import create_knowledge, create_subtasks_from_plan
+    from backend.api.routes_operator import get_environment_doctor
     from backend.api.routes_operator import refresh_subtask_state
     from backend.api.routes_operator import send_to_test
     from backend.api.routes_operator import start_subtask_graph
@@ -1852,6 +1854,37 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertFalse(response.available)
         self.assertFalse(response.needs_operator_input)
+
+    def test_get_environment_doctor_route_returns_report(self) -> None:
+        fake_report = {
+            "overall_status": "warn",
+            "repo_root": self.temp_dir.name,
+            "required_ok": 2,
+            "required_total": 3,
+            "optional_warnings": 1,
+            "checks": [
+                {
+                    "id": "env.SDD_WORKDIR",
+                    "category": "environment",
+                    "label": "Task workdir root",
+                    "required": True,
+                    "status": "ok",
+                    "details": "ok",
+                    "value": self.temp_dir.name,
+                    "source": "process env",
+                    "hint": None,
+                }
+            ],
+        }
+
+        with patch("backend.api.routes_operator.build_report", return_value=fake_report):
+            response = get_environment_doctor(dependencies=self.dependencies)
+
+        self.assertEqual("warn", response.overall_status)
+        self.assertEqual(2, response.required_ok)
+        self.assertEqual(3, response.required_total)
+        self.assertEqual(1, len(response.checks))
+        self.assertEqual("env.SDD_WORKDIR", response.checks[0].id)
 
     def test_pause_session_route_pauses_active_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
