@@ -1,6 +1,7 @@
 import { ArtifactPanel } from "./ArtifactPanel";
 import { FollowupContextPanel } from "./FollowupContextPanel";
 import { OperatorActions } from "./OperatorActions";
+import { PlanningArtifactPanel } from "./PlanningArtifactPanel";
 import { PlanningSummaryPanel } from "./PlanningSummaryPanel";
 import { RoleStatusPanel } from "./RoleStatusPanel";
 import type { Session, SessionBundle } from "../types";
@@ -82,6 +83,10 @@ export function SessionDetail({
       </div>
 
       <FollowupContextPanel followupContext={bundle.followupContext} />
+      <PlanningArtifactPanel
+        planningSummary={bundle.planningSummary}
+        workflowProfile={session.workflow_profile}
+      />
       <OperatorActions onRefresh={onRefresh} session={session} />
       <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
       <ArtifactPanel artifacts={bundle.artifacts} events={bundle.events} />

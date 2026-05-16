@@ -265,6 +265,29 @@ input {
   margin: 10px 0 8px;
 }
 
+.planning-artifact-card {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.planning-artifact-card:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.planning-artifact-content {
+  margin: 12px 0 0;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(17, 33, 50, 0.04);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
 .session-card,
 .action-button {
   border: 1px solid var(--line);
