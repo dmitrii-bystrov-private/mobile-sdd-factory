@@ -140,6 +140,102 @@ class TmuxBackendTests(unittest.TestCase):
             self.assertEqual("pty", backend.effective_mode)
             backend.stop_session(session)
 
+    def test_pty_mode_buffers_launcher_backed_input_until_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            backend = TmuxSessionBackend(
+                mode="pty",
+                runtime_root=runtime_root,
+            )
+            session = backend.create_task_session("IOS-50004")
+            fixture = (
+                Path(__file__).resolve().parent
+                / "fixtures"
+                / "interactive_launcher_fixture.py"
+            )
+            role_workspace = runtime_root / "IOS-50004" / "runtime" / "role-workspaces" / "implementer"
+            role_workspace.mkdir(parents=True, exist_ok=True)
+            launcher_script = role_workspace / "launch-role.sh"
+            launcher_script.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        f"exec python3 -u {fixture}",
+                        "",
+                    ]
+                )
+            )
+            launcher_script.chmod(0o755)
+            role = backend.spawn_role(
+                session,
+                "implementer",
+                start_directory=role_workspace,
+                launch_command=[str(launcher_script)],
+            )
+
+            backend.send_input(role, "first routed work")
+
+            interactive_round = self._wait_for_output(
+                backend,
+                role,
+                timeout_seconds=3.0,
+                expected_substring="interactive round done",
+            )
+            self.assertIn("Quick safety check", interactive_round)
+            self.assertIn("auto mode on", interactive_round)
+            self.assertIn("ROUTED:first routed work", interactive_round)
+            self.assertIn("SDD_OUTPUT", interactive_round)
+            self.assertEqual(["first routed work"], backend.get_sent_inputs(role.role_id))
+
+            backend.stop_session(session)
+
+    def test_pty_mode_emits_synthetic_auth_error_for_launcher_blocker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            backend = TmuxSessionBackend(
+                mode="pty",
+                runtime_root=runtime_root,
+            )
+            session = backend.create_task_session("IOS-50005")
+            fixture = (
+                Path(__file__).resolve().parent
+                / "fixtures"
+                / "interactive_auth_blocker_fixture.py"
+            )
+            role_workspace = runtime_root / "IOS-50005" / "runtime" / "role-workspaces" / "implementer"
+            role_workspace.mkdir(parents=True, exist_ok=True)
+            launcher_script = role_workspace / "launch-role.sh"
+            launcher_script.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        f"exec python3 -u {fixture}",
+                        "",
+                    ]
+                )
+            )
+            launcher_script.chmod(0o755)
+            role = backend.spawn_role(
+                session,
+                "implementer",
+                start_directory=role_workspace,
+                launch_command=[str(launcher_script)],
+            )
+
+            blocker_output = self._wait_for_output(
+                backend,
+                role,
+                timeout_seconds=3.0,
+                expected_substring='SDD_ERROR: {"summary":"interactive auth required"',
+            )
+            self.assertIn("Quick safety check", blocker_output)
+            self.assertIn("auto mode on", blocker_output)
+            self.assertIn('SDD_ERROR: {"summary":"interactive auth required"', blocker_output)
+
+            backend.stop_session(session)
+
 
 if __name__ == "__main__":
     unittest.main()

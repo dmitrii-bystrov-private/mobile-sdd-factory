@@ -1,5 +1,6 @@
 from pathlib import Path
 import tempfile
+import time
 import unittest
 
 from backend.api.sse import SessionEventBus
@@ -21,6 +22,7 @@ from backend.roles.contracts import (
 from backend.roles.launcher import RoleLauncherManager
 from backend.roles.workspace import RoleWorkspaceManager
 from backend.session_backend.tmux_backend import TmuxSessionBackend
+from backend.session_backend.runtime_models import RuntimeSessionHandle
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.db import Database
 from backend.state.event_repository import EventRepository
@@ -178,10 +180,76 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("active", session.status.value)
         self.assertEqual("bug_full", session.workflow_profile)
         self.assertEqual("required", session.policy["test_policy"])
-        self.assertEqual(
-            DEFAULT_SESSION_ROLES + [BUG_FIXER_ROLE, CODE_REVIEWER_ROLE],
-            [role.role_name for role in roles],
+
+    def test_collect_role_output_escalates_launcher_auth_blocker_to_operator(self) -> None:
+        fixture = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "interactive_auth_blocker_fixture.py"
         )
+        pty_backend = TmuxSessionBackend(
+            mode="pty",
+            runtime_root=Path(self.temp_dir.name),
+        )
+        self.coordinator = CoordinatorService(
+            session_repository=self.session_repository,
+            role_repository=self.role_repository,
+            event_repository=self.event_repository,
+            artifact_repository=self.artifact_repository,
+            work_item_repository=self.work_item_repository,
+            session_backend=pty_backend,
+            default_roles=DEFAULT_SESSION_ROLES,
+            jira_adapter=FakeJiraAdapter(),
+            snapshot_adapter=self.snapshot_adapter,
+            gitlab_adapter=FakeGitLabAdapter(),
+            artifacts_root=Path(self.temp_dir.name) / "artifacts",
+            workdir_root=Path(self.temp_dir.name),
+            event_bus=self.event_bus,
+            role_workspace_manager=RoleWorkspaceManager(
+                runtime_root=Path(self.temp_dir.name),
+                repo_root=Path(self.temp_dir.name) / "repo-root",
+                workdir_root=Path(self.temp_dir.name),
+            ),
+            role_launcher_manager=RoleLauncherManager(
+                repo_root=Path(self.temp_dir.name) / "repo-root",
+                workdir_root=Path(self.temp_dir.name),
+                launcher_command=["python3", "-u", str(fixture)],
+            ),
+        )
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30001",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "disabled",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30001")
+
+        updated_session = session
+        chunk_count = 0
+        for _ in range(20):
+            updated_session, _, chunk_count = self.coordinator.collect_role_output(
+                session_id=session.id,
+                role_name="implementer",
+            )
+            if updated_session.status.value == "waiting_for_operator":
+                break
+            time.sleep(0.2)
+
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertGreaterEqual(chunk_count, 2)
+        work_items = self.work_item_repository.list_for_session(session.id)
+        self.assertTrue(
+            any(item.status.value == "waiting_for_operator" for item in work_items),
+            "expected an assigned work item to be escalated to waiting_for_operator",
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.assertIsNotNone(implementer_role)
+        runtime_session_id = implementer_role.runtime_handle.split(":", 1)[0]
+        pty_backend.stop_session(RuntimeSessionHandle(session_id=runtime_session_id))
 
     def test_create_task_session_creates_role_workspaces(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

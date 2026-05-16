@@ -31,6 +31,12 @@ class TmuxSessionBackend(SessionBackend):
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
         self.pty_master_fds: dict[str, int] = {}
         self.session_role_ids: dict[str, set[str]] = defaultdict(set)
+        self.pty_buffered_inputs: dict[str, list[str]] = defaultdict(list)
+        self.pty_interactive_driver_enabled: dict[str, bool] = {}
+        self.pty_role_ready: dict[str, bool] = defaultdict(lambda: True)
+        self.pty_output_buffers: dict[str, str] = defaultdict(str)
+        self.pty_trust_prompt_handled: dict[str, bool] = defaultdict(bool)
+        self.pty_auth_blocker_emitted: dict[str, bool] = defaultdict(bool)
         self._available = shutil.which("tmux") is not None
         self._effective_mode = self._resolve_mode(mode)
 
@@ -134,6 +140,10 @@ class TmuxSessionBackend(SessionBackend):
             self.processes[role_id] = process
             self.pty_master_fds[role_id] = master_fd
             self.session_role_ids[session.session_id].add(role_id)
+            interactive_driver_enabled = bool(role_command) and Path(role_command[0]).name == "launch-role.sh"
+            self.pty_interactive_driver_enabled[role_id] = interactive_driver_enabled
+            self.pty_role_ready[role_id] = not interactive_driver_enabled
+            self.pty_trust_prompt_handled[role_id] = False
         self.last_spawn_commands[role_id] = role_command
         if start_directory is not None:
             self.last_captured_output.setdefault(role_id, "")
@@ -160,6 +170,9 @@ class TmuxSessionBackend(SessionBackend):
             master_fd = self.pty_master_fds.get(role.role_id)
             if master_fd is None:
                 raise RuntimeError(f"Unknown PTY role runtime: {role.role_id}")
+            if self.pty_interactive_driver_enabled.get(role.role_id, False) and not self.pty_role_ready.get(role.role_id, True):
+                self.pty_buffered_inputs[role.role_id].append(text)
+                return
             os.write(master_fd, (text + "\n").encode())
 
     def read_output(self, role: RuntimeRoleHandle) -> list[RuntimeOutputChunk]:
@@ -198,7 +211,10 @@ class TmuxSessionBackend(SessionBackend):
                     break
                 text = data.decode(errors="replace")
                 if text:
+                    synthetic_markers = self._handle_pty_interactive_driver_output(role.role_id, text)
                     chunks.append(RuntimeOutputChunk(role_id=role.role_id, text=text))
+                    for marker_text in synthetic_markers:
+                        chunks.append(RuntimeOutputChunk(role_id=role.role_id, text=marker_text))
             return chunks
 
         socket_path = self._socket_path(role.session_id)
@@ -240,6 +256,12 @@ class TmuxSessionBackend(SessionBackend):
         elif self._effective_mode == "pty":
             process = self.processes.pop(role.role_id, None)
             master_fd = self.pty_master_fds.pop(role.role_id, None)
+            self.pty_buffered_inputs.pop(role.role_id, None)
+            self.pty_interactive_driver_enabled.pop(role.role_id, None)
+            self.pty_role_ready.pop(role.role_id, None)
+            self.pty_output_buffers.pop(role.role_id, None)
+            self.pty_trust_prompt_handled.pop(role.role_id, None)
+            self.pty_auth_blocker_emitted.pop(role.role_id, None)
             if process is not None:
                 if process.poll() is None:
                     process.terminate()
@@ -278,6 +300,12 @@ class TmuxSessionBackend(SessionBackend):
             for role_id in list(self.session_role_ids.get(session.session_id, set())):
                 process = self.processes.pop(role_id, None)
                 master_fd = self.pty_master_fds.pop(role_id, None)
+                self.pty_buffered_inputs.pop(role_id, None)
+                self.pty_interactive_driver_enabled.pop(role_id, None)
+                self.pty_role_ready.pop(role_id, None)
+                self.pty_output_buffers.pop(role_id, None)
+                self.pty_trust_prompt_handled.pop(role_id, None)
+                self.pty_auth_blocker_emitted.pop(role_id, None)
                 if process is not None:
                     if process.poll() is None:
                         process.terminate()
@@ -299,3 +327,48 @@ class TmuxSessionBackend(SessionBackend):
 
     def get_spawn_command(self, role_id: str) -> list[str]:
         return list(self.last_spawn_commands.get(role_id, []))
+
+    def _handle_pty_interactive_driver_output(self, role_id: str, text: str) -> list[str]:
+        if not self.pty_interactive_driver_enabled.get(role_id, False):
+            return []
+
+        accumulated = self.pty_output_buffers.get(role_id, "") + text
+        self.pty_output_buffers[role_id] = accumulated[-32768:]
+        synthetic_markers: list[str] = []
+
+        if not self.pty_role_ready.get(role_id, False):
+            if (
+                not self.pty_trust_prompt_handled.get(role_id, False)
+                and self._contains_claude_trust_prompt(accumulated)
+            ):
+                master_fd = self.pty_master_fds.get(role_id)
+                if master_fd is not None:
+                    os.write(master_fd, b"1\n")
+                    self.pty_trust_prompt_handled[role_id] = True
+            if self._contains_claude_ready_prompt(accumulated):
+                self.pty_role_ready[role_id] = True
+                master_fd = self.pty_master_fds.get(role_id)
+                if master_fd is not None:
+                    for buffered_text in self.pty_buffered_inputs.pop(role_id, []):
+                        os.write(master_fd, (buffered_text + "\n").encode())
+        if (
+            not self.pty_auth_blocker_emitted.get(role_id, False)
+            and self._contains_claude_auth_blocker(accumulated)
+        ):
+            self.pty_auth_blocker_emitted[role_id] = True
+            synthetic_markers.append(
+                'SDD_ERROR: {"summary":"interactive auth required","details":"launcher-backed role requested connector authentication"}'
+            )
+        return synthetic_markers
+
+    def _contains_claude_trust_prompt(self, text: str) -> bool:
+        return "Quick" in text and "safety" in text and "trust" in text and "folder" in text
+
+    def _contains_claude_ready_prompt(self, text: str) -> bool:
+        return (
+            ("auto mode on" in text and "ctrl+g to edit in Vim" in text)
+            or ("[Sonnet" in text and "ctrl+g to edit in Vim" in text)
+        )
+
+    def _contains_claude_auth_blocker(self, text: str) -> bool:
+        return "needs auth" in text and "/mcp" in text
