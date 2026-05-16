@@ -980,6 +980,80 @@ class CoordinatorService:
                 session = self._get_session_or_raise(session.id)
         return session, event, followup_event
 
+    def refresh_subtask_state(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event, Event | None]:
+        if self.snapshot_adapter is None or self.workdir_root is None:
+            raise IntakeError("Coordinator is missing snapshot adapter or workdir root")
+
+        session = self._get_session_or_raise(session_id)
+        subtasks, refresh_ok = self._refresh_subtask_snapshot(session)
+        session = self._get_session_or_raise(session.id)
+
+        if not refresh_ok:
+            event = self._append_event(
+                session_id=session.id,
+                event_type="subtask_state_refresh_failed_by_operator",
+                producer_type="operator",
+                payload={
+                    "task_key": session.task_key,
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                },
+            )
+            return session, event, None
+
+        unresolved = unresolved_subtasks(subtasks) if subtasks is not None else []
+        event = self._append_event(
+            session_id=session.id,
+            event_type="subtask_state_refreshed_by_operator",
+            producer_type="operator",
+            payload={
+                "task_key": session.task_key,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+                "subtask_count": len(subtasks or []),
+                "unresolved_count": len(unresolved),
+            },
+        )
+
+        if not unresolved or session.current_stage != "implementation_requested":
+            return session, event, None
+
+        active_item = self._find_active_primary_coding_work_item(session)
+        decomposition_artifact = self._latest_artifact_for_session_type(
+            session.id,
+            "task_decomposition_markdown",
+        )
+        if (
+            active_item is None
+            or active_item.work_type != "implementation"
+            or decomposition_artifact is None
+            or subtasks is None
+        ):
+            return session, event, None
+
+        followup_event = self._enqueue_subtask_graph(
+            session=session,
+            source_event=event,
+            subtasks=subtasks,
+            initial_work_item=active_item,
+            decomposition_artifact=decomposition_artifact,
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="subtask_graph_requested",
+            producer_type="coordinator",
+            payload={
+                "subtask_count": len(subtasks),
+                "unresolved_count": len(unresolved),
+                "decomposition_artifact_id": decomposition_artifact.id,
+            },
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event, followup_event
+
     def reopen_from_qa(
         self,
         session_id: int,
@@ -2406,7 +2480,7 @@ class CoordinatorService:
             raise IntakeError("No active subtask implementation work item found for the session")
 
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
-        refreshed_subtasks = self._refresh_subtask_snapshot(session)
+        refreshed_subtasks, _refresh_ok = self._refresh_subtask_snapshot(session)
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         if implementer_role is None:
             raise IntakeError("Implementer role is missing for the session")
@@ -3680,9 +3754,9 @@ class CoordinatorService:
             "title": item_title.strip() or title,
         }
 
-    def _refresh_subtask_snapshot(self, session: Session) -> list | None:
+    def _refresh_subtask_snapshot(self, session: Session) -> tuple[list | None, bool]:
         if self.snapshot_adapter is None:
-            return None
+            return None, False
 
         result = self.snapshot_adapter.run(session.task_key)
         if self.artifacts_root is not None:
@@ -3725,11 +3799,11 @@ class CoordinatorService:
                     "snapshot_exit_code": result.returncode,
                 },
             )
-            return None
+            return None, False
 
         subtasks = self._read_snapshot_subtasks(session.task_key)
         if subtasks is None:
-            return None
+            return None, True
 
         self._record_subtask_statuses_artifact(session, subtasks)
         unresolved = unresolved_subtasks(subtasks)
@@ -3744,7 +3818,7 @@ class CoordinatorService:
                 "unresolved_count": len(unresolved),
             },
         )
-        return subtasks
+        return subtasks, True
 
     def _reconcile_subtask_queue_after_refresh(
         self,

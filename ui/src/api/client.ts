@@ -24,6 +24,8 @@ const STREAM_EVENT_TYPES = [
   "bug_analysis_completed",
   "story_spec_requested",
   "story_spec_completed",
+  "subtask_state_refreshed_by_operator",
+  "subtask_state_refresh_failed_by_operator",
   "subtask_graph_requested",
   "subtask_implementation_requested",
   "subtask_completed",
@@ -331,6 +333,22 @@ export const apiClient = {
     session: Session;
   }> {
     return request("/operator/create-subtasks-from-plan", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+      }),
+    });
+  },
+
+  refreshSubtaskState(
+    sessionId: number,
+  ): Promise<{
+    refreshed: boolean;
+    event_type: string;
+    followup_event_type?: string | null;
+    session: Session;
+  }> {
+    return request("/operator/refresh-subtask-state", {
       method: "POST",
       body: JSON.stringify({
         session_id: sessionId,

@@ -33,6 +33,7 @@ try:
     from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
     from backend.api.routes_operator import create_knowledge, create_subtasks_from_plan
+    from backend.api.routes_operator import refresh_subtask_state
     from backend.api.routes_operator import send_to_test
     from backend.api.routes_operator import start_subtask_graph
     from backend.api.routes_operator import ingest_mr_comments
@@ -46,6 +47,7 @@ try:
         IngestMrCommentsRequest,
         PollSessionOutputRequest,
         PauseSessionRequest,
+        RefreshSubtaskStateRequest,
         ReopenFromQaRequest,
         RedirectSessionRequest,
         ResumeSessionRequest,
@@ -425,6 +427,62 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(summary.available)
         self.assertEqual(1, summary.total_count)
         self.assertEqual(["IOS-90001"], [item.key for item in summary.items])
+
+    def test_refresh_subtask_state_route_auto_starts_subtask_lane(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005REFRESH", workflow_profile="story_full"),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005REFRESH"),
+            dependencies=self.dependencies,
+        )
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": "prepared"},
+                ),
+                dependencies=self.dependencies,
+            )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload={"summary": "Decomposition prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40005REFRESH",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005REFRESH | Story | Parent story | In Progress |",
+                    "| IOS-40130 | Sub-task | Build data source | To Do |",
+                    "| IOS-40131 | Sub-task | Wire presentation | To Do |",
+                ]
+            ),
+        )
+
+        response = refresh_subtask_state(
+            RefreshSubtaskStateRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.refreshed)
+        self.assertEqual("subtask_state_refreshed_by_operator", response.event_type)
+        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
 
     def test_create_session_route_rejects_irrelevant_policy_for_profile(self) -> None:
         from fastapi import HTTPException

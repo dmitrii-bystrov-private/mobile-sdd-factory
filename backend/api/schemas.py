@@ -335,6 +335,17 @@ class CreateSubtasksFromPlanResponse(BaseModel):
     followup_event_type: str | None = None
 
 
+class RefreshSubtaskStateRequest(BaseModel):
+    session_id: int
+
+
+class RefreshSubtaskStateResponse(BaseModel):
+    refreshed: bool
+    session: SessionResponse
+    event_type: str
+    followup_event_type: str | None = None
+
+
 class CreateKnowledgeRequest(BaseModel):
     session_id: int
     title: str

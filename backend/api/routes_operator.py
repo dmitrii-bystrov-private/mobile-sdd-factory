@@ -10,6 +10,8 @@ from backend.api.schemas import (
     CompleteDocHarvestResponse,
     CreateSubtasksFromPlanRequest,
     CreateSubtasksFromPlanResponse,
+    RefreshSubtaskStateRequest,
+    RefreshSubtaskStateResponse,
     CreateKnowledgeRequest,
     CreateKnowledgeResponse,
     CompleteSelfReviewRequest,
@@ -268,6 +270,26 @@ def create_subtasks_from_plan(
 
     return CreateSubtasksFromPlanResponse(
         created=event.event_type == "jira_subtasks_created",
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
+@router.post("/refresh-subtask-state", response_model=RefreshSubtaskStateResponse)
+def refresh_subtask_state(
+    payload: RefreshSubtaskStateRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RefreshSubtaskStateResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.refresh_subtask_state(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return RefreshSubtaskStateResponse(
+        refreshed=event.event_type == "subtask_state_refreshed_by_operator",
         session=to_session_response(session),
         event_type=event.event_type,
         followup_event_type=followup_event.event_type if followup_event else None,

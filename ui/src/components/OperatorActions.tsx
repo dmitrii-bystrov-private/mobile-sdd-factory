@@ -123,6 +123,10 @@ export function OperatorActions({
     session.status === "active" &&
     session.workflow_profile === "story_full" &&
     session.current_stage === "implementation_requested";
+  const canRefreshSubtaskState =
+    session.status === "active" &&
+    session.workflow_profile === "story_full" &&
+    ["implementation_requested", "subtask_implementation_requested"].includes(session.current_stage);
   const canCreateSubtasksFromPlan =
     session.workflow_profile === "story_full" &&
     ["implementation_requested", "subtask_implementation_requested", "verification_requested"].includes(
@@ -181,6 +185,14 @@ export function OperatorActions({
           type="button"
         >
           Start Subtask Graph
+        </button>
+        <button
+          className="action-button"
+          disabled={busy || !canRefreshSubtaskState}
+          onClick={() => run(() => apiClient.refreshSubtaskState(session.id))}
+          type="button"
+        >
+          Refresh Subtask State
         </button>
         <button
           className="action-button"
