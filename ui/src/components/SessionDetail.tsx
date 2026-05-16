@@ -86,7 +86,11 @@ export function SessionDetail({
       </div>
 
       <FollowupContextPanel followupContext={bundle.followupContext} />
-      <JiraSubtasksPanel jiraSubtasksSummary={bundle.jiraSubtasksSummary} />
+      <JiraSubtasksPanel
+        jiraSubtasksSummary={bundle.jiraSubtasksSummary}
+        subtaskGraphSummary={bundle.subtaskGraphSummary}
+        subtaskProgressSummary={bundle.subtaskProgressSummary}
+      />
       <SubtaskProgressPanel subtaskProgressSummary={bundle.subtaskProgressSummary} />
       <SubtaskGraphPanel subtaskGraphSummary={bundle.subtaskGraphSummary} />
       <PlanningArtifactPanel
