@@ -31,7 +31,7 @@ Status markers:
 
 ## Current Immediate Next Step
 
-- `[in_progress]` continue `Phase 44` by implementing `Role-Scoped MCP Baseline`
+- `[in_progress]` continue `Phase 44` from the new runtime-management slice; the next intended slice remains `Role-Scoped MCP Baseline`, but it is currently blocked on the unresolved Codex MCP configuration seam
 
 ## Reserved Next Phase
 

@@ -29,6 +29,10 @@ from backend.api.schemas import (
     ReopenFromQaResponse,
     RedirectSessionRequest,
     RedirectSessionResponse,
+    StopRuntimeRoleRequest,
+    StopRuntimeRoleResponse,
+    StopRuntimeSessionRequest,
+    StopRuntimeSessionResponse,
     LoopRunnerControlResponse,
     LoopRunnerStatusResponse,
     PauseSessionRequest,
@@ -197,6 +201,45 @@ def redirect_session(
         session=to_session_response(session),
         event_type=event.event_type,
         followup_event_type=followup_event.event_type,
+    )
+
+
+@router.post("/stop-runtime-role", response_model=StopRuntimeRoleResponse)
+def stop_runtime_role(
+    payload: StopRuntimeRoleRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> StopRuntimeRoleResponse:
+    try:
+        session, event = dependencies.coordinator_service.stop_runtime_role(
+            session_id=payload.session_id,
+            role_name=payload.role_name,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return StopRuntimeRoleResponse(
+        stopped=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+    )
+
+
+@router.post("/stop-runtime-session", response_model=StopRuntimeSessionResponse)
+def stop_runtime_session(
+    payload: StopRuntimeSessionRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> StopRuntimeSessionResponse:
+    try:
+        session, event = dependencies.coordinator_service.stop_runtime_session(
+            session_id=payload.session_id,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return StopRuntimeSessionResponse(
+        stopped=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
     )
 
 

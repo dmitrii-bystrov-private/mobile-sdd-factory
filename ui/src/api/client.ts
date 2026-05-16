@@ -178,6 +178,19 @@ export const apiClient = {
     return request(`/sessions/${sessionId}/interactive-state`);
   },
 
+  getRuntimeState(sessionId: number): Promise<{
+    available: boolean;
+    runtime_session_id: string | null;
+    roles: Array<{
+      role_name: string;
+      status: string;
+      runtime_backend: string;
+      runtime_handle: string | null;
+    }>;
+  }> {
+    return request(`/sessions/${sessionId}/runtime-state`);
+  },
+
   getEnvironmentDoctor(): Promise<{
     overall_status: string;
     repo_root: string;
@@ -284,6 +297,23 @@ export const apiClient = {
 
   retrySession(sessionId: number): Promise<{ event_type: string; session: Session }> {
     return request("/operator/retry-session", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  },
+
+  stopRuntimeRole(
+    sessionId: number,
+    roleName: string,
+  ): Promise<{ event_type: string; session: Session }> {
+    return request("/operator/stop-runtime-role", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, role_name: roleName }),
+    });
+  },
+
+  stopRuntimeSession(sessionId: number): Promise<{ event_type: string; session: Session }> {
+    return request("/operator/stop-runtime-session", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId }),
     });

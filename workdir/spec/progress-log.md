@@ -18,6 +18,21 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - implemented `Runtime Session Management Surface`
+    - added runtime-state inspection
+    - added explicit stop role / stop session actions
+    - exposed runtime management controls in the operator console
+    - validated backend and frontend after the new stop/runtime-state paths
+  - current_state:
+    - operator now has explicit runtime visibility and manual stop control
+    - the next intended slice is still `Role-Scoped MCP Baseline`
+  - next:
+    - reconcile the Codex MCP config seam before implementing role-scoped MCP isolation
+  - blockers:
+    - current local Codex probes do not yet reveal a trustworthy per-session MCP filtering seam
+
+- date: `2026-05-17`
+  - done:
     - implemented `Role Runtime Configuration Baseline`
     - added session-scoped `role_config`
     - normalized role runner/model/effort choices against live runtime capabilities

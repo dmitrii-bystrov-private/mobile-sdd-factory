@@ -21,6 +21,7 @@ import type {
   PlanningSummary,
   PlanningStepSummary,
   RuntimeCapabilitiesSummary,
+  RuntimeSessionStateSummary,
   Session,
   SessionBundle,
   SubtaskGraphSummary,
@@ -179,6 +180,25 @@ async function buildInteractiveStateSummary(
     details: response.details,
     sourceEventType: response.source_event_type,
     needsOperatorInput: response.needs_operator_input,
+  };
+}
+
+async function buildRuntimeStateSummary(
+  sessionId: number,
+): Promise<RuntimeSessionStateSummary | null> {
+  const response = await apiClient.getRuntimeState(sessionId);
+  if (!response.available) {
+    return null;
+  }
+  return {
+    available: response.available,
+    runtimeSessionId: response.runtime_session_id,
+    roles: response.roles.map((role) => ({
+      roleName: role.role_name,
+      status: role.status,
+      runtimeBackend: role.runtime_backend,
+      runtimeHandle: role.runtime_handle,
+    })),
   };
 }
 
@@ -391,6 +411,7 @@ export function SessionsPage(): JSX.Element {
         followupContext,
         planningSummary,
         interactiveStateSummary,
+        runtimeStateSummary,
         jiraSubtasksSummary,
         subtaskGraphSummary,
         subtaskProgressSummary,
@@ -398,6 +419,7 @@ export function SessionsPage(): JSX.Element {
         Promise.resolve(buildFollowupContext(artifacts.items, events.items)),
         buildPlanningSummary(artifacts.items, events.items),
         buildInteractiveStateSummary(sessionId),
+        buildRuntimeStateSummary(sessionId),
         buildJiraSubtasksSummary(sessionId),
         buildSubtaskGraphSummary(sessionId),
         buildSubtaskProgressSummary(sessionId),
@@ -410,6 +432,7 @@ export function SessionsPage(): JSX.Element {
         followupContext,
         planningSummary,
         interactiveStateSummary,
+        runtimeStateSummary,
         jiraSubtasksSummary,
         subtaskGraphSummary,
         subtaskProgressSummary,

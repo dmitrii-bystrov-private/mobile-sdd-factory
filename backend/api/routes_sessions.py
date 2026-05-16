@@ -8,6 +8,7 @@ from backend.api.schemas import (
     CreateSessionRequest,
     CreateSessionResponse,
     InteractiveStateSummaryResponse,
+    RuntimeSessionStateResponse,
     PrepareSessionRequest,
     PrepareSessionResponse,
     JiraSubtasksSummaryResponse,
@@ -121,6 +122,18 @@ def get_interactive_state(
     except IntakeError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return InteractiveStateSummaryResponse(**summary)
+
+
+@router.get("/{session_id}/runtime-state", response_model=RuntimeSessionStateResponse)
+def get_runtime_state(
+    session_id: int,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RuntimeSessionStateResponse:
+    try:
+        summary = dependencies.coordinator_service.get_runtime_state_summary(session_id)
+    except IntakeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return RuntimeSessionStateResponse(**summary)
 
 
 @router.post("/prepare", response_model=PrepareSessionResponse)

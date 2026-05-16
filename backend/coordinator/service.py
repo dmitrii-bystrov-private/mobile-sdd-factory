@@ -3899,6 +3899,75 @@ class CoordinatorService:
                 return RuntimeSessionHandle(session_id=runtime_session_id)
         raise IntakeError(f"Could not infer runtime session handle for session {session.id}")
 
+    def get_runtime_state_summary(self, session_id: int) -> dict:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} not found")
+        roles = self.role_repository.list_for_session(session_id)
+        runtime_session_id = None
+        try:
+            runtime_session_id = self._runtime_session_handle_for_session(session).session_id
+        except IntakeError:
+            runtime_session_id = None
+        return {
+            "available": runtime_session_id is not None,
+            "runtime_session_id": runtime_session_id,
+            "roles": [
+                {
+                    "role_name": role.role_name,
+                    "status": role.status.value,
+                    "runtime_backend": role.runtime_backend,
+                    "runtime_handle": role.runtime_handle,
+                }
+                for role in roles
+            ],
+        }
+
+    def stop_runtime_role(self, session_id: int, role_name: str) -> tuple[Session, Event]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} not found")
+        role = self.role_repository.get_by_name(session_id, role_name)
+        if role is None or role.runtime_handle is None:
+            raise IntakeError(f"Role {role_name} has no live runtime handle")
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_handle_for_session(session).session_id,
+            backend_name=role.runtime_backend,
+        )
+        self.session_backend.stop_role(runtime_role)
+        self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+        session = self.session_repository.update_status(session_id, SessionStatus.PAUSED)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="runtime_role_stopped_by_operator",
+            producer_type="operator",
+            payload={
+                "role_name": role_name,
+                "runtime_handle": role.runtime_handle,
+            },
+        )
+        return session, event
+
+    def stop_runtime_session(self, session_id: int) -> tuple[Session, Event]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} not found")
+        runtime_session = self._runtime_session_handle_for_session(session)
+        self.session_backend.stop_session(runtime_session)
+        for role in self.role_repository.list_for_session(session_id):
+            self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+        session = self.session_repository.update_status(session_id, SessionStatus.PAUSED)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="runtime_session_stopped_by_operator",
+            producer_type="operator",
+            payload={
+                "runtime_session_id": runtime_session.session_id,
+            },
+        )
+        return session, event
+
     def _knowledge_store_for_session_or_raise(self, session: Session) -> KnowledgeStore:
         if self.workdir_root is not None:
             return KnowledgeStore(self.workdir_root / session.task_key / "repo" / "knowledge")

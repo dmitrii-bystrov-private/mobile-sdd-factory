@@ -118,6 +118,19 @@ class InteractiveStateSummaryResponse(BaseModel):
     needs_operator_input: bool = False
 
 
+class RuntimeRoleStateResponse(BaseModel):
+    role_name: str
+    status: str
+    runtime_backend: str
+    runtime_handle: str | None = None
+
+
+class RuntimeSessionStateResponse(BaseModel):
+    available: bool
+    runtime_session_id: str | None = None
+    roles: list[RuntimeRoleStateResponse]
+
+
 class EnvironmentDoctorCheckResponse(BaseModel):
     id: str
     category: str
@@ -377,6 +390,27 @@ class RedirectSessionResponse(BaseModel):
     session: SessionResponse
     event_type: str
     followup_event_type: str | None = None
+
+
+class StopRuntimeRoleRequest(BaseModel):
+    session_id: int
+    role_name: str
+
+
+class StopRuntimeRoleResponse(BaseModel):
+    stopped: bool
+    session: SessionResponse
+    event_type: str
+
+
+class StopRuntimeSessionRequest(BaseModel):
+    session_id: int
+
+
+class StopRuntimeSessionResponse(BaseModel):
+    stopped: bool
+    session: SessionResponse
+    event_type: str
 
 
 class IngestMrCommentsRequest(BaseModel):

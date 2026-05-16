@@ -15,6 +15,7 @@ try:
         list_sessions,
         prepare_session,
         get_interactive_state,
+        get_runtime_state,
     )
     from backend.api.routes_knowledge import list_knowledge
     from backend.api.schemas import CreateSessionRequest, PrepareSessionRequest
@@ -41,6 +42,8 @@ try:
     from backend.api.routes_operator import get_environment_doctor
     from backend.api.routes_operator import get_runtime_capabilities
     from backend.api.routes_operator import refresh_subtask_state
+    from backend.api.routes_operator import stop_runtime_role
+    from backend.api.routes_operator import stop_runtime_session
     from backend.api.routes_operator import send_to_test
     from backend.api.routes_operator import start_subtask_graph
     from backend.api.routes_operator import ingest_mr_comments
@@ -61,6 +64,8 @@ try:
         RetrySessionRequest,
         SendOperatorRuntimeInputRequest,
         SendToTestRequest,
+        StopRuntimeRoleRequest,
+        StopRuntimeSessionRequest,
         StartSubtaskGraphRequest,
     )
     from backend.coordinator.service import CoordinatorService
@@ -1961,6 +1966,55 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("claude", response.runners[0].runner)
         self.assertEqual("sonnet", response.runners[0].models[0].id)
         self.assertEqual("implementer", response.legacy_role_defaults[0].role_name)
+
+    def test_get_runtime_state_route_returns_runtime_handles(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013R"),
+            dependencies=self.dependencies,
+        )
+
+        response = get_runtime_state(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.available)
+        self.assertTrue(response.runtime_session_id)
+        self.assertGreaterEqual(len(response.roles), 1)
+        self.assertTrue(any(role.role_name == "implementer" for role in response.roles))
+
+    def test_stop_runtime_role_route_stops_role_and_pauses_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013S"),
+            dependencies=self.dependencies,
+        )
+
+        response = stop_runtime_role(
+            StopRuntimeRoleRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.stopped)
+        self.assertEqual("runtime_role_stopped_by_operator", response.event_type)
+        self.assertEqual("paused", response.session.status)
+
+    def test_stop_runtime_session_route_stops_all_roles_and_pauses_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013T"),
+            dependencies=self.dependencies,
+        )
+
+        response = stop_runtime_session(
+            StopRuntimeSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.stopped)
+        self.assertEqual("runtime_session_stopped_by_operator", response.event_type)
+        self.assertEqual("paused", response.session.status)
 
     def test_pause_session_route_pauses_active_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

@@ -110,6 +110,19 @@ export type InteractiveStateSummary = {
   needsOperatorInput: boolean;
 };
 
+export type RuntimeRoleStateSummary = {
+  roleName: string;
+  status: string;
+  runtimeBackend: string;
+  runtimeHandle: string | null;
+};
+
+export type RuntimeSessionStateSummary = {
+  available: boolean;
+  runtimeSessionId: string | null;
+  roles: RuntimeRoleStateSummary[];
+};
+
 export type EnvironmentDoctorCheck = {
   id: string;
   category: string;
@@ -235,6 +248,7 @@ export type SessionBundle = {
   followupContext: FollowupContext | null;
   planningSummary: PlanningSummary | null;
   interactiveStateSummary: InteractiveStateSummary | null;
+  runtimeStateSummary: RuntimeSessionStateSummary | null;
   jiraSubtasksSummary: JiraSubtasksSummary | null;
   subtaskGraphSummary: SubtaskGraphSummary | null;
   subtaskProgressSummary: SubtaskProgressSummary | null;

@@ -6,6 +6,7 @@ import { OperatorActions } from "./OperatorActions";
 import { PlanningArtifactPanel } from "./PlanningArtifactPanel";
 import { PlanningSummaryPanel } from "./PlanningSummaryPanel";
 import { RoleStatusPanel } from "./RoleStatusPanel";
+import { RuntimeSessionPanel } from "./RuntimeSessionPanel";
 import { SubtaskGraphPanel } from "./SubtaskGraphPanel";
 import { SubtaskProgressPanel } from "./SubtaskProgressPanel";
 import type { Session, SessionBundle } from "../types";
@@ -88,6 +89,11 @@ export function SessionDetail({
 
       <FollowupContextPanel followupContext={bundle.followupContext} />
       <InteractiveStatePanel interactiveStateSummary={bundle.interactiveStateSummary} />
+      <RuntimeSessionPanel
+        onRefresh={onRefresh}
+        runtimeStateSummary={bundle.runtimeStateSummary}
+        session={session}
+      />
       <JiraSubtasksPanel
         jiraSubtasksSummary={bundle.jiraSubtasksSummary}
         subtaskGraphSummary={bundle.subtaskGraphSummary}
