@@ -14,6 +14,7 @@ from backend.knowledge.store import KnowledgeItem, KnowledgeStore
 from backend.coordinator.subtasks import read_snapshot_subtasks, unresolved_subtasks
 from backend.coordinator.hydration import build_role_hydration
 from backend.models.event import Event
+from backend.models.artifact import Artifact
 from backend.models.enums import RoleStatus, SessionStatus, WorkItemStatus
 from backend.models.session import Session
 from backend.models.role import Role
@@ -797,6 +798,23 @@ class CoordinatorService:
         active_item = self._find_active_primary_coding_work_item(session)
         if active_item is None or active_item.work_type != "implementation":
             raise IntakeError("No active implementation work item found for subtask graph start")
+        decomposition_item = next(
+            (
+                item
+                for item in self.work_item_repository.list_for_session(session.id)
+                if item.work_type == "task_decomposition"
+                and item.status == WorkItemStatus.COMPLETED
+            ),
+            None,
+        )
+        if decomposition_item is None:
+            raise IntakeError("A completed task decomposition is required before starting subtask graph")
+        decomposition_artifact = self._latest_artifact_for_session_type(
+            session.id,
+            "task_decomposition_markdown",
+        )
+        if decomposition_artifact is None:
+            raise IntakeError("Task decomposition artifact is missing for subtask graph start")
 
         statuses_file = self.workdir_root / session.task_key / "statuses.md"
         try:
@@ -833,6 +851,7 @@ class CoordinatorService:
             payload={
                 "subtask_count": len(subtasks),
                 "unresolved_count": len(unresolved),
+                "decomposition_artifact_id": decomposition_artifact.id,
             },
         )
         followup_event = self._enqueue_subtask_graph(
@@ -840,6 +859,7 @@ class CoordinatorService:
             source_event=event,
             subtasks=subtasks,
             initial_work_item=active_item,
+            decomposition_artifact=decomposition_artifact,
         )
         refreshed = self._get_session_or_raise(session.id)
         return refreshed, event, followup_event
@@ -1958,6 +1978,23 @@ class CoordinatorService:
         if task_breakdown:
             context_lines.append(f"Task breakdown: {task_breakdown}")
         additional_context = "\n".join(context_lines) if context_lines else None
+        if self.artifacts_root is not None:
+            artifact_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "planning",
+                "task_decomposition.md",
+                self._task_decomposition_markdown(summary=summary, task_breakdown=task_breakdown),
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="planning",
+                artifact_type="task_decomposition_markdown",
+                path=str(artifact_path),
+                metadata={
+                    "task_key": session.task_key,
+                },
+            )
 
         event = self._enqueue_initial_implementation(
             session=session,
@@ -1974,6 +2011,7 @@ class CoordinatorService:
         source_event: Event,
         subtasks: list,
         initial_work_item: WorkItem,
+        decomposition_artifact: Artifact,
     ) -> Event:
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         if implementer_role is None:
@@ -2015,8 +2053,12 @@ class CoordinatorService:
             stage_name="subtask_implementation_requested",
             instruction=(
                 f"Implement subtask {first_subtask.key} for parent task {session.task_key}. "
+                "Use the latest task decomposition artifact as the primary execution plan input. "
                 "Focus only on this subtask scope before moving to the next one."
             ),
+            extra_hydration={
+                "decomposition_artifact_path": decomposition_artifact.path,
+            },
         )
         return self._append_event(
             session_id=session.id,
@@ -2029,6 +2071,7 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
                 "subtask_key": first_subtask.key,
                 "remaining_subtask_count": len(unresolved),
+                "decomposition_artifact_id": decomposition_artifact.id,
             },
         )
 
@@ -3267,6 +3310,29 @@ class CoordinatorService:
         if self.knowledge_root is not None:
             return KnowledgeStore(self.knowledge_root)
         raise IntakeError("Coordinator is missing knowledge root")
+
+    def _latest_artifact_for_session_type(
+        self,
+        session_id: int,
+        artifact_type: str,
+    ) -> Artifact | None:
+        for artifact in reversed(self.artifact_repository.list_for_session(session_id)):
+            if artifact.artifact_type == artifact_type:
+                return artifact
+        return None
+
+    def _task_decomposition_markdown(
+        self,
+        *,
+        summary: str,
+        task_breakdown: str,
+    ) -> str:
+        lines = ["# Task Decomposition", ""]
+        if summary:
+            lines.extend(["## Summary", "", summary, ""])
+        if task_breakdown:
+            lines.extend(["## Task Breakdown", "", task_breakdown, ""])
+        return "\n".join(lines).rstrip() + "\n"
 
     def _count_mr_discussions(self, markdown: str) -> int:
         return sum(1 for line in markdown.splitlines() if line.startswith("## Discussion "))

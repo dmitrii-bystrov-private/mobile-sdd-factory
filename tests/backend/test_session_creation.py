@@ -1302,6 +1302,8 @@ class SessionCreationTests(unittest.TestCase):
             sorted((item.work_type, item.status.value) for item in work_items),
         )
         self.assertIn("Implement subtask IOS-30010", sent_inputs[-1])
+        self.assertIn("Use the latest task decomposition artifact as the primary execution plan input.", sent_inputs[-1])
+        self.assertIn("decomposition_artifact_path", sent_inputs[-1])
 
     def test_subtask_completion_assigns_next_subtask_before_verification(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
