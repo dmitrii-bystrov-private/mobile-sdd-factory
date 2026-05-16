@@ -1,5 +1,6 @@
 import { ArtifactPanel } from "./ArtifactPanel";
 import { FollowupContextPanel } from "./FollowupContextPanel";
+import { JiraSubtasksPanel } from "./JiraSubtasksPanel";
 import { OperatorActions } from "./OperatorActions";
 import { PlanningArtifactPanel } from "./PlanningArtifactPanel";
 import { PlanningSummaryPanel } from "./PlanningSummaryPanel";
@@ -83,6 +84,7 @@ export function SessionDetail({
       </div>
 
       <FollowupContextPanel followupContext={bundle.followupContext} />
+      <JiraSubtasksPanel jiraSubtasksSummary={bundle.jiraSubtasksSummary} />
       <PlanningArtifactPanel
         planningSummary={bundle.planningSummary}
         workflowProfile={session.workflow_profile}

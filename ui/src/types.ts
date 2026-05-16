@@ -99,6 +99,11 @@ export type PlanningSummary = {
   steps: PlanningStepSummary[];
 };
 
+export type JiraSubtasksSummary = {
+  artifactType: string;
+  artifactDetail: ArtifactDetail | null;
+};
+
 export type SessionBundle = {
   roles: Role[];
   artifacts: Artifact[];
@@ -106,4 +111,5 @@ export type SessionBundle = {
   workItems: WorkItem[];
   followupContext: FollowupContext | null;
   planningSummary: PlanningSummary | null;
+  jiraSubtasksSummary: JiraSubtasksSummary | null;
 };

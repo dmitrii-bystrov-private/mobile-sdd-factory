@@ -10,6 +10,7 @@ import type {
   ArtifactDetail,
   EventItem,
   FollowupContext,
+  JiraSubtasksSummary,
   KnowledgeItem,
   PlanningSummary,
   PlanningStepSummary,
@@ -134,6 +135,23 @@ async function buildPlanningSummary(
   };
 }
 
+async function buildJiraSubtasksSummary(
+  artifacts: Artifact[],
+): Promise<JiraSubtasksSummary | null> {
+  const summaryArtifact = [...artifacts]
+    .reverse()
+    .find((artifact) => artifact.artifact_type === "jira_subtasks_summary");
+
+  if (summaryArtifact === undefined) {
+    return null;
+  }
+
+  return {
+    artifactType: summaryArtifact.artifact_type,
+    artifactDetail: await apiClient.getArtifact(summaryArtifact.id),
+  };
+}
+
 function buildFollowupContext(
   artifacts: Artifact[],
   events: EventItem[],
@@ -223,6 +241,7 @@ export function SessionsPage(): JSX.Element {
       ]);
       const followupContext = await buildFollowupContext(artifacts.items, events.items);
       const planningSummary = await buildPlanningSummary(artifacts.items, events.items);
+      const jiraSubtasksSummary = await buildJiraSubtasksSummary(artifacts.items);
       setBundle({
         roles: roles.items,
         artifacts: artifacts.items,
@@ -230,6 +249,7 @@ export function SessionsPage(): JSX.Element {
         workItems: workItems.items,
         followupContext,
         planningSummary,
+        jiraSubtasksSummary,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load session detail");
