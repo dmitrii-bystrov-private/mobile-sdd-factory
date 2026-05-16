@@ -21,7 +21,7 @@ Status markers:
 ## Current Position
 
 - Current phase: `Phase 43. Environment Setup, Doctor, And Permanent Documentation`
-- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer completion, file-backed role result handling, real two-round live implementer validation, and the first environment doctor baseline are complete; the next active track remains environment setup, doctor, and permanent documentation`
+- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer completion, file-backed role result handling, real two-round live implementer validation, and the first environment doctor/baseline guidance layers are complete; the next active track remains environment setup, doctor, and permanent documentation`
 - Current implementation mode: `launcher-backed live roles now use PTY transport plus file-backed handoff/result semantics; the first doctor/status surface now exists and the next work should widen environment productization beyond the baseline`
 - Primary source of truth for next work: `this file`
 - Filesystem/runtime source of truth: `workdir/spec/filesystem-runtime-model.md`
@@ -47,7 +47,7 @@ Status markers:
   - MVP role set is fixed
   - artifact location strategy is fixed
 - Completed:
-  - `[done]` stack fixed as `Python + FastAPI + SQLite + tmux`
+  - `[done]` stack fixed as `Python + FastAPI + SQLite + persistent local runtime backend`
   - `[done]` MVP role set fixed as `task-coordinator + implementer + verification-coordinator`
   - `[done]` temporary/project spec artifacts moved to `workdir/spec/`
   - `[done]` initial architecture/spec files created in `workdir/spec/`
@@ -89,12 +89,12 @@ Status markers:
 - Goal: provide runtime abstraction for long-lived role processes
 - Exit criteria:
   - `SessionBackend` exists
-  - `TmuxSessionBackend` exists
+  - a concrete persistent runtime backend exists
   - runtime handles and role IO can be exercised through the abstraction
 - Completed:
   - `[done]` `SessionBackend` abstraction implemented
-  - `[done]` `TmuxSessionBackend` implemented
-  - `[done]` recording fallback implemented when `tmux` is unavailable
+  - `[done]` a concrete persistent runtime backend implemented
+  - `[done]` process/pty runtime hosting implemented without external tmux dependency
   - `[done]` role input dispatch implemented through runtime backend
   - `[done]` raw runtime output collection implemented
 

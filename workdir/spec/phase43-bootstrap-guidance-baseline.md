@@ -41,7 +41,7 @@ It supports:
 Passed:
 
 - `./.venv/bin/python -m unittest tests.backend.test_bootstrap_guidance tests.backend.test_environment_doctor`
-- `./.venv/bin/python -m unittest tests.backend.test_tmux_backend tests.backend.test_bootstrap_guidance tests.backend.test_environment_doctor`
+- `./.venv/bin/python -m unittest tests.backend.test_runtime_backend tests.backend.test_bootstrap_guidance tests.backend.test_environment_doctor`
 - `./.venv/bin/python -m unittest discover -s tests/backend -p 'test_*.py'`
 - `bash factory/doctor/run-bootstrap-guide.sh`
 - `bash factory/doctor/run-bootstrap-guide.sh --json`

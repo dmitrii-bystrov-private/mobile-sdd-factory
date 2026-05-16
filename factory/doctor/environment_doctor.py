@@ -315,29 +315,6 @@ def _mcp_server_check(
     )
 
 
-def _tmux_check(which_func: WhichFunc) -> CheckResult:
-    path = which_func("tmux")
-    if path:
-        return CheckResult(
-            id="runtime.tmux",
-            category="runtime",
-            label="tmux host backend",
-            required=False,
-            status="ok",
-            details="tmux is installed.",
-            value=path,
-        )
-    return CheckResult(
-        id="runtime.tmux",
-        category="runtime",
-        label="tmux host backend",
-        required=False,
-        status="missing",
-        details="tmux is not installed; the system will fall back to local process hosting.",
-        hint="Install tmux if you want tmux-backed persistent sessions.",
-    )
-
-
 def build_report(
     *,
     repo_root: Path,
@@ -408,7 +385,6 @@ def build_report(
             which_func=which_func,
         ),
         _runner_presence_check(which_func),
-        _tmux_check(which_func),
         _mcp_server_check(
             server_name="ios-rag",
             required=True,

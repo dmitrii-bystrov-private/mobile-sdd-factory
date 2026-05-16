@@ -21,12 +21,12 @@ class BootstrapGuidanceTests(unittest.TestCase):
                         "hint": "Set SDD_WORKDIR.",
                     },
                     {
-                        "id": "runtime.tmux",
-                        "label": "tmux host backend",
+                        "id": "cli.codex",
+                        "label": "Codex CLI",
                         "required": False,
                         "status": "missing",
-                        "details": "tmux is not installed.",
-                        "hint": "Install tmux.",
+                        "details": "codex is not installed.",
+                        "hint": "Install Codex CLI if you want Codex-backed live roles.",
                     },
                 ],
             }

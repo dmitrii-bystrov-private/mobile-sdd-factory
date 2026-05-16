@@ -70,7 +70,6 @@ Required:
 Optional but surfaced:
 
 - `frontend-rag`
-- `tmux`
 
 ## Validation
 

@@ -30,8 +30,9 @@ Each entry should include:
     - rewrote the PTY pre-ready edge-case test to assert the behavior we actually need:
       - unknown pre-ready noise must not falsely mark a role as ready
       - buffered work must remain buffered until real readiness
+    - removed `tmux` from the doctor/setup story so the environment model reflects the actual supported runtime
     - validated:
-      - `./.venv/bin/python -m unittest tests.backend.test_tmux_backend tests.backend.test_bootstrap_guidance tests.backend.test_environment_doctor`
+      - focused runtime + doctor + bootstrap guidance tests
       - `./.venv/bin/python -m unittest discover -s tests/backend -p 'test_*.py'`
       - `bash factory/doctor/run-bootstrap-guide.sh`
       - `bash factory/doctor/run-bootstrap-guide.sh --json`
@@ -90,7 +91,6 @@ Each entry should include:
       - available live runners
       - auth state for `acli jira`, `glab`, `claude`, and `codex`
       - required MCP servers
-      - optional runtime pieces like `tmux`
     - added unit coverage in:
       - `tests/backend/test_environment_doctor.py`
     - validated:
