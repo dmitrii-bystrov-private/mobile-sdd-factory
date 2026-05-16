@@ -1,5 +1,6 @@
 import { ArtifactPanel } from "./ArtifactPanel";
 import { FollowupContextPanel } from "./FollowupContextPanel";
+import { InteractiveStatePanel } from "./InteractiveStatePanel";
 import { JiraSubtasksPanel } from "./JiraSubtasksPanel";
 import { OperatorActions } from "./OperatorActions";
 import { PlanningArtifactPanel } from "./PlanningArtifactPanel";
@@ -86,6 +87,7 @@ export function SessionDetail({
       </div>
 
       <FollowupContextPanel followupContext={bundle.followupContext} />
+      <InteractiveStatePanel interactiveStateSummary={bundle.interactiveStateSummary} />
       <JiraSubtasksPanel
         jiraSubtasksSummary={bundle.jiraSubtasksSummary}
         subtaskGraphSummary={bundle.subtaskGraphSummary}

@@ -12,6 +12,7 @@ try:
         get_subtask_progress,
         list_sessions,
         prepare_session,
+        get_interactive_state,
     )
     from backend.api.routes_knowledge import list_knowledge
     from backend.api.schemas import CreateSessionRequest, PrepareSessionRequest
@@ -1718,6 +1719,39 @@ class SessionApiTests(unittest.TestCase):
             ["/mcp"],
             self.dependencies.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
         )
+
+    def test_get_interactive_state_route_returns_runtime_blocker_summary(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013B"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"interactive auth required","details":"connector auth needed"}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = get_interactive_state(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.available)
+        self.assertEqual("implementer", response.role_name)
+        self.assertEqual("interactive auth required", response.summary)
+        self.assertEqual("connector auth needed", response.details)
+        self.assertEqual("session_escalated_to_operator", response.source_event_type)
+        self.assertTrue(response.needs_operator_input)
 
     def test_pause_session_route_pauses_active_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

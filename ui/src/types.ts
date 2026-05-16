@@ -99,6 +99,16 @@ export type PlanningSummary = {
   steps: PlanningStepSummary[];
 };
 
+export type InteractiveStateSummary = {
+  available: boolean;
+  roleName: string | null;
+  currentStage: string | null;
+  summary: string | null;
+  details: string | null;
+  sourceEventType: string | null;
+  needsOperatorInput: boolean;
+};
+
 export type JiraSubtasksSummary = {
   available: boolean;
   totalCount: number;
@@ -151,6 +161,7 @@ export type SessionBundle = {
   workItems: WorkItem[];
   followupContext: FollowupContext | null;
   planningSummary: PlanningSummary | null;
+  interactiveStateSummary: InteractiveStateSummary | null;
   jiraSubtasksSummary: JiraSubtasksSummary | null;
   subtaskGraphSummary: SubtaskGraphSummary | null;
   subtaskProgressSummary: SubtaskProgressSummary | null;

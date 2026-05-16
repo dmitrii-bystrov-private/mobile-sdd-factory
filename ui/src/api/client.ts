@@ -165,6 +165,18 @@ export const apiClient = {
     return request(`/sessions/${sessionId}/jira-subtasks`);
   },
 
+  getInteractiveState(sessionId: number): Promise<{
+    available: boolean;
+    role_name: string | null;
+    current_stage: string | null;
+    summary: string | null;
+    details: string | null;
+    source_event_type: string | null;
+    needs_operator_input: boolean;
+  }> {
+    return request(`/sessions/${sessionId}/interactive-state`);
+  },
+
   listKnowledge(): Promise<{ items: KnowledgeItem[] }> {
     return request("/knowledge");
   },

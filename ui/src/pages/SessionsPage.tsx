@@ -10,6 +10,7 @@ import type {
   ArtifactDetail,
   EventItem,
   FollowupContext,
+  InteractiveStateSummary,
   JiraSubtasksSummary,
   KnowledgeItem,
   PlanningSummary,
@@ -157,6 +158,24 @@ async function buildJiraSubtasksSummary(
   };
 }
 
+async function buildInteractiveStateSummary(
+  sessionId: number,
+): Promise<InteractiveStateSummary | null> {
+  const response = await apiClient.getInteractiveState(sessionId);
+  if (!response.available) {
+    return null;
+  }
+  return {
+    available: response.available,
+    roleName: response.role_name,
+    currentStage: response.current_stage,
+    summary: response.summary,
+    details: response.details,
+    sourceEventType: response.source_event_type,
+    needsOperatorInput: response.needs_operator_input,
+  };
+}
+
 async function buildSubtaskGraphSummary(
   sessionId: number,
 ): Promise<SubtaskGraphSummary | null> {
@@ -292,12 +311,14 @@ export function SessionsPage(): JSX.Element {
       const [
         followupContext,
         planningSummary,
+        interactiveStateSummary,
         jiraSubtasksSummary,
         subtaskGraphSummary,
         subtaskProgressSummary,
       ] = await Promise.all([
         Promise.resolve(buildFollowupContext(artifacts.items, events.items)),
         buildPlanningSummary(artifacts.items, events.items),
+        buildInteractiveStateSummary(sessionId),
         buildJiraSubtasksSummary(sessionId),
         buildSubtaskGraphSummary(sessionId),
         buildSubtaskProgressSummary(sessionId),
@@ -309,6 +330,7 @@ export function SessionsPage(): JSX.Element {
         workItems: workItems.items,
         followupContext,
         planningSummary,
+        interactiveStateSummary,
         jiraSubtasksSummary,
         subtaskGraphSummary,
         subtaskProgressSummary,

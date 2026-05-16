@@ -100,6 +100,16 @@ class JiraSubtasksSummaryResponse(BaseModel):
     items: list[JiraSubtaskItemResponse]
 
 
+class InteractiveStateSummaryResponse(BaseModel):
+    available: bool
+    role_name: str | None = None
+    current_stage: str | None = None
+    summary: str | None = None
+    details: str | None = None
+    source_event_type: str | None = None
+    needs_operator_input: bool = False
+
+
 class RoleResponse(BaseModel):
     id: int
     session_id: int

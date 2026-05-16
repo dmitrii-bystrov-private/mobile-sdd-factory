@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from backend.api.schemas import (
     CreateSessionRequest,
     CreateSessionResponse,
+    InteractiveStateSummaryResponse,
     PrepareSessionRequest,
     PrepareSessionResponse,
     JiraSubtasksSummaryResponse,
@@ -99,6 +100,18 @@ def get_jira_subtasks(
     except IntakeError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return JiraSubtasksSummaryResponse(**summary)
+
+
+@router.get("/{session_id}/interactive-state", response_model=InteractiveStateSummaryResponse)
+def get_interactive_state(
+    session_id: int,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> InteractiveStateSummaryResponse:
+    try:
+        summary = dependencies.coordinator_service.get_interactive_state_summary(session_id)
+    except IntakeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return InteractiveStateSummaryResponse(**summary)
 
 
 @router.post("/prepare", response_model=PrepareSessionResponse)

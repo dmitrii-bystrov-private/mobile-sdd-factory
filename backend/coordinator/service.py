@@ -407,6 +407,47 @@ class CoordinatorService:
             "items": items,
         }
 
+    def get_interactive_state_summary(self, session_id: int) -> dict[str, object]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} does not exist")
+
+        escalated_event = None
+        runtime_error_event = None
+        for event in reversed(self.event_repository.list_for_session(session.id)):
+            if (
+                escalated_event is None
+                and event.event_type == "session_escalated_to_operator"
+                and event.payload.get("reason") == "runtime_error"
+            ):
+                escalated_event = event
+            if runtime_error_event is None and event.event_type == "role_runtime_error_reported":
+                runtime_error_event = event
+            if escalated_event is not None and runtime_error_event is not None:
+                break
+
+        source_event = escalated_event or runtime_error_event
+        if source_event is None:
+            return {
+                "available": False,
+                "role_name": None,
+                "current_stage": None,
+                "summary": None,
+                "details": None,
+                "source_event_type": None,
+                "needs_operator_input": False,
+            }
+
+        return {
+            "available": True,
+            "role_name": source_event.payload.get("role_name"),
+            "current_stage": source_event.payload.get("current_stage", session.current_stage),
+            "summary": source_event.payload.get("summary") or source_event.payload.get("reason"),
+            "details": source_event.payload.get("details"),
+            "source_event_type": source_event.event_type,
+            "needs_operator_input": session.status == SessionStatus.WAITING_FOR_OPERATOR,
+        }
+
     def handle_operator_event(
         self,
         session_id: int,
