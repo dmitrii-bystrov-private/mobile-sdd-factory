@@ -7,7 +7,6 @@ from pathlib import Path
 import tempfile
 
 from backend.api.routes_events import inject_event, list_events
-from backend.api.routes_operator import start_subtask_graph
 from backend.api.routes_roles import submit_role_output
 from backend.api.routes_sessions import create_session, prepare_session
 from backend.api.schemas import (
@@ -15,7 +14,6 @@ from backend.api.schemas import (
     InjectEventRequest,
     PrepareSessionRequest,
     RoleOutputRequest,
-    StartSubtaskGraphRequest,
 )
 from backend.api.sse import SessionEventBus
 from backend.coordinator.loop_runner import CoordinatorLoopRunner
@@ -194,15 +192,8 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert decomposition_response.followup_event_type == "implementation_requested"
-
-        subtask_graph_response = start_subtask_graph(
-            StartSubtaskGraphRequest(session_id=session_id),
-            dependencies=deps,
-        )
-        assert subtask_graph_response.event_type == "subtask_graph_requested"
-        assert subtask_graph_response.followup_event_type == "subtask_implementation_requested"
-        assert subtask_graph_response.session.current_stage == "subtask_implementation_requested"
+        assert decomposition_response.followup_event_type == "subtask_implementation_requested"
+        assert decomposition_response.session.current_stage == "subtask_implementation_requested"
 
         subtask_response = inject_event(
             InjectEventRequest(

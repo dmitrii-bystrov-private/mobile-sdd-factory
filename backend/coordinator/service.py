@@ -816,47 +816,13 @@ class CoordinatorService:
         if decomposition_artifact is None:
             raise IntakeError("Task decomposition artifact is missing for subtask graph start")
 
-        statuses_file = self.workdir_root / session.task_key / "statuses.md"
-        try:
-            subtasks = read_snapshot_subtasks(statuses_file)
-        except FileNotFoundError as exc:
-            raise IntakeError(f"statuses.md not found for session {session.task_key}") from exc
-
+        subtasks = self._read_snapshot_subtasks_or_raise(session.task_key)
         unresolved = unresolved_subtasks(subtasks)
         if not unresolved:
             raise IntakeError(f"No unresolved subtasks found for session {session.task_key}")
-
-        artifact_path = write_text_artifact(
-            self.artifacts_root,
-            session.task_key,
-            "subtask-graph",
-            "statuses.md",
-            statuses_file.read_text(),
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="subtask-graph",
-            artifact_type="subtask_statuses_markdown",
-            path=str(artifact_path),
-            metadata={
-                "subtask_count": len(subtasks),
-                "unresolved_count": len(unresolved),
-            },
-        )
-
-        event = self._append_event(
-            session_id=session.id,
-            event_type="subtask_graph_requested",
-            producer_type="operator",
-            payload={
-                "subtask_count": len(subtasks),
-                "unresolved_count": len(unresolved),
-                "decomposition_artifact_id": decomposition_artifact.id,
-            },
-        )
-        followup_event = self._enqueue_subtask_graph(
+        event, followup_event = self._start_subtask_graph_flow(
             session=session,
-            source_event=event,
+            producer_type="operator",
             subtasks=subtasks,
             initial_work_item=active_item,
             decomposition_artifact=decomposition_artifact,
@@ -1978,6 +1944,7 @@ class CoordinatorService:
         if task_breakdown:
             context_lines.append(f"Task breakdown: {task_breakdown}")
         additional_context = "\n".join(context_lines) if context_lines else None
+        decomposition_artifact: Artifact | None = None
         if self.artifacts_root is not None:
             artifact_path = write_text_artifact(
                 self.artifacts_root,
@@ -1986,7 +1953,7 @@ class CoordinatorService:
                 "task_decomposition.md",
                 self._task_decomposition_markdown(summary=summary, task_breakdown=task_breakdown),
             )
-            self.artifact_repository.create(
+            decomposition_artifact = self.artifact_repository.create(
                 session_id=session.id,
                 stage_name="planning",
                 artifact_type="task_decomposition_markdown",
@@ -2003,6 +1970,20 @@ class CoordinatorService:
             additional_context=additional_context,
         )
         session = self._get_session_or_raise(session.id)
+        if decomposition_artifact is not None:
+            subtasks = self._read_snapshot_subtasks(session.task_key)
+            if subtasks is not None and unresolved_subtasks(subtasks):
+                active_item = self._find_active_primary_coding_work_item(session)
+                if active_item is not None and active_item.work_type == "implementation":
+                    _graph_event, followup_event = self._start_subtask_graph_flow(
+                        session=session,
+                        producer_type="coordinator",
+                        subtasks=subtasks,
+                        initial_work_item=active_item,
+                        decomposition_artifact=decomposition_artifact,
+                    )
+                    session = self._get_session_or_raise(session.id)
+                    return session, followup_event
         return session, event
 
     def _enqueue_subtask_graph(
@@ -2074,6 +2055,55 @@ class CoordinatorService:
                 "decomposition_artifact_id": decomposition_artifact.id,
             },
         )
+
+    def _start_subtask_graph_flow(
+        self,
+        session: Session,
+        producer_type: str,
+        subtasks: list,
+        initial_work_item: WorkItem,
+        decomposition_artifact: Artifact,
+    ) -> tuple[Event, Event]:
+        if self.artifacts_root is None or self.workdir_root is None:
+            raise IntakeError("Coordinator is missing workdir root or artifact root")
+
+        unresolved = unresolved_subtasks(subtasks)
+        statuses_file = self.workdir_root / session.task_key / "statuses.md"
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "subtask-graph",
+            "statuses.md",
+            statuses_file.read_text(),
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="subtask-graph",
+            artifact_type="subtask_statuses_markdown",
+            path=str(artifact_path),
+            metadata={
+                "subtask_count": len(subtasks),
+                "unresolved_count": len(unresolved),
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="subtask_graph_requested",
+            producer_type=producer_type,
+            payload={
+                "subtask_count": len(subtasks),
+                "unresolved_count": len(unresolved),
+                "decomposition_artifact_id": decomposition_artifact.id,
+            },
+        )
+        followup_event = self._enqueue_subtask_graph(
+            session=session,
+            source_event=event,
+            subtasks=subtasks,
+            initial_work_item=initial_work_item,
+            decomposition_artifact=decomposition_artifact,
+        )
+        return event, followup_event
 
     def _handle_subtask_completed(
         self,
@@ -3310,6 +3340,20 @@ class CoordinatorService:
         if self.knowledge_root is not None:
             return KnowledgeStore(self.knowledge_root)
         raise IntakeError("Coordinator is missing knowledge root")
+
+    def _read_snapshot_subtasks(self, task_key: str) -> list | None:
+        if self.workdir_root is None:
+            return None
+        statuses_file = self.workdir_root / task_key / "statuses.md"
+        if not statuses_file.exists():
+            return None
+        return read_snapshot_subtasks(statuses_file)
+
+    def _read_snapshot_subtasks_or_raise(self, task_key: str) -> list:
+        subtasks = self._read_snapshot_subtasks(task_key)
+        if subtasks is None:
+            raise IntakeError(f"statuses.md not found for session {task_key}")
+        return subtasks
 
     def _latest_artifact_for_session_type(
         self,

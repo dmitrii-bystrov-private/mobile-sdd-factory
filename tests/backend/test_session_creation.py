@@ -1141,6 +1141,17 @@ class SessionCreationTests(unittest.TestCase):
             event_type="story_spec_completed",
             payload={"summary": "Need a new screen plus navigation wiring"},
         )
+        self.write_statuses_file(
+            "IOS-30003DECOMP",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30003DECOMP | Story | Parent story | In Progress |
+| IOS-30030 | Sub-task | Already done one | Ready for test |
+| IOS-30031 | Sub-task | Already done two | Released |
+""",
+        )
 
         updated_session, followup_event = self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -1258,6 +1269,17 @@ class SessionCreationTests(unittest.TestCase):
             event_type="story_spec_completed",
             payload={"summary": "Split into focused subtasks"},
         )
+        self.write_statuses_file(
+            "IOS-30003SUBTASK",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30003SUBTASK | Story | Parent story | In Progress |
+| IOS-30013 | Sub-task | Already done one | Ready for test |
+| IOS-30014 | Sub-task | Already done two | Released |
+""",
+        )
         self.coordinator.handle_operator_event(
             session_id=session.id,
             event_type="task_decomposition_completed",
@@ -1341,6 +1363,17 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             event_type="story_spec_completed",
             payload={"summary": "Split into focused subtasks"},
+        )
+        self.write_statuses_file(
+            "IOS-30004SUBTASK",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004SUBTASK | Story | Parent story | In Progress |
+| IOS-30022 | Sub-task | Already done one | Ready for test |
+| IOS-30023 | Sub-task | Already done two | Released |
+""",
         )
         self.coordinator.handle_operator_event(
             session_id=session.id,

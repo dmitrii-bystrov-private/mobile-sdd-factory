@@ -746,6 +746,17 @@ class SessionApiTests(unittest.TestCase):
             ),
             dependencies=self.dependencies,
         )
+        self.write_statuses_file(
+            "IOS-40003DECOMP",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40003DECOMP | Story | Parent story | In Progress |
+| IOS-40030 | Sub-task | Already done one | Ready for test |
+| IOS-40031 | Sub-task | Already done two | Released |
+""",
+        )
 
         response = inject_event(
             InjectEventRequest(
@@ -820,6 +831,17 @@ class SessionApiTests(unittest.TestCase):
                 payload={"summary": "Split work into subtasks"},
             ),
             dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40003SUBTASK",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40003SUBTASK | Story | Parent story | In Progress |
+| IOS-40103 | Sub-task | Already done one | Ready for test |
+| IOS-40104 | Sub-task | Already done two | Released |
+""",
         )
         inject_event(
             InjectEventRequest(
@@ -919,6 +941,17 @@ class SessionApiTests(unittest.TestCase):
                 payload={"summary": "Split work into subtasks"},
             ),
             dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40004SUBTASK",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40004SUBTASK | Story | Parent story | In Progress |
+| IOS-40112 | Sub-task | Already done one | Ready for test |
+| IOS-40113 | Sub-task | Already done two | Released |
+""",
         )
         inject_event(
             InjectEventRequest(
