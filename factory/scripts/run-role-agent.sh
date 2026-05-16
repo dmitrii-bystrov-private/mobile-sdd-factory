@@ -42,6 +42,7 @@ printf "SDD_FACTORY_AGENT_BOOTSTRAP launcher=%s role=%s task=%s lifecycle=%s\n" 
 case "$launcher_name" in
   claude)
     args=(
+      "--no-session-persistence"
       "--permission-mode" "auto"
       "--name" "${role_name}:${task_key}"
     )

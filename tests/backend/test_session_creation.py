@@ -307,6 +307,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("SDD_FACTORY_WORKDIR_ROOT=", script_text)
         self.assertIn("/factory/scripts/run-role-agent.sh", script_text)
         self.assertIn("SDD_FACTORY_ROLE_LAUNCHER_READY", script_text)
+        self.assertIn("--no-session-persistence", Path("factory/scripts/run-role-agent.sh").read_text())
 
     def test_real_launcher_backed_runtime_keeps_persistent_role_context_across_rounds(self) -> None:
         runtime_root = Path(self.temp_dir.name)
