@@ -30,6 +30,7 @@ from backend.roles.contracts import (
     PROPOSAL_CONTEXT_WORKER_ROLE,
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
     SPEC_VERIFIER_WORKER_ROLE,
+    TASK_DECOMPOSER_WORKER_ROLE,
     IMPLEMENTER_ROLE,
     STORY_SPEC_WORKER_ROLE,
     TASK_COORDINATOR_ROLE,
@@ -294,6 +295,9 @@ class CoordinatorService:
             return session, followup_event
         if event_type == "story_spec_completed":
             session, followup_event = self._handle_story_spec_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "task_decomposition_completed":
+            session, followup_event = self._handle_task_decomposition_completed(session, accepted_event)
             return session, followup_event
         if event_type == "subtask_completed":
             session, followup_event = self._handle_subtask_completed(session, accepted_event)
@@ -881,6 +885,8 @@ class CoordinatorService:
             session, followup_event = self._handle_spec_verification_completed(session, accepted_event)
         elif mapped_event_type == "story_spec_completed":
             session, followup_event = self._handle_story_spec_completed(session, accepted_event)
+        elif mapped_event_type == "task_decomposition_completed":
+            session, followup_event = self._handle_task_decomposition_completed(session, accepted_event)
         elif mapped_event_type == "subtask_completed":
             session, followup_event = self._handle_subtask_completed(session, accepted_event)
         elif mapped_event_type == "implementation_completed":
@@ -1643,6 +1649,52 @@ class CoordinatorService:
             },
         )
 
+    def _enqueue_task_decomposition(
+        self,
+        session: Session,
+        source_event: Event,
+        additional_context: str | None = None,
+    ) -> Event:
+        decomposer_role = self._ensure_on_demand_role(session, TASK_DECOMPOSER_WORKER_ROLE)
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="task_decomposition",
+            title=f"Task decomposition for {session.task_key}",
+            owner_role_id=decomposer_role.id,
+            source_event_id=source_event.id,
+            priority=97,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="task_decomposition_requested",
+            current_owner=TASK_DECOMPOSER_WORKER_ROLE,
+        )
+        instruction = (
+            f"Prepare compact task decomposition for story {session.task_key} before implementation starts. "
+            "Break the verified planning package into the smallest useful execution-oriented chunks for later implementation or subtask flow."
+        )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
+        self._dispatch_role_work(
+            session=session,
+            role=decomposer_role,
+            work_item=work_item,
+            stage_name="task_decomposition_requested",
+            instruction=instruction,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="task_decomposition_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": TASK_DECOMPOSER_WORKER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
     def _handle_bug_analysis_completed(
         self,
         session: Session,
@@ -1871,6 +1923,40 @@ class CoordinatorService:
             context_lines.append(f"Story spec summary: {summary}")
         if constraints:
             context_lines.append(f"Key constraints: {constraints}")
+        additional_context = "\n".join(context_lines) if context_lines else None
+
+        event = self._enqueue_task_decomposition(
+            session=session,
+            source_event=source_event,
+            additional_context=additional_context,
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event
+
+    def _handle_task_decomposition_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        decomposition_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "task_decomposition" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not decomposition_items:
+            raise IntakeError("No active task decomposition work item found for the session")
+
+        active_item = decomposition_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, TASK_DECOMPOSER_WORKER_ROLE)
+
+        summary = str(source_event.payload.get("summary") or "").strip()
+        task_breakdown = str(source_event.payload.get("task_breakdown") or "").strip()
+        context_lines: list[str] = []
+        if summary:
+            context_lines.append(f"Task decomposition summary: {summary}")
+        if task_breakdown:
+            context_lines.append(f"Task breakdown: {task_breakdown}")
         additional_context = "\n".join(context_lines) if context_lines else None
 
         event = self._enqueue_initial_implementation(
@@ -2498,6 +2584,9 @@ class CoordinatorService:
         if role_name == STORY_SPEC_WORKER_ROLE and session.current_stage == "story_spec_requested":
             if output_type in {"passed", "completed"}:
                 return "story_spec_completed"
+        if role_name == TASK_DECOMPOSER_WORKER_ROLE and session.current_stage == "task_decomposition_requested":
+            if output_type in {"passed", "completed"}:
+                return "task_decomposition_completed"
         raise IntakeError(
             f"Unsupported role output: role={role_name}, output_type={output_type}, stage={session.current_stage}"
         )
@@ -3031,6 +3120,11 @@ class CoordinatorService:
                 f"Prepare a concise implementation spec for story {task_key} before coding. "
                 "Clarify the intended scope, key constraints, and an implementation approach that will guide the next coding step."
             )
+        if stage_name == "task_decomposition_requested":
+            return (
+                f"Prepare compact task decomposition for story {task_key}. "
+                "Break the verified planning package into the smallest useful execution-oriented chunks before implementation starts."
+            )
         if stage_name == "subtask_implementation_requested":
             return (
                 f"Continue sequential subtask implementation for {task_key}. "
@@ -3092,6 +3186,7 @@ class CoordinatorService:
             "constraints_requested": "constraints",
             "spec_verification_requested": "spec_verification",
             "story_spec_requested": "story_spec",
+            "task_decomposition_requested": "task_decomposition",
             "subtask_implementation_requested": "subtask_implementation",
             "implementation_requested": "implementation",
             "self_review_correction_requested": "self_review_correction",

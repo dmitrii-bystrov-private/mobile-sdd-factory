@@ -11,6 +11,7 @@ ACCEPTANCE_CRITERIA_WORKER_ROLE = "acceptance-criteria-worker"
 CONSTRAINTS_WORKER_ROLE = "constraints-worker"
 SPEC_VERIFIER_WORKER_ROLE = "spec-verifier-worker"
 STORY_SPEC_WORKER_ROLE = "story-spec-worker"
+TASK_DECOMPOSER_WORKER_ROLE = "task-decomposer-worker"
 
 DEFAULT_SESSION_ROLES = [
     TASK_COORDINATOR_ROLE,
@@ -39,6 +40,9 @@ ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     },
     "spec_verification_requested": {
         SPEC_VERIFIER_WORKER_ROLE,
+    },
+    "task_decomposition_requested": {
+        TASK_DECOMPOSER_WORKER_ROLE,
     },
     "subtask_implementation_requested": {
         IMPLEMENTER_ROLE,

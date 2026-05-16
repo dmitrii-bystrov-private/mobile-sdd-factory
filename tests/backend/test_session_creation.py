@@ -15,6 +15,7 @@ from backend.roles.contracts import (
     PROPOSAL_CONTEXT_WORKER_ROLE,
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
     SPEC_VERIFIER_WORKER_ROLE,
+    TASK_DECOMPOSER_WORKER_ROLE,
     STORY_SPEC_WORKER_ROLE,
 )
 from backend.roles.launcher import RoleLauncherManager
@@ -1008,7 +1009,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Planning verification summary: Planning package is coherent", sent_inputs[0])
         self.assertIn("Verified focus: navigation + state ownership", sent_inputs[0])
 
-    def test_story_spec_completed_moves_session_to_implementation(self) -> None:
+    def test_story_spec_completed_moves_session_to_task_decomposition(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003STORY",
             workflow_profile="story_full",
@@ -1051,23 +1052,23 @@ class SessionCreationTests(unittest.TestCase):
         )
         work_items = self.work_item_repository.list_for_session(session.id)
         events = self.event_repository.list_for_session(session.id)
-        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
-        implementer_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        decomposer_role = self.role_repository.get_by_name(session.id, TASK_DECOMPOSER_WORKER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(decomposer_role.runtime_handle)
         spec_role = self.role_repository.get_by_name(session.id, STORY_SPEC_WORKER_ROLE)
 
-        self.assertEqual("implementation_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
-        self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual("task_decomposition_requested", updated_session.current_stage)
+        self.assertEqual(TASK_DECOMPOSER_WORKER_ROLE, updated_session.current_owner)
+        self.assertEqual("task_decomposition_requested", followup_event.event_type)
         self.assertEqual("stopped", spec_role.status.value)
         self.assertEqual(
             [
                 ("acceptance_criteria", "completed"),
                 ("constraints", "completed"),
-                ("implementation", "assigned"),
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
                 ("spec_verification", "completed"),
                 ("story_spec", "completed"),
+                ("task_decomposition", "assigned"),
             ],
             sorted((item.work_type, item.status.value) for item in work_items),
         )
@@ -1095,16 +1096,114 @@ class SessionCreationTests(unittest.TestCase):
                 "story_spec_requested",
                 "story_spec_completed",
                 "role_input_dispatched",
+                "task_decomposition_requested",
+            ],
+            [item.event_type for item in events],
+        )
+        self.assertEqual(1, len(sent_inputs))
+        self.assertIn("Prepare compact task decomposition for story IOS-30003STORY before implementation starts.", sent_inputs[0])
+        self.assertIn("Story spec summary: Need a new screen plus navigation wiring", sent_inputs[0])
+
+    def test_task_decomposition_completed_moves_session_to_implementation(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003DECOMP",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003DECOMP")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Scope clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="requirements_completed",
+            payload={"summary": "Requirements clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="acceptance_criteria_completed",
+            payload={"summary": "Acceptance prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning verified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="story_spec_completed",
+            payload={"summary": "Need a new screen plus navigation wiring"},
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload={"summary": "Split into execution chunks", "task_breakdown": "Networking, state, UI wiring"},
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        implementer_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        decomposer_role = self.role_repository.get_by_name(session.id, TASK_DECOMPOSER_WORKER_ROLE)
+
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual("stopped", decomposer_role.status.value)
+        self.assertEqual(
+            [
+                ("acceptance_criteria", "completed"),
+                ("constraints", "completed"),
+                ("implementation", "assigned"),
+                ("proposal_context", "completed"),
+                ("requirements", "completed"),
+                ("spec_verification", "completed"),
+                ("story_spec", "completed"),
+                ("task_decomposition", "completed"),
+            ],
+            sorted((item.work_type, item.status.value) for item in work_items),
+        )
+        self.assertEqual(
+            [
+                "task_started",
+                "task_session_reused",
+                "task_prepared",
+                "role_input_dispatched",
+                "proposal_context_requested",
+                "proposal_context_completed",
+                "role_input_dispatched",
+                "requirements_requested",
+                "requirements_completed",
+                "role_input_dispatched",
+                "acceptance_criteria_requested",
+                "acceptance_criteria_completed",
+                "role_input_dispatched",
+                "constraints_requested",
+                "constraints_completed",
+                "role_input_dispatched",
+                "spec_verification_requested",
+                "spec_verification_completed",
+                "role_input_dispatched",
+                "story_spec_requested",
+                "story_spec_completed",
+                "role_input_dispatched",
+                "task_decomposition_requested",
+                "task_decomposition_completed",
+                "role_input_dispatched",
                 "implementation_requested",
             ],
             [item.event_type for item in events],
         )
         self.assertEqual(1, len(implementer_inputs))
-        self.assertIn("Start implementation work for IOS-30003STORY.", implementer_inputs[0])
-        self.assertIn(
-            "Story spec summary: Need a new screen plus navigation wiring",
-            implementer_inputs[0],
-        )
+        self.assertIn("Start implementation work for IOS-30003DECOMP.", implementer_inputs[0])
+        self.assertIn("Task decomposition summary: Split into execution chunks", implementer_inputs[0])
 
     def test_knowledge_is_repo_visible_markdown(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003KNOW")
@@ -1159,6 +1258,11 @@ class SessionCreationTests(unittest.TestCase):
             event_type="story_spec_completed",
             payload={"summary": "Split into focused subtasks"},
         )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload={"summary": "Execution chunks prepared"},
+        )
         self.write_statuses_file(
             "IOS-30003SUBTASK",
             """# Statuses
@@ -1182,16 +1286,19 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
         self.assertEqual("implementer", updated_session.current_owner)
         self.assertEqual(
-            [
-                ("acceptance_criteria", "completed"),
-                ("constraints", "completed"),
-                ("proposal_context", "completed"),
-                ("requirements", "completed"),
-                ("spec_verification", "completed"),
-                ("story_spec", "completed"),
-                ("subtask_implementation", "assigned"),
-                ("subtask_implementation", "unassigned"),
-            ],
+            sorted(
+                [
+                    ("acceptance_criteria", "completed"),
+                    ("constraints", "completed"),
+                    ("proposal_context", "completed"),
+                    ("requirements", "completed"),
+                    ("spec_verification", "completed"),
+                    ("story_spec", "completed"),
+                    ("task_decomposition", "completed"),
+                    ("subtask_implementation", "assigned"),
+                    ("subtask_implementation", "unassigned"),
+                ]
+            ),
             sorted((item.work_type, item.status.value) for item in work_items),
         )
         self.assertIn("Implement subtask IOS-30010", sent_inputs[-1])
@@ -1233,6 +1340,11 @@ class SessionCreationTests(unittest.TestCase):
             event_type="story_spec_completed",
             payload={"summary": "Split into focused subtasks"},
         )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload={"summary": "Execution chunks prepared"},
+        )
         self.write_statuses_file(
             "IOS-30004SUBTASK",
             """# Statuses
@@ -1256,7 +1368,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("subtask_implementation_requested", followup_event.event_type)
         self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
         self.assertEqual(
-            ["assigned", "completed", "completed", "completed", "completed", "completed", "completed", "completed"],
+            ["assigned", "completed", "completed", "completed", "completed", "completed", "completed", "completed", "completed"],
             sorted(item.status.value for item in work_items),
         )
 
@@ -1557,15 +1669,26 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("story_spec_requested", followup_event.event_type)
         self.assertEqual("story_spec_requested", verifier_session.current_stage)
 
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+        decomposition_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
             role_name=STORY_SPEC_WORKER_ROLE,
             output_type="completed",
             payload={"summary": "Scope clarified"},
         )
-        events = self.event_repository.list_for_session(session.id)
 
         self.assertEqual("story_spec_completed", mapped_event.event_type)
+        self.assertEqual("task_decomposition_requested", followup_event.event_type)
+        self.assertEqual("task_decomposition_requested", decomposition_session.current_stage)
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=TASK_DECOMPOSER_WORKER_ROLE,
+            output_type="completed",
+            payload={"summary": "Decomposition prepared"},
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("task_decomposition_completed", mapped_event.event_type)
         self.assertEqual("implementation_requested", followup_event.event_type)
         self.assertEqual("implementation_requested", updated_session.current_stage)
         self.assertEqual(
@@ -1591,6 +1714,9 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "story_spec_requested",
                 "story_spec_completed",
+                "role_input_dispatched",
+                "task_decomposition_requested",
+                "task_decomposition_completed",
                 "role_input_dispatched",
                 "implementation_requested",
             ],

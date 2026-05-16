@@ -149,6 +149,22 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
             "- Project knowledge base: `{task_knowledge_root}`",
         ]
+    if role_name == "task-decomposer-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Proposal input: `{task_snapshot_root}/spec/proposal.md`",
+            "- Requirements input: `{task_snapshot_root}/spec/requirements.md`",
+            "- Acceptance criteria input: `{task_snapshot_root}/spec/acceptance_criteria.md`",
+            "- Constraints input: `{task_snapshot_root}/spec/constraints.md`",
+            "- Planning verification input: `{task_snapshot_root}/spec/spec_verification.md`",
+            "- Story spec input: `{task_snapshot_root}/spec/story_spec.md`",
+            "- Decomposition target: `{task_snapshot_root}/spec/decomposition.md`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            "- Project knowledge base: `{task_knowledge_root}`",
+        ]
     if role_name == "story-spec-worker":
         return [
             "- Task repo worktree: `{task_repo_root}`",
@@ -221,6 +237,12 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You execute one bounded planning-verification task for one story session.",
             "- Produce the routed verification result and then stop; you do not remain the owner of later planning or implementation work.",
             "- You should not assume persistence across unrelated tasks or later implementation rounds.",
+        ]
+    if role_name == "task-decomposer-worker":
+        return [
+            "- You execute one bounded task-decomposition task for one story session.",
+            "- Produce the routed decomposition result and then stop; you do not remain the owner of later implementation or verification work.",
+            "- You should not assume persistence across unrelated tasks or later execution rounds.",
         ]
     if role_name == "story-spec-worker":
         return [
@@ -300,6 +322,12 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Treat this role as a bounded one-shot worker: verify the assembled planning package, write the routed result, and exit.",
             "- Start from the proposal, requirements, acceptance criteria, and constraints and check that the package is coherent, complete enough for implementation, and free of obvious contradictions.",
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than re-checking the planning package.",
+        ]
+    if role_name == "task-decomposer-worker":
+        return [
+            "- Treat this role as a bounded one-shot worker: prepare task decomposition, write the routed result, and exit.",
+            "- Start from the verified planning package and final story spec and break the work into the smallest useful execution-oriented chunks for later implementation/subtask flow.",
+            "- Keep the output compact and downstream-oriented so execution can start from an explicit decomposition instead of implicit planning assumptions.",
         ]
     if role_name == "story-spec-worker":
         return [
