@@ -82,10 +82,28 @@ export type FollowupContext = {
   eventPayload: Record<string, unknown>;
 };
 
+export type PlanningStepStatus = "completed" | "active" | "pending";
+
+export type PlanningStepSummary = {
+  stageName: string;
+  label: string;
+  status: PlanningStepStatus;
+  artifactType: string | null;
+  artifactDetail: ArtifactDetail | null;
+};
+
+export type PlanningSummary = {
+  stageCount: number;
+  completedCount: number;
+  currentStage: string | null;
+  steps: PlanningStepSummary[];
+};
+
 export type SessionBundle = {
   roles: Role[];
   artifacts: Artifact[];
   events: EventItem[];
   workItems: WorkItem[];
   followupContext: FollowupContext | null;
+  planningSummary: PlanningSummary | null;
 };

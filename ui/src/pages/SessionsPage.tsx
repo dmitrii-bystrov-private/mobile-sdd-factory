@@ -7,14 +7,132 @@ import { SessionList } from "../components/SessionList";
 import { SessionStartForm } from "../components/SessionStartForm";
 import type {
   Artifact,
+  ArtifactDetail,
   EventItem,
   FollowupContext,
   KnowledgeItem,
+  PlanningSummary,
+  PlanningStepSummary,
   Session,
   SessionBundle,
 } from "../types";
 
 const FOLLOWUP_ARTIFACT_TYPES = new Set(["mr_comments_markdown", "qa_reopen_comments"]);
+const PLANNING_STEP_DEFINITIONS = [
+  {
+    stageName: "proposal_context_requested",
+    label: "Proposal & Context",
+    completedEventType: "proposal_context_completed",
+  },
+  {
+    stageName: "requirements_requested",
+    label: "Requirements",
+    completedEventType: "requirements_completed",
+  },
+  {
+    stageName: "acceptance_criteria_requested",
+    label: "Acceptance Criteria",
+    completedEventType: "acceptance_criteria_completed",
+  },
+  {
+    stageName: "constraints_requested",
+    label: "Constraints",
+    completedEventType: "constraints_completed",
+  },
+  {
+    stageName: "spec_verification_requested",
+    label: "Spec Verification",
+    completedEventType: "spec_verification_completed",
+  },
+  {
+    stageName: "story_spec_requested",
+    label: "Story Spec",
+    completedEventType: "story_spec_completed",
+  },
+  {
+    stageName: "task_decomposition_requested",
+    label: "Task Decomposition",
+    completedEventType: "task_decomposition_completed",
+  },
+] as const;
+
+function latestPlanningArtifactForStage(
+  artifacts: Artifact[],
+  stageName: string,
+): Artifact | null {
+  if (stageName === "task_decomposition_requested") {
+    const decompositionArtifact = [...artifacts]
+      .reverse()
+      .find((artifact) => artifact.artifact_type === "task_decomposition_markdown");
+    if (decompositionArtifact !== undefined) {
+      return decompositionArtifact;
+    }
+  }
+
+  const roleSummaryArtifact = [...artifacts]
+    .reverse()
+    .find(
+      (artifact) =>
+        artifact.artifact_type === "role_output_summary" &&
+        artifact.metadata?.current_stage === stageName,
+    );
+  return roleSummaryArtifact ?? null;
+}
+
+async function buildPlanningSummary(
+  artifacts: Artifact[],
+  events: EventItem[],
+): Promise<PlanningSummary | null> {
+  const hasPlanningSignal = events.some((event) =>
+    PLANNING_STEP_DEFINITIONS.some(
+      (step) => event.event_type === step.stageName || event.event_type === step.completedEventType,
+    ),
+  );
+
+  if (!hasPlanningSignal) {
+    return null;
+  }
+
+  const artifactsByStage = new Map<string, Artifact | null>();
+  for (const step of PLANNING_STEP_DEFINITIONS) {
+    artifactsByStage.set(step.stageName, latestPlanningArtifactForStage(artifacts, step.stageName));
+  }
+
+  const artifactDetailsById = new Map<number, ArtifactDetail>();
+  await Promise.all(
+    [...artifactsByStage.values()]
+      .filter((artifact): artifact is Artifact => artifact !== null)
+      .map(async (artifact) => {
+        if (!artifactDetailsById.has(artifact.id)) {
+          artifactDetailsById.set(artifact.id, await apiClient.getArtifact(artifact.id));
+        }
+      }),
+  );
+
+  const steps: PlanningStepSummary[] = PLANNING_STEP_DEFINITIONS.map((step) => {
+    const artifact = artifactsByStage.get(step.stageName) ?? null;
+    const artifactDetail = artifact !== null ? artifactDetailsById.get(artifact.id) ?? null : null;
+    const completed = events.some((event) => event.event_type === step.completedEventType);
+    const active = !completed && events.some((event) => event.event_type === step.stageName);
+
+    return {
+      stageName: step.stageName,
+      label: step.label,
+      status: completed ? "completed" : active ? "active" : "pending",
+      artifactType: artifact?.artifact_type ?? null,
+      artifactDetail,
+    };
+  });
+
+  const currentStep = [...steps].reverse().find((step) => step.status === "active") ?? null;
+
+  return {
+    stageCount: steps.length,
+    completedCount: steps.filter((step) => step.status === "completed").length,
+    currentStage: currentStep?.stageName ?? null,
+    steps,
+  };
+}
 
 function buildFollowupContext(
   artifacts: Artifact[],
@@ -104,12 +222,14 @@ export function SessionsPage(): JSX.Element {
         apiClient.listWorkItems(sessionId),
       ]);
       const followupContext = await buildFollowupContext(artifacts.items, events.items);
+      const planningSummary = await buildPlanningSummary(artifacts.items, events.items);
       setBundle({
         roles: roles.items,
         artifacts: artifacts.items,
         events: events.items,
         workItems: workItems.items,
         followupContext,
+        planningSummary,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load session detail");

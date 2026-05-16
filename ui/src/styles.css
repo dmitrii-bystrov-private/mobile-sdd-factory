@@ -243,6 +243,28 @@ input {
   margin: 8px 0 0;
 }
 
+.planning-summary-list {
+  max-height: 420px;
+}
+
+.planning-step-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-strong);
+  padding: 14px;
+}
+
+.planning-step-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.planning-step-snippet {
+  margin: 10px 0 8px;
+}
+
 .session-card,
 .action-button {
   border: 1px solid var(--line);
