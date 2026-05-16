@@ -18,6 +18,39 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - exposed bootstrap guidance through product surfaces
+    - added backend route:
+      - `GET /operator/bootstrap-guidance`
+    - added typed bootstrap guidance response schema
+    - added UI panel:
+      - `BootstrapGuidancePanel`
+    - integrated bootstrap guidance loading into the operator console session page
+    - validated:
+      - `./.venv/bin/python -m unittest tests.backend.test_environment_doctor tests.backend.test_bootstrap_guidance tests.backend.test_api_sessions`
+      - `./.venv/bin/python -m unittest discover -s tests/backend -p 'test_*.py'`
+      - `npm run build` in `ui/`
+  - current_state:
+    - the operator console now shows both environment diagnosis and prioritized setup guidance
+    - `Phase 43` has a coherent first setup-assistance surface
+  - next:
+    - choose the next concrete `Phase 43` slice
+  - blockers:
+    - none for the bootstrap guidance surface slice
+
+- date: `2026-05-17`
+  - done:
+    - chose the next concrete `Phase 43` slice
+    - selected `Bootstrap Guidance Surface`
+  - current_state:
+    - bootstrap guidance exists in shell form
+    - the next missing layer is to expose that setup plan directly in the operator console
+  - next:
+    - implement `Bootstrap Guidance Surface`
+  - blockers:
+    - none at the planning level
+
+- date: `2026-05-17`
+  - done:
     - implemented `Bootstrap Guidance Baseline`
     - added:
       - `factory/doctor/bootstrap_guidance.py`

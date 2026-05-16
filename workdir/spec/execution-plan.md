@@ -820,6 +820,10 @@ Status markers:
   - `[done]` implement the `Bootstrap Guidance Baseline` slice
   - `[done]` validate the `Bootstrap Guidance Baseline` slice
   - `[done]` document the baseline in `workdir/spec/phase43-bootstrap-guidance-baseline.md`
+  - `[done]` choose the next concrete `Phase 43` slice
+  - `[done]` implement the `Bootstrap Guidance Surface` slice
+  - `[done]` validate the `Bootstrap Guidance Surface` slice
+  - `[done]` document the surface in `workdir/spec/phase43-bootstrap-guidance-surface.md`
   - `[pending]` choose the next concrete `Phase 43` slice
 
 ## Immediate Next Steps
@@ -989,7 +993,8 @@ Status markers:
 165. `[done]` Choose the next concrete `Phase 43` slice.
 166. `[done]` Implement the `Bootstrap Guidance Baseline` slice.
 167. `[done]` Validate the `Bootstrap Guidance Baseline` slice.
-168. `[pending]` Choose the next concrete `Phase 43` slice.
+168. `[done]` Choose the next concrete `Phase 43` slice.
+169. `[pending]` Implement the `Bootstrap Guidance Surface` slice.
 
 ## What Was Going Wrong
 

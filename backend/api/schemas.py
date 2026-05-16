@@ -131,6 +131,23 @@ class EnvironmentDoctorResponse(BaseModel):
     checks: list[EnvironmentDoctorCheckResponse]
 
 
+class BootstrapGuidanceItemResponse(BaseModel):
+    id: str
+    label: str
+    status: str
+    details: str
+    hint: str | None = None
+
+
+class BootstrapGuidanceResponse(BaseModel):
+    overall_status: str
+    required_action_count: int
+    optional_action_count: int
+    next_step: str
+    required_actions: list[BootstrapGuidanceItemResponse]
+    optional_actions: list[BootstrapGuidanceItemResponse]
+
+
 class RoleResponse(BaseModel):
     id: int
     session_id: int

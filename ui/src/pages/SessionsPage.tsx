@@ -2,6 +2,7 @@ import { startTransition, useEffect, useRef, useState } from "react";
 
 import { apiClient, openSessionEventStream } from "../api/client";
 import { EnvironmentDoctorPanel } from "../components/EnvironmentDoctorPanel";
+import { BootstrapGuidancePanel } from "../components/BootstrapGuidancePanel";
 import { SessionDetail } from "../components/SessionDetail";
 import { KnowledgePanel } from "../components/KnowledgePanel";
 import { SessionList } from "../components/SessionList";
@@ -9,6 +10,7 @@ import { SessionStartForm } from "../components/SessionStartForm";
 import type {
   Artifact,
   ArtifactDetail,
+  BootstrapGuidanceSummary,
   EnvironmentDoctorSummary,
   EventItem,
   FollowupContext,
@@ -276,6 +278,8 @@ export function SessionsPage(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [doctorSummary, setDoctorSummary] = useState<EnvironmentDoctorSummary | null>(null);
+  const [bootstrapGuidanceSummary, setBootstrapGuidanceSummary] =
+    useState<BootstrapGuidanceSummary | null>(null);
   const [streamState, setStreamState] = useState<"idle" | "live" | "reconnecting">("idle");
   const [lastStreamEventType, setLastStreamEventType] = useState<string | null>(null);
   const [lastStreamEventId, setLastStreamEventId] = useState<number | null>(null);
@@ -291,6 +295,7 @@ export function SessionsPage(): JSX.Element {
       const sessionResponse = await apiClient.listSessions();
       const knowledgeResponse = await apiClient.listKnowledge();
       const doctorResponse = await apiClient.getEnvironmentDoctor();
+      const guidanceResponse = await apiClient.getBootstrapGuidance();
       setSessions(sessionResponse.items);
       setKnowledgeItems(knowledgeResponse.items);
       setDoctorSummary({
@@ -309,6 +314,26 @@ export function SessionsPage(): JSX.Element {
           value: check.value,
           source: check.source,
           hint: check.hint,
+        })),
+      });
+      setBootstrapGuidanceSummary({
+        overallStatus: guidanceResponse.overall_status,
+        requiredActionCount: guidanceResponse.required_action_count,
+        optionalActionCount: guidanceResponse.optional_action_count,
+        nextStep: guidanceResponse.next_step,
+        requiredActions: guidanceResponse.required_actions.map((item) => ({
+          id: item.id,
+          label: item.label,
+          status: item.status,
+          details: item.details,
+          hint: item.hint,
+        })),
+        optionalActions: guidanceResponse.optional_actions.map((item) => ({
+          id: item.id,
+          label: item.label,
+          status: item.status,
+          details: item.details,
+          hint: item.hint,
         })),
       });
       startTransition(() => {
@@ -478,6 +503,7 @@ export function SessionsPage(): JSX.Element {
             sessions={sessions}
           />
           <EnvironmentDoctorPanel doctorSummary={doctorSummary} />
+          <BootstrapGuidancePanel guidanceSummary={bootstrapGuidanceSummary} />
           <KnowledgePanel items={knowledgeItems} />
         </div>
         {loading ? (

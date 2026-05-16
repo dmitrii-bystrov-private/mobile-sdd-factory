@@ -198,6 +198,29 @@ export const apiClient = {
     return request("/operator/environment-doctor");
   },
 
+  getBootstrapGuidance(): Promise<{
+    overall_status: string;
+    required_action_count: number;
+    optional_action_count: number;
+    next_step: string;
+    required_actions: Array<{
+      id: string;
+      label: string;
+      status: string;
+      details: string;
+      hint: string | null;
+    }>;
+    optional_actions: Array<{
+      id: string;
+      label: string;
+      status: string;
+      details: string;
+      hint: string | null;
+    }>;
+  }> {
+    return request("/operator/bootstrap-guidance");
+  },
+
   listKnowledge(): Promise<{ items: KnowledgeItem[] }> {
     return request("/knowledge");
   },

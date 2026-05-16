@@ -130,6 +130,23 @@ export type EnvironmentDoctorSummary = {
   checks: EnvironmentDoctorCheck[];
 };
 
+export type BootstrapGuidanceItem = {
+  id: string;
+  label: string;
+  status: string;
+  details: string;
+  hint?: string | null;
+};
+
+export type BootstrapGuidanceSummary = {
+  overallStatus: string;
+  requiredActionCount: number;
+  optionalActionCount: number;
+  nextStep: string;
+  requiredActions: BootstrapGuidanceItem[];
+  optionalActions: BootstrapGuidanceItem[];
+};
+
 export type JiraSubtasksSummary = {
   available: boolean;
   totalCount: number;

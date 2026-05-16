@@ -37,6 +37,7 @@ try:
     from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
     from backend.api.routes_operator import create_knowledge, create_subtasks_from_plan
+    from backend.api.routes_operator import get_bootstrap_guidance
     from backend.api.routes_operator import get_environment_doctor
     from backend.api.routes_operator import refresh_subtask_state
     from backend.api.routes_operator import send_to_test
@@ -1885,6 +1886,36 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(3, response.required_total)
         self.assertEqual(1, len(response.checks))
         self.assertEqual("env.SDD_WORKDIR", response.checks[0].id)
+
+    def test_get_bootstrap_guidance_route_returns_guidance(self) -> None:
+        fake_report = {
+            "overall_status": "warn",
+            "repo_root": self.temp_dir.name,
+            "required_ok": 2,
+            "required_total": 3,
+            "optional_warnings": 1,
+            "checks": [
+                {
+                    "id": "env.SDD_WORKDIR",
+                    "category": "environment",
+                    "label": "Task workdir root",
+                    "required": True,
+                    "status": "missing",
+                    "details": "SDD_WORKDIR is not set.",
+                    "value": None,
+                    "source": None,
+                    "hint": "Set SDD_WORKDIR.",
+                }
+            ],
+        }
+
+        with patch("backend.api.routes_operator.build_report", return_value=fake_report):
+            response = get_bootstrap_guidance(dependencies=self.dependencies)
+
+        self.assertEqual("warn", response.overall_status)
+        self.assertEqual(1, response.required_action_count)
+        self.assertEqual("Resolve required setup issues first.", response.next_step)
+        self.assertEqual("env.SDD_WORKDIR", response.required_actions[0].id)
 
     def test_pause_session_route_pauses_active_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
