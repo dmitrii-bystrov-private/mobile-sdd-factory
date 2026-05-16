@@ -236,6 +236,71 @@ class TmuxBackendTests(unittest.TestCase):
 
             backend.stop_session(session)
 
+    def test_pty_mode_emits_second_confirmation_blocker_after_operator_reply(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            backend = TmuxSessionBackend(
+                mode="pty",
+                runtime_root=runtime_root,
+            )
+            session = backend.create_task_session("IOS-50007")
+            fixture = (
+                Path(__file__).resolve().parent
+                / "fixtures"
+                / "interactive_multistep_fixture.py"
+            )
+            role_workspace = runtime_root / "IOS-50007" / "runtime" / "role-workspaces" / "implementer"
+            role_workspace.mkdir(parents=True, exist_ok=True)
+            launcher_script = role_workspace / "launch-role.sh"
+            launcher_script.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        f"exec python3 -u {fixture}",
+                        "",
+                    ]
+                )
+            )
+            launcher_script.chmod(0o755)
+            role = backend.spawn_role(
+                session,
+                "implementer",
+                start_directory=role_workspace,
+                launch_command=[str(launcher_script)],
+            )
+
+            first_blocker = self._wait_for_output(
+                backend,
+                role,
+                timeout_seconds=3.0,
+                expected_substring='SDD_ERROR: {"summary":"interactive auth required"',
+            )
+            self.assertIn('SDD_ERROR: {"summary":"interactive auth required"', first_blocker)
+
+            backend.send_input(role, "/mcp")
+
+            second_blocker = self._wait_for_output(
+                backend,
+                role,
+                timeout_seconds=3.0,
+                expected_substring='SDD_ERROR: {"summary":"interactive confirmation required"',
+            )
+            self.assertIn("AUTH_CONTINUED:/mcp", second_blocker)
+            self.assertIn('SDD_ERROR: {"summary":"interactive confirmation required"', second_blocker)
+
+            backend.send_input(role, "1")
+            completion = self._wait_for_output(
+                backend,
+                role,
+                timeout_seconds=3.0,
+                expected_substring="interactive multi-step recovery completed",
+            )
+            self.assertIn("CONFIRM_CONTINUED:1", completion)
+            self.assertIn("SDD_OUTPUT", completion)
+
+            backend.stop_session(session)
+
 
 if __name__ == "__main__":
     unittest.main()

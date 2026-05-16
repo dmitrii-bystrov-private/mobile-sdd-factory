@@ -37,6 +37,7 @@ class TmuxSessionBackend(SessionBackend):
         self.pty_output_buffers: dict[str, str] = defaultdict(str)
         self.pty_trust_prompt_handled: dict[str, bool] = defaultdict(bool)
         self.pty_auth_blocker_emitted: dict[str, bool] = defaultdict(bool)
+        self.pty_confirmation_blocker_emitted: dict[str, bool] = defaultdict(bool)
         self._available = shutil.which("tmux") is not None
         self._effective_mode = self._resolve_mode(mode)
 
@@ -173,6 +174,10 @@ class TmuxSessionBackend(SessionBackend):
             if self.pty_interactive_driver_enabled.get(role.role_id, False) and not self.pty_role_ready.get(role.role_id, True):
                 self.pty_buffered_inputs[role.role_id].append(text)
                 return
+            if self.pty_interactive_driver_enabled.get(role.role_id, False):
+                self.pty_output_buffers[role.role_id] = ""
+                self.pty_auth_blocker_emitted[role.role_id] = False
+                self.pty_confirmation_blocker_emitted[role.role_id] = False
             os.write(master_fd, (text + "\n").encode())
 
     def read_output(self, role: RuntimeRoleHandle) -> list[RuntimeOutputChunk]:
@@ -262,6 +267,7 @@ class TmuxSessionBackend(SessionBackend):
             self.pty_output_buffers.pop(role.role_id, None)
             self.pty_trust_prompt_handled.pop(role.role_id, None)
             self.pty_auth_blocker_emitted.pop(role.role_id, None)
+            self.pty_confirmation_blocker_emitted.pop(role.role_id, None)
             if process is not None:
                 if process.poll() is None:
                     process.terminate()
@@ -306,6 +312,7 @@ class TmuxSessionBackend(SessionBackend):
                 self.pty_output_buffers.pop(role_id, None)
                 self.pty_trust_prompt_handled.pop(role_id, None)
                 self.pty_auth_blocker_emitted.pop(role_id, None)
+                self.pty_confirmation_blocker_emitted.pop(role_id, None)
                 if process is not None:
                     if process.poll() is None:
                         process.terminate()
@@ -335,6 +342,7 @@ class TmuxSessionBackend(SessionBackend):
         accumulated = self.pty_output_buffers.get(role_id, "") + text
         self.pty_output_buffers[role_id] = accumulated[-32768:]
         synthetic_markers: list[str] = []
+        blocker_detected = False
 
         if not self.pty_role_ready.get(role_id, False):
             if (
@@ -347,18 +355,30 @@ class TmuxSessionBackend(SessionBackend):
                     self.pty_trust_prompt_handled[role_id] = True
             if self._contains_claude_ready_prompt(accumulated):
                 self.pty_role_ready[role_id] = True
-                master_fd = self.pty_master_fds.get(role_id)
-                if master_fd is not None:
-                    for buffered_text in self.pty_buffered_inputs.pop(role_id, []):
-                        os.write(master_fd, (buffered_text + "\n").encode())
         if (
             not self.pty_auth_blocker_emitted.get(role_id, False)
             and self._contains_claude_auth_blocker(accumulated)
         ):
             self.pty_auth_blocker_emitted[role_id] = True
+            blocker_detected = True
             synthetic_markers.append(
                 'SDD_ERROR: {"summary":"interactive auth required","details":"launcher-backed role requested connector authentication"}'
             )
+        elif (
+            self.pty_role_ready.get(role_id, False)
+            and not self.pty_confirmation_blocker_emitted.get(role_id, False)
+            and self._contains_generic_confirmation_blocker(accumulated)
+        ):
+            self.pty_confirmation_blocker_emitted[role_id] = True
+            blocker_detected = True
+            synthetic_markers.append(
+                'SDD_ERROR: {"summary":"interactive confirmation required","details":"launcher-backed role requested explicit confirmation"}'
+            )
+        if self.pty_role_ready.get(role_id, False) and not blocker_detected:
+            master_fd = self.pty_master_fds.get(role_id)
+            if master_fd is not None:
+                for buffered_text in self.pty_buffered_inputs.pop(role_id, []):
+                    os.write(master_fd, (buffered_text + "\n").encode())
         return synthetic_markers
 
     def _contains_claude_trust_prompt(self, text: str) -> bool:
@@ -372,3 +392,10 @@ class TmuxSessionBackend(SessionBackend):
 
     def _contains_claude_auth_blocker(self, text: str) -> bool:
         return "needs auth" in text and "/mcp" in text
+
+    def _contains_generic_confirmation_blocker(self, text: str) -> bool:
+        return (
+            "Enter to confirm" in text
+            and "Esc to cancel" in text
+            and "trust this folder" not in text
+        )
