@@ -347,6 +347,66 @@ class CoordinatorService:
             "items": progress_items,
         }
 
+    def get_created_jira_subtasks_summary(self, session_id: int) -> dict[str, object]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} does not exist")
+
+        created_event = None
+        for event in reversed(self.event_repository.list_for_session(session.id)):
+            if event.event_type == "jira_subtasks_created":
+                created_event = event
+                break
+        if created_event is None:
+            return {
+                "available": False,
+                "total_count": 0,
+                "items": [],
+            }
+
+        raw_keys = created_event.payload.get("created_subtask_keys", [])
+        created_keys = [str(item).strip() for item in raw_keys if str(item).strip()]
+        if not created_keys:
+            return {
+                "available": False,
+                "total_count": 0,
+                "items": [],
+            }
+
+        graph_summary = self.get_subtask_graph_summary(session.id)
+        graph_rows_by_key = {
+            str(row["key"]): row
+            for row in graph_summary.get("rows", [])
+            if isinstance(row, dict) and row.get("key") is not None
+        }
+        progress_summary = self.get_subtask_progress_summary(session.id)
+        progress_items_by_key = {
+            str(item["key"]): item
+            for item in progress_summary.get("items", [])
+            if isinstance(item, dict) and item.get("key") is not None
+        }
+        current_subtask_key = progress_summary.get("current_subtask_key")
+
+        items: list[dict[str, object]] = []
+        for key in created_keys:
+            graph_row = graph_rows_by_key.get(key, {})
+            progress_item = progress_items_by_key.get(key, {})
+            items.append(
+                {
+                    "key": key,
+                    "title": graph_row.get("title"),
+                    "status": graph_row.get("status"),
+                    "queue_position": progress_item.get("queue_position"),
+                    "is_current": current_subtask_key == key,
+                }
+            )
+
+        return {
+            "available": True,
+            "total_count": len(items),
+            "items": items,
+        }
+
     def handle_operator_event(
         self,
         session_id: int,

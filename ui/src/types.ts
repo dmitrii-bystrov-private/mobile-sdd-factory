@@ -100,8 +100,15 @@ export type PlanningSummary = {
 };
 
 export type JiraSubtasksSummary = {
-  artifactType: string;
-  artifactDetail: ArtifactDetail | null;
+  available: boolean;
+  totalCount: number;
+  items: Array<{
+    key: string;
+    title: string | null;
+    status: string | null;
+    queuePosition: number | null;
+    isCurrent: boolean;
+  }>;
 };
 
 export type SubtaskGraphRow = {

@@ -148,6 +148,20 @@ export const apiClient = {
     return request(`/sessions/${sessionId}/subtask-progress`);
   },
 
+  getJiraSubtasks(sessionId: number): Promise<{
+    available: boolean;
+    total_count: number;
+    items: Array<{
+      key: string;
+      title: string | null;
+      status: string | null;
+      queue_position: number | null;
+      is_current: boolean;
+    }>;
+  }> {
+    return request(`/sessions/${sessionId}/jira-subtasks`);
+  },
+
   listKnowledge(): Promise<{ items: KnowledgeItem[] }> {
     return request("/knowledge");
   },

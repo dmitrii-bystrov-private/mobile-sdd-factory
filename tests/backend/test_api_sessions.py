@@ -7,6 +7,7 @@ try:
     from backend.api.sse import SessionEventBus
     from backend.api.routes_sessions import (
         create_session,
+        get_jira_subtasks,
         get_subtask_graph,
         get_subtask_progress,
         list_sessions,
@@ -359,6 +360,71 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(0, summary.completed_count)
         self.assertEqual(2, summary.remaining_count)
         self.assertEqual(["assigned", "unassigned"], [item.status for item in summary.items])
+
+    def test_get_jira_subtasks_route_returns_created_subtasks_summary(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005JS", workflow_profile="story_full"),
+            dependencies=self.dependencies,
+        )
+        prepare_response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005JS"),
+            dependencies=self.dependencies,
+        )
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": "prepared"},
+                ),
+                dependencies=self.dependencies,
+            )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload={
+                    "summary": "Decomposition prepared",
+                    "plan_index_markdown": "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n",
+                    "plan_task_files": [
+                        {
+                            "filename": "01-build-data-source.md",
+                            "content": "# Build data source\n\n## What to implement\nCreate the feature data source.\n",
+                        }
+                    ],
+                },
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40005JS",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005JS | Story | Parent story | In Progress |",
+                    "| IOS-90001 | Sub-task | Build data source | To Do |",
+                    "| IOS-90002 | Sub-task | Wire presentation layer | Ready for test |",
+                ]
+            ),
+        )
+        create_subtasks_from_plan(
+            CreateSubtasksFromPlanRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        summary = get_jira_subtasks(create_response.session.id, dependencies=self.dependencies)
+
+        self.assertTrue(summary.available)
+        self.assertEqual(1, summary.total_count)
+        self.assertEqual(["IOS-90001"], [item.key for item in summary.items])
 
     def test_create_session_route_rejects_irrelevant_policy_for_profile(self) -> None:
         from fastapi import HTTPException

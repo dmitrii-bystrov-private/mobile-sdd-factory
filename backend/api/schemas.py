@@ -86,6 +86,20 @@ class SubtaskProgressSummaryResponse(BaseModel):
     items: list[SubtaskProgressItemResponse]
 
 
+class JiraSubtaskItemResponse(BaseModel):
+    key: str
+    title: str | None = None
+    status: str | None = None
+    queue_position: int | None = None
+    is_current: bool = False
+
+
+class JiraSubtasksSummaryResponse(BaseModel):
+    available: bool
+    total_count: int
+    items: list[JiraSubtaskItemResponse]
+
+
 class RoleResponse(BaseModel):
     id: int
     session_id: int

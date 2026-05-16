@@ -9,6 +9,7 @@ from backend.api.schemas import (
     CreateSessionResponse,
     PrepareSessionRequest,
     PrepareSessionResponse,
+    JiraSubtasksSummaryResponse,
     SessionResponse,
     SessionsResponse,
     SubtaskGraphSummaryResponse,
@@ -86,6 +87,18 @@ def get_subtask_progress(
     except IntakeError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return SubtaskProgressSummaryResponse(**summary)
+
+
+@router.get("/{session_id}/jira-subtasks", response_model=JiraSubtasksSummaryResponse)
+def get_jira_subtasks(
+    session_id: int,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> JiraSubtasksSummaryResponse:
+    try:
+        summary = dependencies.coordinator_service.get_created_jira_subtasks_summary(session_id)
+    except IntakeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return JiraSubtasksSummaryResponse(**summary)
 
 
 @router.post("/prepare", response_model=PrepareSessionResponse)

@@ -10,26 +10,6 @@ type JiraSubtasksPanelProps = {
   subtaskProgressSummary: SubtaskProgressSummary | null;
 };
 
-type ParsedSubtaskLine = {
-  key: string;
-  raw: string;
-};
-
-function parseSubtaskLines(content: string | null | undefined): ParsedSubtaskLine[] {
-  if (content === null || content === undefined) {
-    return [];
-  }
-  return content
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("- "))
-    .map((line) => {
-      const raw = line.slice(2).trim();
-      const key = raw.split(/\s+/, 1)[0] ?? raw;
-      return { key, raw };
-    });
-}
-
 export function JiraSubtasksPanel({
   jiraSubtasksSummary,
   subtaskGraphSummary,
@@ -39,7 +19,6 @@ export function JiraSubtasksPanel({
     return null;
   }
 
-  const lines = parseSubtaskLines(jiraSubtasksSummary.artifactDetail?.content);
   const graphRowsByKey = new Map(
     (subtaskGraphSummary?.rows ?? []).map((row) => [row.key, row]),
   );
@@ -54,25 +33,25 @@ export function JiraSubtasksPanel({
       <div className="subpanel-head">
         <strong>Jira Subtasks</strong>
       </div>
-      {lines.length > 0 ? (
+      {jiraSubtasksSummary.items.length > 0 ? (
         <div className="table-list">
-          {lines.map((line) => {
-            const graphRow = graphRowsByKey.get(line.key);
-            const progressItem = progressItemsByKey.get(line.key);
-            const isCurrent = subtaskProgressSummary?.currentSubtaskKey === line.key;
+          {jiraSubtasksSummary.items.map((item) => {
+            const graphRow = graphRowsByKey.get(item.key);
+            const progressItem = progressItemsByKey.get(item.key);
+            const isCurrent = item.isCurrent || subtaskProgressSummary?.currentSubtaskKey === item.key;
 
             return (
-              <div className="table-row" key={line.raw}>
+              <div className="table-row" key={item.key}>
                 <div>
-                  <strong>{line.key}</strong>
-                  <p>{graphRow?.title ?? line.raw}</p>
+                  <strong>{item.key}</strong>
+                  <p>{graphRow?.title ?? item.title ?? item.key}</p>
                 </div>
                 <div className="subtask-graph-meta">
-                  {progressItem !== undefined ? (
-                    <small>#{progressItem.queuePosition}</small>
+                  {progressItem !== undefined || item.queuePosition !== null ? (
+                    <small>#{progressItem?.queuePosition ?? item.queuePosition}</small>
                   ) : null}
                   {isCurrent ? <small>current</small> : null}
-                  <strong>{graphRow?.status ?? "created"}</strong>
+                  <strong>{graphRow?.status ?? item.status ?? "created"}</strong>
                 </div>
               </div>
             );

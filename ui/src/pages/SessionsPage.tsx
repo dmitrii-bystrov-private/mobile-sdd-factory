@@ -138,19 +138,22 @@ async function buildPlanningSummary(
 }
 
 async function buildJiraSubtasksSummary(
-  artifacts: Artifact[],
+  sessionId: number,
 ): Promise<JiraSubtasksSummary | null> {
-  const summaryArtifact = [...artifacts]
-    .reverse()
-    .find((artifact) => artifact.artifact_type === "jira_subtasks_summary");
-
-  if (summaryArtifact === undefined) {
+  const response = await apiClient.getJiraSubtasks(sessionId);
+  if (!response.available || response.total_count === 0) {
     return null;
   }
-
   return {
-    artifactType: summaryArtifact.artifact_type,
-    artifactDetail: await apiClient.getArtifact(summaryArtifact.id),
+    available: response.available,
+    totalCount: response.total_count,
+    items: response.items.map((item) => ({
+      key: item.key,
+      title: item.title,
+      status: item.status,
+      queuePosition: item.queue_position,
+      isCurrent: item.is_current,
+    })),
   };
 }
 
@@ -295,7 +298,7 @@ export function SessionsPage(): JSX.Element {
       ] = await Promise.all([
         Promise.resolve(buildFollowupContext(artifacts.items, events.items)),
         buildPlanningSummary(artifacts.items, events.items),
-        buildJiraSubtasksSummary(artifacts.items),
+        buildJiraSubtasksSummary(sessionId),
         buildSubtaskGraphSummary(sessionId),
         buildSubtaskProgressSummary(sessionId),
       ]);
