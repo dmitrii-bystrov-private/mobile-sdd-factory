@@ -148,6 +148,40 @@ class BootstrapGuidanceResponse(BaseModel):
     optional_actions: list[BootstrapGuidanceItemResponse]
 
 
+class RuntimeCapabilityModelResponse(BaseModel):
+    id: str
+    label: str
+    supported_efforts: list[str]
+    default_effort: str | None = None
+    visibility: str
+    supported_in_api: bool
+    source: str
+
+
+class RunnerCapabilityResponse(BaseModel):
+    runner: str
+    available: bool
+    source: str
+    path: str | None = None
+    supports_custom_model: bool
+    models: list[RuntimeCapabilityModelResponse]
+
+
+class LegacyRoleDefaultResponse(BaseModel):
+    role_name: str
+    model: str | None = None
+    effort: str | None = None
+    mcp_servers: list[str]
+    source: str
+
+
+class RuntimeCapabilitiesResponse(BaseModel):
+    available_runners: list[str]
+    default_runner: str | None = None
+    runners: list[RunnerCapabilityResponse]
+    legacy_role_defaults: list[LegacyRoleDefaultResponse]
+
+
 class RoleResponse(BaseModel):
     id: int
     session_id: int

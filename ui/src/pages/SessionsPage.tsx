@@ -3,6 +3,7 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import { apiClient, openSessionEventStream } from "../api/client";
 import { EnvironmentDoctorPanel } from "../components/EnvironmentDoctorPanel";
 import { BootstrapGuidancePanel } from "../components/BootstrapGuidancePanel";
+import { RuntimeCapabilitiesPanel } from "../components/RuntimeCapabilitiesPanel";
 import { SessionDetail } from "../components/SessionDetail";
 import { KnowledgePanel } from "../components/KnowledgePanel";
 import { SessionList } from "../components/SessionList";
@@ -19,6 +20,7 @@ import type {
   KnowledgeItem,
   PlanningSummary,
   PlanningStepSummary,
+  RuntimeCapabilitiesSummary,
   Session,
   SessionBundle,
   SubtaskGraphSummary,
@@ -280,6 +282,8 @@ export function SessionsPage(): JSX.Element {
   const [doctorSummary, setDoctorSummary] = useState<EnvironmentDoctorSummary | null>(null);
   const [bootstrapGuidanceSummary, setBootstrapGuidanceSummary] =
     useState<BootstrapGuidanceSummary | null>(null);
+  const [runtimeCapabilitiesSummary, setRuntimeCapabilitiesSummary] =
+    useState<RuntimeCapabilitiesSummary | null>(null);
   const [streamState, setStreamState] = useState<"idle" | "live" | "reconnecting">("idle");
   const [lastStreamEventType, setLastStreamEventType] = useState<string | null>(null);
   const [lastStreamEventId, setLastStreamEventId] = useState<number | null>(null);
@@ -296,6 +300,7 @@ export function SessionsPage(): JSX.Element {
       const knowledgeResponse = await apiClient.listKnowledge();
       const doctorResponse = await apiClient.getEnvironmentDoctor();
       const guidanceResponse = await apiClient.getBootstrapGuidance();
+      const runtimeCapabilitiesResponse = await apiClient.getRuntimeCapabilities();
       setSessions(sessionResponse.items);
       setKnowledgeItems(knowledgeResponse.items);
       setDoctorSummary({
@@ -334,6 +339,33 @@ export function SessionsPage(): JSX.Element {
           status: item.status,
           details: item.details,
           hint: item.hint,
+        })),
+      });
+      setRuntimeCapabilitiesSummary({
+        availableRunners: runtimeCapabilitiesResponse.available_runners,
+        defaultRunner: runtimeCapabilitiesResponse.default_runner,
+        runners: runtimeCapabilitiesResponse.runners.map((runner) => ({
+          runner: runner.runner,
+          available: runner.available,
+          source: runner.source,
+          path: runner.path,
+          supportsCustomModel: runner.supports_custom_model,
+          models: runner.models.map((model) => ({
+            id: model.id,
+            label: model.label,
+            supportedEfforts: model.supported_efforts,
+            defaultEffort: model.default_effort,
+            visibility: model.visibility,
+            supportedInApi: model.supported_in_api,
+            source: model.source,
+          })),
+        })),
+        legacyRoleDefaults: runtimeCapabilitiesResponse.legacy_role_defaults.map((item) => ({
+          roleName: item.role_name,
+          model: item.model,
+          effort: item.effort,
+          mcpServers: item.mcp_servers,
+          source: item.source,
         })),
       });
       startTransition(() => {
@@ -504,6 +536,7 @@ export function SessionsPage(): JSX.Element {
           />
           <EnvironmentDoctorPanel doctorSummary={doctorSummary} />
           <BootstrapGuidancePanel guidanceSummary={bootstrapGuidanceSummary} />
+          <RuntimeCapabilitiesPanel capabilities={runtimeCapabilitiesSummary} />
           <KnowledgePanel items={knowledgeItems} />
         </div>
         {loading ? (

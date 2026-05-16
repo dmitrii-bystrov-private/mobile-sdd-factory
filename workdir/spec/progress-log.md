@@ -18,6 +18,27 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - implemented `Runtime Capabilities Baseline`
+    - added a live capability surface for:
+      - available runners
+      - live model catalogs
+      - supported effort/reasoning levels
+    - separated runtime-discovered capabilities from legacy role defaults
+    - exposed runtime capabilities in:
+      - backend operator API
+      - operator console sidebar
+    - assessed `Phase 43` as complete with permanent documentation deferred
+    - promoted `Phase 44. Runtime Management, Role Configuration, And MCP Isolation` to the active phase
+  - current_state:
+    - the product now knows what models and effort levels are actually selectable per runner
+    - the next practical gap is no longer discovery but configuration and control
+  - next:
+    - implement `Role Runtime Configuration Baseline`
+  - blockers:
+    - none for the runtime-capabilities slice
+
+- date: `2026-05-17`
+  - done:
     - promoted the runtime-management and role-configuration gaps into the plan as an explicit future phase
     - reserved:
       - `Phase 44. Runtime Management, Role Configuration, And MCP Isolation`

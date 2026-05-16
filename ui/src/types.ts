@@ -147,6 +147,40 @@ export type BootstrapGuidanceSummary = {
   optionalActions: BootstrapGuidanceItem[];
 };
 
+export type RuntimeCapabilityModel = {
+  id: string;
+  label: string;
+  supportedEfforts: string[];
+  defaultEffort: string | null;
+  visibility: string;
+  supportedInApi: boolean;
+  source: string;
+};
+
+export type RunnerCapability = {
+  runner: string;
+  available: boolean;
+  source: string;
+  path: string | null;
+  supportsCustomModel: boolean;
+  models: RuntimeCapabilityModel[];
+};
+
+export type LegacyRoleDefault = {
+  roleName: string;
+  model: string | null;
+  effort: string | null;
+  mcpServers: string[];
+  source: string;
+};
+
+export type RuntimeCapabilitiesSummary = {
+  availableRunners: string[];
+  defaultRunner: string | null;
+  runners: RunnerCapability[];
+  legacyRoleDefaults: LegacyRoleDefault[];
+};
+
 export type JiraSubtasksSummary = {
   available: boolean;
   totalCount: number;

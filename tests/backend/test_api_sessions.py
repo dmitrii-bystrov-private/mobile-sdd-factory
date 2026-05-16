@@ -39,6 +39,7 @@ try:
     from backend.api.routes_operator import create_knowledge, create_subtasks_from_plan
     from backend.api.routes_operator import get_bootstrap_guidance
     from backend.api.routes_operator import get_environment_doctor
+    from backend.api.routes_operator import get_runtime_capabilities
     from backend.api.routes_operator import refresh_subtask_state
     from backend.api.routes_operator import send_to_test
     from backend.api.routes_operator import start_subtask_graph
@@ -1916,6 +1917,50 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(1, response.required_action_count)
         self.assertEqual("Resolve required setup issues first.", response.next_step)
         self.assertEqual("env.SDD_WORKDIR", response.required_actions[0].id)
+
+    def test_get_runtime_capabilities_route_returns_capability_surface(self) -> None:
+        fake_capabilities = {
+            "available_runners": ["claude", "codex"],
+            "default_runner": "claude",
+            "runners": [
+                {
+                    "runner": "claude",
+                    "available": True,
+                    "source": "local cli probe + curated alias catalog",
+                    "path": "/usr/bin/claude",
+                    "supports_custom_model": True,
+                    "models": [
+                        {
+                            "id": "sonnet",
+                            "label": "Sonnet",
+                            "supported_efforts": ["low", "medium", "high", "xhigh", "max"],
+                            "default_effort": "medium",
+                            "visibility": "list",
+                            "supported_in_api": True,
+                            "source": "anthropic alias catalog",
+                        }
+                    ],
+                }
+            ],
+            "legacy_role_defaults": [
+                {
+                    "role_name": "implementer",
+                    "model": "sonnet",
+                    "effort": "medium",
+                    "mcp_servers": ["ios-rag", "android-rag", "frontend-rag"],
+                    "source": ".claude/agents/implementer.md",
+                }
+            ],
+        }
+
+        with patch("backend.api.routes_operator.build_runtime_capabilities", return_value=fake_capabilities):
+            response = get_runtime_capabilities(dependencies=self.dependencies)
+
+        self.assertEqual(["claude", "codex"], response.available_runners)
+        self.assertEqual("claude", response.default_runner)
+        self.assertEqual("claude", response.runners[0].runner)
+        self.assertEqual("sonnet", response.runners[0].models[0].id)
+        self.assertEqual("implementer", response.legacy_role_defaults[0].role_name)
 
     def test_pause_session_route_pauses_active_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

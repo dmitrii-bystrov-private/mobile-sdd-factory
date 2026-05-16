@@ -20,9 +20,9 @@ Status markers:
 
 ## Current Position
 
-- Current phase: `Phase 43. Environment Setup, Doctor, And Permanent Documentation`
-- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer completion, file-backed role result handling, real two-round live implementer validation, and the first environment doctor/bootstrap surfaces are complete; the next active track remains environment setup plus runtime capability productization, while permanent docs stay deferred until the end`
-- Current implementation mode: `launcher-backed live roles now use PTY transport plus file-backed handoff/result semantics; doctor and bootstrap guidance exist; the next useful work should expose real runner/model/effort capability data and then move into runtime management, role configuration, MCP isolation, and codex parity`
+- Current phase: `Phase 44. Runtime Management, Role Configuration, And MCP Isolation`
+- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer completion, file-backed role result handling, real two-round live implementer validation, and the setup/doctor/runtime-capability baseline are complete; the active track is now runtime management, role configuration, MCP isolation, and codex parity`
+- Current implementation mode: `launcher-backed live roles use PTY transport plus file-backed handoff/result semantics; doctor, bootstrap guidance, and runtime capabilities now exist; the next work should make roles explicitly configurable and isolated at runtime`
 - Primary source of truth for next work: `this file`
 - Filesystem/runtime source of truth: `workdir/spec/filesystem-runtime-model.md`
 - External runner session cleanup policy: `workdir/spec/external-runner-session-cleanup-policy.md`
@@ -31,11 +31,11 @@ Status markers:
 
 ## Current Immediate Next Step
 
-- `[in_progress]` continue `Phase 43` by implementing `Runtime Capabilities Baseline`
+- `[in_progress]` begin `Phase 44` by implementing `Role Runtime Configuration Baseline`
 
 ## Reserved Next Phase
 
-- `[pending]` `Phase 44. Runtime Management, Role Configuration, And MCP Isolation`
+- `[pending]` no later named phase reserved yet
 
 ## Phase 1. Architecture Contract
 

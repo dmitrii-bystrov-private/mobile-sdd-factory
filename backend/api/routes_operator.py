@@ -12,6 +12,7 @@ from backend.api.schemas import (
     CompleteDocHarvestRequest,
     CompleteDocHarvestResponse,
     EnvironmentDoctorResponse,
+    RuntimeCapabilitiesResponse,
     CreateSubtasksFromPlanRequest,
     CreateSubtasksFromPlanResponse,
     RefreshSubtaskStateRequest,
@@ -50,6 +51,7 @@ from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
 from factory.doctor.bootstrap_guidance import build_bootstrap_guidance
 from factory.doctor.environment_doctor import build_report
+from factory.doctor.runtime_capabilities import build_runtime_capabilities
 
 router = APIRouter(prefix="/operator", tags=["operator"])
 
@@ -83,6 +85,19 @@ def get_bootstrap_guidance(
     report = build_report(repo_root=repo_root)
     guidance = build_bootstrap_guidance(report)
     return BootstrapGuidanceResponse(**guidance)
+
+
+@router.get("/runtime-capabilities", response_model=RuntimeCapabilitiesResponse)
+def get_runtime_capabilities(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RuntimeCapabilitiesResponse:
+    repo_root = (
+        dependencies.config.repo_root
+        if dependencies.config is not None
+        else Path(__file__).resolve().parents[2]
+    )
+    capabilities = build_runtime_capabilities(repo_root=repo_root)
+    return RuntimeCapabilitiesResponse(**capabilities)
 
 
 @router.post("/pause-session", response_model=PauseSessionResponse)

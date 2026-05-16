@@ -221,6 +221,36 @@ export const apiClient = {
     return request("/operator/bootstrap-guidance");
   },
 
+  getRuntimeCapabilities(): Promise<{
+    available_runners: string[];
+    default_runner: string | null;
+    runners: Array<{
+      runner: string;
+      available: boolean;
+      source: string;
+      path: string | null;
+      supports_custom_model: boolean;
+      models: Array<{
+        id: string;
+        label: string;
+        supported_efforts: string[];
+        default_effort: string | null;
+        visibility: string;
+        supported_in_api: boolean;
+        source: string;
+      }>;
+    }>;
+    legacy_role_defaults: Array<{
+      role_name: string;
+      model: string | null;
+      effort: string | null;
+      mcp_servers: string[];
+      source: string;
+    }>;
+  }> {
+    return request("/operator/runtime-capabilities");
+  },
+
   listKnowledge(): Promise<{ items: KnowledgeItem[] }> {
     return request("/knowledge");
   },
