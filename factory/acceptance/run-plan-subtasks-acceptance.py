@@ -72,6 +72,8 @@ def main() -> None:
         artifact_types = [item.artifact_type for item in artifacts_response.items]
         assert "jira_subtasks_stdout" in artifact_types
         assert "jira_subtasks_stderr" in artifact_types
+        assert "subtasks_snapshot_stdout" in artifact_types
+        assert "subtasks_snapshot_stderr" in artifact_types
 
         print(f"Plan-based Jira subtask acceptance passed for session {session_id}.")
 
