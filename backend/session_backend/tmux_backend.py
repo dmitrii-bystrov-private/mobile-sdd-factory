@@ -27,6 +27,7 @@ class TmuxSessionBackend(SessionBackend):
         self.pending_outputs: dict[str, list[str]] = defaultdict(list)
         self.last_captured_output: dict[str, str] = {}
         self.last_spawn_commands: dict[str, list[str]] = {}
+        self.role_working_directories: dict[str, Path] = {}
         self.session_runtime_roots: dict[str, Path] = {}
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
         self.pty_master_fds: dict[str, int] = {}
@@ -164,6 +165,7 @@ class TmuxSessionBackend(SessionBackend):
             self.pty_pre_ready_unknown_chunks[role_id] = 0
         self.last_spawn_commands[role_id] = role_command
         if start_directory is not None:
+            self.role_working_directories[role_id] = start_directory
             self.last_captured_output.setdefault(role_id, "")
         return RuntimeRoleHandle(
             role_id=role_id,
@@ -197,6 +199,8 @@ class TmuxSessionBackend(SessionBackend):
                 self.pty_confirmation_blocker_emitted[role.role_id] = False
                 self.pty_generic_blocker_emitted[role.role_id] = False
                 self.pty_pre_ready_unknown_chunks[role.role_id] = 0
+                self._write_pty_launcher_input(role.role_id, master_fd, text)
+                return
             os.write(master_fd, (text + "\n").encode())
 
     def read_output(self, role: RuntimeRoleHandle) -> list[RuntimeOutputChunk]:
@@ -289,6 +293,7 @@ class TmuxSessionBackend(SessionBackend):
             self.pty_confirmation_blocker_emitted.pop(role.role_id, None)
             self.pty_generic_blocker_emitted.pop(role.role_id, None)
             self.pty_pre_ready_unknown_chunks.pop(role.role_id, None)
+            self.role_working_directories.pop(role.role_id, None)
             if process is not None:
                 if process.poll() is None:
                     process.terminate()
@@ -336,6 +341,7 @@ class TmuxSessionBackend(SessionBackend):
                 self.pty_confirmation_blocker_emitted.pop(role_id, None)
                 self.pty_generic_blocker_emitted.pop(role_id, None)
                 self.pty_pre_ready_unknown_chunks.pop(role_id, None)
+                self.role_working_directories.pop(role_id, None)
                 if process is not None:
                     if process.poll() is None:
                         process.terminate()
@@ -369,9 +375,10 @@ class TmuxSessionBackend(SessionBackend):
         ready_before_chunk = self.pty_role_ready.get(role_id, False)
 
         normalized = self._normalize_terminal_text(accumulated)
+        recent_normalized = self._normalize_terminal_text(text[-4000:])
         trust_prompt = self._contains_claude_trust_prompt(normalized)
-        selection_blocker = self._contains_generic_selection_blocker(normalized)
-        confirmation_blocker = self._contains_generic_confirmation_blocker(normalized)
+        selection_blocker = self._contains_generic_selection_blocker(recent_normalized)
+        confirmation_blocker = self._contains_generic_confirmation_blocker(recent_normalized)
 
         if not self.pty_role_ready.get(role_id, False):
             if (
@@ -382,7 +389,7 @@ class TmuxSessionBackend(SessionBackend):
                 if master_fd is not None:
                     os.write(master_fd, b"1\n")
                     self.pty_trust_prompt_handled[role_id] = True
-            if self._contains_claude_ready_prompt(normalized):
+            if self._contains_claude_ready_prompt(recent_normalized):
                 self.pty_role_ready[role_id] = True
                 self.pty_pre_ready_unknown_chunks[role_id] = 0
         if (
@@ -428,7 +435,7 @@ class TmuxSessionBackend(SessionBackend):
             master_fd = self.pty_master_fds.get(role_id)
             if master_fd is not None:
                 for buffered_text in self.pty_buffered_inputs.pop(role_id, []):
-                    os.write(master_fd, (buffered_text + "\n").encode())
+                    self._write_pty_launcher_input(role_id, master_fd, buffered_text)
         return synthetic_markers
 
     def _contains_claude_trust_prompt(self, normalized_text: str) -> bool:
@@ -439,7 +446,10 @@ class TmuxSessionBackend(SessionBackend):
         )
 
     def _contains_claude_ready_prompt(self, normalized_text: str) -> bool:
-        return self._contains_runner_status_signal(normalized_text)
+        return (
+            self._contains_runner_status_signal(normalized_text)
+            or self._contains_interactive_input_prompt(normalized_text)
+        )
 
     def _contains_generic_selection_blocker(self, normalized_text: str) -> bool:
         return (
@@ -457,3 +467,28 @@ class TmuxSessionBackend(SessionBackend):
 
     def _contains_runner_status_signal(self, normalized_text: str) -> bool:
         return self._RUNNER_STATUS_SIGNAL_RE.search(normalized_text) is not None
+
+    def _contains_interactive_input_prompt(self, normalized_text: str) -> bool:
+        return (
+            "❯" in normalized_text
+            and "quick safety check" not in normalized_text
+            and "enter to confirm" not in normalized_text
+            and "enter to select" not in normalized_text
+        )
+
+    def _materialize_routed_input(self, role_id: str, text: str) -> str:
+        workspace = self.role_working_directories.get(role_id)
+        if workspace is None:
+            return text
+        routed_input_path = workspace / "ROUTED_WORK.md"
+        routed_input_path.write_text(text)
+        return (
+            "Read ROUTED_WORK.md in the current directory, follow it exactly, "
+            "and reply only through the SDD_* protocol described in AGENTS.md."
+        )
+
+    def _write_pty_launcher_input(self, role_id: str, master_fd: int, text: str) -> None:
+        payload_text = text
+        if "\n" in text:
+            payload_text = self._materialize_routed_input(role_id, text)
+        os.write(master_fd, (payload_text + "\n").encode())

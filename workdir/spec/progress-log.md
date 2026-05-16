@@ -1,0 +1,1704 @@
+# Progress Log
+
+## Purpose
+
+Keep a short chronological record of project progress, current state, and immediate next steps.
+
+## Entry Format
+
+Each entry should include:
+
+- date
+- status
+- completed
+- next
+- blockers
+
+## Entries
+
+- date: `2026-05-16`
+  - done:
+    - switched live multi-line routed work delivery away from terminal paste blocks
+    - materialized launcher-backed multi-line handoffs into role-local `ROUTED_WORK.md`
+    - proved with targeted tests that PTY launcher inputs now use the same file-backed path both for direct sends and for buffered post-ready flush
+    - reran a real launcher-backed live probe and confirmed:
+      - `ROUTED_WORK.md` is created in the implementer workspace
+      - the full routed handoff is preserved there
+      - the old `❯ [Pasted text #...]` UI no longer appears
+    - regression checks passed: backend `Ran 151 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the live launcher path no longer loses routed work inside a terminal paste UI
+    - the remaining `Phase 42` gap is now narrower: true launched agents still need a stronger continuation contract after file-backed handoff delivery
+  - next:
+    - keep `Phase 42` active on live continuation and terminal `SDD_*` outcomes after `ROUTED_WORK.md` delivery
+    - document the next real launcher-backed multi-round validation result once a true launched role completes routed work through the new transport
+  - blockers:
+    - real launcher-backed sessions still do not consistently progress from file-backed routed handoff to terminal `SDD_OUTPUT`
+
+- date: `2026-05-16`
+  - done:
+    - reserved a future named phase for setup, diagnostics, and permanent documentation
+    - fixed its scope as:
+      - environment setup / bootstrap
+      - doctor / health verification
+      - permanent documentation after implementation reconciliation
+    - chose `Environment Doctor Baseline` as its first intended slice
+  - current_state:
+    - the project now has a visible future phase for productizing setup and documentation
+    - that phase is explicitly planned but not active
+  - next:
+    - keep `Phase 42` active on the runtime/driver problem
+    - return to `Phase 43` only after the live-agent execution model is stable enough to document honestly
+  - blockers:
+    - none for planning
+    - activation intentionally depends on runtime stabilization first
+
+- date: `2026-05-16`
+  - done:
+    - fixed a project-level principle that `workdir/spec/` is only temporary working memory
+    - explicitly separated temporary working specs from permanent project documentation
+    - fixed the rule that permanent docs must be produced only after reconciliation with the real implementation
+    - recorded this in `workdir/spec/permanent-documentation-principle.md`
+  - current_state:
+    - the project now has an explicit source-of-truth rule for future documentation work
+    - permanent docs, installer, and doctor are still future deliverables, not yet implemented project layers
+  - next:
+    - keep runtime work on the active track
+    - later open a dedicated documentation/setup phase that reconciles implementation before publishing permanent docs
+  - blockers:
+    - none for the principle itself
+
+- date: `2026-05-16`
+  - done:
+    - probed a real launcher-backed `implementer` under the new local `process` host
+    - confirmed that the real launcher path emits bootstrap output correctly:
+      - `SDD_FACTORY_ROLE_LAUNCHER_READY`
+      - `SDD_FACTORY_AGENT_BOOTSTRAP`
+    - confirmed that the session still stays at `implementation_requested` after that probe
+    - proved that the next remaining gap is not auth, home-directory access, or local persistent hosting
+  - current_state:
+    - the factory can now host persistent local subprocess roles and can bootstrap real launcher-backed roles
+    - but true launched `claude`/`codex` roles do not yet participate in the current routed stdin/stdout loop
+  - next:
+    - continue `Phase 42` as a persistent agent-driver / TTY problem
+    - build the layer that can bridge launcher-backed conversational agents into repeated routed work
+  - blockers:
+    - no local runtime blocker remains
+    - the remaining blocker is the absence of a durable driver contract for true live agents
+
+- date: `2026-05-16`
+  - done:
+    - implemented a real local `process` fallback mode in `TmuxSessionBackend`
+    - added persistent subprocess lifecycle for role spawn, repeated input dispatch, output reads, and shutdown
+    - added backend fixture coverage for multi-round persistent process behavior
+    - added and ran `Implementer Two-Round Live Validation`
+    - verified that one persistent `implementer` process can survive:
+      - first implementation round
+      - `verification_failed`
+      - second correction round
+      - repeated `verification_requested`
+    - regression checks passed: backend `Ran 136 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the factory no longer depends on `tmux` being installed in order to prove repeated routed work against a live persistent host
+    - local repeated routed-work proof is complete under the new `process` runtime fallback
+  - next:
+    - continue `Phase 42` by repeating the same two-round proof against a true launched `claude` or `codex` role process
+    - document any remaining gaps in real launcher-backed repeated execution
+  - blockers:
+    - no local host/runtime blocker remains
+    - the remaining gap is true live-agent behavior under launcher-backed repeated rounds
+
+- date: `2026-05-16`
+  - done:
+    - fixed a runner-agnostic cleanup policy for external agent session storage in `workdir/spec/external-runner-session-cleanup-policy.md`
+    - decided that runner-private session directories are:
+      - not factory state
+      - not factory knowledge
+      - not recovery source of truth
+    - decided that they should be deleted only during final task cleanup
+    - fixed the matching rule as simple task-key substring matching in directory names
+  - current_state:
+    - external runner session storage is now treated as disposable operational residue, not as part of the architecture
+    - actual deletion logic is intentionally deferred until a later dedicated final-cleanup slice
+  - next:
+    - continue `Phase 42` work on live multi-round execution / runtime-hosting gaps
+    - keep final cleanup implementation out of the current active runtime-validation track
+  - blockers:
+    - none for the policy itself
+
+- date: `2026-05-16`
+  - done:
+    - implemented and ran `Live Agent Readiness Probe`
+    - added task-local `CODEX_HOME` wiring for the launcher path
+    - verified that the launcher no longer fails on the old local state blockers:
+      - Claude session persistence in `~/.claude/projects`
+      - Codex readonly global state under `~/.codex`
+    - documented the result in `workdir/spec/phase42-live-agent-readiness-validation.md`
+  - current_state:
+    - the remaining `Phase 42` blockers are no longer local runtime-layout issues
+    - the next real dependency is a persistent live runtime host for repeated rounds
+  - next:
+    - run `Implementer Two-Round Live Validation` in an environment with a real persistent runtime host
+    - document operational gaps in real multi-round live execution
+  - blockers:
+    - `tmux` is not available on the current machine, so the backend still falls back to recording mode for session hosting
+
+- date: `2026-05-16`
+  - done:
+    - implemented and ran `Implementer Live Runtime Smoke`
+    - added a first real launcher-backed smoke harness for one persistent `implementer`
+    - updated the default Claude launcher path to use `--no-session-persistence`, removing the previous filesystem blocker around `~/.claude/projects`
+    - documented the result in `workdir/spec/phase41-live-implementer-smoke-validation.md`
+    - assessed and closed `Phase 41. Live Agent Process Validation` as `complete with deferred items`
+    - opened `Phase 42. Authenticated Live Agent Execution`
+    - chose `Implementer Authenticated Two-Round Validation` as the first concrete `Phase 42` slice
+  - current_state:
+    - the runtime now has first real process-bootstrap proof for a launched `claude` role session
+    - the next real gap is authenticated repeated work, not launcher bootstrap
+  - next:
+    - implement and run `Implementer Authenticated Two-Round Validation`
+    - document operational auth/runtime-marker gaps from the first real multi-round live execution attempt
+  - blockers:
+    - real authenticated execution depends on environment login state and live agent behavior
+
+- date: `2026-05-16`
+  - done:
+    - implemented and ran `Real MR Follow-Up Runtime Acceptance`
+    - added a launcher-backed MR follow-up runtime acceptance harness covering:
+      - completed-session reopen from MR comments
+      - persistent implementer continuation after reopen
+      - repeated verification and repeated completion
+    - documented the result in `workdir/spec/phase40-real-mr-followup-runtime-validation.md`
+    - assessed and closed `Phase 40. MR Follow-Up Runtime Acceptance` as `complete with deferred items`
+    - opened `Phase 41. Live Agent Process Validation`
+    - chose `Implementer Live Runtime Smoke` as the first concrete `Phase 41` slice
+  - current_state:
+    - launcher-backed acceptance now covers happy path, bug path, operator recovery, and MR follow-up reopen
+    - the next remaining gap is validation of actual launched agent processes instead of recording-runtime proof
+  - next:
+    - implement and run `Implementer Live Runtime Smoke`
+    - document operational gaps in actual agent bootstrap and repeated routed work
+  - blockers:
+    - likely environment/tool availability for the real launcher path will determine how far the first smoke proof can go
+
+- date: `2026-05-16`
+  - done:
+    - implemented and ran `Escalation And Resume Acceptance`
+    - added a launcher-backed operator recovery acceptance harness covering:
+      - simulated runtime `SDD_ERROR`
+      - `poll-session-output`
+      - escalation to `waiting_for_operator`
+      - `resume-session`
+      - `retry-session`
+    - documented the result in `workdir/spec/phase39-escalation-resume-validation.md`
+    - assessed and closed `Phase 39. Operator Recovery Runtime Acceptance` as `complete with deferred items`
+    - opened `Phase 40. MR Follow-Up Runtime Acceptance`
+    - chose `Real MR Follow-Up Runtime Acceptance` as the first concrete `Phase 40` slice
+  - current_state:
+    - happy-path, bug-path, and first operator-recovery runtime proofs now exist under the launcher-backed persistent role model
+    - the next uncovered runtime family is MR-comment-triggered follow-up
+  - next:
+    - implement and run `Real MR Follow-Up Runtime Acceptance`
+    - document any remaining runtime gaps in the MR feedback loop
+  - blockers:
+    - none currently identified
+
+- date: `2026-05-16`
+  - done:
+    - implemented and ran `Real Bug Session Acceptance`
+    - added a broad bug-shaped runtime acceptance harness covering:
+      - `bug_analysis_requested`
+      - `bug_analysis_completed`
+      - bug-fix implementation
+      - verification
+      - QA reopen follow-up under persistent `bug-fixer`
+      - MR handoff
+      - send-to-test handoff
+    - documented the result in `workdir/spec/phase38-real-bug-runtime-validation.md`
+    - assessed and closed `Phase 38. Bug Runtime Acceptance` as `complete with deferred items`
+    - opened `Phase 39. Operator Recovery Runtime Acceptance`
+    - chose `Escalation And Resume Acceptance` as the first concrete `Phase 39` slice
+  - current_state:
+    - both major workflow families now have realistic launcher-backed runtime acceptance:
+      - story
+      - bug
+    - the next missing confidence layer is operator recovery under persistent runtime
+  - next:
+    - implement and run `Escalation And Resume Acceptance`
+    - document any runtime gaps in escalation/resume/retry behavior
+  - blockers:
+    - none currently identified
+
+- date: `2026-05-16`
+  - done:
+    - implemented and ran `Real Story Session Acceptance`
+    - added a broad story-shaped runtime acceptance harness covering:
+      - planning workers
+      - decomposition
+      - plan-based Jira subtask creation
+      - subtask progression
+      - verification
+      - MR handoff
+      - send-to-test handoff
+    - documented the result in `workdir/spec/phase37-real-story-runtime-validation.md`
+    - assessed and closed `Phase 37. Live Task Runtime Acceptance` as `complete with deferred items`
+    - opened `Phase 38. Bug Runtime Acceptance`
+    - chose `Real Bug Session Acceptance` as the first concrete `Phase 38` slice
+  - current_state:
+    - the story path now has a realistic launcher-backed runtime proof, not just bounded feature acceptance
+    - the next missing runtime proof is the bug-shaped flow under the unified `bug-fixer`
+  - next:
+    - implement and run `Real Bug Session Acceptance`
+    - document any bug-runtime operational gaps that still remain after that pass
+  - blockers:
+    - none currently identified
+
+- date: `2026-05-16`
+  - done:
+    - implemented and validated `Planning Chain Summary Surface`
+    - added explicit `Planning Artifact Panel` visibility in the operator console
+    - assessed and closed `Phase 35. Planning Artifact Surfacing And Visibility`
+    - opened and closed `Phase 36. Subtask Lifecycle Synchronization And Operator Surfaces`
+    - exposed explicit backend/operator contracts for:
+      - created Jira subtasks
+      - subtask graph status
+      - subtask progress queue state
+    - added operator-facing visibility over current subtask, queue position, and created-subtask progression
+    - added acceptance coverage for subtask progression refresh
+    - reconciled the remaining local subtask queue against refreshed snapshot state after `subtask_completed`
+    - added explicit operator-triggered `Refresh Subtask State`
+    - regression checks passed through the latest subtask synchronization slice: backend `Ran 135 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the story planning and subtask lane is now both explicit and operator-facing end-to-end
+    - the system now has first-class surfaces for planning chain, created Jira subtasks, subtask graph state, subtask progress, and operator-triggered subtask refresh
+  - next:
+    - implement and run `Real Story Session Acceptance`
+    - document the resulting operational gaps from the first realistic task-shaped runtime pass
+  - blockers:
+    - none currently identified
+
+- date: `2026-05-16`
+  - done:
+    - implemented and validated `Decomposition-Aware Subtask Graph Start`
+    - made `start_subtask_graph` require a completed decomposition step and its repo-visible artifact
+    - routed subtask execution with explicit decomposition context instead of relying only on implicit planning history
+    - regression checks passed: backend `Ran 124 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 34. Decomposition-To-Subtask Graph Integration`
+    - opened `Phase 35. Planning Artifact Surfacing And Visibility`
+    - chose `Planning Chain Summary Surface` as the first concrete `Phase 35` slice
+  - current_state:
+    - the planning-to-execution bridge is now stronger and decomposition has become a first-class upstream input to the subtask graph
+    - the next practical gap is operator visibility over the richer planning artifact chain
+  - next:
+    - implement `Planning Chain Summary Surface`
+    - validate that the richer planning visibility works without lifecycle changes
+
+- date: `2026-05-16`
+  - done:
+    - implemented and validated `Task Decomposer Worker`
+    - inserted a new bounded `task-decomposer-worker` between final story spec and implementation
+    - story planning path now routes through:
+      - `proposal_context_requested`
+      - `requirements_requested`
+      - `acceptance_criteria_requested`
+      - `constraints_requested`
+      - `spec_verification_requested`
+      - `story_spec_requested`
+      - `task_decomposition_requested`
+      - `implementation_requested`
+    - regression checks passed: backend `Ran 124 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 33. Planning Decomposition Before Execution`
+    - opened `Phase 34. Decomposition-To-Subtask Graph Integration`
+    - chose `Decomposition-Aware Subtask Graph Start` as the first concrete `Phase 34` slice
+  - current_state:
+    - the story planning chain is now explicit through decomposition and still coherent under the launcher-backed one-shot worker model
+    - the next clear gap is making decomposition a first-class input to the downstream subtask graph
+  - next:
+    - implement `Decomposition-Aware Subtask Graph Start`
+    - validate the richer decomposition/subtask integration
+
+- date: `2026-05-16`
+  - done:
+    - implemented and validated `Spec Verifier Worker`
+    - inserted a new bounded `spec-verifier-worker` between constraints and final story spec
+    - story planning path now routes through:
+      - `proposal_context_requested`
+      - `requirements_requested`
+      - `acceptance_criteria_requested`
+      - `constraints_requested`
+      - `spec_verification_requested`
+      - `story_spec_requested`
+      - `implementation_requested`
+    - regression checks passed: backend `Ran 122 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 32. Planning Verification Before Coding`
+    - opened `Phase 33. Planning Decomposition Before Execution`
+    - chose `Task Decomposer Worker` as the first concrete `Phase 33` slice
+  - current_state:
+    - the story-planning chain is now broader, verified, and still coherent under the launcher-backed one-shot worker model
+    - the next clear planning-side gap is explicit task decomposition before execution starts
+  - next:
+    - implement `Task Decomposer Worker`
+    - validate the broader planning and subtask chain again
+
+- date: `2026-05-16`
+  - done:
+    - implemented and validated `Constraints Worker`
+    - inserted a new bounded `constraints-worker` between acceptance criteria and final story spec
+    - story planning path now routes through:
+      - `proposal_context_requested`
+      - `requirements_requested`
+      - `acceptance_criteria_requested`
+      - `constraints_requested`
+      - `story_spec_requested`
+      - `implementation_requested`
+    - regression checks passed: backend `Ran 120 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 31. Planning Constraints Decomposition`
+    - opened `Phase 32. Planning Verification Before Coding`
+    - chose `Spec Verifier Worker` as the first concrete `Phase 32` slice
+  - current_state:
+    - the story-planning chain is now broader and still coherent under the launcher-backed one-shot worker model
+    - the next clear planning-side gap is bounded verification of the assembled planning package before coding
+  - next:
+    - implement `Spec Verifier Worker`
+    - validate the broader planning-helper chain again
+
+- date: `2026-05-16`
+  - done:
+    - aligned runtime/config/knowledge paths with `workdir/spec/filesystem-runtime-model.md`
+    - moved role workspaces to task-local runtime roots:
+      - `workdir/<KEY>/runtime/role-workspaces/<ROLE>/`
+    - switched role workspace contracts to reference project-local conventions:
+      - `workdir/<KEY>/repo/CLAUDE.md`
+      - `workdir/<KEY>/repo/.claude/`
+    - switched project knowledge writes/reads to task-repo knowledge roots:
+      - `workdir/<KEY>/repo/knowledge/`
+    - changed launcher bootstrap to prefer project-local `.claude/settings*.json` over factory-root settings
+    - changed tmux/recording runtime session roots to task-local `workdir/<KEY>/runtime/`
+    - changed acceptance shell harnesses to keep temp artifacts under task-local `workdir/<KEY>/tmp/`
+    - regression checks passed: backend `Ran 118 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the implemented runtime filesystem model now matches the explicit source-of-truth document instead of the older factory-global assumptions
+    - the planning-helper roadmap can continue on top of a cleaner per-task/per-project execution layout
+  - next:
+    - continue `Phase 31. Planning Constraints Decomposition`
+    - implement `Constraints Worker`
+
+- date: `2026-05-16`
+  - done:
+    - fixed a dedicated filesystem/runtime source-of-truth document:
+      - `workdir/spec/filesystem-runtime-model.md`
+    - clarified the intended target layout for:
+      - task snapshot root
+      - task repo root
+      - task spec root
+      - task runtime root
+      - task temp root
+      - project-local knowledge root
+    - linked the execution plan to that document as the canonical reference for future structural refactors
+  - current_state:
+    - the project now has one explicit document describing where task data, runtime data, project conventions, and project knowledge are supposed to live
+    - code still contains transitional assumptions that should be refactored toward that target model
+  - next:
+    - align runtime/config/knowledge paths to `workdir/spec/filesystem-runtime-model.md`
+    - continue the planning-helper roadmap after the structural path model is respected
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `Acceptance Criteria Worker`
+    - inserted a new bounded `acceptance-criteria-worker` between requirements and final story spec
+    - story planning path now routes through:
+      - `proposal_context_requested`
+      - `requirements_requested`
+      - `acceptance_criteria_requested`
+      - `story_spec_requested`
+      - `implementation_requested`
+    - regression checks passed: backend `Ran 118 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 30. Planning Helper Expansion Continuation`
+    - opened `Phase 31. Planning Constraints Decomposition`
+    - chose `Constraints Worker` as the first concrete `Phase 31` slice
+  - current_state:
+    - the story-planning chain is now broader and still coherent under the launcher-backed one-shot worker model
+    - the next clear planning-side gap is explicit task-constraints preparation
+  - next:
+    - implement `Constraints Worker`
+    - validate the broader planning-helper chain
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `Requirements Clarifier Worker`
+    - inserted a new bounded `requirements-clarifier-worker` between proposal/context and final story spec
+    - story planning path now routes through:
+      - `proposal_context_requested`
+      - `requirements_requested`
+      - `story_spec_requested`
+      - `implementation_requested`
+    - regression checks passed: backend `Ran 116 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 29. Story Planning Decomposition`
+    - opened `Phase 30. Planning Helper Expansion Continuation`
+    - chose `Acceptance Criteria Worker` as the first concrete `Phase 30` slice
+  - current_state:
+    - the story-planning chain is now deeper and still coherent under the launcher-backed one-shot worker model
+    - the next clear planning-side gap is explicit acceptance-criteria preparation
+  - next:
+    - implement `Acceptance Criteria Worker`
+    - validate the broader planning-helper chain
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `Proposal And Context Worker Split`
+    - inserted a new bounded `proposal-context-worker` before `story-spec-worker`
+    - story planning path now routes through:
+      - `proposal_context_requested`
+      - `story_spec_requested`
+      - `implementation_requested`
+    - regression checks passed: backend `Ran 114 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 28. Planning Worker Expansion`
+    - opened `Phase 29. Story Planning Decomposition`
+    - chose `Requirements Clarifier Worker` as the first concrete `Phase 29` slice
+  - current_state:
+    - the system now has multiple credible bounded planning workers under the real launcher/runtime model
+    - the next remaining planning-side gap is deeper decomposition of the still-broad story-spec responsibility
+  - next:
+    - implement `Requirements Clarifier Worker`
+    - validate the deeper story-planning chain
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `Bug-Fixer Contract Deepening`
+    - strengthened the durable `bug-fixer` workspace contract with:
+      - bug-analysis report path
+      - explicit `analysis-only` / `fix-only` semantics
+      - explicit narrow issues-file and follow-up-comments rules
+    - extended bug-fixer hydration/prompt payloads with:
+      - `bug_analysis_report_path`
+      - `bug_mode`
+      - `issues_file_path`
+      - `followup_comments_path`
+    - regression checks passed: backend `Ran 112 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 27. Specialized Role Fidelity`
+    - opened `Phase 28. Planning Worker Expansion`
+    - chose `Proposal And Context Worker Split` as the first concrete `Phase 28` slice
+  - current_state:
+    - the strongest remaining specialized persistent-role gap is closed
+    - the next clear remaining runtime-internal gap is broader bounded planning/helper coverage
+  - next:
+    - implement `Proposal And Context Worker Split`
+    - validate the expanded story-planning helper path
+
+- date: `2026-05-15`
+  - done:
+    - closed `Phase 21. Real Agent Launcher And End-to-End Runtime Proof`
+    - opened `Phase 22. Live Operator Acceptance And Workflow Validation`
+    - chose `Happy-Path Task Session Acceptance` as the first concrete `Phase 22` slice
+    - updated the execution plan to reflect the next post-`Phase 21` priority
+  - current_state:
+    - architecture, runtime, and automated runtime proof are now strong
+    - the next remaining gap is live operator acceptance of the real assembled workflow
+  - next:
+    - implement `Happy-Path Task Session Acceptance`
+    - record concrete live findings from the real operator path
+
+- date: `2026-05-15`
+  - done:
+    - closed `Phase 26. One-Shot Worker Launcher Parity`
+    - opened `Phase 27. Specialized Role Fidelity`
+    - chose `Bug-Fixer Contract Deepening` as the first concrete `Phase 27` slice
+    - updated the execution plan to reflect the next post-`Phase 26` priority
+  - current_state:
+    - core runtime, acceptance coverage, and first one-shot parity are complete
+    - the next strongest remaining repository-internal gap is specialized role fidelity, starting with `bug-fixer`
+  - next:
+    - implement `Bug-Fixer Contract Deepening`
+    - validate the deeper `bug-fixer` contract inside the existing runtime/workflow model
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `Story Spec Worker Launcher Parity`
+    - strengthened the `story-spec-worker` runtime contract as a bounded one-shot worker
+    - added explicit one-shot lifecycle signaling in launcher scripts and bootstrap output
+    - regression checks passed: backend `Ran 111 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 26. One-Shot Worker Launcher Parity`
+  - current_state:
+    - the system now has a credible bounded one-shot worker launcher/runtime pattern
+    - `Phase 26` is complete
+  - next:
+    - open the next named phase before more implementation work
+    - decide whether the next priority is specialized role fidelity, unrestricted live acceptance outside the sandbox, or broader one-shot worker expansion
+
+- date: `2026-05-15`
+  - done:
+    - closed `Phase 25. MR Feedback Acceptance`
+    - opened `Phase 26. One-Shot Worker Launcher Parity`
+    - chose `Story Spec Worker Launcher Parity` as the first concrete `Phase 26` slice
+    - updated the execution plan to reflect the next post-`Phase 25` priority
+  - current_state:
+    - persistent runtime and the main operator-visible lifecycle families are now acceptance-covered
+    - the next strongest runtime gap is one-shot worker launcher parity
+  - next:
+    - implement `Story Spec Worker Launcher Parity`
+    - validate bounded one-shot worker launch / execute / exit behavior under the new runtime model
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `MR Comment Follow-Up Acceptance`
+    - added a reproducible MR-follow-up acceptance harness:
+      - `scripts/run-mr-followup-acceptance.sh`
+      - `scripts/run-mr-followup-acceptance.py`
+    - validated the MR feedback path through the operator route surface:
+      - completed session
+      - MR comments intake
+      - follow-up implementation
+      - verification re-entry
+      - final completion
+    - regression checks passed: backend `Ran 111 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 25. MR Feedback Acceptance`
+  - current_state:
+    - the project now has operator acceptance coverage for the main lifecycle families, including MR feedback
+    - `Phase 25` is complete
+  - next:
+    - open the next named phase before more implementation work
+    - decide whether the next priority is one-shot worker launcher parity, specialized role fidelity, or unrestricted live acceptance outside the sandbox
+
+- date: `2026-05-15`
+  - done:
+    - closed `Phase 24. Delivery Acceptance`
+    - opened `Phase 25. MR Feedback Acceptance`
+    - chose `MR Comment Follow-Up Acceptance` as the first concrete `Phase 25` slice
+    - updated the execution plan to reflect the next post-`Phase 24` priority
+  - current_state:
+    - happy-path, reopen, and delivery acceptance are now proven
+    - the next strongest remaining human-feedback branch is MR follow-up acceptance
+  - next:
+    - implement `MR Comment Follow-Up Acceptance`
+    - validate the MR feedback loop through a reproducible operator acceptance harness
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `MR + Send-To-Test Delivery Acceptance`
+    - added a reproducible delivery acceptance harness:
+      - `scripts/run-delivery-acceptance.sh`
+      - `scripts/run-delivery-acceptance.py`
+    - validated the delivery path through the operator route surface:
+      - completed session
+      - MR handoff
+      - send-to-test handoff
+      - final delivery state
+    - regression checks passed: backend `Ran 111 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 24. Delivery Acceptance`
+  - current_state:
+    - the project now has operator acceptance coverage for happy path, reopen path, and delivery path
+    - `Phase 24` is complete
+  - next:
+    - open the next named phase before more implementation work
+    - decide whether the next priority is MR-comment acceptance, one-shot worker launcher parity, or specialized role fidelity
+
+- date: `2026-05-15`
+  - done:
+    - closed `Phase 23. Advanced Operator Acceptance`
+    - opened `Phase 24. Delivery Acceptance`
+    - chose `MR + Send-To-Test Delivery Acceptance` as the first concrete `Phase 24` slice
+    - updated the execution plan to reflect the next post-`Phase 23` priority
+  - current_state:
+    - happy-path and reopen operator acceptance are now proven
+    - the next strongest remaining user-facing branch is delivery acceptance
+  - next:
+    - implement `MR + Send-To-Test Delivery Acceptance`
+    - validate the external delivery path through a reproducible operator acceptance harness
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `Follow-Up Reopen Acceptance`
+    - added a reproducible advanced operator acceptance harness:
+      - `scripts/run-followup-reopen-acceptance.sh`
+      - `scripts/run-followup-reopen-acceptance.py`
+    - validated the reopen path through the operator route surface:
+      - completed session
+      - QA reopen
+      - follow-up implementation
+      - verification re-entry
+      - final completion
+    - regression checks passed: backend `Ran 111 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 23. Advanced Operator Acceptance`
+  - current_state:
+    - the project now has both happy-path and follow-up-reopen operator acceptance coverage
+    - `Phase 23` is complete
+  - next:
+    - open the next named phase before more implementation work
+    - decide whether the next priority is delivery-handoff acceptance, MR-follow-up acceptance, or one-shot worker launcher parity
+
+- date: `2026-05-15`
+  - done:
+    - closed `Phase 22. Live Operator Acceptance And Workflow Validation`
+    - opened `Phase 23. Advanced Operator Acceptance`
+    - chose `Follow-Up Reopen Acceptance` as the first concrete `Phase 23` slice
+    - updated the execution plan to reflect the next post-`Phase 22` priority
+  - current_state:
+    - happy-path operator acceptance is now proven
+    - the next strongest lifecycle confidence signal is follow-up reopen acceptance through the operator surface
+  - next:
+    - implement `Follow-Up Reopen Acceptance`
+    - validate the reopened-session lifecycle path through a reproducible operator acceptance harness
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `Happy-Path Task Session Acceptance`
+    - added a reproducible operator acceptance harness:
+      - `scripts/run-happy-path-acceptance.sh`
+      - `scripts/run-happy-path-acceptance.py`
+    - validated the happy path through the operator route surface:
+      - create session
+      - prepare session
+      - implementation
+      - reviewer pass
+      - verification failure
+      - correction
+      - verification success
+      - task completion
+    - regression checks passed: backend `Ran 111 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 22. Live Operator Acceptance And Workflow Validation`
+  - current_state:
+    - the project now has both automated runtime proof and reproducible operator-surface happy-path acceptance
+    - `Phase 22` is complete
+  - next:
+    - open the next named phase before more implementation work
+    - decide whether the next priority is advanced live acceptance, one-shot worker launcher parity, or deeper specialized role fidelity
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `End-to-End Persistent Runtime Acceptance`
+    - added automated acceptance coverage for a real launcher-backed persistent runtime path
+    - acceptance now proves:
+      - launcher-backed role startup
+      - repeated routed rounds
+      - persistent role continuity for `implementer` and `verification-coordinator`
+      - reviewer participation inside the same launcher-backed runtime flow
+    - regression checks passed: backend `Ran 111 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 21. Real Agent Launcher And End-to-End Runtime Proof`
+  - current_state:
+    - the project now has both a real launcher bootstrap model and an automated end-to-end persistent runtime proof
+    - `Phase 21` is complete
+  - next:
+    - open the next named phase before more implementation work
+    - decide whether the next priority is live operator acceptance, specialized role fidelity, or one-shot worker launcher parity
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `Real Launcher Bootstrap For Persistent Roles`
+    - changed the default role launcher contract from shell-only bootstrap to repo-level `scripts/run-role-agent.sh`
+    - the bootstrap script now chooses a real agent executable model:
+      - `claude` first
+      - `codex` fallback
+      - `sh` only as last-resort fallback
+    - generated role launch scripts now export repo/workdir bootstrap context
+    - regression checks passed: backend `Ran 110 tests`, `OK`; frontend `npm run build`, `OK`
+    - chose `End-to-End Persistent Runtime Acceptance` as the next `Phase 21` slice
+  - current_state:
+    - the runtime launcher is now structurally real rather than shell-placeholder-only
+    - the next main question is behavioral end-to-end acceptance of the persistent runtime path
+  - next:
+    - implement `End-to-End Persistent Runtime Acceptance`
+    - validate that the real launcher-backed persistent runtime behaves coherently across repeated routed rounds
+
+- date: `2026-05-15`
+  - done:
+    - closed `Phase 20. Role Contract Alignment`
+    - opened `Phase 21. Real Agent Launcher And End-to-End Runtime Proof`
+    - chose `Real Launcher Bootstrap For Persistent Roles` as the first concrete `Phase 21` slice
+    - updated the execution plan to reflect the next post-`Phase 20` priority
+  - current_state:
+    - the persistent runtime core and core role contracts are now strong
+    - the next main unresolved gap is that launcher-backed role startup still needs a real agent executable proof
+  - next:
+    - implement `Real Launcher Bootstrap For Persistent Roles`
+    - validate the first real launcher-backed persistent runtime path end-to-end
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `Verification-Coordinator Contract Alignment`
+    - strengthened the durable `verification-coordinator` contract in both role-local `AGENTS.md` and routed verification prompts
+    - added explicit verifier rules for:
+      - wrapper-first workflow gate semantics
+      - `run-test.sh` + `run-lint.sh` scope
+      - no `run-build.sh` in the verification role
+      - fresh verification-round semantics
+      - explicit no-code-mutation behavior
+    - verification hydration now carries `verification_gate` and `verification_report_path`
+    - regression checks passed: backend `Ran 109 tests`, `OK`; frontend `npm run build`, `OK`
+    - assessed and closed `Phase 20. Role Contract Alignment`
+  - current_state:
+    - the core persistent runtime trio now has materially stronger durable contracts
+    - `Phase 20` is complete
+  - next:
+    - open the next named phase before more implementation work
+    - decide whether the next priority is runtime usability, autonomous end-to-end proof, or deeper specialized role fidelity
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `Code-Reviewer Contract Alignment`
+    - strengthened the durable `code-reviewer` contract in both role-local `AGENTS.md` and routed self-review prompts
+    - added explicit reviewer rules for:
+      - diff-first review scope
+      - previous-review-first behavior
+      - convention-source-only review discipline
+      - compact fixer-oriented output
+    - self-review hydration now carries explicit reviewer review scope and can include previous review summary paths
+    - regression checks passed: backend `Ran 109 tests`, `OK`; frontend `npm run build`, `OK`
+    - chose `Verification-Coordinator Contract Alignment` as the next `Phase 20` slice
+  - current_state:
+    - the first two durable role-depth slices are now complete for `implementer` and `code-reviewer`
+    - the next remaining core contract gap is the persistent verification role
+  - next:
+    - implement `Verification-Coordinator Contract Alignment`
+    - validate the verifier slice end-to-end inside the current runtime model
+
+- date: `2026-05-15`
+  - done:
+    - implemented and validated `Implementer Contract Alignment`
+    - strengthened the durable `implementer` contract in both role-local `AGENTS.md` and routed handoff prompts
+    - added explicit implementer rules for:
+      - routed spec-input reading
+      - RAG-first exploration
+      - narrow correction behavior
+      - deferred workflow-level verification
+    - regression checks passed: backend `Ran 108 tests`, `OK`; frontend `npm run build`, `OK`
+    - chose `Code-Reviewer Contract Alignment` as the next `Phase 20` slice
+  - current_state:
+    - the first durable role-depth slice is now complete for `implementer`
+    - the next highest-value contract gap is the persistent reviewer role, which still lacks diff-first and previous-review-aware behavior
+  - next:
+    - implement `Code-Reviewer Contract Alignment`
+    - validate the reviewer slice end-to-end inside the current runtime model
+
+- date: `2026-05-15`
+  - done:
+    - opened `Phase 20. Role Contract Alignment`
+    - recorded the phase direction in `workdir/spec/phase20-direction.md`
+    - chose `Implementer Contract Alignment` as the first concrete `Phase 20` slice
+    - updated the execution plan to reflect the next post-`Phase 19` priority
+    - implemented and validated `Implementer Contract Alignment`
+    - recorded the result in `workdir/spec/phase20-implementer-contract-validation.md`
+    - regression checks passed: backend `Ran 108 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - runtime ownership and bug alignment are now strong enough
+    - the first durable role-depth slice is now complete for `implementer`
+  - next:
+    - choose the next `Phase 20` slice
+    - then reuse the same alignment method for another persistent role
+
+- date: `2026-05-15`
+  - done:
+    - opened `Phase 19. Unified Bug-Fix Runtime Alignment`
+    - recorded the phase direction in `workdir/spec/phase19-direction.md`
+    - chose `Bug Runtime Role Decision` as the first concrete `Phase 19` slice
+    - decided to model unified bug work as a separate persistent `bug-fixer` runtime role
+    - recorded the decision in `workdir/spec/phase19-bug-runtime-role-decision.md`
+    - updated the execution plan to reflect the corrected post-`Phase 18` priority
+    - implemented the `bug-fixer` long-runner pilot
+    - validated it in `workdir/spec/phase19-bug-fixer-pilot-validation.md`
+    - regression checks passed: backend `Ran 106 tests`, `OK`; frontend `npm run build`, `OK`
+    - chose `Bug-Fixer Mode-Aware Handoffs` as the next concrete `Phase 19` slice
+    - implemented and validated `Bug-Fixer Mode-Aware Handoffs`
+    - recorded the result in `workdir/spec/phase19-bug-fixer-mode-aware-validation.md`
+    - assessed and closed `Phase 19. Unified Bug-Fix Runtime Alignment`
+    - regression checks passed again: backend `Ran 108 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the bug-runtime mapping is now explicit, implemented, and validated
+    - `Phase 19` is complete and bug work now has its own persistent runtime model
+  - next:
+    - open the next named phase before more runtime specialization work
+    - decide which remaining runtime-mapping or usability gap is now highest value
+
+- date: `2026-05-15`
+  - done:
+    - reread the updated legacy agent and skill configuration
+    - corrected the runtime interpretation of bug work
+    - removed the temporary `bug-analysis-worker` runtime path and restored bug analysis to the persistent implementation flow
+    - corrected `Phase 18` docs so that only the `Story Spec One-Shot Worker` slice remains accepted
+    - regression checks passed again: backend `Ran 106 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - `Story Spec One-Shot Worker` remains the accepted one-shot proof
+    - bug analysis is now explicitly excluded from the one-shot worker model and must be remapped later against the unified `bug-fixer` agent
+  - next:
+    - update the runtime mapping plan around the current `bug-fixer` reality
+    - open the next named phase only after that mapping is explicit
+
+- date: `2026-05-15`
+  - done:
+    - chose `Bug Analysis One-Shot Worker` as the next `Phase 18` slice
+    - implemented `Bug Analysis One-Shot Worker`
+    - validated the slice and recorded the result in `workdir/spec/phase18-bug-analysis-validation.md`
+    - assessed and closed `Phase 18. One-Shot Worker Integration`
+    - regression checks passed: backend `Ran 106 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the runtime model now has both persistent long-runners and bounded one-shot workers
+    - `Phase 18` is complete and no longer needs more same-shape proofs
+  - next:
+    - open the next named phase before more runtime specialization work
+    - choose the next highest-value execution or usability gap
+
+- date: `2026-05-15`
+  - done:
+    - implemented `Story Spec One-Shot Worker`
+    - routed `story_spec_requested` through a bounded `story-spec-worker` instead of the persistent `implementer`
+    - validated the slice and recorded the result in `workdir/spec/phase18-story-spec-validation.md`
+    - regression checks passed: backend `Ran 106 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - `Phase 18` now has a real one-shot worker proof, not just a direction document
+    - the runtime model now supports both persistent roles and bounded helper workers
+  - next:
+    - choose the next `Phase 18` slice
+    - expand the one-shot worker model to the next narrow front-half helper
+
+- date: `2026-05-15`
+  - done:
+    - chose `Story Spec One-Shot Worker` as the first concrete slice of `Phase 18`
+    - recorded the slice decision in `workdir/spec/phase18-first-slice.md`
+  - current_state:
+    - `Phase 18` now has one explicit first target
+    - the next runtime proof is a bounded worker launch/execute/exit path rather than another persistent role
+  - next:
+    - implement the `Story Spec One-Shot Worker` slice
+    - validate that one-shot helper execution integrates cleanly with the existing story-spec lane
+
+- date: `2026-05-15`
+  - done:
+    - opened `Phase 18. One-Shot Worker Integration`
+    - fixed the next runtime priority after persistent-role integration
+    - recorded the phase direction in `workdir/spec/phase18-direction.md`
+  - current_state:
+    - the persistent runtime core is complete
+    - the next missing execution class is bounded one-shot workers for narrow helper tasks
+  - next:
+    - choose the first concrete `Phase 18` slice
+    - start from the narrowest one-shot worker that materially improves the front-half workflow
+
+- date: `2026-05-15`
+  - done:
+    - implemented `Agent Launcher Integration`
+    - added role-local `launch-role.sh` generation and spawn-command wiring
+    - validated launcher behavior through coordinator and route-level tests
+    - recorded the result in `workdir/spec/phase17-agent-launcher-validation.md`
+    - assessed and closed `Phase 17. Agent Runtime Integration`
+    - regression checks passed: backend `Ran 106 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - `Phase 17` is now complete
+    - the project has crossed from deterministic scaffolding plus partial runtime contracts into a real persistent role runtime model for the core recurring roles
+  - next:
+    - open the next named phase before starting any further implementation work
+    - decide whether the next priority is deeper role specialization, one-shot worker integration, or broader autonomous execution proof
+
+- date: `2026-05-15`
+  - done:
+    - implemented `Verification-Coordinator Long-Runner Pilot`
+    - extended bootstrap vs continuation prompt semantics to the verifier role
+    - validated the slice and recorded the result in `workdir/spec/phase17-verification-long-runner-validation.md`
+    - chose `Agent Launcher Integration` as the next concrete `Phase 17` slice
+    - regression checks passed: backend `Ran 104 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the core persistent-role trio now shares the same isolated workspace and continuation model
+    - the main remaining runtime gap is no longer role continuity, but what real agent executable is launched in those role workspaces
+  - next:
+    - implement the `Agent Launcher Integration` slice
+    - keep `Phase 17` open until role windows are backed by a real agent launcher contract
+
+- date: `2026-05-15`
+  - done:
+    - chose `Verification-Coordinator Long-Runner Pilot` as the next concrete `Phase 17` slice
+    - recorded the sequencing decision in `workdir/spec/phase17-next-after-implementer.md`
+  - current_state:
+    - reviewer and implementer pilots are complete
+    - one core runtime role still remains to be migrated to the same persistent prompt model before phase assessment
+  - next:
+    - implement the `Verification-Coordinator Long-Runner Pilot` slice
+    - then assess whether `Phase 17` is complete
+
+- date: `2026-05-15`
+  - done:
+    - implemented `Implementer Long-Runner Pilot`
+    - introduced bootstrap vs continuation prompt semantics for the implementer role
+    - made later implementer rounds continue from task-scoped role context instead of re-sending the same bootstrap instructions
+    - validated the slice and recorded the result in `workdir/spec/phase17-implementer-long-runner-validation.md`
+    - regression checks passed: backend `Ran 103 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the implementer role now behaves more like a real persistent long-runner than a repeated cold-start handoff target
+    - the next runtime sequencing question moves to verification or phase assessment
+  - next:
+    - choose the next `Phase 17` slice
+    - decide whether `Verification-Coordinator Long-Runner Pilot` is still required before `Phase 17` assessment
+
+- date: `2026-05-15`
+  - done:
+    - chose `Implementer Long-Runner Pilot` as the next concrete `Phase 17` slice after reviewer
+    - recorded the runtime sequencing decision in `workdir/spec/phase17-next-after-reviewer.md`
+  - current_state:
+    - reviewer proved the runtime model on a narrow lane
+    - the next highest-value runtime target is now the main iterative delivery role
+  - next:
+    - implement the `Implementer Long-Runner Pilot` slice
+    - then decide whether verification needs its own explicit persistent-role pilot before `Phase 17` can be assessed
+
+- date: `2026-05-15`
+  - done:
+    - implemented `Reviewer Long-Runner Pilot`
+    - added persistent `code-reviewer` role spawning for self-review-enabled sessions
+    - replaced ownerless required self-review waiting with reviewer-owned routed work
+    - connected reviewer runtime output directly to:
+      - `self_review_passed -> verification_requested`
+      - `self_review_issues_found -> self_review_correction_requested`
+    - validated the slice and recorded the result in `workdir/spec/phase17-reviewer-long-runner-validation.md`
+    - regression checks passed: backend `Ran 103 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - `code-reviewer` is now the first real persistent runtime pilot beyond the deterministic backbone
+    - the next runtime decision moves to the next long-runner candidate rather than to filesystem scaffolding
+  - next:
+    - choose the next `Phase 17` slice
+    - decide whether `Implementer Long-Runner Pilot` or `Verification-Coordinator Long-Runner Pilot` should go next
+
+- date: `2026-05-15`
+  - done:
+    - chose `Reviewer Long-Runner Pilot` as the next concrete `Phase 17` slice
+    - compared reviewer, implementer, and verification-coordinator as first persistent-role pilots
+    - recorded the sequencing decision in `workdir/spec/phase17-next-slice.md`
+  - current_state:
+    - the next runtime-integration target is explicit
+    - the phase now moves from runtime filesystem scaffolding into the first true persistent-role behavior proof
+  - next:
+    - implement the `Reviewer Long-Runner Pilot` slice
+    - keep `implementer` and `verification-coordinator` as later follow-up pilots
+
+- date: `2026-05-15`
+  - done:
+    - validated `Persistent Role Workspace Contract`
+    - added route-level proof that `POST /sessions` creates role workspaces, `AGENTS.md`, and `CLAUDE.md` symlinks
+    - recorded the validation result in `workdir/spec/phase17-persistent-role-workspace-validation.md`
+    - regression checks passed: backend `Ran 100 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the workspace contract is now implemented and validated
+    - the next runtime-integration decision is no longer about filesystem layout, but about the first true agent-backed long-runner pilot
+  - next:
+    - choose the next `Phase 17` slice
+    - decide whether `Reviewer Long-Runner Pilot` or `Implementer Long-Runner Pilot` should go first
+
+- date: `2026-05-15`
+  - done:
+    - implemented `Persistent Role Workspace Contract` as the first concrete slice of `Phase 17`
+    - added isolated role workspaces under the runtime root
+    - added role-local `AGENTS.md` plus `CLAUDE.md` symlink scaffolding
+    - wired role session startup so existing persistent roles now start in their own isolated directories
+    - regression checks passed: backend `Ran 99 tests`, `OK`
+  - current_state:
+    - the persistent role directory model is now real in code
+    - the next gap is validation of this contract rather than another blind runtime change
+  - next:
+    - validate the `Persistent Role Workspace Contract` slice end-to-end
+    - then choose the first true long-runner pilot role on top of this foundation
+
+- date: `2026-05-15`
+  - done:
+    - chose the first concrete `Phase 17` slice
+    - selected `Persistent Role Workspace Contract` ahead of any specific long-runner pilot
+    - recorded the role-runtime options and decision in `workdir/spec/phase17-first-slice.md`
+  - current_state:
+    - the next implementation target is now explicit
+    - the main immediate gap is the role workspace and durable instruction contract, not yet reviewer or implementer behavior itself
+  - next:
+    - implement the `Persistent Role Workspace Contract` slice
+    - then choose the first real long-runner pilot role on top of that foundation
+
+- date: `2026-05-15`
+  - done:
+    - opened `Phase 17. Agent Runtime Integration`
+    - documented the current runtime boundary in `workdir/spec/agent-runtime-as-is.md`
+    - documented the old-to-new mapping approach in `workdir/spec/agent-runtime-mapping-plan.md`
+    - fixed the roadmap so the next step is no longer ambiguous after the deterministic backbone and shared knowledge base were completed
+  - current_state:
+    - the project now has an explicit next epic
+    - the main remaining gap is no longer orchestration structure, but real long-runner/one-shot agent execution integration
+  - next:
+    - choose the first concrete `Phase 17` slice
+    - then start the runtime integration work from the documented boundary instead of from assumptions
+
+- date: `2026-05-15`
+  - done:
+    - corrected the knowledge model away from source-driven capture and prompt-side attachment
+    - implemented `Knowledge Taxonomy And Catalog` as the first concrete slice of `Phase 16`
+    - preserved the shared knowledge corpus while reorienting it toward project meaning and curation
+    - regression checks passed after the correction: backend `Ran 98 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - `Phase 16` is now ready for formal closure
+    - the knowledge base is positioned as a shared project artifact, not a hidden reuse system
+  - next:
+    - record `Phase 16` assessment
+    - then choose the next named phase explicitly
+
+- date: `2026-05-15`
+  - done:
+    - chose `Knowledge Visibility` as the next concrete slice of `Phase 15`
+  - current_state:
+    - the knowledge model now has enough sources that visibility/governance is the next bottleneck
+  - next:
+    - implement the `Knowledge Visibility` slice
+    - expose repo-visible knowledge through a narrow read surface in API and UI
+
+- date: `2026-05-15`
+  - done:
+    - corrected the post-Phase-15 direction away from auto-reuse and source-driven structure
+    - selected `Knowledge Taxonomy And Catalog` as the first concrete `Phase 16` slice
+  - current_state:
+    - the next implementation target is now explicit
+    - the remaining gap is the shape and curation of the knowledge base itself
+  - next:
+    - implement `Knowledge Taxonomy And Catalog`
+    - strengthen `knowledge/` as a project-facing base rather than a prompt-side reuse system
+
+- date: `2026-05-15`
+  - done:
+    - closed `Phase 15. Knowledge Expansion And Governance`
+    - selected `Knowledge Relevance And Scoped Reuse` as the next named phase
+  - current_state:
+    - the knowledge layer now has multiple accepted sources plus operator visibility
+    - this entry is superseded by the later correction toward knowledge-base structure and curation
+  - next:
+    - choose the first concrete `Phase 16` slice
+    - correct the phase target before further implementation
+
+- date: `2026-05-15`
+  - done:
+    - implemented `Knowledge Visibility` as the next concrete governance slice of `Phase 15`
+    - added a narrow backend read surface for repo-visible `knowledge/`
+    - exposed the shared knowledge corpus directly in the operator UI sidebar
+    - regression checks passed: backend `Ran 102 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the knowledge layer now has source expansion plus direct operator visibility
+    - `Phase 15` remains open, but it is now ready for a sequencing decision instead of another blind expansion
+  - next:
+    - decide the next `Phase 15` slice after `Knowledge Visibility`
+    - determine whether the next step is additional governance or formal assessment
+
+- date: `2026-05-15`
+  - done:
+    - implemented `QA Knowledge` as the first concrete slice of `Phase 15. Knowledge Expansion And Governance`
+    - added explicit promotion of QA reopen feedback into repo-visible markdown under `knowledge/qa/`
+    - preserved the same bounded reuse model by attaching matching QA knowledge on later `prepare`
+    - regression checks passed: backend `Ran 101 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - review, session-insight, and QA-derived knowledge now share the same repo-visible model
+    - `Phase 15` remains in progress, but its first bounded slice is closed
+  - next:
+    - decide the next `Phase 15` slice after `QA Knowledge`
+    - determine whether the next step should be governance/visibility or another bounded knowledge source
+
+- date: `2026-05-15`
+  - done:
+    - closed `Phase 14` in code and commit history
+    - opened `Phase 15. Knowledge Expansion And Governance`
+    - selected `QA Knowledge` as the first concrete slice of the next phase
+  - current_state:
+    - the first repo-visible knowledge loop is complete
+    - the next bounded expansion is QA-derived knowledge on top of the same model
+  - next:
+    - implement the `QA Knowledge` slice
+    - validate QA-derived capture and later reuse on `prepare`
+
+- date: `2026-05-14`
+  - done:
+    - reactivated `Phase 14. Memory And Feedback Loop` after workflow-coverage closure
+    - implemented the first bounded knowledge slice around repo-visible `knowledge/`
+    - added curated capture flows for:
+      - review feedback knowledge
+      - session insight knowledge
+    - attached matching shared knowledge on later `prepare` as explicit artifacts, events, and first-handoff context
+    - regression checks passed: backend `Ran 99 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the first curated cross-session knowledge loop is now real
+    - `Phase 14` is ready for formal assessment and closure
+  - next:
+    - record `Phase 14` assessment
+    - then choose the next named implementation phase explicitly
+
+- date: `2026-05-14`
+  - done:
+    - validated `Story Planning/Spec Lane` and recorded the result in `workdir/spec/phase13-story-spec-validation.md`
+    - implemented `Subtask Graph Orchestration` as a session-native operator-triggered lane over `statuses.md`
+    - added sequential `subtask_implementation_requested -> subtask_completed -> verification_requested` handling without reviving the old orchestration model
+    - exposed `Start Subtask Graph` in the operator API and UI for `story_full` sessions
+    - regression checks passed: backend `Ran 95 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - all three declared `Phase 13` capability classes now exist:
+      - bug analysis
+      - story planning/spec
+      - subtask graph orchestration
+    - the phase is ready for formal assessment and closure
+  - next:
+    - record `Phase 13` assessment
+    - then reactivate `Phase 14. Memory And Feedback Loop`
+
+- date: `2026-05-14`
+  - done:
+    - validated `Bug Analysis Lane` and recorded the result in `workdir/spec/phase13-bug-analysis-validation.md`
+    - chose `Story Planning/Spec Lane` as the second concrete `Phase 13` slice
+    - implemented an explicit `story_spec_requested -> story_spec_completed -> implementation_requested` path for `story_full` sessions
+    - kept `story_full` as an explicit profile choice instead of forcing every Jira Story into the planning lane
+    - regression checks passed: backend `Ran 91 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - both `bug_full` and explicit `story_full` now alter the session lifecycle before implementation
+    - the remaining unchecked item is validation of the new story planning/spec lane
+  - next:
+    - validate the `Story Planning/Spec Lane` slice end-to-end
+    - then move to the last major `Phase 13` gap: subtask graph orchestration
+
+- date: `2026-05-14`
+  - done:
+    - chose `Bug Analysis Lane` as the first concrete slice inside `Phase 13. Planning And Execution Coverage`
+    - implemented an explicit `bug_analysis_requested -> bug_analysis_completed -> implementation_requested` path for `bug_full` sessions
+    - kept the existing persistent role set and reused the implementer as the analysis lane owner
+    - regression checks passed: backend `Ran 86 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - `bug_full` is no longer only a profile label; it now changes the real session lifecycle
+    - the next unchecked item in `Phase 13` is validation of the new bug-analysis slice
+  - next:
+    - validate the `Bug Analysis Lane` slice end-to-end
+    - then choose the next `Phase 13` slice between story planning/spec and subtask graph coverage
+
+- date: `2026-05-14`
+  - done:
+    - compared the current plan against the old `jira-story`, `jira-bug`, and `oneshot` capability surface
+    - chose `Coverage First` over immediate active memory work
+    - re-sequenced the roadmap so `Planning And Execution Coverage` becomes the active `Phase 13`
+    - moved `Memory And Feedback Loop` to the next strategic phase instead of deleting it
+  - current_state:
+    - the project stays on the same architectural course
+    - the active priority is now restoring front-half workflow coverage before repo-visible knowledge reuse
+  - next:
+    - choose the first concrete `Phase 13` slice for planning/bug/subtask coverage
+    - keep `Phase 14` memory work parked until that coverage phase is closed
+
+- date: `2026-05-14`
+  - done:
+    - compared the active `Phase 13` direction against the real capability surface of the old `jira-story`, `jira-bug`, and `oneshot` orchestration
+    - captured the product-priority fork in `workdir/spec/phase-priority-decision.md`
+    - concluded that `Memory And Feedback Loop` is strategically correct, but may still come after one more workflow-coverage phase
+  - current_state:
+    - the project is not off course architecturally
+    - the open question is now phase sequencing, not whether the new system is valid
+  - next:
+    - decide between `Coverage First` and `Knowledge First`
+    - only then update `execution-plan.md` if the active next phase changes
+
+- date: `2026-05-14`
+  - done:
+    - removed the exploratory verification-failure memory loop from active backend behavior
+    - deleted the hidden `memory_items` model/repository path and the `memory_item_count` prepare-session surface
+    - restored `Phase 13` to a clean starting point for repo-visible `knowledge/` work
+    - regression checks passed: backend `Ran 81 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - no rejected hidden-memory behavior remains in active runtime flow
+    - the next `Phase 13` implementation can now start directly from the accepted `knowledge/` model
+  - next:
+    - implement the `Review And Session Insight Knowledge` slice
+    - decide the first concrete knowledge-item format under `knowledge/`
+
+- date: `2026-05-14`
+  - done:
+    - re-scoped `Phase 13` away from hidden DB-centric memory toward repo-visible knowledge under `knowledge/`
+    - changed the first accepted memory slice from `Verification Failure Lessons` to `Review And Session Insight Knowledge`
+    - fixed that future knowledge should come primarily from review feedback and session insights rather than raw previous-run failures
+  - current_state:
+    - `Phase 13` is now framed around shared team knowledge, not opaque internal memory
+    - the exploratory verification-failure loop remains implemented, but it is no longer the accepted primary direction of the phase
+  - next:
+    - implement the `Review And Session Insight Knowledge` slice
+    - keep QA-derived knowledge and broader indexing out of the first accepted knowledge slice
+
+- date: `2026-05-14`
+  - done:
+    - implemented the `Verification Failure Lessons` slice
+    - added a first structured cross-session memory item model backed by SQLite
+    - made `verification_failed` create reusable `verification_failure_lesson` memory items
+    - made `prepare` attach matching lessons as artifacts, events, and initial implementer context for later similar sessions
+    - regression checks passed: backend `Ran 84 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the first memory slice is now implemented as a real extraction-and-reuse loop
+    - the slice is implemented but not yet separately validated as a named artifact
+  - next:
+    - validate the `Verification Failure Lessons` slice end-to-end
+    - then decide whether to expand memory extraction beyond verification failures
+
+- date: `2026-05-14`
+  - done:
+    - chose the first concrete `Phase 13` slice
+    - selected `Verification Failure Lessons` as the first cross-session learning proof
+    - recorded the reasoning in `workdir/spec/phase13-first-slice.md`
+  - current_state:
+    - `Phase 13` now has one bounded first target
+    - the next missing proof is not generic memory infrastructure, but one end-to-end lesson loop from verification failure to later reuse
+  - next:
+    - implement the `Verification Failure Lessons` slice
+    - keep MR comments, QA reopen, and broader retrieval logic out of the first memory slice
+
+- date: `2026-05-14`
+  - done:
+    - chose the next named implementation phase after workflow control and optional lanes
+    - selected `Memory And Feedback Loop` as `Phase 13`
+    - connected the already-fixed strategic direction to the active execution plan in `workdir/spec/phase13-direction.md`
+  - current_state:
+    - the project has now exited the workflow-control milestone horizon
+    - the next missing proof is cross-session learning rather than another local orchestration branch
+  - next:
+    - choose the first concrete `Phase 13` slice inside memory and feedback loop
+    - keep the first slice narrower than autonomous external intake, production telemetry, or broad ops automation
+
+- date: `2026-05-14`
+  - done:
+    - completed formal assessment of `Phase 12`
+    - recorded the verdict in `workdir/spec/phase12-assessment.md`
+    - concluded that workflow policy is now proven as a real execution capability rather than only stored configuration
+  - current_state:
+    - `Phase 12` no longer needs more slices by default
+    - the project now has explicit proof of policy-driven optional-lane execution before and after verification
+  - next:
+    - choose the next named implementation phase after workflow control and optional lanes
+    - keep the new memory direction separate until that next phase is chosen explicitly
+
+- date: `2026-05-14`
+  - done:
+    - captured `Memory And Feedback Loop` as the next strategic continuation after the current workflow-control milestone horizon
+    - fixed that direction in `workdir/spec/memory-feedback-loop-direction.md`
+    - recorded that this future phase is mandatory but intentionally not part of the active execution path yet
+  - current_state:
+    - the project now has an explicit post-milestone strategic direction beyond single-session orchestration
+    - the active implementation path remains unchanged and still goes through `Phase 12` assessment
+  - next:
+    - continue the current execution plan without pulling memory work into the active slice
+    - revisit the new direction when the next named phase is chosen
+
+- date: `2026-05-14`
+  - done:
+    - decided not to require `boy_scout` before closing `Phase 12`
+    - recorded that `Doc Harvest Lane` plus `Self Review Lane` already prove policy-driven optional-lane execution strongly enough for phase assessment
+    - documented the decision in `workdir/spec/phase12-completion-direction.md`
+  - current_state:
+    - `Phase 12` no longer depends on a third optional-lane implementation slice
+    - the next missing action is formal milestone assessment, not more workflow branching
+  - next:
+    - assess `Phase 12` completion against its declared goal and exit criteria
+    - decide afterward whether `boy_scout` belongs to a future phase or to deferred scope
+
+- date: `2026-05-14`
+  - done:
+    - validated the `Self Review Lane` slice through the real route layer with fake in-memory dependencies
+    - confirmed that `self_review_policy = required` routes implementation completion into `self_review_requested`
+    - confirmed that `POST /operator/complete-self-review` supports bounded outcomes:
+      - `passed` -> `verification_requested`
+      - `issues_found` -> `self_review_correction_requested`
+    - confirmed that self-review correction completion re-enters the standard verification loop
+    - recorded the result in `workdir/spec/phase12-self-review-validation.md`
+  - current_state:
+    - the second optional lane is now both implemented and validated
+    - `Phase 12` now proves explicit optional-lane routing both before and after final verification
+  - next:
+    - decide the next `Phase 12` slice after `Self Review Lane`
+    - choose whether `boy_scout` is still needed before `Phase 12` assessment
+
+- date: `2026-05-14`
+  - done:
+    - implemented the `Self Review Lane` slice
+    - made `self_review_policy = required` route implementation completion into an explicit `self_review_requested` stage
+    - added coordinator-owned `complete_self_review()` flow and `POST /operator/complete-self-review`
+    - added bounded self-review outcomes:
+      - `passed` -> `verification_requested`
+      - `issues_found` -> `self_review_correction_requested`
+    - exposed self-review completion as an operator UI action for self-review-capable sessions
+    - regression checks passed: backend `Ran 81 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the second optional lane is now implemented as a real pre-verification stage path
+    - the slice is implemented but not yet separately validated as a named artifact
+  - next:
+    - validate the `Self Review Lane` slice end-to-end
+    - then decide whether `Phase 12` needs `boy_scout` or can move toward assessment
+
+- date: `2026-05-14`
+  - done:
+    - chose the next concrete `Phase 12` slice after the validated `Doc Harvest Lane`
+    - selected `Self Review Lane` instead of moving directly into `boy_scout`
+    - recorded the reasoning in `workdir/spec/phase12-next-slice.md`
+  - current_state:
+    - `Phase 12` now has a second bounded target
+    - the next missing proof is policy-driven pre-verification quality routing rather than another post-delivery lane
+  - next:
+    - implement the `Self Review Lane` slice
+    - keep `boy_scout` and broader workflow-control overrides out of the next implementation step
+
+- date: `2026-05-14`
+  - done:
+    - validated the `Doc Harvest Lane` slice through the real route layer with fake in-memory dependencies
+    - confirmed that `doc_harvest_policy = required` routes verification success into `doc_harvest_requested`
+    - confirmed that `POST /operator/complete-doc-harvest` moves the session to `doc_harvest_completed`
+    - confirmed that doc harvest completion writes a `doc_harvest_summary` artifact
+    - recorded the result in `workdir/spec/phase12-doc-harvest-validation.md`
+  - current_state:
+    - the first optional lane is now both implemented and validated
+    - `Phase 12` is no longer blocked on proving that policy can drive an explicit lane
+  - next:
+    - decide the next `Phase 12` slice after `Doc Harvest Lane`
+    - choose whether to continue with another optional lane or move toward `Phase 12` assessment
+
+- date: `2026-05-14`
+  - done:
+    - implemented the `Doc Harvest Lane` slice
+    - made `doc_harvest_policy = required` route verification success into an explicit `doc_harvest_requested` stage
+    - added coordinator-owned `complete_doc_harvest()` flow and `POST /operator/complete-doc-harvest`
+    - recorded doc-harvest completion as a dedicated artifact and lifecycle event
+    - exposed doc harvest completion as an operator UI action for doc-harvest-capable sessions
+    - regression checks passed: backend `Ran 74 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the first optional lane is now implemented as a real session stage path rather than only a policy field
+    - the slice is implemented but not yet separately validated as a named artifact
+  - next:
+    - validate the `Doc Harvest Lane` slice end-to-end
+    - then decide whether `Phase 12` needs another optional lane or can move to assessment
+
+- date: `2026-05-14`
+  - done:
+    - chose the first concrete `Phase 12` slice
+    - selected `Doc Harvest Lane` instead of starting with `boy_scout` or stronger self-review semantics
+    - recorded the reasoning in `workdir/spec/phase12-first-slice.md`
+  - current_state:
+    - `Phase 12` is now active with a concrete first optional-lane target
+    - the next missing proof is policy-to-stage execution for a bounded documentation lane
+  - next:
+    - implement the `Doc Harvest Lane` slice
+    - keep `boy_scout` and stronger self-review semantics out of the first `Phase 12` slice
+
+- date: `2026-05-14`
+  - done:
+    - selected the next named implementation phase after delivery and handoff
+    - chose `Workflow Control And Optional Lanes` as `Phase 12`
+    - updated `project-charter.md` so current status reflects the new highest-priority missing proof
+    - recorded the phase direction in `workdir/spec/phase12-direction.md`
+  - current_state:
+    - default delivery path is no longer the main product gap
+    - the next strategic gap is that workflow policy exists, but optional lanes are not yet real stage paths
+  - next:
+    - choose the first concrete `Phase 12` slice inside workflow control and optional lanes
+    - keep the next slice narrower than “all optional behavior at once”
+
+- date: `2026-05-14`
+  - done:
+    - completed formal assessment of `Phase 11`
+    - recorded the verdict in `workdir/spec/phase11-assessment.md`
+    - concluded that the default delivery path proof is complete enough for the current milestone
+  - current_state:
+    - the project now proves backend control, UI control, lifecycle extension, and outward delivery handoff
+    - `Phase 11` no longer needs more slices by default
+  - next:
+    - choose the next named implementation phase after delivery and handoff
+    - do not continue expanding `Phase 11` without an explicit new phase decision
+
+- date: `2026-05-14`
+  - done:
+    - decided not to force `boy_scout` or `doc_harvest` into `Phase 11` before assessment
+    - recorded that optional quality/documentation lanes are explicitly deferrable within the current phase
+    - documented the decision in `workdir/spec/phase11-completion-direction.md`
+  - current_state:
+    - the default delivery path proof is complete enough to evaluate the phase
+    - the next missing control action is milestone assessment, not another implementation slice
+  - next:
+    - assess `Phase 11` formally
+    - only then decide whether optional lanes deserve a separate later phase
+
+- date: `2026-05-14`
+  - done:
+    - validated the `Send To Test Handoff` slice through the real operator route with fake dependencies
+    - confirmed that a completed session progresses from `mr_handoff_completed` to `send_to_test_completed`
+    - confirmed that send-to-test emits a dedicated lifecycle event and writes stdout/stderr handoff artifacts
+    - recorded the result in `workdir/spec/phase11-send-to-test-validation.md`
+  - current_state:
+    - the default delivery path now reaches explicit testing handoff
+    - the next `Phase 11` decision is again about scope, not about correctness of the implemented slices
+  - next:
+    - decide whether `Phase 11` needs optional quality/documentation lanes before closure
+    - or whether the phase is already strong enough for formal assessment
+
+- date: `2026-05-14`
+  - done:
+    - implemented the `Send To Test Handoff` slice
+    - added coordinator-owned `send_to_test_handoff()` flow gated on `mr_handoff_completed`
+    - added `POST /operator/send-to-test`
+    - recorded send-to-test stdout/stderr as artifacts and `send_to_test_completed` or `send_to_test_failed` as lifecycle events
+    - exposed send-to-test as an operator UI action after MR handoff
+    - regression checks passed: backend `Ran 70 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the default delivery path now continues from `completed` to `MR Handoff` and then to `Send To Test`
+    - this second delivery slice is implemented but not yet separately validated as a named artifact
+  - next:
+    - validate the `Send To Test Handoff` slice end-to-end
+    - then decide whether to assess `Phase 11` or add an optional quality/documentation lane
+
+- date: `2026-05-14`
+  - done:
+    - chose the next concrete `Phase 11` slice after `MR Handoff`
+    - selected `Send To Test Handoff` instead of moving immediately into optional quality or documentation lanes
+    - recorded the reasoning in `workdir/spec/phase11-next-slice.md`
+  - current_state:
+    - the default delivery path now has a clear next target after MR creation
+    - optional quality/documentation lanes remain intentionally deferred inside the phase for now
+  - next:
+    - implement the `Send To Test Handoff` slice
+    - keep `boy_scout` and `doc_harvest` out of the next implementation slice
+
+- date: `2026-05-14`
+  - done:
+    - validated the `MR Handoff` slice through the real operator route with fake dependencies
+    - confirmed that a completed session transitions to `mr_handoff_completed` without leaving `completed` status
+    - confirmed that MR handoff emits a dedicated lifecycle event and writes stdout/stderr handoff artifacts
+    - recorded the result in `workdir/spec/phase11-mr-handoff-validation.md`
+  - current_state:
+    - the first delivery slice is now both implemented and validated
+    - the next `Phase 11` decision is again about scope, not correctness
+  - next:
+    - decide the next `Phase 11` slice after `MR Handoff`
+    - choose between external handoff continuation and optional quality/documentation lanes
+
+- date: `2026-05-14`
+  - done:
+    - implemented the first `Phase 11` delivery slice: explicit `MR Handoff`
+    - added coordinator-owned `create_mr_handoff()` flow for completed sessions
+    - added `POST /operator/create-mr`
+    - recorded MR handoff stdout/stderr as artifacts and `mr_handoff_completed` or `mr_handoff_failed` as lifecycle events
+    - exposed MR handoff as an operator UI action for completed sessions
+    - regression checks passed: backend `Ran 67 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - the system can now distinguish between internal completion and MR handoff completion
+    - the first delivery slice is implemented but not yet separately validated as a named phase artifact
+  - next:
+    - validate the `MR Handoff` slice end-to-end
+    - then decide whether the next delivery slice is `send-to-test` or optional quality/documentation lanes
+
+- date: `2026-05-14`
+  - done:
+    - chose the first concrete `Phase 11` slice
+    - selected `MR Handoff` instead of starting with optional quality or documentation lanes
+    - recorded the reasoning in `workdir/spec/phase11-first-slice.md`
+  - current_state:
+    - `Phase 11` is now active with a concrete first target
+    - the next missing proof is an explicit session-controlled transition from internal completion to MR handoff
+  - next:
+    - implement the `MR Handoff` slice
+    - keep `send-to-test`, `doc-harvest`, and `boy_scout` out of the first delivery slice
+
+- date: `2026-05-14`
+  - done:
+    - selected the next named implementation phase after the closure pass
+    - chose `Delivery And Handoff` as `Phase 11`
+    - updated `project-charter.md` so current status no longer claims the project is still pre-implementation
+    - recorded the phase direction in `workdir/spec/phase11-direction.md`
+  - current_state:
+    - the project has exited the cleanup-only period
+    - the next missing product proof is explicit delivery completion and handoff, not more reopen or recovery work
+  - next:
+    - choose the first concrete `Phase 11` slice inside delivery and handoff
+    - keep the next slice smaller than the whole old closing workflow
+
+- date: `2026-05-14`
+  - done:
+    - completed formal assessment of `Phase 10`
+    - recorded the verdict in `workdir/spec/phase10-assessment.md`
+    - concluded that the current hardening-and-closure pass is complete
+  - current_state:
+    - backend MVP, stable UI milestone, lifecycle extension, and the closure phase all now have explicit assessment artifacts
+    - the project is no longer blocked on internal cleanup work
+  - next:
+    - choose the next implementation phase after the current closure pass
+    - do not resume coding until that next phase is named and entered in `execution-plan.md`
+
+- date: `2026-05-14`
+  - done:
+    - added a reusable milestone completion checklist in `workdir/spec/milestone-checklist.md`
+    - normalized the expected assessment shape for future milestone closure
+    - linked the checklist to existing assessment examples so later phases can follow the same structure
+  - current_state:
+    - the project now has one explicit reusable pattern for milestone closure instead of ad hoc assessment wording
+    - the organizational work inside `Phase 10` is effectively closed
+  - next:
+    - decide whether to formalize `Phase 10` itself as complete
+    - or introduce a new implementation phase before another milestone assessment is needed
+
+- date: `2026-05-14`
+  - done:
+    - reconciled the remaining stale spec documents against the implemented system state
+    - updated `mvp-scope.md` so it no longer treats MR/QA lifecycle as purely future work
+    - updated `session-policy-v1.md` and `workflow-policy-model.md` so deferred policy fields reflect the current lifecycle implementation accurately
+    - updated `api-operator-contract.md` to reflect policy-aware `POST /sessions` and the implemented MR/QA operator routes
+    - replaced outdated `open-questions.md` entries with questions that still matter after the current milestone
+  - current_state:
+    - the main spec set now matches the implemented backend, UI, and lifecycle state much more closely
+    - the remaining `Phase 10` work is structural milestone hygiene, not factual reconciliation
+  - next:
+    - add a reusable milestone completion checklist structure for later phases
+
+- date: `2026-05-14`
+  - done:
+    - completed formal assessment of `Phase 9`
+    - recorded the milestone verdict in `workdir/spec/phase9-assessment.md`
+    - concluded that `Phase 9` satisfies its declared goal and exit criteria
+    - moved the next project step from lifecycle expansion to `Phase 10. Hardening And Completion`
+  - current_state:
+    - lifecycle extension is complete enough for the current milestone
+    - the project should now shift from adding lifecycle behaviors to reconciling docs and milestone framing
+  - next:
+    - reconcile remaining spec docs with implemented behavior
+    - add explicit completion checklist structure for later phases if needed
+
+- date: `2026-05-14`
+  - done:
+    - reconciled the current `Phase 9` state against its own exit criteria
+    - decided not to invent another lifecycle-extension slice before checking milestone completeness
+    - recorded that the next disciplined step is formal `Phase 9` assessment in `workdir/spec/phase9-completion-direction.md`
+  - current_state:
+    - `Phase 9` appears to satisfy its declared exit criteria
+    - the next missing control action is milestone assessment, not new feature work
+  - next:
+    - assess `Phase 9` completion formally
+    - record whether the phase is complete, complete with deferred items, or still blocked
+
+- date: `2026-05-14`
+  - done:
+    - validated the new follow-up intake slice against the real route layer with fake dependencies
+    - confirmed that MR follow-up intake reopens a completed session into `mr_followup_requested`
+    - confirmed that QA reopen reactivates a completed session into `qa_reopen_requested`
+    - confirmed that the UI-facing trace data exists for both cases: source event plus readable artifact detail
+    - recorded the result in `workdir/spec/phase9-followup-intake-validation.md`
+  - current_state:
+    - the operator-visible follow-up intake slice is now validated
+    - `Phase 9` needs a new next-step decision again, instead of continuing with ad hoc follow-up additions
+  - next:
+    - decide the next `Phase 9` slice after operator-visible follow-up intake validation
+    - keep `execution-plan.md` as the source of truth before starting any further implementation
+
+- date: `2026-05-14`
+  - done:
+    - implemented stable operator UI actions for MR follow-up intake and QA reopen
+    - added a follow-up context panel in session detail
+    - wired the UI to fetch the latest MR or QA follow-up artifact detail so the operator can see the captured context, not only the source event
+    - regression checks passed: backend `Ran 64 tests`, `OK`; frontend `npm run build`, `OK`
+  - current_state:
+    - lifecycle extension is now operable from the console, not only from backend routes
+    - the remaining gap in this slice is end-to-end validation that reopen flows and visible follow-up context behave correctly on a live session
+  - next:
+    - validate MR follow-up intake from the console against a completed session
+    - validate QA reopen from the console against a completed session
+    - record the result in a dedicated Phase 9 validation note
+
+- date: `2026-05-12`
+  - done:
+    - selected the next concrete `Phase 9` slice after generic follow-up handling
+    - decided to focus on `operator-triggerable follow-up intake surface`, not on another hidden backend transition
+    - recorded the slice in `workdir/spec/phase9-next-slice.md`
+    - updated `execution-plan.md` so the next unchecked item is now UI/operator work for MR and QA follow-up intake
+  - current_state:
+    - lifecycle extension backend primitives exist
+    - the next missing proof is that operators can actually drive MR and QA reopen flows from the console and see follow-up context
+  - next:
+    - implement stable operator UI actions for MR follow-up intake and QA reopen
+    - surface follow-up source/context in the session detail view
+
+### 2026-05-12
+
+- Status: planning in progress
+- Completed:
+  - reviewed `workdir/task-session-architecture-brainstorm.md`
+  - reviewed `workdir/task-session-architecture-start-plan.md`
+  - fixed initial project direction, stack, MVP role set, and artifact location
+  - created initial `workdir/spec/` artifact set
+  - expanded repository migration mapping across `.claude/` and `scripts/`
+  - converted implementation backlog into a file-level backend plan
+  - fixed the initial Python backend layout and captured it in the decision log
+  - created the first `backend/` scaffold and `pyproject.toml`
+  - added SQLite bootstrap with migration tracking
+  - implemented the first coordinator use case for task session creation and initial event logging
+  - exposed session creation/listing through the FastAPI session routes
+  - added default role spawning and role runtime metadata persistence for new sessions
+  - added first backend tests for repositories, session creation, and session API routes
+  - added deterministic intake/setup flow with Jira resolution, snapshot execution, and artifact registration
+  - exposed session preparation as a separate API action
+  - added coordinator-owned post-prepare handoff into `implementation_requested`
+  - new sessions now receive an initial implementation work item, owner assignment, and hydration artifact
+  - added structured `implementation_completed` ingestion and coordinator transition into verification
+  - exposed event history and work-item state through API routes
+  - added structured `verification_failed` ingestion and coordinator transition back to implementer correction flow
+  - added structured `verification_passed` ingestion and terminal session completion
+  - added coordinator-driven role input dispatch with persisted prompt/hydration artifacts
+  - added reverse runtime bridge for structured role outputs through the roles API
+  - added first-class artifact inspection for role IO, including artifact content reads
+  - upgraded `TmuxSessionBackend` from pure placeholder to real tmux-capable transport with recording fallback
+  - added session-level polling and collection for raw runtime role output
+  - added in-memory event bus and SSE stream for live session event delivery
+  - added first coordinator loop tick for polling all active session outputs
+  - added automatic normalization of `SDD_OUTPUT` markers from raw runtime output
+  - added managed in-process coordinator loop runner with start/stop/status controls
+  - added recoverable SSE replay from SQLite event history with `since_event_id` reconnect support
+  - added dedicated backend tests for SSE replay and live post-replay delivery
+  - added coordinator-loop reconciliation for persisted active work items that lost their runtime dispatch
+  - loop ticks can now restore pending implementer/verification handoffs from SQLite-backed session state
+  - expanded runtime marker normalization with `SDD_PROGRESS` and `SDD_ERROR`
+  - added non-terminal role progress/error events and dedicated structured marker artifacts
+  - added runtime-error escalation semantics: `SDD_ERROR` now moves sessions into `waiting_for_operator`
+  - autonomous loop now stops advancing escalated sessions until an explicit operator action resumes them
+  - added explicit operator resume flow for `waiting_for_operator` sessions
+  - resume now restores owner from the assigned work item, returns session to `active`, and re-dispatches the current handoff
+  - added explicit operator retry flow for escalated sessions
+  - runtime-error escalation now parks the active work item in `waiting_for_operator`, while retry creates a fresh assigned work item and re-dispatches the current stage
+  - added explicit operator redirect flow for escalated sessions
+  - redirect now creates a fresh assigned work item for a different persistent role and re-dispatches the current stage under operator control
+  - added coordinator-enforced stage-to-role redirect allowlists
+  - semantically invalid redirects are now rejected before state mutation, and redirect remains usable only for stage-compatible target roles
+  - created `workdir/spec/execution-plan.md` as the main status-driven implementation tracker
+  - reconciled actual backend progress against the original roadmap phases
+  - initialized local `.venv` and installed project dependencies
+  - removed test-environment-driven backend skips by running the suite inside the project virtualenv
+  - surfaced and fixed a real `prepare_session` response wiring bug once API tests started executing for real
+  - documented the actual backend HTTP surface in `workdir/spec/api-operator-contract.md`
+  - classified API routes into `mvp-core`, `mvp-supporting`, `experimental`, and `placeholder`
+  - implemented explicit `pause-session` semantics as a real operator control action in the backend MVP
+  - updated the contract decision: `pause` stays in MVP, `checkpoints` move to `deferred`
+  - updated the scope decision: `cancel` semantics are also out of the current backend MVP
+  - completed formal backend milestone assessment and recorded the verdict in `workdir/spec/backend-mvp-assessment.md`
+  - backend MVP is now treated as `complete with deferred items`
+  - started `Phase 7` and created the initial `ui/` scaffold for the operator console
+  - verified the UI scaffold with a real `vite build`
+  - added live session updates over SSE to the operator console
+  - the first UI slice is now pull + live-event aware rather than refresh-only
+  - validated operator-facing backend flows against a running local server and recorded the results in `workdir/spec/ui-operator-validation.md`
+  - confirmed live SSE delivery for newly emitted operator events
+  - reconciled the next planning step against the real legacy flow structure from `.claude/skills`
+  - documented `workdir/spec/workflow-policy-model.md` to separate role control from workflow/stage control
+  - recorded that `redirect` is an experimental operator override rather than the future mechanism for flow-path changes
+  - updated the execution plan so the next milestone is session workflow policy and startup configuration, not more ad hoc operator primitives
+  - normalized the first workflow-policy schema to one shared tri-state model: `disabled | enabled | required`
+  - froze the first implementation payload in `workdir/spec/session-policy-v1.md`
+  - defined the first session-start backend/UI contract in `workdir/spec/session-start-contract.md`
+  - implemented policy-aware session creation in backend with normalized `workflow_profile + policy` state
+  - added session policy validation/normalization and persisted policy fields in SQLite
+  - extended session read surfaces to return normalized policy state
+  - backend suite passes with the new policy-aware session contract: `Ran 56 tests`, `OK`
+  - closed the `redirect-session` decision by removing it from the future stable UI/operator surface
+  - implemented a policy-aware session-start form in the operator UI
+  - removed `redirect` from the operator UI while keeping the backend route as an internal-only escape hatch
+  - updated session surfaces in UI to show `workflow_profile` and stored policy state
+  - validated the slice technically with `Ran 58 tests`, `OK` and `npm run build`
+  - completed the first stable operator-console milestone assessment in `workdir/spec/ui-milestone-assessment.md`
+  - `Phase 8` is now treated as complete with deferred items
+  - selected lifecycle extension, not UI hardening, as the next primary implementation direction
+  - moved `Phase 9` to `in_progress`
+  - added the first `Phase 9` vertical slice: MR comments can now reopen a completed session into an implementer follow-up loop
+  - MR comments are fetched through the GitLab adapter, stored as artifacts, emitted as lifecycle events, and routed into a new follow-up handoff
+  - added the second `Phase 9` vertical slice: QA reopen can now reactivate a completed session into an implementer follow-up loop
+  - generalized MR and QA reopen into a shared `followup_implementation` lane that re-enters the verification loop after implementer completion
+  - backend suite passes after the generalized follow-up handling slice: `Ran 64 tests`, `OK`
+- Next:
+  - use `execution-plan.md` as the primary progress tracker instead of ad hoc next-step selection
+  - decide the next `Phase 9` slice after generic follow-up handling
+  - decide whether the in-memory live bus also needs cross-process persistence or broker-backed fanout
+- Blockers:
+  - none currently identified

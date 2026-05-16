@@ -202,6 +202,56 @@ class TmuxBackendTests(unittest.TestCase):
 
             backend.stop_session(session)
 
+    def test_pty_mode_materializes_multiline_routed_input_for_launcher_backed_role(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            backend = TmuxSessionBackend(
+                mode="pty",
+                runtime_root=runtime_root,
+            )
+            session = backend.create_task_session("IOS-50004B")
+            fixture = (
+                Path(__file__).resolve().parent
+                / "fixtures"
+                / "interactive_launcher_fixture.py"
+            )
+            role_workspace = runtime_root / "IOS-50004B" / "runtime" / "role-workspaces" / "implementer"
+            role_workspace.mkdir(parents=True, exist_ok=True)
+            launcher_script = role_workspace / "launch-role.sh"
+            launcher_script.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        f"exec python3 -u {fixture}",
+                        "",
+                    ]
+                )
+            )
+            launcher_script.chmod(0o755)
+            role = backend.spawn_role(
+                session,
+                "implementer",
+                start_directory=role_workspace,
+                launch_command=[str(launcher_script)],
+            )
+
+            multiline = "line 1\nline 2\nline 3"
+            backend.send_input(role, multiline)
+
+            routed = self._wait_for_output(
+                backend,
+                role,
+                timeout_seconds=3.0,
+                expected_substring="ROUTED:Read ROUTED_WORK.md",
+            )
+            routed_input_path = role_workspace / "ROUTED_WORK.md"
+            self.assertTrue(routed_input_path.is_file())
+            self.assertEqual(multiline, routed_input_path.read_text())
+            self.assertIn("ROUTED:Read ROUTED_WORK.md", routed)
+
+            backend.stop_session(session)
+
     def test_pty_mode_emits_synthetic_selection_error_for_launcher_blocker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir)
@@ -379,6 +429,9 @@ class TmuxBackendTests(unittest.TestCase):
         status_signal_long = backend._normalize_terminal_text(
             "❯ .\n\n✻ Brewed for 1m 24s"
         )
+        prompt_ready = backend._normalize_terminal_text(
+            "❯ Try \"refactor <filepath>\"\n[Sonnet 4.6] 0% | $0.00 | 0m 2s"
+        )
 
         self.assertTrue(backend._contains_claude_trust_prompt(trust))
         self.assertTrue(backend._contains_generic_selection_blocker(selection))
@@ -387,6 +440,11 @@ class TmuxBackendTests(unittest.TestCase):
         self.assertTrue(backend._contains_claude_ready_prompt(status_signal))
         self.assertTrue(backend._contains_runner_status_signal(status_signal_long))
         self.assertTrue(backend._contains_claude_ready_prompt(status_signal_long))
+        self.assertTrue(backend._contains_interactive_input_prompt(prompt_ready))
+        self.assertTrue(backend._contains_claude_ready_prompt(prompt_ready))
+        self.assertFalse(backend._contains_interactive_input_prompt(trust))
+        self.assertFalse(backend._contains_interactive_input_prompt(selection))
+        self.assertFalse(backend._contains_interactive_input_prompt(confirmation))
 
 
 if __name__ == "__main__":
