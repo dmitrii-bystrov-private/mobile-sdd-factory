@@ -251,6 +251,40 @@ class SessionCreationTests(unittest.TestCase):
         runtime_session_id = implementer_role.runtime_handle.split(":", 1)[0]
         pty_backend.stop_session(RuntimeSessionHandle(session_id=runtime_session_id))
 
+    def test_send_operator_runtime_input_reactivates_waiting_session_without_new_handoff(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30002",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "disabled",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30002")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+        self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+
+        updated_session, event = self.coordinator.send_operator_runtime_input(
+            session_id=session.id,
+            text="/mcp",
+        )
+
+        self.assertEqual("operator_runtime_input_sent", event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertEqual(
+            ["/mcp"],
+            self.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
+        )
+
     def test_create_task_session_creates_role_workspaces(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30000W",

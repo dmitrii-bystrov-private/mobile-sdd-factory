@@ -32,6 +32,8 @@ from backend.api.schemas import (
     PollSessionOutputResponse,
     RetrySessionRequest,
     RetrySessionResponse,
+    SendOperatorRuntimeInputRequest,
+    SendOperatorRuntimeInputResponse,
     SendToTestRequest,
     SendToTestResponse,
     StartSubtaskGraphRequest,
@@ -86,6 +88,26 @@ def resume_session(
         session=to_session_response(session),
         event_type=event.event_type,
         followup_event_type=followup_event.event_type,
+    )
+
+
+@router.post("/send-runtime-input", response_model=SendOperatorRuntimeInputResponse)
+def send_runtime_input(
+    payload: SendOperatorRuntimeInputRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> SendOperatorRuntimeInputResponse:
+    try:
+        session, event = dependencies.coordinator_service.send_operator_runtime_input(
+            session_id=payload.session_id,
+            text=payload.text,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return SendOperatorRuntimeInputResponse(
+        sent=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
     )
 
 

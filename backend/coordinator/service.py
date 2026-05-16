@@ -1436,6 +1436,48 @@ class CoordinatorService:
         )
         return session, resumed_event, dispatch_event
 
+    def send_operator_runtime_input(self, session_id: int, text: str) -> tuple[Session, Event]:
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
+            raise IntakeError(
+                f"Session {session_id} is not waiting for operator; current status is {session.status.value}"
+            )
+        work_item = self._find_operator_pending_work_item(session.id)
+        if work_item is None:
+            raise IntakeError(f"Session {session.id} has no operator-pending work item to continue")
+        if work_item.owner_role_id is None:
+            raise IntakeError(f"Work item {work_item.id} is missing an owner role")
+        role = self.role_repository.get_by_id(work_item.owner_role_id)
+        if role is None:
+            raise IntakeError(f"Owner role {work_item.owner_role_id} is missing for session {session.id}")
+        if role.runtime_handle is None:
+            raise IntakeError(f"Role {role.role_name} has no runtime handle for session {session.id}")
+
+        self.work_item_repository.update_status(work_item.id, WorkItemStatus.ASSIGNED)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=f"session:{session.id}",
+            backend_name=role.runtime_backend,
+        )
+        self.session_backend.send_input(runtime_role, text)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="operator_runtime_input_sent",
+            producer_type="operator",
+            payload={
+                "role_name": role.role_name,
+                "current_stage": session.current_stage,
+                "input_length": len(text),
+            },
+        )
+        return session, event
+
     def _resume_paused_session(self, session: Session) -> tuple[Session, Event, Event]:
         if session.current_owner is None:
             raise IntakeError(

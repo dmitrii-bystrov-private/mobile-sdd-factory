@@ -255,6 +255,17 @@ class ResumeSessionResponse(BaseModel):
     followup_event_type: str | None = None
 
 
+class SendOperatorRuntimeInputRequest(BaseModel):
+    session_id: int
+    text: str
+
+
+class SendOperatorRuntimeInputResponse(BaseModel):
+    sent: bool
+    session: SessionResponse
+    event_type: str
+
+
 class RetrySessionRequest(BaseModel):
     session_id: int
 

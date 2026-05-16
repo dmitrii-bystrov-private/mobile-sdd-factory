@@ -26,6 +26,7 @@ try:
     from backend.api.routes_operator import run_loop_once
     from backend.api.routes_operator import pause_session
     from backend.api.routes_operator import resume_session
+    from backend.api.routes_operator import send_runtime_input
     from backend.api.routes_operator import retry_session
     from backend.api.routes_operator import reopen_from_qa
     from backend.api.routes_operator import redirect_session
@@ -52,6 +53,7 @@ try:
         RedirectSessionRequest,
         ResumeSessionRequest,
         RetrySessionRequest,
+        SendOperatorRuntimeInputRequest,
         SendToTestRequest,
         StartSubtaskGraphRequest,
     )
@@ -1678,6 +1680,44 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("role_input_dispatched", response.followup_event_type)
         self.assertEqual("active", response.session.status)
         self.assertEqual("implementer", response.session.current_owner)
+
+    def test_send_runtime_input_route_continues_waiting_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013A"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = send_runtime_input(
+            SendOperatorRuntimeInputRequest(
+                session_id=prepare_response.session.id,
+                text="/mcp",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.sent)
+        self.assertEqual("operator_runtime_input_sent", response.event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertEqual("implementer", response.session.current_owner)
+        self.assertEqual(
+            ["/mcp"],
+            self.dependencies.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
+        )
 
     def test_pause_session_route_pauses_active_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
