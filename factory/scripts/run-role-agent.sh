@@ -20,11 +20,6 @@ task_repo_root="${SDD_FACTORY_TASK_REPO_ROOT:-}"
 workdir_root="${SDD_FACTORY_WORKDIR_ROOT:-}"
 lifecycle="${SDD_FACTORY_ROLE_LIFECYCLE:-persistent}"
 settings_file=""
-task_runtime_root=""
-
-if [[ -n "$workdir_root" ]]; then
-  task_runtime_root="$workdir_root/$task_key/runtime"
-fi
 
 if [[ -n "$task_repo_root" ]]; then
   if [[ -f "$task_repo_root/.claude/settings.local.json" ]]; then
@@ -47,7 +42,6 @@ printf "SDD_FACTORY_AGENT_BOOTSTRAP launcher=%s role=%s task=%s lifecycle=%s\n" 
 case "$launcher_name" in
   claude)
     args=(
-      "--no-session-persistence"
       "--permission-mode" "auto"
       "--name" "${role_name}:${task_key}"
     )
@@ -66,10 +60,6 @@ case "$launcher_name" in
     exec claude "${args[@]}"
     ;;
   codex)
-    if [[ -z "${CODEX_HOME:-}" && -n "$task_runtime_root" ]]; then
-      export CODEX_HOME="$task_runtime_root/codex-home"
-      mkdir -p "$CODEX_HOME"
-    fi
     exec codex
     ;;
   sh)
