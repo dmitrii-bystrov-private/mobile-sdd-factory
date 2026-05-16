@@ -438,11 +438,8 @@ class TmuxSessionBackend(SessionBackend):
     def _contains_claude_ready_prompt(self, normalized_text: str) -> bool:
         return (
             ("auto mode on" in normalized_text and "ctrl+g to edit in vim" in normalized_text)
-            or (
-                "auto mode on" in normalized_text
-                and ("[sonnet" in normalized_text or "/effort" in normalized_text or "shift+tab to cycle" in normalized_text)
-            )
-            or ("sonnet" in normalized_text and "ctrl+g to edit in vim" in normalized_text)
+            or ("auto mode on" in normalized_text and "shift+tab to cycle" in normalized_text)
+            or ("ctrl+g to edit in vim" in normalized_text)
         )
 
     def _contains_claude_auth_blocker(self, normalized_text: str) -> bool:
