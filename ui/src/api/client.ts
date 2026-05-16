@@ -285,6 +285,7 @@ export const apiClient = {
   ): Promise<{
     created: boolean;
     event_type: string;
+    followup_event_type?: string | null;
     session: Session;
   }> {
     return request("/operator/create-subtasks-from-plan", {

@@ -1069,6 +1069,76 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "jira_subtasks_stdout" for item in artifacts_response.items))
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stdout" for item in artifacts_response.items))
 
+    def test_create_subtasks_from_plan_route_can_auto_start_subtask_lane(self) -> None:
+        from backend.api.routes_sessions import create_session, prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40005SUBAUTO",
+                workflow_profile="story_full",
+                policy={"self_review_policy": "disabled"},
+            ),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005SUBAUTO"),
+            dependencies=self.dependencies,
+        )
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": "prepared"},
+                ),
+                dependencies=self.dependencies,
+            )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload={
+                    "summary": "Decomposition prepared",
+                    "plan_index_markdown": "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n",
+                    "plan_task_files": [
+                        {
+                            "filename": "01-build-data-source.md",
+                            "content": "# Build data source\n\n## What to implement\nCreate the feature data source.\n",
+                        }
+                    ],
+                },
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40005SUBAUTO",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40005SUBAUTO | Story | Parent story | In Progress |
+| IOS-40120 | Sub-task | Build data source | To Do |
+| IOS-40121 | Sub-task | Finish docs | Ready for test |
+""",
+        )
+
+        response = create_subtasks_from_plan(
+            CreateSubtasksFromPlanRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        self.assertEqual("jira_subtasks_created", response.event_type)
+        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+
     def test_list_knowledge_route_returns_repo_visible_items(self) -> None:
         from backend.api.routes_sessions import prepare_session
 

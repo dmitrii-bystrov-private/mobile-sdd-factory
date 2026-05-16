@@ -1316,16 +1316,87 @@ class SessionCreationTests(unittest.TestCase):
             "# Build data source\n\n## What to implement\nCreate the feature data source.\n"
         )
 
-        updated_session, event = self.coordinator.create_subtasks_from_plan(session.id)
+        updated_session, event, followup_event = self.coordinator.create_subtasks_from_plan(session.id)
         artifacts = self.artifact_repository.list_for_session(session.id)
 
         self.assertEqual(session.id, updated_session.id)
         self.assertEqual("jira_subtasks_created", event.event_type)
+        self.assertIsNone(followup_event)
         self.assertTrue(any(item.artifact_type == "jira_subtasks_stdout" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "jira_subtasks_stderr" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stdout" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stderr" for item in artifacts))
         self.assertEqual(0, event.payload["snapshot_refresh_exit_code"])
+
+    def test_create_subtasks_from_plan_can_auto_start_subtask_lane(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003SUBAUTO",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30003SUBAUTO")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Context prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="requirements_completed",
+            payload={"summary": "Requirements prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="acceptance_criteria_completed",
+            payload={"summary": "Acceptance prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning verified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="story_spec_completed",
+            payload={"summary": "Need explicit decomposition package"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload={
+                "summary": "Decomposition prepared",
+                "plan_index_markdown": "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n",
+                "plan_task_files": [
+                    {
+                        "filename": "01-build-data-source.md",
+                        "content": "# Build data source\n\n## What to implement\nCreate the feature data source.\n",
+                    }
+                ],
+            },
+        )
+        self.write_statuses_file(
+            "IOS-30003SUBAUTO",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30003SUBAUTO | Story | Parent story | In Progress |
+| IOS-30040 | Sub-task | Build data source | To Do |
+| IOS-30041 | Sub-task | Finish docs | Ready for test |
+""",
+        )
+
+        updated_session, event, followup_event = self.coordinator.create_subtasks_from_plan(session.id)
+
+        self.assertEqual("jira_subtasks_created", event.event_type)
+        self.assertIsNotNone(followup_event)
+        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
 
     def test_knowledge_is_repo_visible_markdown(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003KNOW")

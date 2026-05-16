@@ -680,7 +680,7 @@ class CoordinatorService:
     def create_subtasks_from_plan(
         self,
         session_id: int,
-    ) -> tuple[Session, Event]:
+    ) -> tuple[Session, Event, Event | None]:
         if (
             self.jira_adapter is None
             or self.snapshot_adapter is None
@@ -791,7 +791,30 @@ class CoordinatorService:
                 "status": session.status.value,
             },
         )
-        return session, event
+        followup_event: Event | None = None
+        if result.ok and session.current_stage == "implementation_requested":
+            active_item = self._find_active_primary_coding_work_item(session)
+            decomposition_artifact = self._latest_artifact_for_session_type(
+                session.id,
+                "task_decomposition_markdown",
+            )
+            subtasks = self._read_snapshot_subtasks(session.task_key)
+            if (
+                active_item is not None
+                and active_item.work_type == "implementation"
+                and decomposition_artifact is not None
+                and subtasks is not None
+                and unresolved_subtasks(subtasks)
+            ):
+                _graph_event, followup_event = self._start_subtask_graph_flow(
+                    session=session,
+                    producer_type="coordinator",
+                    subtasks=subtasks,
+                    initial_work_item=active_item,
+                    decomposition_artifact=decomposition_artifact,
+                )
+                session = self._get_session_or_raise(session.id)
+        return session, event, followup_event
 
     def reopen_from_qa(
         self,

@@ -285,6 +285,7 @@ class CreateSubtasksFromPlanResponse(BaseModel):
     created: bool
     session: SessionResponse
     event_type: str
+    followup_event_type: str | None = None
 
 
 class CreateKnowledgeRequest(BaseModel):
