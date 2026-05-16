@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
+import os
 import re
 import shutil
 import subprocess
@@ -26,6 +27,8 @@ class TmuxSessionBackend(SessionBackend):
         self.last_captured_output: dict[str, str] = {}
         self.last_spawn_commands: dict[str, list[str]] = {}
         self.session_runtime_roots: dict[str, Path] = {}
+        self.processes: dict[str, subprocess.Popen[bytes]] = {}
+        self.session_role_ids: dict[str, set[str]] = defaultdict(set)
         self._available = shutil.which("tmux") is not None
         self._effective_mode = self._resolve_mode(mode)
 
@@ -36,9 +39,11 @@ class TmuxSessionBackend(SessionBackend):
     def _resolve_mode(self, mode: str) -> str:
         if mode == "recording":
             return "recording"
+        if mode == "process":
+            return "process"
         if mode == "tmux":
             return "tmux"
-        return "tmux" if self._available else "recording"
+        return "tmux" if self._available else "process"
 
     def _sanitize(self, value: str) -> str:
         return re.sub(r"[^A-Za-z0-9_-]+", "-", value)
@@ -97,13 +102,26 @@ class TmuxSessionBackend(SessionBackend):
             result = self._tmux(socket_path, *args)
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to create tmux window")
+        elif self._effective_mode == "process":
+            process = subprocess.Popen(
+                role_command,
+                cwd=start_directory,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            if process.stdout is None or process.stdin is None:
+                raise RuntimeError("Failed to start process runtime with pipes")
+            os.set_blocking(process.stdout.fileno(), False)
+            self.processes[role_id] = process
+            self.session_role_ids[session.session_id].add(role_id)
         self.last_spawn_commands[role_id] = role_command
         if start_directory is not None:
             self.last_captured_output.setdefault(role_id, "")
         return RuntimeRoleHandle(
             role_id=role_id,
             session_id=session.session_id,
-            backend_name="tmux",
+            backend_name="tmux" if self._effective_mode == "tmux" else self._effective_mode,
         )
 
     def send_input(self, role: RuntimeRoleHandle, text: str) -> None:
@@ -113,11 +131,33 @@ class TmuxSessionBackend(SessionBackend):
             result = self._tmux(socket_path, "send-keys", "-t", role.role_id, text, "Enter")
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to send tmux input")
+        elif self._effective_mode == "process":
+            process = self.processes.get(role.role_id)
+            if process is None or process.stdin is None:
+                raise RuntimeError(f"Unknown process role runtime: {role.role_id}")
+            process.stdin.write((text + "\n").encode())
+            process.stdin.flush()
 
     def read_output(self, role: RuntimeRoleHandle) -> list[RuntimeOutputChunk]:
         if self._effective_mode == "recording":
             outputs = self.pending_outputs.pop(role.role_id, [])
             return [RuntimeOutputChunk(role_id=role.role_id, text=text) for text in outputs]
+        if self._effective_mode == "process":
+            process = self.processes.get(role.role_id)
+            if process is None or process.stdout is None:
+                return []
+            chunks: list[RuntimeOutputChunk] = []
+            while True:
+                try:
+                    data = os.read(process.stdout.fileno(), 65536)
+                except BlockingIOError:
+                    break
+                if not data:
+                    break
+                text = data.decode(errors="replace")
+                if text:
+                    chunks.append(RuntimeOutputChunk(role_id=role.role_id, text=text))
+            return chunks
 
         socket_path = self._socket_path(role.session_id)
         result = self._tmux(socket_path, "capture-pane", "-p", "-t", role.role_id)
@@ -140,6 +180,21 @@ class TmuxSessionBackend(SessionBackend):
         if self._effective_mode == "tmux":
             socket_path = self._socket_path(role.session_id)
             self._tmux(socket_path, "kill-window", "-t", role.role_id)
+        elif self._effective_mode == "process":
+            process = self.processes.pop(role.role_id, None)
+            if process is not None:
+                if process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+                if process.stdin is not None:
+                    process.stdin.close()
+                if process.stdout is not None:
+                    process.stdout.close()
+            self.session_role_ids.get(role.session_id, set()).discard(role.role_id)
 
     def stop_session(self, session: RuntimeSessionHandle) -> None:
         if self._effective_mode == "tmux":
@@ -147,6 +202,22 @@ class TmuxSessionBackend(SessionBackend):
             self._tmux(socket_path, "kill-session", "-t", session.session_id)
             if socket_path.exists():
                 socket_path.unlink()
+        elif self._effective_mode == "process":
+            for role_id in list(self.session_role_ids.get(session.session_id, set())):
+                process = self.processes.pop(role_id, None)
+                if process is not None:
+                    if process.poll() is None:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=5)
+                    if process.stdin is not None:
+                        process.stdin.close()
+                    if process.stdout is not None:
+                        process.stdout.close()
+            self.session_role_ids.pop(session.session_id, None)
         self.session_runtime_roots.pop(session.session_id, None)
 
     def get_sent_inputs(self, role_id: str) -> list[str]:

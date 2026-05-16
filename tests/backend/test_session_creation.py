@@ -128,7 +128,7 @@ class SessionCreationTests(unittest.TestCase):
         self.event_repository = EventRepository(self.database)
         self.artifact_repository = ArtifactRepository(self.database)
         self.work_item_repository = WorkItemRepository(self.database)
-        self.session_backend = TmuxSessionBackend()
+        self.session_backend = TmuxSessionBackend(mode="recording")
         self.event_bus = SessionEventBus()
         self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
         self.coordinator = CoordinatorService(

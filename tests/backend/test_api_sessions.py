@@ -162,7 +162,7 @@ class SessionApiTests(unittest.TestCase):
         event_repository = EventRepository(self.database)
         artifact_repository = ArtifactRepository(self.database)
         work_item_repository = WorkItemRepository(self.database)
-        session_backend = TmuxSessionBackend()
+        session_backend = TmuxSessionBackend(mode="recording")
         event_bus = SessionEventBus()
         self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
         coordinator = CoordinatorService(
