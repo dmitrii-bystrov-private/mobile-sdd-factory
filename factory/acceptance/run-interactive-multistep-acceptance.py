@@ -157,12 +157,12 @@ def main() -> None:
         assert blocker_one.session.current_stage == "implementation_requested"
         interactive_one = get_interactive_state(session_id, dependencies=deps)
         assert interactive_one.available
-        assert interactive_one.summary == "interactive auth required"
+        assert interactive_one.summary == "interactive selection required"
 
         send_runtime_input(
             SendOperatorRuntimeInputRequest(
                 session_id=session_id,
-                text="/mcp",
+                text="1",
             ),
             dependencies=deps,
         )

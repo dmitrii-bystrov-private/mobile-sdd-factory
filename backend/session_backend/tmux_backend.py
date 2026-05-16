@@ -36,7 +36,7 @@ class TmuxSessionBackend(SessionBackend):
         self.pty_role_ready: dict[str, bool] = defaultdict(lambda: True)
         self.pty_output_buffers: dict[str, str] = defaultdict(str)
         self.pty_trust_prompt_handled: dict[str, bool] = defaultdict(bool)
-        self.pty_auth_blocker_emitted: dict[str, bool] = defaultdict(bool)
+        self.pty_selection_blocker_emitted: dict[str, bool] = defaultdict(bool)
         self.pty_confirmation_blocker_emitted: dict[str, bool] = defaultdict(bool)
         self.pty_generic_blocker_emitted: dict[str, bool] = defaultdict(bool)
         self.pty_pre_ready_unknown_chunks: dict[str, int] = defaultdict(int)
@@ -160,6 +160,7 @@ class TmuxSessionBackend(SessionBackend):
             self.pty_role_ready[role_id] = not interactive_driver_enabled
             self.pty_trust_prompt_handled[role_id] = False
             self.pty_generic_blocker_emitted[role_id] = False
+            self.pty_selection_blocker_emitted[role_id] = False
             self.pty_pre_ready_unknown_chunks[role_id] = 0
         self.last_spawn_commands[role_id] = role_command
         if start_directory is not None:
@@ -192,7 +193,7 @@ class TmuxSessionBackend(SessionBackend):
                 return
             if self.pty_interactive_driver_enabled.get(role.role_id, False):
                 self.pty_output_buffers[role.role_id] = ""
-                self.pty_auth_blocker_emitted[role.role_id] = False
+                self.pty_selection_blocker_emitted[role.role_id] = False
                 self.pty_confirmation_blocker_emitted[role.role_id] = False
                 self.pty_generic_blocker_emitted[role.role_id] = False
                 self.pty_pre_ready_unknown_chunks[role.role_id] = 0
@@ -284,7 +285,7 @@ class TmuxSessionBackend(SessionBackend):
             self.pty_role_ready.pop(role.role_id, None)
             self.pty_output_buffers.pop(role.role_id, None)
             self.pty_trust_prompt_handled.pop(role.role_id, None)
-            self.pty_auth_blocker_emitted.pop(role.role_id, None)
+            self.pty_selection_blocker_emitted.pop(role.role_id, None)
             self.pty_confirmation_blocker_emitted.pop(role.role_id, None)
             self.pty_generic_blocker_emitted.pop(role.role_id, None)
             self.pty_pre_ready_unknown_chunks.pop(role.role_id, None)
@@ -331,7 +332,7 @@ class TmuxSessionBackend(SessionBackend):
                 self.pty_role_ready.pop(role_id, None)
                 self.pty_output_buffers.pop(role_id, None)
                 self.pty_trust_prompt_handled.pop(role_id, None)
-                self.pty_auth_blocker_emitted.pop(role_id, None)
+                self.pty_selection_blocker_emitted.pop(role_id, None)
                 self.pty_confirmation_blocker_emitted.pop(role_id, None)
                 self.pty_generic_blocker_emitted.pop(role_id, None)
                 self.pty_pre_ready_unknown_chunks.pop(role_id, None)
@@ -369,7 +370,7 @@ class TmuxSessionBackend(SessionBackend):
 
         normalized = self._normalize_terminal_text(accumulated)
         trust_prompt = self._contains_claude_trust_prompt(normalized)
-        auth_blocker = self._contains_claude_auth_blocker(normalized)
+        selection_blocker = self._contains_generic_selection_blocker(normalized)
         confirmation_blocker = self._contains_generic_confirmation_blocker(normalized)
 
         if not self.pty_role_ready.get(role_id, False):
@@ -385,13 +386,14 @@ class TmuxSessionBackend(SessionBackend):
                 self.pty_role_ready[role_id] = True
                 self.pty_pre_ready_unknown_chunks[role_id] = 0
         if (
-            not self.pty_auth_blocker_emitted.get(role_id, False)
-            and auth_blocker
+            self.pty_role_ready.get(role_id, False)
+            and not self.pty_selection_blocker_emitted.get(role_id, False)
+            and selection_blocker
         ):
-            self.pty_auth_blocker_emitted[role_id] = True
+            self.pty_selection_blocker_emitted[role_id] = True
             blocker_detected = True
             synthetic_markers.append(
-                'SDD_ERROR: {"summary":"interactive auth required","details":"launcher-backed role requested connector authentication"}'
+                'SDD_ERROR: {"summary":"interactive selection required","details":"launcher-backed role requested explicit selection input"}'
             )
         elif (
             self.pty_role_ready.get(role_id, False)
@@ -409,7 +411,7 @@ class TmuxSessionBackend(SessionBackend):
             and self.pty_buffered_inputs.get(role_id)
             and normalized
             and not trust_prompt
-            and not auth_blocker
+            and not selection_blocker
             and not self.pty_generic_blocker_emitted.get(role_id, False)
         ):
             self.pty_pre_ready_unknown_chunks[role_id] += 1
@@ -437,15 +439,14 @@ class TmuxSessionBackend(SessionBackend):
         )
 
     def _contains_claude_ready_prompt(self, normalized_text: str) -> bool:
-        return (
-            ("auto mode on" in normalized_text and "ctrl+g to edit in vim" in normalized_text)
-            or ("auto mode on" in normalized_text and "shift+tab to cycle" in normalized_text)
-            or ("ctrl+g to edit in vim" in normalized_text)
-            or ("❯" in normalized_text and self._contains_runner_status_signal(normalized_text))
-        )
+        return self._contains_runner_status_signal(normalized_text)
 
-    def _contains_claude_auth_blocker(self, normalized_text: str) -> bool:
-        return "needs auth" in normalized_text and "/mcp" in normalized_text
+    def _contains_generic_selection_blocker(self, normalized_text: str) -> bool:
+        return (
+            "enter to select" in normalized_text
+            and "to navigate" in normalized_text
+            and "esc to cancel" in normalized_text
+        )
 
     def _contains_generic_confirmation_blocker(self, normalized_text: str) -> bool:
         return (

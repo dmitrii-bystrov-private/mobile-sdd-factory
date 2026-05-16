@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive fixture that reaches ready state and then asks for auth."""
+"""Interactive fixture that reaches ready state and then asks for selection."""
 
 from __future__ import annotations
 
@@ -28,9 +28,16 @@ def main() -> None:
             if line == "1":
                 trusted = True
                 sys.stdout.write(
-                    "⏵⏵ auto mode on (shift+tab to cycle)          ctrl+g to edit in Vim\n"
+                    "❯ .\n"
+                    "✻ Brewed for 1s\n"
                 )
-                sys.stdout.write("1 claude.ai connector needs auth · /mcp\n")
+                sys.stdout.write(
+                    "☐ Action\n"
+                    "What would you like to do?\n"
+                    "❯ 1. Option 1\n"
+                    "  2. Option 2\n"
+                    "Enter to select · ↑/↓ to navigate · Esc to cancel\n"
+                )
                 sys.stdout.flush()
             continue
 

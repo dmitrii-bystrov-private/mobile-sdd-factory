@@ -30,14 +30,21 @@ def main() -> None:
                 trusted = True
                 blocked = True
                 sys.stdout.write(
-                    "⏵⏵ auto mode on (shift+tab to cycle)          ctrl+g to edit in Vim\n"
+                    "❯ .\n"
+                    "✻ Brewed for 1s\n"
                 )
-                sys.stdout.write("1 claude.ai connector needs auth · /mcp\n")
+                sys.stdout.write(
+                    "☐ Action\n"
+                    "What would you like to do?\n"
+                    "❯ 1. Option 1\n"
+                    "  2. Option 2\n"
+                    "Enter to select · ↑/↓ to navigate · Esc to cancel\n"
+                )
                 sys.stdout.flush()
             continue
 
         if blocked:
-            if line.startswith("/"):
+            if line:
                 blocked = False
                 sys.stdout.write(f"AUTH_CONTINUED:{line}\n")
                 sys.stdout.write(

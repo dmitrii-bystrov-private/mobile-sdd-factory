@@ -22,24 +22,31 @@ def main() -> None:
     sys.stdout.flush()
 
     trusted = False
-    auth_blocked = False
+    selection_blocked = False
     confirm_blocked = False
     for raw_line in sys.stdin:
         line = raw_line.rstrip("\r\n")
         if not trusted:
             if line == "1":
                 trusted = True
-                auth_blocked = True
+                selection_blocked = True
                 sys.stdout.write(
-                    "⏵⏵ auto mode on (shift+tab to cycle)          ctrl+g to edit in Vim\n"
+                    "❯ .\n"
+                    "✻ Brewed for 1s\n"
                 )
-                sys.stdout.write("1 claude.ai connector needs auth · /mcp\n")
+                sys.stdout.write(
+                    "☐ Action\n"
+                    "What would you like to do?\n"
+                    "❯ 1. Option 1\n"
+                    "  2. Option 2\n"
+                    "Enter to select · ↑/↓ to navigate · Esc to cancel\n"
+                )
                 sys.stdout.flush()
             continue
 
-        if auth_blocked:
-            if line.startswith("/"):
-                auth_blocked = False
+        if selection_blocked:
+            if line:
+                selection_blocked = False
                 confirm_blocked = True
                 sys.stdout.write(f"AUTH_CONTINUED:{line}\n")
                 sys.stdout.write(

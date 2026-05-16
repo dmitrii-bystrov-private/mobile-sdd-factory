@@ -250,7 +250,7 @@ export function OperatorActions({
               className="text-area-input"
               disabled={busy || session.status !== "waiting_for_operator"}
               onChange={(event) => setRuntimeInput(event.target.value)}
-              placeholder="Examples: 1, /mcp, or another direct reply required by the live agent session."
+              placeholder="Examples: 1 or another direct reply required by the live agent session."
               rows={3}
               value={runtimeInput}
             />

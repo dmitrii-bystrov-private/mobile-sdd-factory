@@ -144,7 +144,7 @@ def main() -> None:
         send_response = send_runtime_input(
             SendOperatorRuntimeInputRequest(
                 session_id=session_id,
-                text="/mcp",
+                text="1",
             ),
             dependencies=deps,
         )

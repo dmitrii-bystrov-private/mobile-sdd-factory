@@ -181,11 +181,11 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("bug_full", session.workflow_profile)
         self.assertEqual("required", session.policy["test_policy"])
 
-    def test_collect_role_output_escalates_launcher_auth_blocker_to_operator(self) -> None:
+    def test_collect_role_output_escalates_launcher_selection_blocker_to_operator(self) -> None:
         fixture = (
             Path(__file__).resolve().parent
             / "fixtures"
-            / "interactive_auth_blocker_fixture.py"
+            / "interactive_selection_blocker_fixture.py"
         )
         pty_backend = TmuxSessionBackend(
             mode="pty",
@@ -274,14 +274,14 @@ class SessionCreationTests(unittest.TestCase):
 
         updated_session, event = self.coordinator.send_operator_runtime_input(
             session_id=session.id,
-            text="/mcp",
+            text="1",
         )
 
         self.assertEqual("operator_runtime_input_sent", event.event_type)
         self.assertEqual("active", updated_session.status.value)
         self.assertEqual("implementer", updated_session.current_owner)
         self.assertEqual(
-            ["/mcp"],
+            ["1"],
             self.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
         )
 
@@ -299,7 +299,7 @@ class SessionCreationTests(unittest.TestCase):
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            'SDD_ERROR: {"summary":"interactive auth required","details":"connector auth needed"}',
+            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed"}',
         )
         self.coordinator.collect_role_output(
             session_id=session.id,
@@ -311,8 +311,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(summary["available"])
         self.assertEqual("implementer", summary["role_name"])
         self.assertEqual("implementation_requested", summary["current_stage"])
-        self.assertEqual("interactive auth required", summary["summary"])
-        self.assertEqual("connector auth needed", summary["details"])
+        self.assertEqual("interactive selection required", summary["summary"])
+        self.assertEqual("operator choice needed", summary["details"])
         self.assertEqual("session_escalated_to_operator", summary["source_event_type"])
         self.assertTrue(summary["needs_operator_input"])
 
@@ -330,7 +330,7 @@ class SessionCreationTests(unittest.TestCase):
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            'SDD_ERROR: {"summary":"interactive auth required","details":"connector auth needed"}',
+            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed"}',
         )
         self.coordinator.collect_role_output(
             session_id=session.id,
@@ -339,7 +339,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.coordinator.send_operator_runtime_input(
             session_id=session.id,
-            text="/mcp",
+            text="1",
         )
         summary = self.coordinator.get_interactive_state_summary(session.id)
 

@@ -195,14 +195,14 @@ class TmuxBackendTests(unittest.TestCase):
                 expected_substring="interactive round done",
             )
             self.assertIn("Quick safety check", interactive_round)
-            self.assertIn("auto mode on", interactive_round)
+            self.assertIn("✻ Brewed for 1s", interactive_round)
             self.assertIn("ROUTED:first routed work", interactive_round)
             self.assertIn("SDD_OUTPUT", interactive_round)
             self.assertEqual(["first routed work"], backend.get_sent_inputs(role.role_id))
 
             backend.stop_session(session)
 
-    def test_pty_mode_emits_synthetic_auth_error_for_launcher_blocker(self) -> None:
+    def test_pty_mode_emits_synthetic_selection_error_for_launcher_blocker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir)
             backend = TmuxSessionBackend(
@@ -213,7 +213,7 @@ class TmuxBackendTests(unittest.TestCase):
             fixture = (
                 Path(__file__).resolve().parent
                 / "fixtures"
-                / "interactive_auth_blocker_fixture.py"
+                / "interactive_selection_blocker_fixture.py"
             )
             role_workspace = runtime_root / "IOS-50005" / "runtime" / "role-workspaces" / "implementer"
             role_workspace.mkdir(parents=True, exist_ok=True)
@@ -240,11 +240,12 @@ class TmuxBackendTests(unittest.TestCase):
                 backend,
                 role,
                 timeout_seconds=3.0,
-                expected_substring='SDD_ERROR: {"summary":"interactive auth required"',
+                expected_substring='SDD_ERROR: {"summary":"interactive selection required"',
             )
             self.assertIn("Quick safety check", blocker_output)
-            self.assertIn("auto mode on", blocker_output)
-            self.assertIn('SDD_ERROR: {"summary":"interactive auth required"', blocker_output)
+            self.assertIn("✻ Brewed for 1s", blocker_output)
+            self.assertIn("Enter to select", blocker_output)
+            self.assertIn('SDD_ERROR: {"summary":"interactive selection required"', blocker_output)
 
             backend.stop_session(session)
 
@@ -286,11 +287,11 @@ class TmuxBackendTests(unittest.TestCase):
                 backend,
                 role,
                 timeout_seconds=3.0,
-                expected_substring='SDD_ERROR: {"summary":"interactive auth required"',
+                expected_substring='SDD_ERROR: {"summary":"interactive selection required"',
             )
-            self.assertIn('SDD_ERROR: {"summary":"interactive auth required"', first_blocker)
+            self.assertIn('SDD_ERROR: {"summary":"interactive selection required"', first_blocker)
 
-            backend.send_input(role, "/mcp")
+            backend.send_input(role, "1")
 
             second_blocker = self._wait_for_output(
                 backend,
@@ -298,7 +299,7 @@ class TmuxBackendTests(unittest.TestCase):
                 timeout_seconds=3.0,
                 expected_substring='SDD_ERROR: {"summary":"interactive confirmation required"',
             )
-            self.assertIn("AUTH_CONTINUED:/mcp", second_blocker)
+            self.assertIn("AUTH_CONTINUED:1", second_blocker)
             self.assertIn('SDD_ERROR: {"summary":"interactive confirmation required"', second_blocker)
 
             backend.send_input(role, "1")
@@ -366,14 +367,11 @@ class TmuxBackendTests(unittest.TestCase):
         trust = backend._normalize_terminal_text(
             "\x1b[1CQuick\x1b[1Csafety\x1b[1Ccheck\x1b[1Ctrust\x1b[1Cthis\x1b[1Cfolder"
         )
-        auth = backend._normalize_terminal_text(
-            "\x1b[39C1\x1b[1Cclaude.ai\x1b[1Cconnector\x1b[1Cneeds\x1b[1Cauth\x1b[1C·\x1b[1C/mcp"
+        selection = backend._normalize_terminal_text(
+            "☐ Action\nWhat would you like to do?\n❯ 1. Option 1\n2. Option 2\nEnter to select · ↑/↓ to navigate · Esc to cancel"
         )
         confirmation = backend._normalize_terminal_text(
             "Confirm tool execution?\nEnter to confirm · Esc to cancel"
-        )
-        ready = backend._normalize_terminal_text(
-            "❯  try \"fix lint errors\"\n⏵⏵ auto mode on (shift+tab to cycle) ◐ medium · /effort [sonnet 4.6]"
         )
         status_signal = backend._normalize_terminal_text(
             "❯ .\n\n✻ Churned for 5s"
@@ -383,9 +381,8 @@ class TmuxBackendTests(unittest.TestCase):
         )
 
         self.assertTrue(backend._contains_claude_trust_prompt(trust))
-        self.assertTrue(backend._contains_claude_auth_blocker(auth))
+        self.assertTrue(backend._contains_generic_selection_blocker(selection))
         self.assertTrue(backend._contains_generic_confirmation_blocker(confirmation))
-        self.assertTrue(backend._contains_claude_ready_prompt(ready))
         self.assertTrue(backend._contains_runner_status_signal(status_signal))
         self.assertTrue(backend._contains_claude_ready_prompt(status_signal))
         self.assertTrue(backend._contains_runner_status_signal(status_signal_long))

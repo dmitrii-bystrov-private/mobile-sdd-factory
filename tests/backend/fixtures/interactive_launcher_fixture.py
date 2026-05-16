@@ -28,7 +28,8 @@ def main() -> None:
             if line == "1":
                 trusted = True
                 sys.stdout.write(
-                    "⏵⏵ auto mode on (shift+tab to cycle)          ctrl+g to edit in Vim\n"
+                    "❯ .\n"
+                    "✻ Brewed for 1s\n"
                 )
                 sys.stdout.flush()
             continue

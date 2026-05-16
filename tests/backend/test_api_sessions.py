@@ -1706,7 +1706,7 @@ class SessionApiTests(unittest.TestCase):
         response = send_runtime_input(
             SendOperatorRuntimeInputRequest(
                 session_id=prepare_response.session.id,
-                text="/mcp",
+                text="1",
             ),
             dependencies=self.dependencies,
         )
@@ -1716,7 +1716,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("active", response.session.status)
         self.assertEqual("implementer", response.session.current_owner)
         self.assertEqual(
-            ["/mcp"],
+            ["1"],
             self.dependencies.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
         )
 
@@ -1731,7 +1731,7 @@ class SessionApiTests(unittest.TestCase):
         )
         self.dependencies.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            'SDD_ERROR: {"summary":"interactive auth required","details":"connector auth needed"}',
+            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed"}',
         )
         collect_role_output(
             CollectRoleOutputRequest(
@@ -1748,8 +1748,8 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertTrue(response.available)
         self.assertEqual("implementer", response.role_name)
-        self.assertEqual("interactive auth required", response.summary)
-        self.assertEqual("connector auth needed", response.details)
+        self.assertEqual("interactive selection required", response.summary)
+        self.assertEqual("operator choice needed", response.details)
         self.assertEqual("session_escalated_to_operator", response.source_event_type)
         self.assertTrue(response.needs_operator_input)
 
@@ -1764,7 +1764,7 @@ class SessionApiTests(unittest.TestCase):
         )
         self.dependencies.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            'SDD_ERROR: {"summary":"interactive auth required","details":"connector auth needed"}',
+            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed"}',
         )
         collect_role_output(
             CollectRoleOutputRequest(
@@ -1776,7 +1776,7 @@ class SessionApiTests(unittest.TestCase):
         send_runtime_input(
             SendOperatorRuntimeInputRequest(
                 session_id=prepare_response.session.id,
-                text="/mcp",
+                text="1",
             ),
             dependencies=self.dependencies,
         )
