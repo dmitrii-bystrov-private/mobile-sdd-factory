@@ -378,6 +378,9 @@ class TmuxBackendTests(unittest.TestCase):
         status_signal = backend._normalize_terminal_text(
             "❯ .\n\n✻ Churned for 5s"
         )
+        status_signal_long = backend._normalize_terminal_text(
+            "❯ .\n\n✻ Brewed for 1m 24s"
+        )
 
         self.assertTrue(backend._contains_claude_trust_prompt(trust))
         self.assertTrue(backend._contains_claude_auth_blocker(auth))
@@ -385,6 +388,8 @@ class TmuxBackendTests(unittest.TestCase):
         self.assertTrue(backend._contains_claude_ready_prompt(ready))
         self.assertTrue(backend._contains_runner_status_signal(status_signal))
         self.assertTrue(backend._contains_claude_ready_prompt(status_signal))
+        self.assertTrue(backend._contains_runner_status_signal(status_signal_long))
+        self.assertTrue(backend._contains_claude_ready_prompt(status_signal_long))
 
 
 if __name__ == "__main__":
