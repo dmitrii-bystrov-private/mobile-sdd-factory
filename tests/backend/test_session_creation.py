@@ -1216,6 +1216,82 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Start implementation work for IOS-30003DECOMP.", implementer_inputs[0])
         self.assertIn("Task decomposition summary: Split into execution chunks", implementer_inputs[0])
 
+    def test_task_decomposition_completed_writes_legacy_plan_package_when_provided(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003PLAN",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003PLAN")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Scope clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="requirements_completed",
+            payload={"summary": "Requirements clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="acceptance_criteria_completed",
+            payload={"summary": "Acceptance prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning verified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="story_spec_completed",
+            payload={"summary": "Need explicit decomposition package"},
+        )
+        self.write_statuses_file(
+            "IOS-30003PLAN",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30003PLAN | Story | Parent story | In Progress |
+| IOS-30032 | Sub-task | Existing subtask | Ready for test |
+""",
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload={
+                "summary": "Decomposition prepared",
+                "plan_index_markdown": "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n",
+                "plan_task_files": [
+                    {
+                        "filename": "01-build-data-source.md",
+                        "content": "# Build data source\n\n## What to implement\nCreate the feature data source.\n",
+                    }
+                ],
+            },
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+        plan_dir = Path(self.temp_dir.name) / "IOS-30003PLAN" / "plan"
+
+        self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertTrue((plan_dir / "index.md").is_file())
+        self.assertTrue((plan_dir / "01-build-data-source.md").is_file())
+        self.assertTrue(
+            any(artifact.artifact_type == "task_decomposition_plan_index" for artifact in artifacts)
+        )
+        self.assertTrue(
+            any(artifact.artifact_type == "task_decomposition_plan_package" for artifact in artifacts)
+        )
+
     def test_knowledge_is_repo_visible_markdown(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003KNOW")
         _, event = self.coordinator.create_knowledge(

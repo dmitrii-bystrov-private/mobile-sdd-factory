@@ -327,6 +327,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Treat this role as a bounded one-shot worker: prepare task decomposition, write the routed result, and exit.",
             "- Start from the verified planning package and final story spec and break the work into the smallest useful execution-oriented chunks for later implementation/subtask flow.",
+            "- When the decomposition naturally maps to Jira-subtask-sized execution units, include a legacy-compatible plan package in the routed output: `plan_index_markdown` plus `plan_task_files` with self-contained Markdown task files.",
             "- Keep the output compact and downstream-oriented so execution can start from an explicit decomposition instead of implicit planning assumptions.",
         ]
     if role_name == "story-spec-worker":

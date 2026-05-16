@@ -1938,6 +1938,8 @@ class CoordinatorService:
 
         summary = str(source_event.payload.get("summary") or "").strip()
         task_breakdown = str(source_event.payload.get("task_breakdown") or "").strip()
+        plan_index_markdown = str(source_event.payload.get("plan_index_markdown") or "").strip()
+        raw_plan_task_files = source_event.payload.get("plan_task_files") or []
         context_lines: list[str] = []
         if summary:
             context_lines.append(f"Task decomposition summary: {summary}")
@@ -1962,6 +1964,12 @@ class CoordinatorService:
                     "task_key": session.task_key,
                 },
             )
+            if plan_index_markdown:
+                self._write_task_decomposition_plan_package(
+                    session=session,
+                    plan_index_markdown=plan_index_markdown,
+                    raw_plan_task_files=raw_plan_task_files,
+                )
 
         event = self._enqueue_initial_implementation(
             session=session,
@@ -3377,6 +3385,59 @@ class CoordinatorService:
         if task_breakdown:
             lines.extend(["## Task Breakdown", "", task_breakdown, ""])
         return "\n".join(lines).rstrip() + "\n"
+
+    def _write_task_decomposition_plan_package(
+        self,
+        *,
+        session: Session,
+        plan_index_markdown: str,
+        raw_plan_task_files: object,
+    ) -> None:
+        if self.workdir_root is None:
+            raise IntakeError("Coordinator is missing workdir root")
+
+        plan_dir = self.workdir_root / session.task_key / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+
+        index_path = plan_dir / "index.md"
+        index_path.write_text(plan_index_markdown.rstrip() + "\n")
+
+        normalized_task_files: list[str] = []
+        if isinstance(raw_plan_task_files, list):
+            for item in raw_plan_task_files:
+                if not isinstance(item, dict):
+                    continue
+                filename = str(item.get("filename") or "").strip()
+                content = str(item.get("content") or "").strip()
+                if not filename or not content:
+                    continue
+                safe_name = Path(filename).name
+                if safe_name != filename or not safe_name.endswith(".md"):
+                    continue
+                file_path = plan_dir / safe_name
+                file_path.write_text(content.rstrip() + "\n")
+                normalized_task_files.append(safe_name)
+
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="planning",
+            artifact_type="task_decomposition_plan_index",
+            path=str(index_path),
+            metadata={
+                "task_key": session.task_key,
+                "task_file_count": len(normalized_task_files),
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="planning",
+            artifact_type="task_decomposition_plan_package",
+            path=str(plan_dir),
+            metadata={
+                "task_key": session.task_key,
+                "task_files": normalized_task_files,
+            },
+        )
 
     def _count_mr_discussions(self, markdown: str) -> int:
         return sum(1 for line in markdown.splitlines() if line.startswith("## Discussion "))
