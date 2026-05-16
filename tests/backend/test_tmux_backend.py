@@ -313,6 +313,54 @@ class TmuxBackendTests(unittest.TestCase):
 
             backend.stop_session(session)
 
+    def test_pty_mode_emits_generic_pre_ready_blocker_for_unknown_interactive_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            backend = TmuxSessionBackend(
+                mode="pty",
+                runtime_root=runtime_root,
+            )
+            session = backend.create_task_session("IOS-50008")
+            fixture = (
+                Path(__file__).resolve().parent
+                / "fixtures"
+                / "interactive_unknown_pre_ready_fixture.py"
+            )
+            role_workspace = runtime_root / "IOS-50008" / "runtime" / "role-workspaces" / "implementer"
+            role_workspace.mkdir(parents=True, exist_ok=True)
+            launcher_script = role_workspace / "launch-role.sh"
+            launcher_script.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        f"exec python3 -u {fixture}",
+                        "",
+                    ]
+                )
+            )
+            launcher_script.chmod(0o755)
+            role = backend.spawn_role(
+                session,
+                "implementer",
+                start_directory=role_workspace,
+                launch_command=[str(launcher_script)],
+            )
+
+            backend.send_input(role, "first routed work")
+
+            blocker_output = self._wait_for_output(
+                backend,
+                role,
+                timeout_seconds=3.0,
+                expected_substring='SDD_ERROR: {"summary":"interactive operator input required"',
+            )
+            self.assertIn('SDD_ERROR: {"summary":"interactive operator input required"', blocker_output)
+            self.assertIn("before ready:", blocker_output)
+            self.assertIn("6 6 6", blocker_output)
+
+            backend.stop_session(session)
+
     def test_ansi_normalized_prompt_detection_helpers(self) -> None:
         backend = TmuxSessionBackend(mode="recording")
         trust = backend._normalize_terminal_text(
@@ -324,10 +372,14 @@ class TmuxBackendTests(unittest.TestCase):
         confirmation = backend._normalize_terminal_text(
             "Confirm tool execution?\nEnter to confirm · Esc to cancel"
         )
+        ready = backend._normalize_terminal_text(
+            "❯  try \"fix lint errors\"\n⏵⏵ auto mode on (shift+tab to cycle) ◐ medium · /effort [sonnet 4.6]"
+        )
 
         self.assertTrue(backend._contains_claude_trust_prompt(trust))
         self.assertTrue(backend._contains_claude_auth_blocker(auth))
         self.assertTrue(backend._contains_generic_confirmation_blocker(confirmation))
+        self.assertTrue(backend._contains_claude_ready_prompt(ready))
 
 
 if __name__ == "__main__":

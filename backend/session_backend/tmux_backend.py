@@ -38,6 +38,8 @@ class TmuxSessionBackend(SessionBackend):
         self.pty_trust_prompt_handled: dict[str, bool] = defaultdict(bool)
         self.pty_auth_blocker_emitted: dict[str, bool] = defaultdict(bool)
         self.pty_confirmation_blocker_emitted: dict[str, bool] = defaultdict(bool)
+        self.pty_generic_blocker_emitted: dict[str, bool] = defaultdict(bool)
+        self.pty_pre_ready_unknown_chunks: dict[str, int] = defaultdict(int)
         self._available = shutil.which("tmux") is not None
         self._effective_mode = self._resolve_mode(mode)
 
@@ -156,6 +158,8 @@ class TmuxSessionBackend(SessionBackend):
             self.pty_interactive_driver_enabled[role_id] = interactive_driver_enabled
             self.pty_role_ready[role_id] = not interactive_driver_enabled
             self.pty_trust_prompt_handled[role_id] = False
+            self.pty_generic_blocker_emitted[role_id] = False
+            self.pty_pre_ready_unknown_chunks[role_id] = 0
         self.last_spawn_commands[role_id] = role_command
         if start_directory is not None:
             self.last_captured_output.setdefault(role_id, "")
@@ -189,6 +193,8 @@ class TmuxSessionBackend(SessionBackend):
                 self.pty_output_buffers[role.role_id] = ""
                 self.pty_auth_blocker_emitted[role.role_id] = False
                 self.pty_confirmation_blocker_emitted[role.role_id] = False
+                self.pty_generic_blocker_emitted[role.role_id] = False
+                self.pty_pre_ready_unknown_chunks[role.role_id] = 0
             os.write(master_fd, (text + "\n").encode())
 
     def read_output(self, role: RuntimeRoleHandle) -> list[RuntimeOutputChunk]:
@@ -279,6 +285,8 @@ class TmuxSessionBackend(SessionBackend):
             self.pty_trust_prompt_handled.pop(role.role_id, None)
             self.pty_auth_blocker_emitted.pop(role.role_id, None)
             self.pty_confirmation_blocker_emitted.pop(role.role_id, None)
+            self.pty_generic_blocker_emitted.pop(role.role_id, None)
+            self.pty_pre_ready_unknown_chunks.pop(role.role_id, None)
             if process is not None:
                 if process.poll() is None:
                     process.terminate()
@@ -324,6 +332,8 @@ class TmuxSessionBackend(SessionBackend):
                 self.pty_trust_prompt_handled.pop(role_id, None)
                 self.pty_auth_blocker_emitted.pop(role_id, None)
                 self.pty_confirmation_blocker_emitted.pop(role_id, None)
+                self.pty_generic_blocker_emitted.pop(role_id, None)
+                self.pty_pre_ready_unknown_chunks.pop(role_id, None)
                 if process is not None:
                     if process.poll() is None:
                         process.terminate()
@@ -354,13 +364,17 @@ class TmuxSessionBackend(SessionBackend):
         self.pty_output_buffers[role_id] = accumulated[-32768:]
         synthetic_markers: list[str] = []
         blocker_detected = False
+        ready_before_chunk = self.pty_role_ready.get(role_id, False)
 
         normalized = self._normalize_terminal_text(accumulated)
+        trust_prompt = self._contains_claude_trust_prompt(normalized)
+        auth_blocker = self._contains_claude_auth_blocker(normalized)
+        confirmation_blocker = self._contains_generic_confirmation_blocker(normalized)
 
         if not self.pty_role_ready.get(role_id, False):
             if (
                 not self.pty_trust_prompt_handled.get(role_id, False)
-                and self._contains_claude_trust_prompt(normalized)
+                and trust_prompt
             ):
                 master_fd = self.pty_master_fds.get(role_id)
                 if master_fd is not None:
@@ -368,9 +382,10 @@ class TmuxSessionBackend(SessionBackend):
                     self.pty_trust_prompt_handled[role_id] = True
             if self._contains_claude_ready_prompt(normalized):
                 self.pty_role_ready[role_id] = True
+                self.pty_pre_ready_unknown_chunks[role_id] = 0
         if (
             not self.pty_auth_blocker_emitted.get(role_id, False)
-            and self._contains_claude_auth_blocker(normalized)
+            and auth_blocker
         ):
             self.pty_auth_blocker_emitted[role_id] = True
             blocker_detected = True
@@ -380,13 +395,32 @@ class TmuxSessionBackend(SessionBackend):
         elif (
             self.pty_role_ready.get(role_id, False)
             and not self.pty_confirmation_blocker_emitted.get(role_id, False)
-            and self._contains_generic_confirmation_blocker(normalized)
+            and confirmation_blocker
         ):
             self.pty_confirmation_blocker_emitted[role_id] = True
             blocker_detected = True
             synthetic_markers.append(
                 'SDD_ERROR: {"summary":"interactive confirmation required","details":"launcher-backed role requested explicit confirmation"}'
             )
+        elif (
+            not ready_before_chunk
+            and not self.pty_role_ready.get(role_id, False)
+            and self.pty_buffered_inputs.get(role_id)
+            and normalized
+            and not trust_prompt
+            and not auth_blocker
+            and not self.pty_generic_blocker_emitted.get(role_id, False)
+        ):
+            self.pty_pre_ready_unknown_chunks[role_id] += 1
+            if self.pty_pre_ready_unknown_chunks[role_id] >= 3:
+                self.pty_generic_blocker_emitted[role_id] = True
+                blocker_detected = True
+                preview = normalized[:160]
+                synthetic_markers.append(
+                    'SDD_ERROR: {"summary":"interactive operator input required","details":"launcher-backed role emitted unresolved interactive output before ready: '
+                    + preview.replace('"', '\\"')
+                    + '"}'
+                )
         if self.pty_role_ready.get(role_id, False) and not blocker_detected:
             master_fd = self.pty_master_fds.get(role_id)
             if master_fd is not None:
@@ -404,6 +438,10 @@ class TmuxSessionBackend(SessionBackend):
     def _contains_claude_ready_prompt(self, normalized_text: str) -> bool:
         return (
             ("auto mode on" in normalized_text and "ctrl+g to edit in vim" in normalized_text)
+            or (
+                "auto mode on" in normalized_text
+                and ("[sonnet" in normalized_text or "/effort" in normalized_text or "shift+tab to cycle" in normalized_text)
+            )
             or ("sonnet" in normalized_text and "ctrl+g to edit in vim" in normalized_text)
         )
 
