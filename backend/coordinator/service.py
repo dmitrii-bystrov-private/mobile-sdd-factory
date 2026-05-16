@@ -10,7 +10,7 @@ from pathlib import Path
 from backend.api.sse import SessionEventBus
 from backend.coordinator.artifacts import write_text_artifact
 from backend.coordinator.intake import IntakeError, classify_task_readiness
-from backend.knowledge.store import KnowledgeStore
+from backend.knowledge.store import KnowledgeItem, KnowledgeStore
 from backend.coordinator.subtasks import read_snapshot_subtasks, unresolved_subtasks
 from backend.coordinator.hydration import build_role_hydration
 from backend.models.event import Event
@@ -715,7 +715,7 @@ class CoordinatorService:
         scope: str | None = None,
     ) -> tuple[Session, Event]:
         session = self._get_session_or_raise(session_id)
-        knowledge_store = self._knowledge_store_or_raise()
+        knowledge_store = self._knowledge_store_for_session_or_raise(session)
         item = knowledge_store.create_item(
             title=title,
             platform=self._platform_for_task_key(session.task_key),
@@ -746,6 +746,21 @@ class CoordinatorService:
             },
         )
         return session, event
+
+    def list_knowledge(self) -> list[KnowledgeItem]:
+        if self.workdir_root is None or not self.workdir_root.exists():
+            return []
+        seen: set[tuple[str, str, str]] = set()
+        items: list[KnowledgeItem] = []
+        for root in sorted(self.workdir_root.glob("*/repo/knowledge")):
+            store = KnowledgeStore(root)
+            for item in store.list_items():
+                fingerprint = (item.id, item.title, item.guidance)
+                if fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+                items.append(item)
+        return items
 
     def start_subtask_graph(
         self,
@@ -2961,10 +2976,12 @@ class CoordinatorService:
                 return RuntimeSessionHandle(session_id=runtime_session_id)
         raise IntakeError(f"Could not infer runtime session handle for session {session.id}")
 
-    def _knowledge_store_or_raise(self) -> KnowledgeStore:
-        if self.knowledge_root is None:
-            raise IntakeError("Coordinator is missing knowledge root")
-        return KnowledgeStore(self.knowledge_root)
+    def _knowledge_store_for_session_or_raise(self, session: Session) -> KnowledgeStore:
+        if self.workdir_root is not None:
+            return KnowledgeStore(self.workdir_root / session.task_key / "repo" / "knowledge")
+        if self.knowledge_root is not None:
+            return KnowledgeStore(self.knowledge_root)
+        raise IntakeError("Coordinator is missing knowledge root")
 
     def _count_mr_discussions(self, markdown: str) -> int:
         return sum(1 for line in markdown.splitlines() if line.startswith("## Discussion "))

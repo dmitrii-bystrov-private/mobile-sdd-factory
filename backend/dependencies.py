@@ -86,7 +86,6 @@ def build_dependencies() -> AppDependencies:
         gitlab_adapter=gitlab_adapter,
         artifacts_root=config.workdir_root / "factory-artifacts",
         workdir_root=config.workdir_root,
-        knowledge_root=config.repo_root / "knowledge",
         event_bus=event_bus,
         role_workspace_manager=RoleWorkspaceManager(
             runtime_root=config.runtime_root,
@@ -95,6 +94,7 @@ def build_dependencies() -> AppDependencies:
         ),
         role_launcher_manager=RoleLauncherManager(
             repo_root=config.repo_root,
+            workdir_root=config.workdir_root,
             launcher_command=list(config.agent_launcher_command),
         ),
     )

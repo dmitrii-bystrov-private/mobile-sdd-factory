@@ -143,15 +143,15 @@ class SessionApiTests(unittest.TestCase):
             gitlab_adapter=FakeGitLabAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
             workdir_root=Path(self.temp_dir.name),
-            knowledge_root=Path(self.temp_dir.name) / "knowledge",
             event_bus=event_bus,
             role_workspace_manager=RoleWorkspaceManager(
-                runtime_root=Path(self.temp_dir.name) / "runtime",
+                runtime_root=Path(self.temp_dir.name),
                 repo_root=Path(self.temp_dir.name) / "repo-root",
                 workdir_root=Path(self.temp_dir.name),
             ),
             role_launcher_manager=RoleLauncherManager(
                 repo_root=Path(self.temp_dir.name) / "repo-root",
+                workdir_root=Path(self.temp_dir.name),
                 launcher_command=["sh"],
             ),
         )
@@ -208,7 +208,7 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertTrue(response.created)
         for role_name in DEFAULT_SESSION_ROLES + [CODE_REVIEWER_ROLE]:
-            role_dir = Path(self.temp_dir.name) / "runtime" / "role-workspaces" / "IOS-40000W" / role_name
+            role_dir = Path(self.temp_dir.name) / "IOS-40000W" / "runtime" / "role-workspaces" / role_name
             self.assertTrue(role_dir.is_dir())
             self.assertTrue((role_dir / "AGENTS.md").is_file())
             self.assertTrue((role_dir / "CLAUDE.md").is_symlink())
@@ -226,9 +226,9 @@ class SessionApiTests(unittest.TestCase):
         )
         launch_script = (
             Path(self.temp_dir.name)
+            / "IOS-40000L"
             / "runtime"
             / "role-workspaces"
-            / "IOS-40000L"
             / "implementer"
             / "launch-role.sh"
         )
@@ -737,7 +737,9 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        knowledge_files = list((Path(self.temp_dir.name) / "knowledge").rglob("*.md"))
+        knowledge_files = list(
+            (Path(self.temp_dir.name) / "IOS-40005KNOW" / "repo" / "knowledge").rglob("*.md")
+        )
         self.assertTrue(response.created)
         self.assertEqual("knowledge_created", response.event_type)
         self.assertTrue(any("Reuse existing navigation assembly" in path.read_text() for path in knowledge_files))

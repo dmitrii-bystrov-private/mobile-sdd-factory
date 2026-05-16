@@ -46,7 +46,7 @@ def load_config() -> AppConfig:
         database_path=database_path,
         runtime_backend=os.environ.get("SDD_FACTORY_RUNTIME_BACKEND", "auto"),
         runtime_root=Path(
-            os.environ.get("SDD_FACTORY_RUNTIME_ROOT", default_workdir_root / "factory-runtime")
+            os.environ.get("SDD_FACTORY_RUNTIME_ROOT", workdir_root)
         ),
         agent_launcher_command=tuple(
             os.environ.get("SDD_FACTORY_AGENT_LAUNCHER", "auto").split()

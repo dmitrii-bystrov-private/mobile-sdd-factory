@@ -5,10 +5,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 PORT="${SDD_FACTORY_ACCEPTANCE_PORT:-8012}"
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/sdd-factory-acceptance.XXXXXX")"
+TASK_KEY="IOS-ACCEPT-001"
+WORKDIR_ROOT="${REPO_ROOT}/workdir"
+TASK_ROOT="${WORKDIR_ROOT}/${TASK_KEY}"
+mkdir -p "${TASK_ROOT}/tmp"
+TMP_ROOT="$(mktemp -d "${TASK_ROOT}/tmp/happy-path-acceptance.XXXXXX")"
 DB_PATH="${TMP_ROOT}/acceptance.sqlite3"
-RUNTIME_ROOT="${TMP_ROOT}/runtime"
-WORKDIR_ROOT="${TMP_ROOT}/workdir"
+RUNTIME_ROOT="${WORKDIR_ROOT}"
 BASE_URL="http://127.0.0.1:${PORT}"
 SERVER_LOG="${TMP_ROOT}/server.log"
 
@@ -63,7 +66,7 @@ CREATE_PAYLOAD='{"task_key":"IOS-ACCEPT-001","workflow_profile":"oneshot","polic
 CREATE_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/sessions" -H 'content-type: application/json' -d "${CREATE_PAYLOAD}")"
 SESSION_ID="$(jq -r '.session.id' <<<"${CREATE_RESPONSE}")"
 
-PREPARE_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/sessions/prepare" -H 'content-type: application/json' -d '{"task_key":"IOS-ACCEPT-001"}')"
+PREPARE_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/sessions/prepare" -H 'content-type: application/json' -d "{\"task_key\":\"${TASK_KEY}\"}")"
 jq -e '.followup_event_type == "implementation_requested"' <<<"${PREPARE_RESPONSE}" >/dev/null
 
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \

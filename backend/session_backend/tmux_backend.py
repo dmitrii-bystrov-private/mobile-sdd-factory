@@ -20,11 +20,12 @@ class TmuxSessionBackend(SessionBackend):
 
     def __init__(self, mode: str = "auto", runtime_root: Path | None = None) -> None:
         self.mode = mode
-        self.runtime_root = runtime_root or Path.cwd() / "workdir" / "factory-runtime"
+        self.runtime_root = runtime_root or Path.cwd() / "workdir"
         self.sent_inputs: dict[str, list[str]] = defaultdict(list)
         self.pending_outputs: dict[str, list[str]] = defaultdict(list)
         self.last_captured_output: dict[str, str] = {}
         self.last_spawn_commands: dict[str, list[str]] = {}
+        self.session_runtime_roots: dict[str, Path] = {}
         self._available = shutil.which("tmux") is not None
         self._effective_mode = self._resolve_mode(mode)
 
@@ -42,9 +43,13 @@ class TmuxSessionBackend(SessionBackend):
     def _sanitize(self, value: str) -> str:
         return re.sub(r"[^A-Za-z0-9_-]+", "-", value)
 
+    def _task_runtime_root(self, task_key: str) -> Path:
+        return self.runtime_root / task_key / "runtime"
+
     def _socket_path(self, session_name: str) -> Path:
-        self.runtime_root.mkdir(parents=True, exist_ok=True)
-        return self.runtime_root / f"{session_name}.sock"
+        runtime_root = self.session_runtime_roots.get(session_name, self.runtime_root)
+        runtime_root.mkdir(parents=True, exist_ok=True)
+        return runtime_root / f"{session_name}.sock"
 
     def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -56,6 +61,7 @@ class TmuxSessionBackend(SessionBackend):
 
     def create_task_session(self, task_key: str) -> RuntimeSessionHandle:
         session_name = f"sdd-{self._sanitize(task_key)}"
+        self.session_runtime_roots[session_name] = self._task_runtime_root(task_key)
         if self._effective_mode == "tmux":
             socket_path = self._socket_path(session_name)
             result = self._tmux(socket_path, "new-session", "-d", "-s", session_name, "sh")
@@ -141,6 +147,7 @@ class TmuxSessionBackend(SessionBackend):
             self._tmux(socket_path, "kill-session", "-t", session.session_id)
             if socket_path.exists():
                 socket_path.unlink()
+        self.session_runtime_roots.pop(session.session_id, None)
 
     def get_sent_inputs(self, role_id: str) -> list[str]:
         return list(self.sent_inputs.get(role_id, []))

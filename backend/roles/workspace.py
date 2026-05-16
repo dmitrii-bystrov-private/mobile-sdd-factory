@@ -23,6 +23,18 @@ def _task_repo_root(workdir_root: Path, task_key: str) -> Path:
     return _task_snapshot_root(workdir_root, task_key) / "repo"
 
 
+def _task_runtime_root(workdir_root: Path, task_key: str) -> Path:
+    return _task_snapshot_root(workdir_root, task_key) / "runtime"
+
+
+def _task_tmp_root(workdir_root: Path, task_key: str) -> Path:
+    return _task_snapshot_root(workdir_root, task_key) / "tmp"
+
+
+def _task_knowledge_root(workdir_root: Path, task_key: str) -> Path:
+    return _task_repo_root(workdir_root, task_key) / "knowledge"
+
+
 def _task_artifacts_root(workdir_root: Path, task_key: str) -> Path:
     return workdir_root / "factory-artifacts" / task_key
 
@@ -32,9 +44,12 @@ def _role_relevant_paths(role_name: str) -> list[str]:
         return [
             "- Task repo worktree: `{task_repo_root}`",
             "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and coordinator outputs: `{task_artifacts_root}`",
             "- Main repo scripts: `{repo_root}/scripts`",
-            "- Shared knowledge base: `{repo_root}/knowledge`",
+            "- Project conventions: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "bug-fixer":
         return [
@@ -42,26 +57,32 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task snapshot metadata: `{task_snapshot_root}`",
             "- Task description and comments: `{task_snapshot_root}/description.md`, `{task_snapshot_root}/comments.md`",
             "- Bug analysis report target: `{task_snapshot_root}/spec/bug-analysis.md`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and bug analysis outputs: `{task_artifacts_root}`",
             "- Main repo scripts: `{repo_root}/scripts`",
-            "- Project conventions: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
-            "- Shared knowledge base: `{repo_root}/knowledge`",
+            "- Project conventions: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "verification-coordinator":
         return [
             "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and verification outputs: `{task_artifacts_root}`",
             "- Build/test/lint wrappers: `{repo_root}/scripts/run-build.sh`, `{repo_root}/scripts/run-test.sh`, `{repo_root}/scripts/run-lint.sh`",
             "- Final verification report target: `{task_snapshot_root}/spec/final-verification.md`",
-            "- Shared knowledge base: `{repo_root}/knowledge`",
+            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "code-reviewer":
         return [
             "- Task repo worktree: `{task_repo_root}`",
             "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and review outputs: `{task_artifacts_root}`",
-            "- Project conventions: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
-            "- Shared knowledge base: `{repo_root}/knowledge`",
+            "- Project conventions: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "proposal-context-worker":
         return [
@@ -69,8 +90,10 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Proposal target: `{task_snapshot_root}/spec/proposal.md`",
             "- Context directory: `{task_snapshot_root}/spec/context`",
             "- Task repo worktree: `{task_repo_root}`",
-            "- Project conventions and templates: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
-            "- Shared knowledge base: `{repo_root}/knowledge`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "requirements-clarifier-worker":
         return [
@@ -79,8 +102,10 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Requirements target: `{task_snapshot_root}/spec/requirements.md`",
             "- Context directory: `{task_snapshot_root}/spec/context`",
             "- Task repo worktree: `{task_repo_root}`",
-            "- Project conventions and templates: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
-            "- Shared knowledge base: `{repo_root}/knowledge`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "acceptance-criteria-worker":
         return [
@@ -90,16 +115,20 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Acceptance criteria target: `{task_snapshot_root}/spec/acceptance_criteria.md`",
             "- Context directory: `{task_snapshot_root}/spec/context`",
             "- Task repo worktree: `{task_repo_root}`",
-            "- Project conventions and templates: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
-            "- Shared knowledge base: `{repo_root}/knowledge`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "story-spec-worker":
         return [
             "- Task repo worktree: `{task_repo_root}`",
             "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and planning outputs: `{task_artifacts_root}`",
-            "- Project conventions and templates: `{repo_root}/CLAUDE.md`, `{repo_root}/.claude/`",
-            "- Shared knowledge base: `{repo_root}/knowledge`",
+            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            "- Project knowledge base: `{task_knowledge_root}`",
             "- Completion boundary: stop after producing the routed planning/spec result for this task session.",
         ]
     return [
@@ -242,6 +271,9 @@ def build_role_agents_md(
             repo_root=repo_root,
             task_snapshot_root=_task_snapshot_root(workdir_root, task_key),
             task_repo_root=_task_repo_root(workdir_root, task_key),
+            task_runtime_root=_task_runtime_root(workdir_root, task_key),
+            task_tmp_root=_task_tmp_root(workdir_root, task_key),
+            task_knowledge_root=_task_knowledge_root(workdir_root, task_key),
             task_artifacts_root=_task_artifacts_root(workdir_root, task_key),
         )
         for line in _role_relevant_paths(role_name)
@@ -288,7 +320,7 @@ class RoleWorkspaceManager:
         self.workdir_root = workdir_root
 
     def session_root(self, task_key: str) -> Path:
-        return self.runtime_root / "role-workspaces" / task_key
+        return _task_runtime_root(self.workdir_root, task_key) / "role-workspaces"
 
     def role_directory(self, task_key: str, role_name: str) -> Path:
         return self.session_root(task_key) / role_name

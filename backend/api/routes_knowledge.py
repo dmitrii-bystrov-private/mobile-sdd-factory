@@ -6,8 +6,6 @@ from fastapi import APIRouter, Depends, Request
 
 from backend.api.schemas import KnowledgeItemResponse, KnowledgeItemsResponse
 from backend.dependencies import AppDependencies
-from backend.knowledge.store import KnowledgeStore
-
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
@@ -19,11 +17,7 @@ def get_dependencies(request: Request) -> AppDependencies:
 def list_knowledge(
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> KnowledgeItemsResponse:
-    knowledge_root = dependencies.coordinator_service.knowledge_root
-    if knowledge_root is None:
-        return KnowledgeItemsResponse(items=[])
-    knowledge_store = KnowledgeStore(knowledge_root)
-    items = knowledge_store.list_items()
+    items = dependencies.coordinator_service.list_knowledge()
     return KnowledgeItemsResponse(
         items=[
             KnowledgeItemResponse(

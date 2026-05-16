@@ -36,8 +36,14 @@ def _role_lifecycle_mode(role_name: str) -> str:
 class RoleLauncherManager:
     """Create explicit launcher scripts for persistent role runtimes."""
 
-    def __init__(self, repo_root: Path, launcher_command: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        repo_root: Path,
+        workdir_root: Path | None = None,
+        launcher_command: list[str] | None = None,
+    ) -> None:
         self.repo_root = repo_root
+        self.workdir_root = workdir_root or (repo_root / "workdir")
         if launcher_command is None or launcher_command == ["auto"]:
             self.launcher_command = [str(repo_root / "factory" / "scripts" / "run-role-agent.sh")]
         else:
@@ -83,7 +89,8 @@ class RoleLauncherManager:
                 f'export SDD_FACTORY_ROLE_WORKSPACE={_shell_escape(str(workspace.directory))}',
                 f'export SDD_FACTORY_ROLE_AGENTS_MD={_shell_escape(str(workspace.agents_path))}',
                 f'export SDD_FACTORY_REPO_ROOT={_shell_escape(str(self.repo_root))}',
-                f'export SDD_FACTORY_WORKDIR_ROOT={_shell_escape(str(self.repo_root / "workdir"))}',
+                f'export SDD_FACTORY_WORKDIR_ROOT={_shell_escape(str(self.workdir_root))}',
+                f'export SDD_FACTORY_TASK_REPO_ROOT={_shell_escape(str(self.workdir_root / task_key / "repo"))}',
                 f'export SDD_FACTORY_ROLE_LIFECYCLE={_shell_escape(_role_lifecycle_mode(role_name))}',
                 f"cd {_shell_escape(str(workspace.directory))}",
                 'printf "SDD_FACTORY_ROLE_LAUNCHER_READY role=%s task=%s lifecycle=%s\\n" "$SDD_FACTORY_ROLE_NAME" "$SDD_FACTORY_TASK_KEY" "$SDD_FACTORY_ROLE_LIFECYCLE"',

@@ -119,15 +119,15 @@ class SessionCreationTests(unittest.TestCase):
             gitlab_adapter=FakeGitLabAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
             workdir_root=Path(self.temp_dir.name),
-            knowledge_root=Path(self.temp_dir.name) / "knowledge",
             event_bus=self.event_bus,
             role_workspace_manager=RoleWorkspaceManager(
-                runtime_root=Path(self.temp_dir.name) / "runtime",
+                runtime_root=Path(self.temp_dir.name),
                 repo_root=Path(self.temp_dir.name) / "repo-root",
                 workdir_root=Path(self.temp_dir.name),
             ),
             role_launcher_manager=RoleLauncherManager(
                 repo_root=Path(self.temp_dir.name) / "repo-root",
+                workdir_root=Path(self.temp_dir.name),
                 launcher_command=["sh"],
             ),
         )
@@ -167,7 +167,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertIsNotNone(session.id)
         for role_name in DEFAULT_SESSION_ROLES + [CODE_REVIEWER_ROLE]:
-            role_dir = Path(self.temp_dir.name) / "runtime" / "role-workspaces" / "IOS-30000W" / role_name
+            role_dir = Path(self.temp_dir.name) / "IOS-30000W" / "runtime" / "role-workspaces" / role_name
             agents_path = role_dir / "AGENTS.md"
             claude_path = role_dir / "CLAUDE.md"
             self.assertTrue(role_dir.is_dir())
@@ -180,9 +180,9 @@ class SessionCreationTests(unittest.TestCase):
 
         implementer_agents = (
             Path(self.temp_dir.name)
+            / "IOS-30000W"
             / "runtime"
             / "role-workspaces"
-            / "IOS-30000W"
             / "implementer"
             / "AGENTS.md"
         ).read_text()
@@ -192,9 +192,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Treat final test+lint verification as deferred to the coordinator.", implementer_agents)
         verification_agents = (
             Path(self.temp_dir.name)
+            / "IOS-30000W"
             / "runtime"
             / "role-workspaces"
-            / "IOS-30000W"
             / "verification-coordinator"
             / "AGENTS.md"
         ).read_text()
@@ -204,9 +204,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Do not modify product code.", verification_agents)
         reviewer_agents = (
             Path(self.temp_dir.name)
+            / "IOS-30000W"
             / "runtime"
             / "role-workspaces"
-            / "IOS-30000W"
             / CODE_REVIEWER_ROLE
             / "AGENTS.md"
         ).read_text()
@@ -224,9 +224,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIsNotNone(session.id)
         bug_fixer_agents = (
             Path(self.temp_dir.name)
+            / "IOS-30000BUGW"
             / "runtime"
             / "role-workspaces"
-            / "IOS-30000BUGW"
             / BUG_FIXER_ROLE
             / "AGENTS.md"
         ).read_text()
@@ -248,9 +248,9 @@ class SessionCreationTests(unittest.TestCase):
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         launch_script = (
             Path(self.temp_dir.name)
+            / "IOS-30000L"
             / "runtime"
             / "role-workspaces"
-            / "IOS-30000L"
             / "implementer"
             / "launch-role.sh"
         )
@@ -264,12 +264,13 @@ class SessionCreationTests(unittest.TestCase):
 
     def test_default_role_launcher_uses_repo_bootstrap_script(self) -> None:
         workspace_manager = RoleWorkspaceManager(
-            runtime_root=Path(self.temp_dir.name) / "runtime-default-launcher",
+            runtime_root=Path(self.temp_dir.name),
             repo_root=Path(self.temp_dir.name) / "repo-root-default-launcher",
             workdir_root=Path(self.temp_dir.name),
         )
         launcher_manager = RoleLauncherManager(
             repo_root=Path(self.temp_dir.name) / "repo-root-default-launcher",
+            workdir_root=Path(self.temp_dir.name),
         )
         workspace = workspace_manager.ensure_role_workspace("IOS-30000AUTO", "implementer")
         launch_plan = launcher_manager.ensure_launch_plan(
@@ -283,7 +284,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("SDD_FACTORY_ROLE_LAUNCHER_READY", script_text)
 
     def test_real_launcher_backed_runtime_keeps_persistent_role_context_across_rounds(self) -> None:
-        runtime_root = Path(self.temp_dir.name) / "runtime-real-launcher"
+        runtime_root = Path(self.temp_dir.name)
         repo_root = Path(self.temp_dir.name) / "repo-root-real-launcher"
         session_backend = TmuxSessionBackend(mode="recording", runtime_root=runtime_root)
         coordinator = CoordinatorService(
@@ -299,14 +300,16 @@ class SessionCreationTests(unittest.TestCase):
             gitlab_adapter=FakeGitLabAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts-real-launcher",
             workdir_root=Path(self.temp_dir.name),
-            knowledge_root=Path(self.temp_dir.name) / "knowledge-real-launcher",
             event_bus=self.event_bus,
             role_workspace_manager=RoleWorkspaceManager(
                 runtime_root=runtime_root,
                 repo_root=repo_root,
                 workdir_root=Path(self.temp_dir.name),
             ),
-            role_launcher_manager=RoleLauncherManager(repo_root=repo_root),
+            role_launcher_manager=RoleLauncherManager(
+                repo_root=repo_root,
+                workdir_root=Path(self.temp_dir.name),
+            ),
         )
 
         session, _, _ = coordinator.create_task_session(
@@ -763,9 +766,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Role-specific rules:", sent_inputs[0])
         launch_script = (
             Path(self.temp_dir.name)
+            / "IOS-30002STORY"
             / "runtime"
             / "role-workspaces"
-            / "IOS-30002STORY"
             / PROPOSAL_CONTEXT_WORKER_ROLE
             / "launch-role.sh"
         )
@@ -773,9 +776,9 @@ class SessionCreationTests(unittest.TestCase):
         launch_script_text = launch_script.read_text()
         proposal_agents = (
             Path(self.temp_dir.name)
+            / "IOS-30002STORY"
             / "runtime"
             / "role-workspaces"
-            / "IOS-30002STORY"
             / PROPOSAL_CONTEXT_WORKER_ROLE
             / "AGENTS.md"
         ).read_text()
@@ -985,7 +988,9 @@ class SessionCreationTests(unittest.TestCase):
             scope="shared-formatting",
         )
 
-        knowledge_files = list((Path(self.temp_dir.name) / "knowledge").rglob("*.md"))
+        knowledge_files = list(
+            (Path(self.temp_dir.name) / "IOS-30003KNOW" / "repo" / "knowledge").rglob("*.md")
+        )
         self.assertEqual("knowledge_created", event.event_type)
         self.assertTrue(any("Reuse existing formatter helper" in path.read_text() for path in knowledge_files))
         self.assertTrue(any("shared-formatting" in str(path) for path in knowledge_files))

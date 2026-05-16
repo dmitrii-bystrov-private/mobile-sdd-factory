@@ -46,7 +46,7 @@ def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDepend
     work_item_repository = WorkItemRepository(database)
     session_backend = TmuxSessionBackend(
         mode="recording",
-        runtime_root=temp_root / "runtime",
+        runtime_root=temp_root / "workdir",
     )
     jira_adapter = FakeJiraAdapter(repo_root)
     snapshot_adapter = FakeSnapshotAdapter(repo_root, temp_root / "workdir")
@@ -65,14 +65,16 @@ def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDepend
         gitlab_adapter=gitlab_adapter,
         artifacts_root=temp_root / "workdir" / "factory-artifacts",
         workdir_root=temp_root / "workdir",
-        knowledge_root=repo_root / "knowledge",
         event_bus=event_bus,
         role_workspace_manager=RoleWorkspaceManager(
-            runtime_root=temp_root / "runtime",
+            runtime_root=temp_root / "workdir",
             repo_root=repo_root,
             workdir_root=temp_root / "workdir",
         ),
-        role_launcher_manager=RoleLauncherManager(repo_root=repo_root),
+        role_launcher_manager=RoleLauncherManager(
+            repo_root=repo_root,
+            workdir_root=temp_root / "workdir",
+        ),
     )
     loop_runner = CoordinatorLoopRunner(
         callback=coordinator_service.run_loop_once,
