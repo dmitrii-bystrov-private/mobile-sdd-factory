@@ -1707,6 +1707,94 @@ class SessionCreationTests(unittest.TestCase):
             any(event.event_type == "subtask_snapshot_refreshed" for event in events)
         )
 
+    def test_subtask_completion_uses_refreshed_snapshot_as_remaining_source_of_truth(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004SUBTRUTH",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004SUBTRUTH")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Context prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="requirements_completed",
+            payload={"summary": "Requirements clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="acceptance_criteria_completed",
+            payload={"summary": "Acceptance prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning verified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="story_spec_completed",
+            payload={"summary": "Split into focused subtasks"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload={"summary": "Execution chunks prepared"},
+        )
+        self.write_statuses_file(
+            "IOS-30004SUBTRUTH",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004SUBTRUTH | Story | Parent story | In Progress |
+| IOS-30040 | Sub-task | Add data source | To Do |
+| IOS-30041 | Sub-task | Wire view state | To Do |
+""",
+        )
+        self.coordinator.start_subtask_graph(session.id)
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-30004SUBTRUTH",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004SUBTRUTH | Story | Parent story | In Progress |
+| IOS-30040 | Sub-task | Add data source | Ready for test |
+| IOS-30041 | Sub-task | Wire view state | Released |
+""",
+        )
+
+        final_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="subtask_completed",
+            payload={"summary": "First subtask implemented"},
+        )
+
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual("verification_requested", final_session.current_stage)
+        self.assertEqual(
+            0,
+            len(
+                [
+                    item
+                    for item in work_items
+                    if item.work_type == "subtask_implementation"
+                    and item.status.value == "unassigned"
+                ]
+            ),
+        )
+
     def test_verification_failed_moves_session_back_to_implementer(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")
         self.coordinator.handle_operator_event(

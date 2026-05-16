@@ -2406,7 +2406,7 @@ class CoordinatorService:
             raise IntakeError("No active subtask implementation work item found for the session")
 
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
-        self._refresh_subtask_snapshot(session)
+        refreshed_subtasks = self._refresh_subtask_snapshot(session)
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         if implementer_role is None:
             raise IntakeError("Implementer role is missing for the session")
@@ -2417,6 +2417,25 @@ class CoordinatorService:
             if item.work_type == "subtask_implementation"
             and item.status == WorkItemStatus.UNASSIGNED
         ]
+        if refreshed_subtasks is not None:
+            completed_subtask_keys = {
+                parsed["key"]
+                for item in self.work_item_repository.list_for_session(session.id)
+                if item.work_type == "subtask_implementation"
+                and item.status == WorkItemStatus.COMPLETED
+                for parsed in [self._parse_subtask_work_item_title(item.title)]
+                if parsed["key"] is not None
+            }
+            remaining_items = self._reconcile_subtask_queue_after_refresh(
+                session=session,
+                source_event=source_event,
+                queued_items=remaining_items,
+                unresolved=[
+                    subtask
+                    for subtask in unresolved_subtasks(refreshed_subtasks)
+                    if subtask.key not in completed_subtask_keys
+                ],
+            )
         if remaining_items:
             next_item = self.work_item_repository.update_assignment(
                 remaining_items[0].id,
@@ -2449,6 +2468,7 @@ class CoordinatorService:
                     "work_item_id": next_item.id,
                     "current_stage": session.current_stage,
                     "remaining_subtask_count": len(remaining_items),
+                    "subtask_key": self._parse_subtask_work_item_title(next_item.title)["key"],
                 },
             )
 
@@ -3660,9 +3680,9 @@ class CoordinatorService:
             "title": item_title.strip() or title,
         }
 
-    def _refresh_subtask_snapshot(self, session: Session) -> None:
+    def _refresh_subtask_snapshot(self, session: Session) -> list | None:
         if self.snapshot_adapter is None:
-            return
+            return None
 
         result = self.snapshot_adapter.run(session.task_key)
         if self.artifacts_root is not None:
@@ -3705,11 +3725,11 @@ class CoordinatorService:
                     "snapshot_exit_code": result.returncode,
                 },
             )
-            return
+            return None
 
         subtasks = self._read_snapshot_subtasks(session.task_key)
         if subtasks is None:
-            return
+            return None
 
         self._record_subtask_statuses_artifact(session, subtasks)
         unresolved = unresolved_subtasks(subtasks)
@@ -3724,6 +3744,53 @@ class CoordinatorService:
                 "unresolved_count": len(unresolved),
             },
         )
+        return subtasks
+
+    def _reconcile_subtask_queue_after_refresh(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+        queued_items: list[WorkItem],
+        unresolved: list,
+    ) -> list[WorkItem]:
+        if not unresolved:
+            for item in queued_items:
+                self.work_item_repository.update_status(item.id, WorkItemStatus.COMPLETED)
+            return []
+
+        desired_count = len(unresolved)
+        normalized_items = queued_items[:desired_count]
+        for extra_item in queued_items[desired_count:]:
+            self.work_item_repository.update_status(extra_item.id, WorkItemStatus.COMPLETED)
+
+        reconciled: list[WorkItem] = []
+        for index, subtask in enumerate(unresolved):
+            title = f"Subtask implementation for {subtask.key}: {subtask.title}"
+            priority = max(70 - index, 1)
+            if index < len(normalized_items):
+                reconciled.append(
+                    self.work_item_repository.update_shape(
+                        normalized_items[index].id,
+                        work_type="subtask_implementation",
+                        title=title,
+                        owner_role_id=None,
+                        status=WorkItemStatus.UNASSIGNED,
+                    )
+                )
+                continue
+            reconciled.append(
+                self.work_item_repository.create(
+                    session_id=session.id,
+                    work_type="subtask_implementation",
+                    title=title,
+                    owner_role_id=None,
+                    source_event_id=source_event.id,
+                    priority=priority,
+                    status=WorkItemStatus.UNASSIGNED,
+                )
+            )
+        return reconciled
 
     def _record_subtask_statuses_artifact(self, session: Session, subtasks: list) -> None:
         if self.artifacts_root is None or self.workdir_root is None:
