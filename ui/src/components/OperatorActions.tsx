@@ -123,6 +123,11 @@ export function OperatorActions({
     session.status === "active" &&
     session.workflow_profile === "story_full" &&
     session.current_stage === "implementation_requested";
+  const canCreateSubtasksFromPlan =
+    session.workflow_profile === "story_full" &&
+    ["implementation_requested", "subtask_implementation_requested", "verification_requested"].includes(
+      session.current_stage,
+    );
   const canCreateMr = session.status === "completed" && session.current_stage !== "mr_handoff_completed";
   const canSendToTest =
     session.status === "completed" && session.current_stage === "mr_handoff_completed";
@@ -176,6 +181,14 @@ export function OperatorActions({
           type="button"
         >
           Start Subtask Graph
+        </button>
+        <button
+          className="action-button"
+          disabled={busy || !canCreateSubtasksFromPlan}
+          onClick={() => run(() => apiClient.createSubtasksFromPlan(session.id))}
+          type="button"
+        >
+          Create Jira Subtasks
         </button>
         <button
           className="action-button action-button-strong"

@@ -47,6 +47,14 @@ class FakeJiraAdapter:
             stderr="",
         )
 
+    def create_subtasks(self, task_key: str, plan_dir: Path) -> CommandResult:
+        return CommandResult(
+            command=["create_subtasks", task_key, str(plan_dir)],
+            returncode=0,
+            stdout="Created subtasks:\n01    IOS-90001     Build data source\n",
+            stderr="",
+        )
+
     def send_to_test(self, task_key: str) -> CommandResult:
         return CommandResult(
             command=["send_to_test", task_key],
@@ -1291,6 +1299,30 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(
             any(artifact.artifact_type == "task_decomposition_plan_package" for artifact in artifacts)
         )
+
+    def test_create_subtasks_from_plan_records_batch_artifacts(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003SUBBATCH",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003SUBBATCH")
+        plan_dir = Path(self.temp_dir.name) / "IOS-30003SUBBATCH" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
+        )
+        (plan_dir / "01-build-data-source.md").write_text(
+            "# Build data source\n\n## What to implement\nCreate the feature data source.\n"
+        )
+
+        updated_session, event = self.coordinator.create_subtasks_from_plan(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(session.id, updated_session.id)
+        self.assertEqual("jira_subtasks_created", event.event_type)
+        self.assertTrue(any(item.artifact_type == "jira_subtasks_stdout" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "jira_subtasks_stderr" for item in artifacts))
 
     def test_knowledge_is_repo_visible_markdown(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003KNOW")

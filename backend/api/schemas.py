@@ -277,6 +277,16 @@ class StartSubtaskGraphResponse(BaseModel):
     followup_event_type: str
 
 
+class CreateSubtasksFromPlanRequest(BaseModel):
+    session_id: int
+
+
+class CreateSubtasksFromPlanResponse(BaseModel):
+    created: bool
+    session: SessionResponse
+    event_type: str
+
+
 class CreateKnowledgeRequest(BaseModel):
     session_id: int
     title: str

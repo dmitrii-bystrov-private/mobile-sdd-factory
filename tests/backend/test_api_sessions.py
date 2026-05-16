@@ -25,7 +25,7 @@ try:
     from backend.api.routes_operator import complete_doc_harvest
     from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
-    from backend.api.routes_operator import create_knowledge
+    from backend.api.routes_operator import create_knowledge, create_subtasks_from_plan
     from backend.api.routes_operator import send_to_test
     from backend.api.routes_operator import start_subtask_graph
     from backend.api.routes_operator import ingest_mr_comments
@@ -35,6 +35,7 @@ try:
         CompleteSelfReviewRequest,
         CreateKnowledgeRequest,
         CreateMrRequest,
+        CreateSubtasksFromPlanRequest,
         IngestMrCommentsRequest,
         PollSessionOutputRequest,
         PauseSessionRequest,
@@ -82,6 +83,14 @@ class FakeJiraAdapter:
 
     def get_issue_type(self, task_key: str) -> "CommandResult":
         return CommandResult(["get_issue_type", task_key], 0, "Story\n", "")
+
+    def create_subtasks(self, task_key: str, plan_dir: Path) -> "CommandResult":
+        return CommandResult(
+            ["create_subtasks", task_key, str(plan_dir)],
+            0,
+            "Created subtasks:\n01    IOS-90001     Build data source\n",
+            "",
+        )
 
     def send_to_test(self, task_key: str) -> "CommandResult":
         return CommandResult(["send_to_test", task_key], 0, f"Done: {task_key} -> Ready for test\n", "")
@@ -1022,6 +1031,42 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(response.created)
         self.assertEqual("knowledge_created", response.event_type)
         self.assertTrue(any("Reuse existing navigation assembly" in path.read_text() for path in knowledge_files))
+
+    def test_create_subtasks_from_plan_route_records_batch_run(self) -> None:
+        from backend.api.routes_sessions import create_session, prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40005SUBBATCH",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005SUBBATCH"),
+            dependencies=self.dependencies,
+        )
+        plan_dir = Path(self.temp_dir.name) / "IOS-40005SUBBATCH" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
+        )
+        (plan_dir / "01-build-data-source.md").write_text(
+            "# Build data source\n\n## What to implement\nCreate the feature data source.\n"
+        )
+
+        response = create_subtasks_from_plan(
+            CreateSubtasksFromPlanRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=create_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        self.assertEqual("jira_subtasks_created", response.event_type)
+        self.assertTrue(any(item.artifact_type == "jira_subtasks_stdout" for item in artifacts_response.items))
 
     def test_list_knowledge_route_returns_repo_visible_items(self) -> None:
         from backend.api.routes_sessions import prepare_session

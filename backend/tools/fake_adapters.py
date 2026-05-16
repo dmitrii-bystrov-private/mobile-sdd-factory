@@ -27,6 +27,18 @@ class FakeJiraAdapter:
             stderr="",
         )
 
+    def create_subtasks(self, task_key: str, plan_dir: Path) -> CommandResult:
+        return CommandResult(
+            command=["fake_create_subtasks", task_key, str(plan_dir)],
+            returncode=0,
+            stdout=(
+                "Created subtasks:\n"
+                "01    IOS-90001     Build data source\n"
+                "02    IOS-90002     Wire presentation layer\n"
+            ),
+            stderr="",
+        )
+
     def send_to_test(self, task_key: str) -> CommandResult:
         return CommandResult(
             command=["fake_send_to_test", task_key],

@@ -8,6 +8,8 @@ from backend.api.routes_sessions import to_session_response
 from backend.api.schemas import (
     CompleteDocHarvestRequest,
     CompleteDocHarvestResponse,
+    CreateSubtasksFromPlanRequest,
+    CreateSubtasksFromPlanResponse,
     CreateKnowledgeRequest,
     CreateKnowledgeResponse,
     CompleteSelfReviewRequest,
@@ -249,6 +251,25 @@ def start_subtask_graph(
         session=to_session_response(session),
         event_type=event.event_type,
         followup_event_type=followup_event.event_type,
+    )
+
+
+@router.post("/create-subtasks-from-plan", response_model=CreateSubtasksFromPlanResponse)
+def create_subtasks_from_plan(
+    payload: CreateSubtasksFromPlanRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> CreateSubtasksFromPlanResponse:
+    try:
+        session, event = dependencies.coordinator_service.create_subtasks_from_plan(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return CreateSubtasksFromPlanResponse(
+        created=event.event_type == "jira_subtasks_created",
+        session=to_session_response(session),
+        event_type=event.event_type,
     )
 
 

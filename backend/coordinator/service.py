@@ -677,6 +677,75 @@ class CoordinatorService:
         )
         return session, event
 
+    def create_subtasks_from_plan(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event]:
+        if self.jira_adapter is None or self.artifacts_root is None or self.workdir_root is None:
+            raise IntakeError("Coordinator is missing Jira adapter, workdir root, or artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        if session.workflow_profile != "story_full":
+            raise IntakeError(
+                f"Session {session_id} is {session.workflow_profile}, but plan-based subtask creation is only supported for story_full"
+            )
+
+        plan_index_path = self.workdir_root / session.task_key / "plan" / "index.md"
+        if not plan_index_path.exists():
+            raise IntakeError(f"plan/index.md not found for session {session.task_key}")
+
+        result = self.jira_adapter.create_subtasks(session.task_key, plan_index_path.parent)
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "subtasks-batch",
+            "create-subtasks.stdout.log",
+            result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "subtasks-batch",
+            "create-subtasks.stderr.log",
+            result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="subtasks-batch",
+            artifact_type="jira_subtasks_stdout",
+            path=str(stdout_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="subtasks-batch",
+            artifact_type="jira_subtasks_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+
+        event_type = "jira_subtasks_created" if result.ok else "jira_subtasks_creation_failed"
+        event = self._append_event(
+            session_id=session.id,
+            event_type=event_type,
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "returncode": result.returncode,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event
+
     def reopen_from_qa(
         self,
         session_id: int,

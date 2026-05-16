@@ -280,6 +280,21 @@ export const apiClient = {
     });
   },
 
+  createSubtasksFromPlan(
+    sessionId: number,
+  ): Promise<{
+    created: boolean;
+    event_type: string;
+    session: Session;
+  }> {
+    return request("/operator/create-subtasks-from-plan", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+      }),
+    });
+  },
+
   createKnowledge(
     sessionId: number,
     title: string,
