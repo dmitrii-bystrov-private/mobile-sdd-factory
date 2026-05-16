@@ -11,6 +11,7 @@ from backend.roles.contracts import (
     CODE_REVIEWER_ROLE,
     DEFAULT_SESSION_ROLES,
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
+    CONSTRAINTS_WORKER_ROLE,
     PROPOSAL_CONTEXT_WORKER_ROLE,
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
     STORY_SPEC_WORKER_ROLE,
@@ -855,7 +856,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Requirements summary: Requirements clarified", sent_inputs[0])
         self.assertIn("Explicit assumptions: Reuse existing screen state", sent_inputs[0])
 
-    def test_acceptance_criteria_completed_moves_story_session_to_story_spec(self) -> None:
+    def test_acceptance_criteria_completed_moves_story_session_to_constraints(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003ACC",
             workflow_profile="story_full",
@@ -879,6 +880,55 @@ class SessionCreationTests(unittest.TestCase):
             payload={"summary": "Acceptance prepared", "highlighted_cases": "Retry + empty state"},
         )
         work_items = self.work_item_repository.list_for_session(session.id)
+        constraints_role = self.role_repository.get_by_name(session.id, CONSTRAINTS_WORKER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(constraints_role.runtime_handle)
+
+        self.assertEqual("constraints_requested", updated_session.current_stage)
+        self.assertEqual(CONSTRAINTS_WORKER_ROLE, updated_session.current_owner)
+        self.assertEqual("constraints_requested", followup_event.event_type)
+        self.assertEqual(
+            [
+                ("acceptance_criteria", "completed"),
+                ("constraints", "assigned"),
+                ("proposal_context", "completed"),
+                ("requirements", "completed"),
+            ],
+            sorted((item.work_type, item.status.value) for item in work_items),
+        )
+        self.assertEqual(1, len(sent_inputs))
+        self.assertIn("Prepare compact implementation constraints for story IOS-30003ACC.", sent_inputs[0])
+        self.assertIn("Acceptance criteria summary: Acceptance prepared", sent_inputs[0])
+        self.assertIn("Highlighted cases: Retry + empty state", sent_inputs[0])
+
+    def test_constraints_completed_moves_story_session_to_story_spec(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003CONSTR",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003CONSTR")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Scope clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="requirements_completed",
+            payload={"summary": "Requirements clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="acceptance_criteria_completed",
+            payload={"summary": "Acceptance prepared"},
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Respect analytics + assembly conventions", "key_constraints": "Reuse existing assembly pattern and analytics hooks"},
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
         spec_role = self.role_repository.get_by_name(session.id, STORY_SPEC_WORKER_ROLE)
         sent_inputs = self.session_backend.get_sent_inputs(spec_role.runtime_handle)
 
@@ -888,16 +938,18 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(
             [
                 ("acceptance_criteria", "completed"),
+                ("constraints", "completed"),
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
                 ("story_spec", "assigned"),
             ],
             sorted((item.work_type, item.status.value) for item in work_items),
         )
+        self.assertEqual("running", spec_role.status.value)
         self.assertEqual(1, len(sent_inputs))
-        self.assertIn("Prepare a concise implementation spec for story IOS-30003ACC before coding.", sent_inputs[0])
-        self.assertIn("Acceptance criteria summary: Acceptance prepared", sent_inputs[0])
-        self.assertIn("Highlighted cases: Retry + empty state", sent_inputs[0])
+        self.assertIn("Prepare a concise implementation spec for story IOS-30003CONSTR before coding.", sent_inputs[0])
+        self.assertIn("Constraints summary: Respect analytics + assembly conventions", sent_inputs[0])
+        self.assertIn("Key constraints: Reuse existing assembly pattern and analytics hooks", sent_inputs[0])
 
     def test_story_spec_completed_moves_session_to_implementation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -921,6 +973,11 @@ class SessionCreationTests(unittest.TestCase):
             event_type="acceptance_criteria_completed",
             payload={"summary": "Acceptance prepared"},
         )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
 
         updated_session, followup_event = self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -943,6 +1000,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(
             [
                 ("acceptance_criteria", "completed"),
+                ("constraints", "completed"),
                 ("implementation", "assigned"),
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
@@ -964,6 +1022,9 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "acceptance_criteria_requested",
                 "acceptance_criteria_completed",
+                "role_input_dispatched",
+                "constraints_requested",
+                "constraints_completed",
                 "role_input_dispatched",
                 "story_spec_requested",
                 "story_spec_completed",
@@ -1019,6 +1080,11 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.coordinator.handle_operator_event(
             session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
             event_type="story_spec_completed",
             payload={"summary": "Split into focused subtasks"},
         )
@@ -1047,6 +1113,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(
             [
                 ("acceptance_criteria", "completed"),
+                ("constraints", "completed"),
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
                 ("story_spec", "completed"),
@@ -1081,6 +1148,11 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.coordinator.handle_operator_event(
             session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
             event_type="story_spec_completed",
             payload={"summary": "Split into focused subtasks"},
         )
@@ -1107,7 +1179,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("subtask_implementation_requested", followup_event.event_type)
         self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
         self.assertEqual(
-            ["assigned", "completed", "completed", "completed", "completed", "completed"],
+            ["assigned", "completed", "completed", "completed", "completed", "completed", "completed"],
             sorted(item.status.value for item in work_items),
         )
 
@@ -1383,8 +1455,19 @@ class SessionCreationTests(unittest.TestCase):
         )
 
         self.assertEqual("acceptance_criteria_completed", mapped_event.event_type)
+        self.assertEqual("constraints_requested", followup_event.event_type)
+        self.assertEqual("constraints_requested", acceptance_session.current_stage)
+
+        constraints_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CONSTRAINTS_WORKER_ROLE,
+            output_type="completed",
+            payload={"summary": "Constraints prepared"},
+        )
+
+        self.assertEqual("constraints_completed", mapped_event.event_type)
         self.assertEqual("story_spec_requested", followup_event.event_type)
-        self.assertEqual("story_spec_requested", acceptance_session.current_stage)
+        self.assertEqual("story_spec_requested", constraints_session.current_stage)
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
@@ -1411,6 +1494,9 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "acceptance_criteria_requested",
                 "acceptance_criteria_completed",
+                "role_input_dispatched",
+                "constraints_requested",
+                "constraints_completed",
                 "role_input_dispatched",
                 "story_spec_requested",
                 "story_spec_completed",

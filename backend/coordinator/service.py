@@ -26,6 +26,7 @@ from backend.roles.contracts import (
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
+    CONSTRAINTS_WORKER_ROLE,
     PROPOSAL_CONTEXT_WORKER_ROLE,
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
     IMPLEMENTER_ROLE,
@@ -283,6 +284,9 @@ class CoordinatorService:
             return session, followup_event
         if event_type == "acceptance_criteria_completed":
             session, followup_event = self._handle_acceptance_criteria_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "constraints_completed":
+            session, followup_event = self._handle_constraints_completed(session, accepted_event)
             return session, followup_event
         if event_type == "story_spec_completed":
             session, followup_event = self._handle_story_spec_completed(session, accepted_event)
@@ -867,6 +871,8 @@ class CoordinatorService:
             session, followup_event = self._handle_requirements_completed(session, accepted_event)
         elif mapped_event_type == "acceptance_criteria_completed":
             session, followup_event = self._handle_acceptance_criteria_completed(session, accepted_event)
+        elif mapped_event_type == "constraints_completed":
+            session, followup_event = self._handle_constraints_completed(session, accepted_event)
         elif mapped_event_type == "story_spec_completed":
             session, followup_event = self._handle_story_spec_completed(session, accepted_event)
         elif mapped_event_type == "subtask_completed":
@@ -1539,6 +1545,52 @@ class CoordinatorService:
             },
         )
 
+    def _enqueue_constraints(
+        self,
+        session: Session,
+        source_event: Event,
+        additional_context: str | None = None,
+    ) -> Event:
+        constraints_role = self._ensure_on_demand_role(session, CONSTRAINTS_WORKER_ROLE)
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="constraints",
+            title=f"Constraints preparation for {session.task_key}",
+            owner_role_id=constraints_role.id,
+            source_event_id=source_event.id,
+            priority=100,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="constraints_requested",
+            current_owner=CONSTRAINTS_WORKER_ROLE,
+        )
+        instruction = (
+            f"Prepare compact implementation constraints for story {session.task_key}. "
+            "Surface architecture, convention, dependency, and integration constraints that should guide the final story-spec step."
+        )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
+        self._dispatch_role_work(
+            session=session,
+            role=constraints_role,
+            work_item=work_item,
+            stage_name="constraints_requested",
+            instruction=instruction,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="constraints_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": CONSTRAINTS_WORKER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
     def _handle_bug_analysis_completed(
         self,
         session: Session,
@@ -1665,6 +1717,40 @@ class CoordinatorService:
             context_lines.append(f"Acceptance criteria summary: {summary}")
         if highlighted_cases:
             context_lines.append(f"Highlighted cases: {highlighted_cases}")
+        additional_context = "\n".join(context_lines) if context_lines else None
+
+        event = self._enqueue_constraints(
+            session=session,
+            source_event=source_event,
+            additional_context=additional_context,
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event
+
+    def _handle_constraints_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        constraint_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "constraints" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not constraint_items:
+            raise IntakeError("No active constraints work item found for the session")
+
+        active_item = constraint_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, CONSTRAINTS_WORKER_ROLE)
+
+        summary = str(source_event.payload.get("summary") or "").strip()
+        key_constraints = str(source_event.payload.get("key_constraints") or "").strip()
+        context_lines: list[str] = []
+        if summary:
+            context_lines.append(f"Constraints summary: {summary}")
+        if key_constraints:
+            context_lines.append(f"Key constraints: {key_constraints}")
         additional_context = "\n".join(context_lines) if context_lines else None
 
         event = self._enqueue_story_spec(
@@ -2317,6 +2403,9 @@ class CoordinatorService:
         if role_name == ACCEPTANCE_CRITERIA_WORKER_ROLE and session.current_stage == "acceptance_criteria_requested":
             if output_type in {"passed", "completed"}:
                 return "acceptance_criteria_completed"
+        if role_name == CONSTRAINTS_WORKER_ROLE and session.current_stage == "constraints_requested":
+            if output_type in {"passed", "completed"}:
+                return "constraints_completed"
         if role_name == STORY_SPEC_WORKER_ROLE and session.current_stage == "story_spec_requested":
             if output_type in {"passed", "completed"}:
                 return "story_spec_completed"
@@ -2838,6 +2927,11 @@ class CoordinatorService:
                 f"Prepare compact acceptance criteria for story {task_key}. "
                 "Cover happy paths, edge cases, and error scenarios from the clarified requirements before the final story-spec step."
             )
+        if stage_name == "constraints_requested":
+            return (
+                f"Prepare compact implementation constraints for story {task_key}. "
+                "Surface architecture, convention, dependency, and integration constraints before the final story-spec step."
+            )
         if stage_name == "story_spec_requested":
             return (
                 f"Prepare a concise implementation spec for story {task_key} before coding. "
@@ -2901,6 +2995,7 @@ class CoordinatorService:
             "proposal_context_requested": "proposal_context",
             "requirements_requested": "requirements",
             "acceptance_criteria_requested": "acceptance_criteria",
+            "constraints_requested": "constraints",
             "story_spec_requested": "story_spec",
             "subtask_implementation_requested": "subtask_implementation",
             "implementation_requested": "implementation",

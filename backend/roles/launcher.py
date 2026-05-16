@@ -28,6 +28,7 @@ def _role_lifecycle_mode(role_name: str) -> str:
         "proposal-context-worker",
         "requirements-clarifier-worker",
         "acceptance-criteria-worker",
+        "constraints-worker",
     }:
         return "one-shot"
     return "persistent"
