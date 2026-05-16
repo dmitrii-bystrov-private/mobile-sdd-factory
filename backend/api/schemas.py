@@ -53,6 +53,21 @@ class SessionsResponse(BaseModel):
     items: list[SessionResponse]
 
 
+class SubtaskGraphRowResponse(BaseModel):
+    key: str
+    issue_type: str
+    title: str
+    status: str
+
+
+class SubtaskGraphSummaryResponse(BaseModel):
+    available: bool
+    total_count: int
+    completed_count: int
+    unresolved_count: int
+    rows: list[SubtaskGraphRowResponse]
+
+
 class RoleResponse(BaseModel):
     id: int
     session_id: int

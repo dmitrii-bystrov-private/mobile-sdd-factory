@@ -112,8 +112,10 @@ export type SubtaskGraphRow = {
 };
 
 export type SubtaskGraphSummary = {
-  artifactType: string;
-  artifactDetail: ArtifactDetail | null;
+  available: boolean;
+  totalCount: number;
+  completedCount: number;
+  unresolvedCount: number;
   rows: SubtaskGraphRow[];
 };
 

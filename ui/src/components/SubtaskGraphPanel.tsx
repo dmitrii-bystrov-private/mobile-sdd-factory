@@ -4,19 +4,12 @@ type SubtaskGraphPanelProps = {
   subtaskGraphSummary: SubtaskGraphSummary | null;
 };
 
-function countTerminal(rows: SubtaskGraphSummary["rows"]): number {
-  const terminalStatuses = new Set(["ready for test", "released", "resolved"]);
-  return rows.filter((row) => terminalStatuses.has(row.status.trim().toLowerCase())).length;
-}
-
 export function SubtaskGraphPanel({
   subtaskGraphSummary,
 }: SubtaskGraphPanelProps): JSX.Element | null {
-  if (subtaskGraphSummary === null) {
+  if (subtaskGraphSummary === null || !subtaskGraphSummary.available) {
     return null;
   }
-
-  const completedCount = countTerminal(subtaskGraphSummary.rows);
 
   return (
     <section className="panel">
@@ -26,7 +19,7 @@ export function SubtaskGraphPanel({
           <h3>Subtask Graph</h3>
         </div>
         <span className="badge badge-muted">
-          {completedCount}/{subtaskGraphSummary.rows.length}
+          {subtaskGraphSummary.completedCount}/{subtaskGraphSummary.totalCount}
         </span>
       </div>
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+TERMINAL_SUBTASK_STATUSES = frozenset({"ready for test", "resolved", "released"})
+
 
 @dataclass(frozen=True, slots=True)
 class SnapshotSubtask:
@@ -44,9 +46,16 @@ def read_snapshot_subtasks(statuses_file: Path) -> list[SnapshotSubtask]:
 
 
 def unresolved_subtasks(subtasks: list[SnapshotSubtask]) -> list[SnapshotSubtask]:
-    terminal_statuses = {"ready for test", "resolved", "released"}
     return [
         subtask
         for subtask in subtasks
-        if subtask.status.strip().lower() not in terminal_statuses
+        if subtask.status.strip().lower() not in TERMINAL_SUBTASK_STATUSES
+    ]
+
+
+def completed_subtasks(subtasks: list[SnapshotSubtask]) -> list[SnapshotSubtask]:
+    return [
+        subtask
+        for subtask in subtasks
+        if subtask.status.strip().lower() in TERMINAL_SUBTASK_STATUSES
     ]

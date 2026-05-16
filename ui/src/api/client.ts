@@ -120,6 +120,16 @@ export const apiClient = {
     return request(`/artifacts?session_id=${sessionId}`);
   },
 
+  getSubtaskGraph(sessionId: number): Promise<{
+    available: boolean;
+    total_count: number;
+    completed_count: number;
+    unresolved_count: number;
+    rows: Array<{ key: string; issue_type: string; title: string; status: string }>;
+  }> {
+    return request(`/sessions/${sessionId}/subtask-graph`);
+  },
+
   listKnowledge(): Promise<{ items: KnowledgeItem[] }> {
     return request("/knowledge");
   },

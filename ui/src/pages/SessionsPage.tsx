@@ -16,7 +16,6 @@ import type {
   PlanningStepSummary,
   Session,
   SessionBundle,
-  SubtaskGraphRow,
   SubtaskGraphSummary,
 } from "../types";
 
@@ -154,49 +153,24 @@ async function buildJiraSubtasksSummary(
   };
 }
 
-function parseSubtaskGraphRows(content: string | null | undefined): SubtaskGraphRow[] {
-  if (content === null || content === undefined) {
-    return [];
-  }
-
-  const tableRows = content
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("|"));
-
-  if (tableRows.length < 3) {
-    return [];
-  }
-
-  return tableRows
-    .slice(2)
-    .map((row) => row.trim().replace(/^\||\|$/g, "").split("|").map((part) => part.trim()))
-    .filter((parts) => parts.length >= 4)
-    .map(([key, issueType, title, status]) => ({
-      key,
-      issueType,
-      title,
-      status,
-    }))
-    .slice(1);
-}
-
 async function buildSubtaskGraphSummary(
-  artifacts: Artifact[],
+  sessionId: number,
 ): Promise<SubtaskGraphSummary | null> {
-  const graphArtifact = [...artifacts]
-    .reverse()
-    .find((artifact) => artifact.artifact_type === "subtask_statuses_markdown");
-
-  if (graphArtifact === undefined) {
+  const response = await apiClient.getSubtaskGraph(sessionId);
+  if (!response.available || response.total_count === 0) {
     return null;
   }
-
-  const artifactDetail = await apiClient.getArtifact(graphArtifact.id);
   return {
-    artifactType: graphArtifact.artifact_type,
-    artifactDetail,
-    rows: parseSubtaskGraphRows(artifactDetail.content),
+    available: response.available,
+    totalCount: response.total_count,
+    completedCount: response.completed_count,
+    unresolvedCount: response.unresolved_count,
+    rows: response.rows.map((row) => ({
+      key: row.key,
+      issueType: row.issue_type,
+      title: row.title,
+      status: row.status,
+    })),
   };
 }
 
@@ -290,7 +264,7 @@ export function SessionsPage(): JSX.Element {
       const followupContext = await buildFollowupContext(artifacts.items, events.items);
       const planningSummary = await buildPlanningSummary(artifacts.items, events.items);
       const jiraSubtasksSummary = await buildJiraSubtasksSummary(artifacts.items);
-      const subtaskGraphSummary = await buildSubtaskGraphSummary(artifacts.items);
+        const subtaskGraphSummary = await buildSubtaskGraphSummary(sessionId);
       setBundle({
         roles: roles.items,
         artifacts: artifacts.items,

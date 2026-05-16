@@ -11,6 +11,7 @@ from backend.api.schemas import (
     PrepareSessionResponse,
     SessionResponse,
     SessionsResponse,
+    SubtaskGraphSummaryResponse,
 )
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
@@ -60,6 +61,18 @@ def create_session(
         session=to_session_response(session),
         event_type=event.event_type,
     )
+
+
+@router.get("/{session_id}/subtask-graph", response_model=SubtaskGraphSummaryResponse)
+def get_subtask_graph(
+    session_id: int,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> SubtaskGraphSummaryResponse:
+    try:
+        summary = dependencies.coordinator_service.get_subtask_graph_summary(session_id)
+    except IntakeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return SubtaskGraphSummaryResponse(**summary)
 
 
 @router.post("/prepare", response_model=PrepareSessionResponse)

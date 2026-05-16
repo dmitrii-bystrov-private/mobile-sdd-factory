@@ -51,6 +51,16 @@ class SessionRepository:
             return None
         return session_from_row(row)
 
+    def get_by_id(self, session_id: int) -> Session | None:
+        with self.db.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return session_from_row(row)
+
     def list_all(self) -> list[Session]:
         with self.db.connect() as connection:
             rows = connection.execute(

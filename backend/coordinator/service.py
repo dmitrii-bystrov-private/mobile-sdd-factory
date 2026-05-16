@@ -11,7 +11,7 @@ from backend.api.sse import SessionEventBus
 from backend.coordinator.artifacts import write_text_artifact
 from backend.coordinator.intake import IntakeError, classify_task_readiness
 from backend.knowledge.store import KnowledgeItem, KnowledgeStore
-from backend.coordinator.subtasks import read_snapshot_subtasks, unresolved_subtasks
+from backend.coordinator.subtasks import completed_subtasks, read_snapshot_subtasks, unresolved_subtasks
 from backend.coordinator.hydration import build_role_hydration
 from backend.models.event import Event
 from backend.models.artifact import Artifact
@@ -262,6 +262,39 @@ class CoordinatorService:
                 ).event_type
             session = self._get_session_or_raise(session.id)
         return session, event, created, details
+
+    def get_subtask_graph_summary(self, session_id: int) -> dict[str, object]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} does not exist")
+
+        subtasks = self._read_snapshot_subtasks(session.task_key)
+        if subtasks is None:
+            return {
+                "available": False,
+                "rows": [],
+                "completed_count": 0,
+                "total_count": 0,
+                "unresolved_count": 0,
+            }
+
+        completed = completed_subtasks(subtasks)
+        unresolved = unresolved_subtasks(subtasks)
+        return {
+            "available": True,
+            "rows": [
+                {
+                    "key": subtask.key,
+                    "issue_type": subtask.issue_type,
+                    "title": subtask.title,
+                    "status": subtask.status,
+                }
+                for subtask in subtasks
+            ],
+            "completed_count": len(completed),
+            "total_count": len(subtasks),
+            "unresolved_count": len(unresolved),
+        }
 
     def handle_operator_event(
         self,
