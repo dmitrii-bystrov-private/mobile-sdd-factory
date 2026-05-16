@@ -18,6 +18,39 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - implemented `Local Toolchain Doctor Expansion`
+    - extended doctor checks with:
+      - local `.venv`
+      - `node`
+      - `npm`
+    - verified that bootstrap guidance automatically reflects the richer doctor state
+    - validated:
+      - `./.venv/bin/python -m unittest tests.backend.test_environment_doctor tests.backend.test_bootstrap_guidance`
+      - `./.venv/bin/python -m unittest discover -s tests/backend -p 'test_*.py'`
+      - `bash factory/doctor/run-doctor.sh`
+      - `bash factory/doctor/run-bootstrap-guide.sh`
+  - current_state:
+    - the setup/tooling model now covers both Python and frontend local toolchain prerequisites
+    - doctor and guidance remain coherent after the expansion
+  - next:
+    - choose the next concrete `Phase 43` slice
+  - blockers:
+    - none for this expansion
+
+- date: `2026-05-17`
+  - done:
+    - chose the next concrete `Phase 43` slice
+    - selected `Local Toolchain Doctor Expansion`
+  - current_state:
+    - doctor and guidance surfaces exist
+    - the next most useful improvement is broader local toolchain coverage
+  - next:
+    - implement `Local Toolchain Doctor Expansion`
+  - blockers:
+    - none at the planning level
+
+- date: `2026-05-17`
+  - done:
     - exposed bootstrap guidance through product surfaces
     - added backend route:
       - `GET /operator/bootstrap-guidance`

@@ -43,6 +43,7 @@ class EnvironmentDoctorTests(unittest.TestCase):
             env_checks = {item["id"]: item for item in report["checks"]}
             self.assertEqual("ok", env_checks["env.SDD_WORKDIR"]["status"])
             self.assertEqual(".claude/.env", env_checks["env.SDD_WORKDIR"]["source"])
+            self.assertEqual("missing", env_checks["toolchain.venv"]["status"])
             self.assertEqual("ok", env_checks["mcp.ios-rag"]["status"])
             self.assertEqual("ok", env_checks["mcp.android-rag"]["status"])
 
@@ -51,6 +52,7 @@ class EnvironmentDoctorTests(unittest.TestCase):
             repo_root = Path(temp_dir)
             claude_dir = repo_root / ".claude"
             claude_dir.mkdir()
+            (repo_root / ".venv").mkdir()
             workdir = repo_root / "workdir"
             ios_dir = repo_root / "ios"
             android_dir = repo_root / "android"
@@ -79,6 +81,8 @@ class EnvironmentDoctorTests(unittest.TestCase):
                     "jq": "/usr/bin/jq",
                     "acli": "/usr/bin/acli",
                     "glab": "/usr/bin/glab",
+                    "node": "/usr/bin/node",
+                    "npm": "/usr/bin/npm",
                 }
                 return mapping.get(name)
 
@@ -90,6 +94,7 @@ class EnvironmentDoctorTests(unittest.TestCase):
             )
 
             checks = {item["id"]: item for item in report["checks"]}
+            self.assertEqual("ok", checks["toolchain.venv"]["status"])
             self.assertEqual("missing", checks["runner.any"]["status"])
             self.assertEqual("unauthorized", checks["auth.runner_any"]["status"])
             self.assertEqual("missing", checks["mcp.android-rag"]["status"])

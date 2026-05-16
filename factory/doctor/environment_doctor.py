@@ -155,6 +155,37 @@ def _command_presence_check(
     )
 
 
+def _file_presence_check(
+    *,
+    check_id: str,
+    label: str,
+    required: bool,
+    path: Path,
+    details_ok: str,
+    details_missing: str,
+    hint: str,
+) -> CheckResult:
+    if path.exists():
+        return CheckResult(
+            id=check_id,
+            category="toolchain",
+            label=label,
+            required=required,
+            status="ok",
+            details=details_ok,
+            value=str(path),
+        )
+    return CheckResult(
+        id=check_id,
+        category="toolchain",
+        label=label,
+        required=required,
+        status="missing",
+        details=details_missing,
+        hint=hint,
+    )
+
+
 def _runner_presence_check(which_func: WhichFunc) -> CheckResult:
     available = [name for name in ("claude", "codex") if which_func(name)]
     if available:
@@ -354,6 +385,15 @@ def build_report(
             required=True,
             which_func=which_func,
         ),
+        _file_presence_check(
+            check_id="toolchain.venv",
+            label="Local Python virtualenv",
+            required=True,
+            path=repo_root / ".venv",
+            details_ok="Local .venv exists.",
+            details_missing="Local .venv is missing.",
+            hint="Create the project virtualenv before using backend tooling.",
+        ),
         _command_presence_check(
             command_name="jq",
             label="jq",
@@ -369,6 +409,18 @@ def build_report(
         _command_presence_check(
             command_name="glab",
             label="GitLab CLI",
+            required=True,
+            which_func=which_func,
+        ),
+        _command_presence_check(
+            command_name="node",
+            label="Node.js",
+            required=True,
+            which_func=which_func,
+        ),
+        _command_presence_check(
+            command_name="npm",
+            label="npm",
             required=True,
             which_func=which_func,
         ),
@@ -486,7 +538,7 @@ def format_human_report(report: dict[str, object]) -> str:
     if optional_warnings:
         lines.append(f"Optional warnings: {optional_warnings}")
 
-    category_order = ("environment", "cli", "runtime", "mcp", "auth")
+    category_order = ("environment", "cli", "toolchain", "runtime", "mcp", "auth")
     checks = report["checks"]
     for category in category_order:
         category_checks = [item for item in checks if item["category"] == category]

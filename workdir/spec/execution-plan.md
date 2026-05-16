@@ -824,6 +824,10 @@ Status markers:
   - `[done]` implement the `Bootstrap Guidance Surface` slice
   - `[done]` validate the `Bootstrap Guidance Surface` slice
   - `[done]` document the surface in `workdir/spec/phase43-bootstrap-guidance-surface.md`
+  - `[done]` choose the next concrete `Phase 43` slice
+  - `[done]` implement the `Local Toolchain Doctor Expansion` slice
+  - `[done]` validate the `Local Toolchain Doctor Expansion` slice
+  - `[done]` document the expansion in `workdir/spec/phase43-local-toolchain-doctor-expansion.md`
   - `[pending]` choose the next concrete `Phase 43` slice
 
 ## Immediate Next Steps
