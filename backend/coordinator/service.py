@@ -412,21 +412,38 @@ class CoordinatorService:
         if session is None:
             raise IntakeError(f"Session {session_id} does not exist")
 
-        escalated_event = None
-        runtime_error_event = None
+        blocker_event = None
+        clear_event = None
         for event in reversed(self.event_repository.list_for_session(session.id)):
             if (
-                escalated_event is None
-                and event.event_type == "session_escalated_to_operator"
-                and event.payload.get("reason") == "runtime_error"
+                blocker_event is None
+                and (
+                    (
+                        event.event_type == "session_escalated_to_operator"
+                        and event.payload.get("reason") == "runtime_error"
+                    )
+                    or event.event_type == "role_runtime_error_reported"
+                )
             ):
-                escalated_event = event
-            if runtime_error_event is None and event.event_type == "role_runtime_error_reported":
-                runtime_error_event = event
-            if escalated_event is not None and runtime_error_event is not None:
+                blocker_event = event
+            if (
+                clear_event is None
+                and event.event_type
+                in {
+                    "operator_runtime_input_sent",
+                    "session_resumed_by_operator",
+                    "session_retried_by_operator",
+                    "session_redirected_by_operator",
+                }
+            ):
+                clear_event = event
+            if blocker_event is not None and clear_event is not None:
                 break
 
-        source_event = escalated_event or runtime_error_event
+        if blocker_event is not None and clear_event is not None and clear_event.id > blocker_event.id:
+            blocker_event = None
+
+        source_event = blocker_event
         if source_event is None:
             return {
                 "available": False,

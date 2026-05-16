@@ -316,6 +316,36 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("session_escalated_to_operator", summary["source_event_type"])
         self.assertTrue(summary["needs_operator_input"])
 
+    def test_get_interactive_state_summary_clears_after_operator_runtime_input(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "disabled",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30004")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"interactive auth required","details":"connector auth needed"}',
+        )
+        self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+
+        self.coordinator.send_operator_runtime_input(
+            session_id=session.id,
+            text="/mcp",
+        )
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertFalse(summary["available"])
+        self.assertFalse(summary["needs_operator_input"])
+
     def test_create_task_session_creates_role_workspaces(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30000W",
