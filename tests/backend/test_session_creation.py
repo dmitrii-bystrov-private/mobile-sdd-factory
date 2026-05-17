@@ -1323,7 +1323,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003PC",
             workflow_profile="story_full",
-            policy=None,
+            policy={"requirements_clarification_mode": "ask-a-lot"},
         )
         self.coordinator.prepare_task_session("IOS-30003PC")
 
@@ -1335,6 +1335,11 @@ class SessionCreationTests(unittest.TestCase):
         work_items = self.work_item_repository.list_for_session(session.id)
         requirements_role = self.role_repository.get_by_name(session.id, REQUIREMENTS_CLARIFIER_WORKER_ROLE)
         sent_inputs = self.session_backend.get_sent_inputs(requirements_role.runtime_handle)
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        hydration = json.loads((role_workspace / "HYDRATION.json").read_text())
 
         self.assertEqual("requirements_requested", updated_session.current_stage)
         self.assertEqual(REQUIREMENTS_CLARIFIER_WORKER_ROLE, updated_session.current_owner)
@@ -1345,8 +1350,10 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Clarify the implementation requirements for story IOS-30003PC.", sent_inputs[0])
+        self.assertIn("Clarification mode for this session: ask-a-lot.", sent_inputs[0])
         self.assertIn("Proposal/context summary: Scope clarified", sent_inputs[0])
         self.assertIn("Key context findings: Reuse existing presenter flow", sent_inputs[0])
+        self.assertEqual("ask-a-lot", hydration["requirements_clarification_mode"])
 
     def test_requirements_completed_moves_story_session_to_acceptance_criteria(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

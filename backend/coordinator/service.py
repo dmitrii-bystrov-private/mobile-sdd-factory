@@ -1709,6 +1709,7 @@ class CoordinatorService:
             session.task_key,
             workflow_profile=session.workflow_profile,
             role_name=role.role_name,
+            session_policy=session.policy,
         )
         if instruction is None:
             raise IntakeError(f"Session {session.id} cannot be resumed from stage {session.current_stage}")
@@ -1805,6 +1806,7 @@ class CoordinatorService:
             session.task_key,
             workflow_profile=session.workflow_profile,
             role_name=role.role_name,
+            session_policy=session.policy,
         )
         if instruction is None:
             raise IntakeError(f"Session {session.id} cannot be resumed from stage {session.current_stage}")
@@ -1866,6 +1868,7 @@ class CoordinatorService:
             session.task_key,
             workflow_profile=session.workflow_profile,
             role_name=role.role_name,
+            session_policy=session.policy,
         )
         if instruction is None:
             raise IntakeError(f"Session {session_id} cannot be retried from stage {session.current_stage}")
@@ -1949,6 +1952,7 @@ class CoordinatorService:
             session.task_key,
             workflow_profile=session.workflow_profile,
             role_name=target_role.role_name,
+            session_policy=session.policy,
         )
         if instruction is None:
             raise IntakeError(f"Session {session_id} cannot be redirected from stage {session.current_stage}")
@@ -1988,6 +1992,7 @@ class CoordinatorService:
             resolved_task_key,
             workflow_profile=session.workflow_profile,
             role_name=coding_role.role_name,
+            session_policy=session.policy,
         )
         if instruction is None:
             raise IntakeError(
@@ -2041,6 +2046,7 @@ class CoordinatorService:
             session.task_key,
             workflow_profile=session.workflow_profile,
             role_name=coding_role.role_name,
+            session_policy=session.policy,
         )
         if base_instruction is None:
             raise IntakeError(
@@ -2185,9 +2191,11 @@ class CoordinatorService:
             current_stage="requirements_requested",
             current_owner=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
         )
+        clarification_mode = self._requirements_clarification_mode(session.policy)
         instruction = (
             f"Clarify the implementation requirements for story {session.task_key}. "
-            "Resolve assumptions, edge cases, and out-of-scope boundaries so the later story-spec step can focus on implementation structure."
+            "Resolve assumptions, edge cases, and out-of-scope boundaries so the later story-spec step can focus on implementation structure.\n"
+            f"Clarification mode for this session: {clarification_mode}."
         )
         if additional_context:
             instruction = f"{instruction}\n\n{additional_context}"
@@ -2197,6 +2205,9 @@ class CoordinatorService:
             work_item=work_item,
             stage_name="requirements_requested",
             instruction=instruction,
+            extra_hydration={
+                "requirements_clarification_mode": clarification_mode,
+            },
         )
         return self._append_event(
             session_id=session.id,
@@ -3020,6 +3031,7 @@ class CoordinatorService:
             session.task_key,
             workflow_profile=session.workflow_profile,
             role_name=coding_role.role_name,
+            session_policy=session.policy,
         )
         if instruction is None:
             raise IntakeError(
@@ -3237,6 +3249,7 @@ class CoordinatorService:
             session.task_key,
             workflow_profile=session.workflow_profile,
             role_name=coding_role.role_name,
+            session_policy=session.policy,
         )
         if effective_instruction is None:
             effective_instruction = instruction
@@ -3286,6 +3299,7 @@ class CoordinatorService:
             session.task_key,
             workflow_profile=session.workflow_profile,
             role_name=coding_role.role_name,
+            session_policy=session.policy,
         )
         if instruction is None:
             raise IntakeError(
@@ -3782,6 +3796,7 @@ class CoordinatorService:
             session.task_key,
             workflow_profile=session.workflow_profile,
             role_name=role.role_name,
+            session_policy=session.policy,
         )
         if instruction is None:
             return False
@@ -3898,6 +3913,10 @@ class CoordinatorService:
         role: Role,
         stage_name: str,
     ) -> dict[str, str | int | None]:
+        if role.role_name == REQUIREMENTS_CLARIFIER_WORKER_ROLE and stage_name == "requirements_requested":
+            return {
+                "requirements_clarification_mode": self._requirements_clarification_mode(session.policy),
+            }
         if session.workflow_profile != "bug_full" or role.role_name != BUG_FIXER_ROLE:
             return {}
 
@@ -3940,6 +3959,9 @@ class CoordinatorService:
             )
         return payload
 
+    def _requirements_clarification_mode(self, policy: dict[str, str] | None) -> str:
+        return (policy or {}).get("requirements_clarification_mode", "ask-selectively")
+
     def _find_operator_pending_work_item(self, session_id: int) -> WorkItem | None:
         for item in self.work_item_repository.list_for_session(session_id):
             if item.status != WorkItemStatus.WAITING_FOR_OPERATOR:
@@ -3981,6 +4003,7 @@ class CoordinatorService:
         task_key: str,
         workflow_profile: str | None = None,
         role_name: str | None = None,
+        session_policy: dict[str, str] | None = None,
     ) -> str | None:
         if workflow_profile == "bug_full" and role_name == BUG_FIXER_ROLE:
             if stage_name == "bug_analysis_requested":
@@ -4029,9 +4052,11 @@ class CoordinatorService:
                 "Extract the compact problem statement, key clarifications, and the smallest useful project/context findings for the later story-spec step."
             )
         if stage_name == "requirements_requested":
+            clarification_mode = self._requirements_clarification_mode(session_policy)
             return (
                 f"Clarify the implementation requirements for story {task_key}. "
                 "Resolve assumptions, edge cases, and out-of-scope boundaries before the final story-spec step. "
+                f"Clarification mode: {clarification_mode}. "
                 "If critical ambiguity remains, ask the operator directly in the live session instead of guessing."
             )
         if stage_name == "boy_scout_requested":
@@ -4530,6 +4555,7 @@ class CoordinatorService:
             session.task_key,
             workflow_profile=session.workflow_profile,
             role_name=role.role_name,
+            session_policy=session.policy,
         )
         if instruction is None:
             return None
@@ -4555,12 +4581,14 @@ class CoordinatorService:
         *,
         workflow_profile: str,
         role_name: str,
+        session_policy: dict[str, str] | None = None,
     ) -> str | None:
         base_instruction = self._stage_instruction(
             stage_name,
             task_key,
             workflow_profile=workflow_profile,
             role_name=role_name,
+            session_policy=session_policy,
         )
         if base_instruction is None:
             return None

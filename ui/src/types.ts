@@ -1,5 +1,7 @@
 export type WorkflowProfile = "oneshot" | "bug_full" | "story_full";
 export type SessionPolicyValue = "disabled" | "enabled" | "required";
+export type RequirementsClarificationMode = "ask-a-lot" | "ask-selectively" | "autonomous";
+export type SessionPolicyEntry = SessionPolicyValue | RequirementsClarificationMode;
 
 export type Session = {
   id: number;
@@ -8,7 +10,7 @@ export type Session = {
   current_stage: string;
   current_owner: string | null;
   workflow_profile: WorkflowProfile;
-  policy: Record<string, SessionPolicyValue>;
+  policy: Record<string, SessionPolicyEntry>;
   role_config: Record<string, { runner: string; model: string; effort: string }>;
 };
 

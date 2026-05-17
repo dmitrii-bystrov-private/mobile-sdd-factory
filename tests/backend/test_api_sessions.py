@@ -747,6 +747,18 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("proposal_context_requested", response.followup_event_type)
         self.assertEqual("proposal_context_requested", response.session.current_stage)
 
+    def test_create_session_route_accepts_story_clarification_mode(self) -> None:
+        response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40002CLARIFY",
+                workflow_profile="story_full",
+                policy={"requirements_clarification_mode": "ask-a-lot"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("ask-a-lot", response.session.policy["requirements_clarification_mode"])
+
     def test_proposal_context_completed_event_returns_story_spec_handoff(self) -> None:
         prepare_response = create_session(
             CreateSessionRequest(

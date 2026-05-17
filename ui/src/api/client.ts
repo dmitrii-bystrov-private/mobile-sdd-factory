@@ -3,6 +3,7 @@ import type {
   ArtifactDetail,
   EventItem,
   KnowledgeItem,
+  RequirementsClarificationMode,
   Role,
   RuntimeDefaultsSummary,
   SessionPolicyValue,
@@ -80,6 +81,7 @@ type CreateSessionPayload = {
     boy_scout_policy: SessionPolicyValue;
     doc_harvest_policy: SessionPolicyValue;
     test_policy?: SessionPolicyValue;
+    requirements_clarification_mode?: RequirementsClarificationMode;
   };
   role_config?: Record<string, { runner: string; model: string; effort: string }>;
 };

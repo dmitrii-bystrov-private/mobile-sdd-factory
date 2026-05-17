@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { apiClient } from "../api/client";
 import type {
+  RequirementsClarificationMode,
   RuntimeCapabilitiesSummary,
   RuntimeDefaultsSummary,
   SessionPolicyValue,
@@ -15,12 +16,18 @@ type SessionStartFormProps = {
 };
 
 const POLICY_OPTIONS: SessionPolicyValue[] = ["disabled", "enabled", "required"];
+const REQUIREMENTS_CLARIFICATION_OPTIONS: RequirementsClarificationMode[] = [
+  "ask-a-lot",
+  "ask-selectively",
+  "autonomous",
+];
 
 type DraftPolicy = {
   test_policy: SessionPolicyValue;
   self_review_policy: SessionPolicyValue;
   boy_scout_policy: SessionPolicyValue;
   doc_harvest_policy: SessionPolicyValue;
+  requirements_clarification_mode: RequirementsClarificationMode;
 };
 
 function defaultDraftPolicy(): DraftPolicy {
@@ -29,6 +36,7 @@ function defaultDraftPolicy(): DraftPolicy {
     self_review_policy: "enabled",
     boy_scout_policy: "enabled",
     doc_harvest_policy: "enabled",
+    requirements_clarification_mode: "ask-selectively",
   };
 }
 
@@ -45,6 +53,7 @@ export function SessionStartForm({
   const [error, setError] = useState<string | null>(null);
 
   const showTestPolicy = workflowProfile === "bug_full";
+  const showRequirementsClarificationMode = workflowProfile === "story_full";
   const normalizedTaskKey = taskKey.trim().toUpperCase();
 
   const payload = useMemo(() => {
@@ -59,6 +68,15 @@ export function SessionStartForm({
         policy: {
           ...basePolicy,
           test_policy: policy.test_policy,
+        },
+      };
+    }
+    if (workflowProfile === "story_full") {
+      return {
+        workflow_profile: workflowProfile,
+        policy: {
+          ...basePolicy,
+          requirements_clarification_mode: policy.requirements_clarification_mode,
         },
       };
     }
@@ -286,6 +304,28 @@ export function SessionStartForm({
             ))}
           </select>
         </label>
+
+        {showRequirementsClarificationMode ? (
+          <label className="form-field">
+            <span>Requirements Clarification</span>
+            <select
+              className="select-input"
+              onChange={(event) =>
+                updatePolicy(
+                  "requirements_clarification_mode",
+                  event.target.value as RequirementsClarificationMode,
+                )
+              }
+              value={policy.requirements_clarification_mode}
+            >
+              {REQUIREMENTS_CLARIFICATION_OPTIONS.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
 
         {runtimeCapabilities !== null ? (
           <div className="artifact-stack">

@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from backend.coordinator.intake import IntakeError
 
 TRI_STATE_VALUES = {"disabled", "enabled", "required"}
+REQUIREMENTS_CLARIFICATION_MODE_VALUES = {
+    "ask-a-lot",
+    "ask-selectively",
+    "autonomous",
+}
 WORKFLOW_PROFILES = {"oneshot", "bug_full", "story_full"}
 
 PROFILE_POLICY_FIELDS: dict[str, tuple[str, ...]] = {
@@ -25,6 +30,7 @@ PROFILE_POLICY_FIELDS: dict[str, tuple[str, ...]] = {
         "self_review_policy",
         "boy_scout_policy",
         "doc_harvest_policy",
+        "requirements_clarification_mode",
     ),
 }
 
@@ -34,10 +40,18 @@ COMMON_DEFAULTS: dict[str, str] = {
     "doc_harvest_policy": "enabled",
 }
 
+FIELD_ALLOWED_VALUES: dict[str, set[str]] = {
+    "test_policy": TRI_STATE_VALUES,
+    "self_review_policy": TRI_STATE_VALUES,
+    "boy_scout_policy": TRI_STATE_VALUES,
+    "doc_harvest_policy": TRI_STATE_VALUES,
+    "requirements_clarification_mode": REQUIREMENTS_CLARIFICATION_MODE_VALUES,
+}
+
 PROFILE_DEFAULTS: dict[str, dict[str, str]] = {
     "oneshot": {},
     "bug_full": {"test_policy": "enabled"},
-    "story_full": {},
+    "story_full": {"requirements_clarification_mode": "ask-selectively"},
 }
 
 
@@ -78,7 +92,10 @@ def normalize_session_policy(
     }
 
     for field_name, value in provided_policy.items():
-        if value not in TRI_STATE_VALUES:
+        allowed_values = FIELD_ALLOWED_VALUES.get(field_name)
+        if allowed_values is None:
+            raise IntakeError(f"Unsupported policy field: {field_name}")
+        if value not in allowed_values:
             raise IntakeError(
                 f"Unsupported policy value for {field_name}: {value}"
             )

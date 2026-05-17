@@ -10,6 +10,7 @@ class SessionPolicyPayload(BaseModel):
     self_review_policy: str | None = None
     boy_scout_policy: str | None = None
     doc_harvest_policy: str | None = None
+    requirements_clarification_mode: str | None = None
 
 
 class RoleRuntimeConfigPayload(BaseModel):
