@@ -42,7 +42,7 @@ def build_dependencies(repo_root: Path, temp_root: Path, fixture: Path) -> AppDe
     event_repository = EventRepository(database)
     artifact_repository = ArtifactRepository(database)
     work_item_repository = WorkItemRepository(database)
-    session_backend = TmuxSessionBackend(mode="pty", runtime_root=temp_root / "workdir")
+    session_backend = TmuxSessionBackend(mode="tmux", runtime_root=temp_root / "workdir")
     jira_adapter = FakeJiraAdapter(repo_root)
     snapshot_adapter = FakeSnapshotAdapter(repo_root, temp_root / "workdir")
     gitlab_adapter = FakeGitLabAdapter(repo_root)
@@ -100,10 +100,11 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="sdd-factory-interactive-recovery-acceptance.") as temp_dir:
         temp_root = Path(temp_dir)
         deps = build_dependencies(repo_root, temp_root, fixture)
+        task_key = f"IOS-ACCEPT-INTERACTIVE-{temp_root.name.split('.')[-1].upper()}"
 
         create_response = create_session(
             CreateSessionRequest(
-                task_key="IOS-ACCEPT-INTERACTIVE-001",
+                task_key=task_key,
                 workflow_profile="oneshot",
                 policy={
                     "self_review_policy": "disabled",
@@ -116,7 +117,7 @@ def main() -> None:
         session_id = create_response.session.id
 
         prepare_response = prepare_session(
-            PrepareSessionRequest(task_key="IOS-ACCEPT-INTERACTIVE-001"),
+            PrepareSessionRequest(task_key=task_key),
             dependencies=deps,
         )
         assert prepare_response.followup_event_type == "implementation_requested"

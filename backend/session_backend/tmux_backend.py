@@ -433,8 +433,8 @@ class TmuxSessionBackend(SessionBackend):
         normalized = self._normalize_terminal_text(accumulated)
         recent_normalized = self._normalize_terminal_text(text[-4000:])
         trust_prompt = self._contains_workspace_trust_prompt(normalized)
-        selection_blocker = self._contains_generic_selection_blocker(recent_normalized)
-        confirmation_blocker = self._contains_generic_confirmation_blocker(recent_normalized)
+        selection_blocker = self._contains_generic_selection_blocker(normalized)
+        confirmation_blocker = self._contains_generic_confirmation_blocker(normalized)
 
         if not self.pty_role_ready.get(role_id, False):
             if (
@@ -450,6 +450,7 @@ class TmuxSessionBackend(SessionBackend):
                 self.pty_pre_ready_unknown_chunks[role_id] = 0
         if (
             self.pty_role_ready.get(role_id, False)
+            and not confirmation_blocker
             and not self.pty_selection_blocker_emitted.get(role_id, False)
             and selection_blocker
         ):
@@ -525,6 +526,7 @@ class TmuxSessionBackend(SessionBackend):
                 self.tmux_pre_ready_unknown_chunks[role_id] = 0
         if (
             self.tmux_role_ready.get(role_id, False)
+            and not confirmation_blocker
             and not self.tmux_selection_blocker_emitted.get(role_id, False)
             and selection_blocker
         ):
@@ -599,6 +601,8 @@ class TmuxSessionBackend(SessionBackend):
         )
 
     def _contains_generic_confirmation_blocker(self, normalized_text: str) -> bool:
+        if "confirm tool execution" in normalized_text and "enter to confirm" in normalized_text:
+            return True
         return (
             "enter to confirm" in normalized_text
             and "esc to cancel" in normalized_text

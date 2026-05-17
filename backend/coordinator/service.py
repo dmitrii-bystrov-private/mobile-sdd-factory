@@ -1348,7 +1348,6 @@ class CoordinatorService:
 
         if chunks:
             self._record_runtime_output_artifacts(session, role, chunks)
-            session = self._apply_runtime_output_markers(session, role, chunks)
         if file_result is not None:
             output_type, output_payload = file_result
             session, _, _ = self.handle_role_output(
@@ -1357,6 +1356,8 @@ class CoordinatorService:
                 output_type=output_type,
                 payload=output_payload,
             )
+        elif chunks:
+            session = self._apply_runtime_output_markers(session, role, chunks)
         event = self._append_event(
             session_id=session.id,
             event_type="role_output_collected",
@@ -1391,7 +1392,6 @@ class CoordinatorService:
                 continue
             if chunks:
                 self._record_runtime_output_artifacts(session, role, chunks)
-                session = self._apply_runtime_output_markers(session, role, chunks)
             if file_result is not None:
                 output_type, output_payload = file_result
                 session, _, _ = self.handle_role_output(
@@ -1400,6 +1400,8 @@ class CoordinatorService:
                     output_type=output_type,
                     payload=output_payload,
                 )
+            elif chunks:
+                session = self._apply_runtime_output_markers(session, role, chunks)
             total_chunks += len(chunks) + (1 if file_result is not None else 0)
 
         if total_chunks == 0:

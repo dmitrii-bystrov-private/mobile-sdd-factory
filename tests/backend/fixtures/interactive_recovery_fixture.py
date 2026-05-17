@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import sys
 
 
@@ -47,8 +49,14 @@ def main() -> None:
             if line:
                 blocked = False
                 sys.stdout.write(f"AUTH_CONTINUED:{line}\n")
-                sys.stdout.write(
-                    'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"interactive recovery completed"}}\n'
+                (Path.cwd() / "RESULT.json").write_text(
+                    json.dumps(
+                        {
+                            "output_type": "completed",
+                            "payload": {"summary": "interactive recovery completed"},
+                        }
+                    ),
+                    encoding="utf-8",
                 )
                 sys.stdout.flush()
             continue

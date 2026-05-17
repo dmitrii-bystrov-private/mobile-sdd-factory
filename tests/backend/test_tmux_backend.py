@@ -463,8 +463,10 @@ class TmuxBackendTests(unittest.TestCase):
                 timeout_seconds=3.0,
                 expected_substring="interactive multi-step recovery completed",
             )
+            result_path = role_workspace / "RESULT.json"
             self.assertIn("CONFIRM_CONTINUED:1", completion)
-            self.assertIn("SDD_OUTPUT", completion)
+            self.assertTrue(result_path.is_file())
+            self.assertIn("interactive multi-step recovery completed", result_path.read_text())
 
             backend.stop_session(session)
 

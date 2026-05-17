@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import sys
 
 
@@ -62,8 +64,14 @@ def main() -> None:
             if line == "1":
                 confirm_blocked = False
                 sys.stdout.write("CONFIRM_CONTINUED:1\n")
-                sys.stdout.write(
-                    'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"interactive multi-step recovery completed"}}\n'
+                (Path.cwd() / "RESULT.json").write_text(
+                    json.dumps(
+                        {
+                            "output_type": "completed",
+                            "payload": {"summary": "interactive multi-step recovery completed"},
+                        }
+                    ),
+                    encoding="utf-8",
                 )
                 sys.stdout.flush()
             continue
