@@ -38,6 +38,7 @@ try:
     from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
     from backend.api.routes_operator import create_knowledge, create_subtasks_from_plan
+    from backend.api.routes_operator import cleanup_task
     from backend.api.routes_operator import get_bootstrap_guidance
     from backend.api.routes_operator import get_environment_doctor
     from backend.api.routes_operator import get_runtime_capabilities
@@ -54,6 +55,7 @@ try:
         CompleteDocHarvestRequest,
         CompleteSelfReviewRequest,
         CreateKnowledgeRequest,
+        CleanupTaskRequest,
         CreateMrRequest,
         CreateSubtasksFromPlanRequest,
         IngestMrCommentsRequest,
@@ -104,11 +106,23 @@ except ModuleNotFoundError:
 
 
 class FakeJiraAdapter:
+    def __init__(self) -> None:
+        self.status_by_task: dict[str, str] = {}
+
     def resolve_parent(self, task_key: str) -> "CommandResult":
         return CommandResult(["resolve_parent", task_key], 0, f"{task_key}\n", "")
 
     def get_issue_type(self, task_key: str) -> "CommandResult":
         return CommandResult(["get_issue_type", task_key], 0, "Story\n", "")
+
+    def get_issue_status(self, task_key: str) -> "CommandResult":
+        status = self.status_by_task.get(task_key, "In Progress")
+        return CommandResult(
+            ["get_issue_status", task_key],
+            0,
+            json.dumps({"fields": {"status": {"name": status}}}),
+            "",
+        )
 
     def create_subtasks(self, task_key: str, plan_dir: Path) -> "CommandResult":
         return CommandResult(
@@ -182,6 +196,7 @@ class SessionApiTests(unittest.TestCase):
         session_backend = RecordingSessionBackend()
         event_bus = SessionEventBus()
         self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
+        self.jira_adapter = FakeJiraAdapter()
         coordinator = CoordinatorService(
             session_repository=session_repository,
             role_repository=role_repository,
@@ -190,7 +205,7 @@ class SessionApiTests(unittest.TestCase):
             work_item_repository=work_item_repository,
             session_backend=session_backend,
             default_roles=DEFAULT_SESSION_ROLES,
-            jira_adapter=FakeJiraAdapter(),
+            jira_adapter=self.jira_adapter,
             snapshot_adapter=self.snapshot_adapter,
             gitlab_adapter=FakeGitLabAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
@@ -220,7 +235,7 @@ class SessionApiTests(unittest.TestCase):
             artifact_repository=artifact_repository,
             work_item_repository=work_item_repository,
             session_backend=session_backend,
-            jira_adapter=FakeJiraAdapter(),
+            jira_adapter=self.jira_adapter,
             snapshot_adapter=self.snapshot_adapter,
             gitlab_adapter=FakeGitLabAdapter(),
             event_bus=event_bus,
@@ -251,6 +266,43 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("bug_full", response.session.workflow_profile)
         self.assertEqual("required", response.session.policy["test_policy"])
         self.assertEqual("task_started", response.event_type)
+
+    def test_cleanup_task_route_soft_keeps_session_and_removes_runtime_residue(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40100", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        self.jira_adapter.status_by_task["IOS-40100"] = "In Progress"
+        runtime_dir = Path(self.temp_dir.name) / "IOS-40100" / "runtime"
+        tmp_dir = Path(self.temp_dir.name) / "IOS-40100" / "tmp"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        response = cleanup_task(
+            CleanupTaskRequest(session_id=create_response.session.id, cleanup_mode="soft"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.cleaned)
+        self.assertFalse(response.deleted_session)
+        self.assertEqual("soft", response.cleanup_mode)
+        self.assertFalse(runtime_dir.exists())
+        self.assertFalse(tmp_dir.exists())
+        sessions = list_sessions(dependencies=self.dependencies)
+        self.assertEqual(["IOS-40100"], [item.task_key for item in sessions.items])
+
+    def test_cleanup_task_route_full_requires_closed_status_unless_forced(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40101", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        self.jira_adapter.status_by_task["IOS-40101"] = "In Progress"
+
+        with self.assertRaises(Exception):
+            cleanup_task(
+                CleanupTaskRequest(session_id=create_response.session.id, cleanup_mode="full"),
+                dependencies=self.dependencies,
+            )
 
     def test_create_session_route_creates_role_workspaces(self) -> None:
         response = create_session(

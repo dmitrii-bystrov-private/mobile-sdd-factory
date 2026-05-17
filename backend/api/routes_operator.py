@@ -11,6 +11,8 @@ from backend.api.schemas import (
     BootstrapGuidanceResponse,
     CompleteDocHarvestRequest,
     CompleteDocHarvestResponse,
+    CleanupTaskRequest,
+    CleanupTaskResponse,
     EnvironmentDoctorResponse,
     RuntimeCapabilitiesResponse,
     CreateSubtasksFromPlanRequest,
@@ -285,6 +287,35 @@ def restart_runtime_session(
         session=to_session_response(session),
         event_type=event.event_type,
         followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
+@router.post("/cleanup-task", response_model=CleanupTaskResponse)
+def cleanup_task(
+    payload: CleanupTaskRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> CleanupTaskResponse:
+    try:
+        result = dependencies.coordinator_service.cleanup_task(
+            session_id=payload.session_id,
+            cleanup_mode=payload.cleanup_mode,
+            force=payload.force,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    session = result.get("session")
+    return CleanupTaskResponse(
+        cleaned=bool(result["cleaned"]),
+        deleted_session=bool(result["deleted_session"]),
+        cleanup_mode=str(result["cleanup_mode"]),
+        task_key=str(result["task_key"]),
+        jira_status=(
+            str(result["jira_status"]) if result.get("jira_status") is not None else None
+        ),
+        full_cleanup_allowed=bool(result["full_cleanup_allowed"]),
+        removed_paths=[str(path) for path in result["removed_paths"]],
+        session=to_session_response(session) if session is not None else None,
     )
 
 

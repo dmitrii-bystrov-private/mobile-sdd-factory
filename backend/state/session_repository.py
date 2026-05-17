@@ -141,3 +141,13 @@ class SessionRepository:
                 (session_id,),
             ).fetchone()
         return session_from_row(row)
+
+    def delete(self, session_id: int) -> None:
+        with self.db.connect() as connection:
+            connection.execute("DELETE FROM checkpoints WHERE session_id = ?", (session_id,))
+            connection.execute("DELETE FROM verification_runs WHERE session_id = ?", (session_id,))
+            connection.execute("DELETE FROM artifacts WHERE session_id = ?", (session_id,))
+            connection.execute("DELETE FROM work_items WHERE session_id = ?", (session_id,))
+            connection.execute("DELETE FROM events WHERE session_id = ?", (session_id,))
+            connection.execute("DELETE FROM roles WHERE session_id = ?", (session_id,))
+            connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))

@@ -133,6 +133,44 @@ export function RuntimeSessionPanel({
         </>
       )}
 
+      <div className="artifact-card">
+        <div className="artifact-meta">
+          <span>cleanup</span>
+          <strong>Task Cleanup</strong>
+        </div>
+        <p className="path-label">
+          Soft cleanup stops live runtime and removes task-local runtime residue while keeping the
+          task worktree. Full cleanup removes the whole task snapshot and worktree; force mode
+          skips the closed-status gate.
+        </p>
+        <div className="actions-grid">
+          <button
+            className="action-button"
+            disabled={busy}
+            onClick={() => run(() => apiClient.cleanupTask(session.id, "soft"))}
+            type="button"
+          >
+            Clean Runtime Residue
+          </button>
+          <button
+            className="action-button"
+            disabled={busy}
+            onClick={() => run(() => apiClient.cleanupTask(session.id, "full"))}
+            type="button"
+          >
+            Full Cleanup If Closed
+          </button>
+          <button
+            className="action-button"
+            disabled={busy}
+            onClick={() => run(() => apiClient.cleanupTask(session.id, "full", true))}
+            type="button"
+          >
+            Force Full Cleanup
+          </button>
+        </div>
+      </div>
+
       {error ? <p className="error-banner">{error}</p> : null}
     </section>
   );

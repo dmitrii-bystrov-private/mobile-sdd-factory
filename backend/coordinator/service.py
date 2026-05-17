@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 import json
+import re
+import shutil
+import subprocess
 from pathlib import Path
 
 from backend.api.sse import SessionEventBus
@@ -49,6 +51,10 @@ from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.gitlab_adapter import GitLabAdapter
 from backend.tools.jira_adapter import JiraAdapter
 from backend.tools.snapshot_adapter import SnapshotAdapter
+
+
+_CLOSED_JIRA_STATUSES = {"resolved", "done", "closed", "cancelled"}
+_TASK_KEY_PATTERN = re.compile(r"^[A-Z]+-\d+$")
 
 
 @dataclass
@@ -4047,6 +4053,105 @@ class CoordinatorService:
         )
         return refreshed, event, followup_event
 
+    def cleanup_task(
+        self,
+        session_id: int,
+        *,
+        cleanup_mode: str,
+        force: bool = False,
+    ) -> dict:
+        session = self._get_session_or_raise(session_id)
+        if cleanup_mode not in {"soft", "full"}:
+            raise IntakeError(f"Unsupported cleanup mode: {cleanup_mode}")
+
+        jira_status = self._get_jira_status_name(session.task_key)
+        full_cleanup_allowed = (
+            jira_status is not None and jira_status.strip().lower() in _CLOSED_JIRA_STATUSES
+        )
+        if cleanup_mode == "full" and not force and not full_cleanup_allowed:
+            raise IntakeError(
+                f"Full cleanup requires a closed Jira status; current status is {jira_status or 'unknown'}"
+            )
+
+        removed_paths: list[str] = []
+        removed_paths.extend(self._stop_and_clear_runtime_handles(session))
+        removed_paths.extend(self._remove_task_runtime_residue(session.task_key))
+        removed_paths.extend(self._remove_runner_private_residue(session.task_key))
+
+        deleted_session = False
+        if cleanup_mode == "full":
+            removed_paths.extend(self._remove_task_artifacts(session.task_key))
+            removed_paths.extend(self._remove_task_worktree_and_directory(session.task_key))
+            self.session_repository.delete(session.id)
+            deleted_session = True
+        else:
+            refreshed = self._get_session_or_raise(session_id)
+            self._append_event(
+                session_id=refreshed.id,
+                event_type="task_runtime_cleaned_by_operator",
+                producer_type="operator",
+                payload={
+                    "task_key": refreshed.task_key,
+                    "cleanup_mode": cleanup_mode,
+                    "removed_paths": removed_paths,
+                },
+            )
+
+        return {
+            "cleaned": True,
+            "deleted_session": deleted_session,
+            "cleanup_mode": cleanup_mode,
+            "task_key": session.task_key,
+            "jira_status": jira_status,
+            "full_cleanup_allowed": full_cleanup_allowed,
+            "removed_paths": removed_paths,
+            "session": None if deleted_session else self._get_session_or_raise(session_id),
+        }
+
+    def cleanup_closed_tasks(self) -> list[dict]:
+        if self.workdir_root is None:
+            raise IntakeError("Coordinator is missing workdir root")
+
+        results: list[dict] = []
+        candidates: set[str] = set()
+        for session in self.session_repository.list_all():
+            candidates.add(session.task_key)
+        for child in self.workdir_root.iterdir():
+            if child.is_dir() and _TASK_KEY_PATTERN.match(child.name):
+                candidates.add(child.name)
+
+        for task_key in sorted(candidates):
+            jira_status = self._get_jira_status_name(task_key)
+            if jira_status is None or jira_status.strip().lower() not in _CLOSED_JIRA_STATUSES:
+                continue
+            session = self.session_repository.get_by_task_key(task_key)
+            if session is None:
+                removed_paths: list[str] = []
+                removed_paths.extend(self._remove_task_runtime_residue(task_key))
+                removed_paths.extend(self._remove_runner_private_residue(task_key))
+                removed_paths.extend(self._remove_task_artifacts(task_key))
+                removed_paths.extend(self._remove_task_worktree_and_directory(task_key))
+                results.append(
+                    {
+                        "task_key": task_key,
+                        "jira_status": jira_status,
+                        "deleted_session": False,
+                        "removed_paths": removed_paths,
+                    }
+                )
+                continue
+
+            result = self.cleanup_task(session.id, cleanup_mode="full", force=True)
+            results.append(
+                {
+                    "task_key": task_key,
+                    "jira_status": jira_status,
+                    "deleted_session": bool(result["deleted_session"]),
+                    "removed_paths": list(result["removed_paths"]),
+                }
+            )
+        return results
+
     def _knowledge_store_for_session_or_raise(self, session: Session) -> KnowledgeStore:
         if self.workdir_root is not None:
             return KnowledgeStore(self.workdir_root / session.task_key / "repo" / "knowledge")
@@ -4521,6 +4626,143 @@ class CoordinatorService:
                 return "live_bootstrap" if role.last_hydration_version == 0 else "live_continuation"
             return "bootstrap" if role.last_hydration_version == 0 else "continuation"
         return "full"
+
+    def _get_jira_status_name(self, task_key: str) -> str | None:
+        if self.jira_adapter is None:
+            return None
+        result = self.jira_adapter.get_issue_status(task_key)
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return None
+        return payload.get("fields", {}).get("status", {}).get("name")
+
+    def _stop_and_clear_runtime_handles(self, session: Session) -> list[str]:
+        removed_paths: list[str] = []
+        runtime_session_id = None
+        try:
+            runtime_session_id = self._runtime_session_handle_for_session(session).session_id
+        except IntakeError:
+            runtime_session_id = None
+
+        if runtime_session_id is not None:
+            self.session_backend.stop_session(RuntimeSessionHandle(session_id=runtime_session_id))
+            removed_paths.append(f"runtime-session:{runtime_session_id}")
+
+        updated_any = False
+        for role in self.role_repository.list_for_session(session.id):
+            if role.runtime_handle is not None or role.status != RoleStatus.STOPPED:
+                self.role_repository.update_runtime(
+                    role.id,
+                    runtime_backend=role.runtime_backend,
+                    runtime_handle=None,
+                    status=RoleStatus.STOPPED,
+                )
+                updated_any = True
+
+        if updated_any and session.status in {
+            SessionStatus.ACTIVE,
+            SessionStatus.WAITING_FOR_OPERATOR,
+        }:
+            self.session_repository.update_status(session.id, SessionStatus.PAUSED)
+        return removed_paths
+
+    def _remove_task_runtime_residue(self, task_key: str) -> list[str]:
+        if self.workdir_root is None:
+            return []
+        removed: list[str] = []
+        for path in (
+            self.workdir_root / task_key / "runtime",
+            self.workdir_root / task_key / "tmp",
+        ):
+            if path.exists():
+                shutil.rmtree(path, ignore_errors=True)
+                removed.append(str(path))
+        return removed
+
+    def _remove_task_artifacts(self, task_key: str) -> list[str]:
+        if self.workdir_root is None:
+            return []
+        path = self.workdir_root / "factory-artifacts" / task_key
+        if not path.exists():
+            return []
+        shutil.rmtree(path, ignore_errors=True)
+        return [str(path)]
+
+    def _remove_runner_private_residue(self, task_key: str) -> list[str]:
+        removed: list[str] = []
+        roots = (
+            Path.home() / ".claude" / "projects",
+            Path.home() / ".codex" / "projects",
+            Path.home() / ".codex" / "sessions",
+        )
+        task_key_lower = task_key.lower()
+        for root in roots:
+            if not root.exists() or not root.is_dir():
+                continue
+            for child in root.iterdir():
+                if task_key_lower not in child.name.lower():
+                    continue
+                if child.is_dir():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
+                removed.append(str(child))
+        return removed
+
+    def _remove_task_worktree_and_directory(self, task_key: str) -> list[str]:
+        if self.workdir_root is None:
+            return []
+        removed: list[str] = []
+        task_root = self.workdir_root / task_key
+        repo_dir = task_root / "repo"
+
+        if repo_dir.exists():
+            git_file = repo_dir / ".git"
+            if git_file.is_file():
+                try:
+                    common_git_dir = (
+                        subprocess.run(
+                            ["git", "-C", str(repo_dir), "rev-parse", "--git-common-dir"],
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                        .stdout.strip()
+                    )
+                    main_repo = Path(common_git_dir).resolve().parent
+                    subprocess.run(
+                        ["git", "-C", str(main_repo), "worktree", "remove", "--force", str(repo_dir)],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                    for branch in (f"feature/{task_key}", f"bugfix/{task_key}"):
+                        branch_exists = subprocess.run(
+                            ["git", "-C", str(main_repo), "rev-parse", "--verify", branch],
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                        )
+                        if branch_exists.returncode == 0:
+                            subprocess.run(
+                                ["git", "-C", str(main_repo), "branch", "-D", branch],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                            )
+                except subprocess.CalledProcessError:
+                    pass
+            if repo_dir.exists():
+                shutil.rmtree(repo_dir, ignore_errors=True)
+            removed.append(str(repo_dir))
+
+        if task_root.exists():
+            shutil.rmtree(task_root, ignore_errors=True)
+            removed.append(str(task_root))
+        return removed
 
     def _repo_root(self) -> Path:
         if self.workdir_root is not None:

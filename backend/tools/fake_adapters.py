@@ -10,6 +10,7 @@ from backend.tools.command_runner import CommandResult
 class FakeJiraAdapter:
     def __init__(self, repo_root: Path) -> None:
         self.repo_root = repo_root
+        self.status_by_task: dict[str, str] = {}
 
     def resolve_parent(self, task_key: str) -> CommandResult:
         return CommandResult(
@@ -24,6 +25,15 @@ class FakeJiraAdapter:
             command=["fake_get_issue_type", task_key],
             returncode=0,
             stdout="Story\n",
+            stderr="",
+        )
+
+    def get_issue_status(self, task_key: str) -> CommandResult:
+        status = self.status_by_task.get(task_key, "In Progress")
+        return CommandResult(
+            command=["fake_get_issue_status", task_key],
+            returncode=0,
+            stdout=f'{{"fields": {{"status": {{"name": "{status}"}}}}}}\n',
             stderr="",
         )
 

@@ -35,6 +35,9 @@ from backend.tools.command_runner import CommandResult
 
 
 class FakeJiraAdapter:
+    def __init__(self) -> None:
+        self.status_by_task: dict[str, str] = {}
+
     def resolve_parent(self, task_key: str) -> CommandResult:
         return CommandResult(
             command=["resolve_parent", task_key],
@@ -48,6 +51,15 @@ class FakeJiraAdapter:
             command=["get_issue_type", task_key],
             returncode=0,
             stdout="Story\n",
+            stderr="",
+        )
+
+    def get_issue_status(self, task_key: str) -> CommandResult:
+        status = self.status_by_task.get(task_key, "In Progress")
+        return CommandResult(
+            command=["get_issue_status", task_key],
+            returncode=0,
+            stdout=json.dumps({"fields": {"status": {"name": status}}}),
             stderr="",
         )
 
@@ -135,6 +147,7 @@ class SessionCreationTests(unittest.TestCase):
         self.session_backend = RecordingSessionBackend()
         self.event_bus = SessionEventBus()
         self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
+        self.jira_adapter = FakeJiraAdapter()
         self.coordinator = CoordinatorService(
             session_repository=self.session_repository,
             role_repository=self.role_repository,
@@ -143,7 +156,7 @@ class SessionCreationTests(unittest.TestCase):
             work_item_repository=self.work_item_repository,
             session_backend=self.session_backend,
             default_roles=DEFAULT_SESSION_ROLES,
-            jira_adapter=FakeJiraAdapter(),
+            jira_adapter=self.jira_adapter,
             snapshot_adapter=self.snapshot_adapter,
             gitlab_adapter=FakeGitLabAdapter(),
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
@@ -182,6 +195,46 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("active", session.status.value)
         self.assertEqual("bug_full", session.workflow_profile)
         self.assertEqual("required", session.policy["test_policy"])
+
+    def test_cleanup_task_soft_removes_runtime_and_tmp_but_keeps_task_directory(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30000CLEAN",
+            workflow_profile="oneshot",
+            policy={},
+        )
+        task_root = Path(self.temp_dir.name) / "IOS-30000CLEAN"
+        runtime_dir = task_root / "runtime"
+        tmp_dir = task_root / "tmp"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        result = self.coordinator.cleanup_task(session.id, cleanup_mode="soft")
+
+        self.assertTrue(result["cleaned"])
+        self.assertFalse(result["deleted_session"])
+        self.assertTrue(task_root.exists())
+        self.assertFalse(runtime_dir.exists())
+        self.assertFalse(tmp_dir.exists())
+        self.assertIsNotNone(self.session_repository.get_by_id(session.id))
+
+    def test_cleanup_task_full_removes_session_and_task_directory_when_closed(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30000FULL",
+            workflow_profile="oneshot",
+            policy={},
+        )
+        self.jira_adapter.status_by_task["IOS-30000FULL"] = "Resolved"
+        task_root = Path(self.temp_dir.name) / "IOS-30000FULL"
+        repo_dir = task_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        (repo_dir / "placeholder.txt").write_text("x")
+
+        result = self.coordinator.cleanup_task(session.id, cleanup_mode="full")
+
+        self.assertTrue(result["cleaned"])
+        self.assertTrue(result["deleted_session"])
+        self.assertFalse(task_root.exists())
+        self.assertIsNone(self.session_repository.get_by_id(session.id))
 
     def test_collect_role_output_escalates_launcher_selection_blocker_to_operator(self) -> None:
         fixture = (

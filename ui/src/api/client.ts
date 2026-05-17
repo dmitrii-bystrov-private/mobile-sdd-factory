@@ -347,6 +347,30 @@ export const apiClient = {
     });
   },
 
+  cleanupTask(
+    sessionId: number,
+    cleanupMode: "soft" | "full",
+    force = false,
+  ): Promise<{
+    cleaned: boolean;
+    deleted_session: boolean;
+    cleanup_mode: string;
+    task_key: string;
+    jira_status: string | null;
+    full_cleanup_allowed: boolean;
+    removed_paths: string[];
+    session: Session | null;
+  }> {
+    return request("/operator/cleanup-task", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        cleanup_mode: cleanupMode,
+        force,
+      }),
+    });
+  },
+
   sendRuntimeInput(
     sessionId: number,
     text: string,

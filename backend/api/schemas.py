@@ -445,6 +445,23 @@ class RestartRuntimeSessionResponse(BaseModel):
     followup_event_type: str | None = None
 
 
+class CleanupTaskRequest(BaseModel):
+    session_id: int
+    cleanup_mode: str
+    force: bool = False
+
+
+class CleanupTaskResponse(BaseModel):
+    cleaned: bool
+    deleted_session: bool
+    cleanup_mode: str
+    task_key: str
+    jira_status: str | None = None
+    full_cleanup_allowed: bool
+    removed_paths: list[str]
+    session: SessionResponse | None = None
+
+
 class IngestMrCommentsRequest(BaseModel):
     session_id: int
     platform: str

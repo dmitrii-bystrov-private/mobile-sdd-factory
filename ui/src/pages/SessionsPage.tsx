@@ -316,7 +316,7 @@ export function SessionsPage(): JSX.Element {
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? null;
 
-  async function loadSessions(): Promise<void> {
+  async function loadSessions(): Promise<number | null> {
     setLoading(true);
     setError(null);
     try {
@@ -395,11 +395,18 @@ export function SessionsPage(): JSX.Element {
           source: item.source,
         })),
       });
+      const availableIds = new Set(sessionResponse.items.map((session) => session.id));
+      const nextSelectedId =
+        selectedSessionId !== null && availableIds.has(selectedSessionId)
+          ? selectedSessionId
+          : sessionResponse.items[0]?.id ?? null;
       startTransition(() => {
-        setSelectedSessionId((current) => current ?? sessionResponse.items[0]?.id ?? null);
+        setSelectedSessionId(nextSelectedId);
       });
+      return nextSelectedId;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load sessions");
+      return null;
     } finally {
       setLoading(false);
     }
@@ -450,9 +457,11 @@ export function SessionsPage(): JSX.Element {
   }
 
   async function refreshSelected(): Promise<void> {
-    await loadSessions();
-    if (selectedSessionId !== null) {
-      await loadBundle(selectedSessionId);
+    const nextSelectedId = await loadSessions();
+    if (nextSelectedId !== null) {
+      await loadBundle(nextSelectedId);
+    } else {
+      setBundle(null);
     }
   }
 
