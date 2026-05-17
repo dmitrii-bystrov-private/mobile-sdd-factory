@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { apiClient } from "../api/client";
-import type { RuntimeCapabilitiesSummary, SessionPolicyValue, WorkflowProfile } from "../types";
+import type {
+  RuntimeCapabilitiesSummary,
+  RuntimeDefaultsSummary,
+  SessionPolicyValue,
+  WorkflowProfile,
+} from "../types";
 
 type SessionStartFormProps = {
   onCreated: (sessionId: number) => Promise<void>;
   runtimeCapabilities: RuntimeCapabilitiesSummary | null;
+  runtimeDefaults: RuntimeDefaultsSummary | null;
 };
 
 const POLICY_OPTIONS: SessionPolicyValue[] = ["disabled", "enabled", "required"];
@@ -29,6 +35,7 @@ function defaultDraftPolicy(): DraftPolicy {
 export function SessionStartForm({
   onCreated,
   runtimeCapabilities,
+  runtimeDefaults,
 }: SessionStartFormProps): JSX.Element {
   const [taskKey, setTaskKey] = useState("");
   const [workflowProfile, setWorkflowProfile] = useState<WorkflowProfile>("oneshot");
@@ -79,20 +86,32 @@ export function SessionStartForm({
 
     const runnerIndex = new Map(runtimeCapabilities.runners.map((runner) => [runner.runner, runner]));
     const legacyIndex = new Map(runtimeCapabilities.legacyRoleDefaults.map((item) => [item.roleName, item]));
-    const defaultRunner = runtimeCapabilities.defaultRunner ?? runtimeCapabilities.availableRunners[0] ?? "claude";
+    const defaultRunner =
+      runtimeDefaults?.defaultRunner ??
+      runtimeCapabilities.defaultRunner ??
+      runtimeCapabilities.availableRunners[0] ??
+      "claude";
 
     function defaultConfigForRole(roleName: string): { runner: string; model: string; effort: string } {
-      const runner = defaultRunner;
+      const storedRoleDefault = runtimeDefaults?.roleDefaults[roleName];
+      const runner = storedRoleDefault?.runner ?? defaultRunner;
       const runnerCapability = runnerIndex.get(runner);
       const legacyDefault = legacyIndex.get(roleName);
       const models = runnerCapability?.models ?? [];
       const model =
+        (storedRoleDefault?.runner === null || storedRoleDefault?.runner === runner ? storedRoleDefault?.model : null) ??
         legacyDefault?.model ??
         (runner === "claude" ? models.find((item) => item.id === "sonnet")?.id : undefined) ??
         models[0]?.id ??
         "";
       const modelCapability = models.find((item) => item.id === model);
       const effort =
+        (
+          (storedRoleDefault?.runner === null || storedRoleDefault?.runner === runner) &&
+          (storedRoleDefault?.model === null || storedRoleDefault?.model === model)
+            ? storedRoleDefault?.effort
+            : null
+        ) ??
         legacyDefault?.effort ??
         modelCapability?.defaultEffort ??
         modelCapability?.supportedEfforts[0] ??
@@ -107,7 +126,7 @@ export function SessionStartForm({
       }
       return next;
     });
-  }, [effectiveRoleNames, runtimeCapabilities]);
+  }, [effectiveRoleNames, runtimeCapabilities, runtimeDefaults]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();

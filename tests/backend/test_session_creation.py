@@ -22,6 +22,7 @@ from backend.roles.contracts import (
     STORY_SPEC_WORKER_ROLE,
 )
 from backend.roles.launcher import RoleLauncherManager
+from backend.role_runtime_config import normalize_role_runtime_config
 from backend.roles.workspace import RoleWorkspaceManager
 from backend.session_backend.recording_backend import RecordingSessionBackend
 from backend.session_backend.tmux_backend import TmuxSessionBackend
@@ -413,6 +414,42 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIsNotNone(implementer_role)
         runtime_session_id = implementer_role.runtime_handle.split(":", 1)[0]
         tmux_backend.stop_session(RuntimeSessionHandle(session_id=runtime_session_id))
+
+    def test_normalize_role_runtime_config_prefers_saved_project_defaults(self) -> None:
+        repo_root = Path(self.temp_dir.name) / "repo-root"
+        settings_dir = repo_root / ".sdd-factory"
+        settings_dir.mkdir(parents=True, exist_ok=True)
+        (settings_dir / "settings.local.json").write_text(
+            json.dumps(
+                {
+                    "runtime_defaults": {
+                        "default_runner": "claude",
+                        "role_defaults": {
+                            "implementer": {
+                                "runner": "codex",
+                                "model": "gpt-5.5",
+                                "effort": "high",
+                            }
+                        },
+                    }
+                }
+            )
+        )
+
+        normalized = normalize_role_runtime_config(
+            repo_root=repo_root,
+            role_names=["implementer"],
+            provided=None,
+        )
+
+        self.assertEqual(
+            {
+                "runner": "codex",
+                "model": "gpt-5.5",
+                "effort": "high",
+            },
+            normalized["implementer"],
+        )
 
     def test_send_operator_runtime_input_reactivates_waiting_session_without_new_handoff(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

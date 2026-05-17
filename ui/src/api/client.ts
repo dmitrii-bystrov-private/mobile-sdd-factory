@@ -4,6 +4,7 @@ import type {
   EventItem,
   KnowledgeItem,
   Role,
+  RuntimeDefaultsSummary,
   SessionPolicyValue,
   Session,
   StreamEventPayload,
@@ -280,6 +281,30 @@ export const apiClient = {
     }>;
   }> {
     return request("/operator/runtime-capabilities");
+  },
+
+  getRuntimeDefaults(): Promise<{
+    default_runner: string | null;
+    role_defaults: Record<string, { runner: string | null; model: string | null; effort: string | null }>;
+    known_roles: string[];
+    source_path: string;
+  }> {
+    return request("/operator/runtime-defaults");
+  },
+
+  updateRuntimeDefaults(payload: RuntimeDefaultsSummary): Promise<{
+    default_runner: string | null;
+    role_defaults: Record<string, { runner: string | null; model: string | null; effort: string | null }>;
+    known_roles: string[];
+    source_path: string;
+  }> {
+    return request("/operator/runtime-defaults", {
+      method: "POST",
+      body: JSON.stringify({
+        default_runner: payload.defaultRunner,
+        role_defaults: payload.roleDefaults,
+      }),
+    });
   },
 
   listKnowledge(): Promise<{ items: KnowledgeItem[] }> {

@@ -4,6 +4,7 @@ import { apiClient, openSessionEventStream } from "../api/client";
 import { EnvironmentDoctorPanel } from "../components/EnvironmentDoctorPanel";
 import { BootstrapGuidancePanel } from "../components/BootstrapGuidancePanel";
 import { RuntimeCapabilitiesPanel } from "../components/RuntimeCapabilitiesPanel";
+import { RuntimeDefaultsPanel } from "../components/RuntimeDefaultsPanel";
 import { SessionDetail } from "../components/SessionDetail";
 import { KnowledgePanel } from "../components/KnowledgePanel";
 import { SessionList } from "../components/SessionList";
@@ -21,6 +22,7 @@ import type {
   PlanningSummary,
   PlanningStepSummary,
   RuntimeCapabilitiesSummary,
+  RuntimeDefaultsSummary,
   RuntimeSessionStateSummary,
   Session,
   SessionBundle,
@@ -318,6 +320,8 @@ export function SessionsPage(): JSX.Element {
     useState<BootstrapGuidanceSummary | null>(null);
   const [runtimeCapabilitiesSummary, setRuntimeCapabilitiesSummary] =
     useState<RuntimeCapabilitiesSummary | null>(null);
+  const [runtimeDefaultsSummary, setRuntimeDefaultsSummary] =
+    useState<RuntimeDefaultsSummary | null>(null);
   const [streamState, setStreamState] = useState<"idle" | "live" | "reconnecting">("idle");
   const [lastStreamEventType, setLastStreamEventType] = useState<string | null>(null);
   const [lastStreamEventId, setLastStreamEventId] = useState<number | null>(null);
@@ -335,6 +339,7 @@ export function SessionsPage(): JSX.Element {
       const doctorResponse = await apiClient.getEnvironmentDoctor();
       const guidanceResponse = await apiClient.getBootstrapGuidance();
       const runtimeCapabilitiesResponse = await apiClient.getRuntimeCapabilities();
+      const runtimeDefaultsResponse = await apiClient.getRuntimeDefaults();
       setSessions(sessionResponse.items);
       setKnowledgeItems(knowledgeResponse.items);
       setDoctorSummary({
@@ -404,6 +409,12 @@ export function SessionsPage(): JSX.Element {
           mcpServers: item.mcp_servers,
           source: item.source,
         })),
+      });
+      setRuntimeDefaultsSummary({
+        defaultRunner: runtimeDefaultsResponse.default_runner,
+        roleDefaults: runtimeDefaultsResponse.role_defaults,
+        knownRoles: runtimeDefaultsResponse.known_roles,
+        sourcePath: runtimeDefaultsResponse.source_path,
       });
       const availableIds = new Set(sessionResponse.items.map((session) => session.id));
       const nextSelectedId =
@@ -578,6 +589,14 @@ export function SessionsPage(): JSX.Element {
               await loadBundle(sessionId);
             }}
             runtimeCapabilities={runtimeCapabilitiesSummary}
+            runtimeDefaults={runtimeDefaultsSummary}
+          />
+          <RuntimeDefaultsPanel
+            onSaved={(summary) => {
+              setRuntimeDefaultsSummary(summary);
+            }}
+            runtimeCapabilities={runtimeCapabilitiesSummary}
+            runtimeDefaults={runtimeDefaultsSummary}
           />
           <SessionList
             onSelect={(sessionId) => setSelectedSessionId(sessionId)}

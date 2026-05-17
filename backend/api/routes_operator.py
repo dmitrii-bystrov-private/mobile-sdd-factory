@@ -15,6 +15,8 @@ from backend.api.schemas import (
     CleanupTaskResponse,
     EnvironmentDoctorResponse,
     RuntimeCapabilitiesResponse,
+    RuntimeDefaultsResponse,
+    UpdateRuntimeDefaultsRequest,
     CreateSubtasksFromPlanRequest,
     CreateSubtasksFromPlanResponse,
     RefreshSubtaskStateRequest,
@@ -59,6 +61,7 @@ from backend.api.schemas import (
 )
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
+from backend.runtime_defaults import load_runtime_defaults, save_runtime_defaults
 from factory.doctor.bootstrap_guidance import build_bootstrap_guidance
 from factory.doctor.environment_doctor import build_report
 from factory.doctor.runtime_capabilities import build_runtime_capabilities
@@ -70,15 +73,22 @@ def get_dependencies(request: Request) -> AppDependencies:
     return request.app.state.dependencies
 
 
+def _repo_root_from_dependencies(dependencies: AppDependencies) -> Path:
+    if dependencies.config is not None:
+        return dependencies.config.repo_root
+    coordinator = dependencies.coordinator_service
+    if coordinator.role_launcher_manager is not None:
+        return coordinator.role_launcher_manager.repo_root
+    if coordinator.role_workspace_manager is not None:
+        return coordinator.role_workspace_manager.repo_root
+    return Path(__file__).resolve().parents[2]
+
+
 @router.get("/environment-doctor", response_model=EnvironmentDoctorResponse)
 def get_environment_doctor(
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> EnvironmentDoctorResponse:
-    repo_root = (
-        dependencies.config.repo_root
-        if dependencies.config is not None
-        else Path(__file__).resolve().parents[2]
-    )
+    repo_root = _repo_root_from_dependencies(dependencies)
     report = build_report(repo_root=repo_root)
     return EnvironmentDoctorResponse(**report)
 
@@ -87,11 +97,7 @@ def get_environment_doctor(
 def get_bootstrap_guidance(
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> BootstrapGuidanceResponse:
-    repo_root = (
-        dependencies.config.repo_root
-        if dependencies.config is not None
-        else Path(__file__).resolve().parents[2]
-    )
+    repo_root = _repo_root_from_dependencies(dependencies)
     report = build_report(repo_root=repo_root)
     guidance = build_bootstrap_guidance(report)
     return BootstrapGuidanceResponse(**guidance)
@@ -101,13 +107,39 @@ def get_bootstrap_guidance(
 def get_runtime_capabilities(
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> RuntimeCapabilitiesResponse:
-    repo_root = (
-        dependencies.config.repo_root
-        if dependencies.config is not None
-        else Path(__file__).resolve().parents[2]
-    )
+    repo_root = _repo_root_from_dependencies(dependencies)
     capabilities = build_runtime_capabilities(repo_root=repo_root)
     return RuntimeCapabilitiesResponse(**capabilities)
+
+
+@router.get("/runtime-defaults", response_model=RuntimeDefaultsResponse)
+def get_runtime_defaults(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RuntimeDefaultsResponse:
+    repo_root = _repo_root_from_dependencies(dependencies)
+    defaults = load_runtime_defaults(repo_root)
+    return RuntimeDefaultsResponse(**defaults)
+
+
+@router.post("/runtime-defaults", response_model=RuntimeDefaultsResponse)
+def update_runtime_defaults(
+    payload: UpdateRuntimeDefaultsRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RuntimeDefaultsResponse:
+    repo_root = _repo_root_from_dependencies(dependencies)
+    defaults = save_runtime_defaults(
+        repo_root,
+        default_runner=payload.default_runner,
+        role_defaults={
+            role_name: {
+                "runner": value.runner,
+                "model": value.model,
+                "effort": value.effort,
+            }
+            for role_name, value in payload.role_defaults.items()
+        },
+    )
+    return RuntimeDefaultsResponse(**defaults)
 
 
 @router.post("/pause-session", response_model=PauseSessionResponse)

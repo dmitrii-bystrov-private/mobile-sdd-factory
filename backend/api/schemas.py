@@ -220,6 +220,30 @@ class RuntimeCapabilitiesResponse(BaseModel):
     legacy_role_defaults: list[LegacyRoleDefaultResponse]
 
 
+class RuntimeRoleDefaultConfigResponse(BaseModel):
+    runner: str | None = None
+    model: str | None = None
+    effort: str | None = None
+
+
+class RuntimeDefaultsResponse(BaseModel):
+    default_runner: str | None = None
+    role_defaults: dict[str, RuntimeRoleDefaultConfigResponse]
+    known_roles: list[str]
+    source_path: str
+
+
+class RuntimeRoleDefaultConfigPayload(BaseModel):
+    runner: str | None = None
+    model: str | None = None
+    effort: str | None = None
+
+
+class UpdateRuntimeDefaultsRequest(BaseModel):
+    default_runner: str | None = None
+    role_defaults: dict[str, RuntimeRoleDefaultConfigPayload]
+
+
 class RoleResponse(BaseModel):
     id: int
     session_id: int

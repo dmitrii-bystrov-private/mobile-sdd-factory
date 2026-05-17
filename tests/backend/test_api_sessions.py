@@ -42,6 +42,7 @@ try:
     from backend.api.routes_operator import get_bootstrap_guidance
     from backend.api.routes_operator import get_environment_doctor
     from backend.api.routes_operator import get_runtime_capabilities
+    from backend.api.routes_operator import get_runtime_defaults
     from backend.api.routes_operator import refresh_subtask_state
     from backend.api.routes_operator import restart_runtime_role
     from backend.api.routes_operator import restart_runtime_session
@@ -51,6 +52,7 @@ try:
     from backend.api.routes_operator import start_subtask_graph
     from backend.api.routes_operator import ingest_mr_comments
     from backend.api.routes_operator import loop_status, start_loop, stop_loop
+    from backend.api.routes_operator import update_runtime_defaults
     from backend.api.schemas import (
         CompleteDocHarvestRequest,
         CompleteSelfReviewRequest,
@@ -73,6 +75,7 @@ try:
         StopRuntimeRoleRequest,
         StopRuntimeSessionRequest,
         StartSubtaskGraphRequest,
+        UpdateRuntimeDefaultsRequest,
     )
     from backend.coordinator.service import CoordinatorService
     from backend.coordinator.loop_runner import CoordinatorLoopRunner
@@ -341,6 +344,33 @@ class SessionApiTests(unittest.TestCase):
             [str(launch_script)],
             self.dependencies.session_backend.get_spawn_command(implementer_role.runtime_handle),
         )
+
+    def test_runtime_defaults_routes_roundtrip_project_local_settings(self) -> None:
+        response = get_runtime_defaults(dependencies=self.dependencies)
+
+        self.assertIsNone(response.default_runner)
+        self.assertIn("implementer", response.known_roles)
+        self.assertTrue(response.source_path.endswith(".sdd-factory/settings.local.json"))
+
+        updated = update_runtime_defaults(
+            UpdateRuntimeDefaultsRequest(
+                default_runner="codex",
+                role_defaults={
+                    "implementer": {
+                        "runner": "claude",
+                        "model": "sonnet",
+                        "effort": "high",
+                    }
+                },
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("codex", updated.default_runner)
+        self.assertEqual("claude", updated.role_defaults["implementer"].runner)
+        self.assertEqual("sonnet", updated.role_defaults["implementer"].model)
+        self.assertEqual("high", updated.role_defaults["implementer"].effort)
+        self.assertTrue(Path(updated.source_path).is_file())
 
     def test_list_sessions_route_returns_created_session(self) -> None:
         create_session(

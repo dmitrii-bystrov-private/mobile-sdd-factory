@@ -212,6 +212,19 @@ export type RuntimeCapabilitiesSummary = {
   legacyRoleDefaults: LegacyRoleDefault[];
 };
 
+export type RuntimeRoleDefaultConfig = {
+  runner: string | null;
+  model: string | null;
+  effort: string | null;
+};
+
+export type RuntimeDefaultsSummary = {
+  defaultRunner: string | null;
+  roleDefaults: Record<string, RuntimeRoleDefaultConfig>;
+  knownRoles: string[];
+  sourcePath: string;
+};
+
 export type JiraSubtasksSummary = {
   available: boolean;
   totalCount: number;
