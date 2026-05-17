@@ -43,6 +43,9 @@ class RecordingSessionBackend(SessionBackend):
         outputs = self.pending_outputs.pop(role.role_id, [])
         return [RuntimeOutputChunk(role_id=role.role_id, text=text) for text in outputs]
 
+    def is_role_alive(self, role: RuntimeRoleHandle) -> bool:
+        return role.role_id in self.spawn_commands
+
     def stop_role(self, role: RuntimeRoleHandle) -> None:
         self.sent_inputs.pop(role.role_id, None)
         self.pending_outputs.pop(role.role_id, None)

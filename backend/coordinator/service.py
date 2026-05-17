@@ -1474,6 +1474,7 @@ class CoordinatorService:
         reconciled_sessions = 0
 
         for session in active_sessions:
+            session = self._recover_dead_owner_runtime_if_needed(session)
             if self._reconcile_session_dispatch(session):
                 reconciled_sessions += 1
             _, _, _, chunk_count = self.poll_session_output(session.id)
@@ -1494,6 +1495,106 @@ class CoordinatorService:
             },
         )
         return summary_event, polled_sessions, total_chunks
+
+    def _recover_dead_owner_runtime_if_needed(self, session: Session) -> Session:
+        if session.current_owner is None:
+            return session
+        role = self.role_repository.get_by_name(session.id, session.current_owner)
+        if role is None or role.runtime_handle is None or role.status != RoleStatus.RUNNING:
+            return session
+
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        if self.session_backend.is_role_alive(runtime_role):
+            return session
+
+        if self._auto_recovery_already_attempted(session.id, role.role_name, role.runtime_handle):
+            return session
+
+        return self._attempt_dead_owner_runtime_recovery(session, role)
+
+    def _auto_recovery_already_attempted(self, session_id: int, role_name: str, dead_runtime_handle: str) -> bool:
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.event_type not in {
+                "runtime_role_auto_recovery_attempted",
+                "runtime_role_auto_recovery_failed",
+            }:
+                continue
+            if event.payload.get("role_name") != role_name:
+                continue
+            if event.payload.get("dead_runtime_handle") == dead_runtime_handle:
+                return True
+        return False
+
+    def _attempt_dead_owner_runtime_recovery(self, session: Session, role: Role) -> Session:
+        dead_runtime_handle = role.runtime_handle
+        assert dead_runtime_handle is not None
+        recovery_event_type = "runtime_role_auto_recovery_attempted"
+        try:
+            runtime_role = self._spawn_role_runtime(
+                runtime_session=self._runtime_session_handle_for_session(session),
+                task_key=session.task_key,
+                role_name=role.role_name,
+                role_config=(session.role_config or {}).get(role.role_name),
+                resume_mode="native",
+            )
+        except Exception as exc:
+            self.role_repository.update_status(role.id, RoleStatus.FAILED)
+            self._append_event(
+                session_id=session.id,
+                event_type="runtime_role_auto_recovery_failed",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "dead_runtime_handle": dead_runtime_handle,
+                    "error": str(exc),
+                    "current_stage": session.current_stage,
+                },
+            )
+            self.work_item_repository.mark_assigned_as_waiting_for_operator(session.id)
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage=session.current_stage,
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            self._append_event(
+                session_id=session.id,
+                event_type="session_escalated_to_operator",
+                producer_type="coordinator",
+                payload={
+                    "reason": "runtime_recovery_failed",
+                    "role_name": role.role_name,
+                    "summary": "automatic runtime recovery failed",
+                    "details": str(exc),
+                    "current_stage": session.current_stage,
+                },
+            )
+            return session
+
+        role = self.role_repository.update_runtime(
+            role.id,
+            runtime_backend=runtime_role.backend_name,
+            runtime_handle=runtime_role.role_id,
+            status=RoleStatus.RUNNING,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._append_event(
+            session_id=session.id,
+            event_type=recovery_event_type,
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "dead_runtime_handle": dead_runtime_handle,
+                "runtime_handle": role.runtime_handle,
+                "current_stage": session.current_stage,
+            },
+        )
+        self._reactivate_restarted_owner_work(session, role)
+        return self._get_session_or_raise(session.id)
 
     def pause_session(self, session_id: int) -> tuple[Session, Event]:
         session = self._get_session_or_raise(session_id)

@@ -318,6 +318,19 @@ class TmuxSessionBackend(SessionBackend):
             chunks.append(RuntimeOutputChunk(role_id=role.role_id, text=marker_text))
         return chunks
 
+    def is_role_alive(self, role: RuntimeRoleHandle) -> bool:
+        if self._effective_mode == "tmux":
+            socket_path = self._socket_path(role.session_id)
+            result = self._tmux(socket_path, "list-panes", "-t", role.role_id)
+            return result.returncode == 0
+        if self._effective_mode == "process":
+            process = self.processes.get(role.role_id)
+            return process is not None and process.poll() is None
+        if self._effective_mode == "pty":
+            process = self.processes.get(role.role_id)
+            return process is not None and process.poll() is None
+        return role.role_id in self.pending_outputs or role.role_id in self.sent_inputs or role.role_id in self.last_spawn_commands
+
     def stop_role(self, role: RuntimeRoleHandle) -> None:
         if self._effective_mode == "tmux":
             socket_path = self._socket_path(role.session_id)

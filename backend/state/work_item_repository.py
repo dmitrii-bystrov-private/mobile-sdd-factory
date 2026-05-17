@@ -143,3 +143,18 @@ class WorkItemRepository:
                 (work_item_id,),
             ).fetchone()
         return work_item_from_row(row)
+
+    def mark_assigned_as_waiting_for_operator(self, session_id: int) -> None:
+        with self.db.connect() as connection:
+            connection.execute(
+                """
+                UPDATE work_items
+                SET status = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE session_id = ? AND status = ?
+                """,
+                (
+                    WorkItemStatus.WAITING_FOR_OPERATOR.value,
+                    session_id,
+                    WorkItemStatus.ASSIGNED.value,
+                ),
+            )

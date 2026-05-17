@@ -34,6 +34,10 @@ class SessionBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def is_role_alive(self, role: RuntimeRoleHandle) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
     def stop_role(self, role: RuntimeRoleHandle) -> None:
         raise NotImplementedError
 

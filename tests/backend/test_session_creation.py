@@ -25,7 +25,7 @@ from backend.roles.launcher import RoleLauncherManager
 from backend.roles.workspace import RoleWorkspaceManager
 from backend.session_backend.recording_backend import RecordingSessionBackend
 from backend.session_backend.tmux_backend import TmuxSessionBackend
-from backend.session_backend.runtime_models import RuntimeSessionHandle
+from backend.session_backend.runtime_models import RuntimeRoleHandle, RuntimeSessionHandle
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.db import Database
 from backend.state.event_repository import EventRepository
@@ -131,6 +131,53 @@ class FakeGitLabAdapter:
             ),
             stderr="",
         )
+
+
+class AutoRecoveryRecordingBackend(RecordingSessionBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.spawn_generation: dict[tuple[str, str], int] = {}
+        self.role_alive: dict[str, bool] = {}
+        self.fail_spawn_for: set[tuple[str, str]] = set()
+
+    def spawn_role(
+        self,
+        session: RuntimeSessionHandle,
+        role_name: str,
+        start_directory: Path | None = None,
+        launch_command: list[str] | None = None,
+    ):
+        del start_directory
+        key = (session.session_id, role_name)
+        if key in self.fail_spawn_for:
+            raise RuntimeError(f"spawn failed for {role_name}")
+        generation = self.spawn_generation.get(key, 0) + 1
+        self.spawn_generation[key] = generation
+        role_id = f"{session.session_id}:{role_name}:{generation}"
+        self.spawn_commands[role_id] = list(launch_command or [])
+        self.role_alive[role_id] = True
+        return RuntimeRoleHandle(
+            role_id=role_id,
+            session_id=session.session_id,
+            backend_name="recording",
+        )
+
+    def is_role_alive(self, role) -> bool:
+        return self.role_alive.get(role.role_id, False)
+
+    def mark_dead(self, role_id: str) -> None:
+        self.role_alive[role_id] = False
+
+    def stop_role(self, role) -> None:
+        self.role_alive[role.role_id] = False
+        super().stop_role(role)
+
+    def stop_session(self, session) -> None:
+        prefix = f"{session.session_id}:"
+        for role_id in list(self.role_alive):
+            if role_id.startswith(prefix):
+                self.role_alive[role_id] = False
+        super().stop_session(session)
 
 
 class SessionCreationTests(unittest.TestCase):
@@ -3449,6 +3496,65 @@ class SessionCreationTests(unittest.TestCase):
                 session_id=session.id,
                 target_role_name="implementer",
             )
+
+    def test_run_loop_once_auto_recovers_dead_owner_runtime(self) -> None:
+        backend = AutoRecoveryRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004AUTORECOVER")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        assert implementer_role is not None
+        dead_handle = implementer_role.runtime_handle
+        assert dead_handle is not None
+        backend.mark_dead(dead_handle)
+
+        event, session_count, chunk_count = self.coordinator.run_loop_once()
+
+        self.assertEqual("coordinator_loop_ran", event.event_type)
+        self.assertEqual(1, session_count)
+        self.assertEqual(0, chunk_count)
+        refreshed_session = self.session_repository.get_by_id(session.id)
+        refreshed_role = self.role_repository.get_by_name(session.id, "implementer")
+        assert refreshed_session is not None
+        assert refreshed_role is not None
+        self.assertEqual("active", refreshed_session.status.value)
+        self.assertEqual("implementer", refreshed_session.current_owner)
+        self.assertNotEqual(dead_handle, refreshed_role.runtime_handle)
+        events = self.event_repository.list_for_session(session.id)
+        self.assertTrue(any(item.event_type == "runtime_role_auto_recovery_attempted" for item in events))
+        self.assertTrue(any(item.event_type == "role_input_dispatched" for item in events))
+        sent_inputs = backend.get_sent_inputs(refreshed_role.runtime_handle)
+        self.assertEqual(1, len(sent_inputs))
+
+    def test_run_loop_once_escalates_when_auto_recovery_fails(self) -> None:
+        backend = AutoRecoveryRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004AUTORECOVERFAIL")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        assert implementer_role is not None
+        dead_handle = implementer_role.runtime_handle
+        assert dead_handle is not None
+        backend.mark_dead(dead_handle)
+        backend.fail_spawn_for.add((f"recording-IOS-30004AUTORECOVERFAIL", "implementer"))
+
+        event, session_count, chunk_count = self.coordinator.run_loop_once()
+
+        self.assertEqual("coordinator_loop_ran", event.event_type)
+        self.assertEqual(1, session_count)
+        self.assertEqual(0, chunk_count)
+        refreshed_session = self.session_repository.get_by_id(session.id)
+        refreshed_role = self.role_repository.get_by_name(session.id, "implementer")
+        assert refreshed_session is not None
+        assert refreshed_role is not None
+        self.assertEqual("waiting_for_operator", refreshed_session.status.value)
+        self.assertIsNone(refreshed_session.current_owner)
+        self.assertEqual("failed", refreshed_role.status.value)
+        work_items = self.work_item_repository.list_for_session(session.id)
+        self.assertTrue(any(item.status.value == "waiting_for_operator" for item in work_items))
+        events = self.event_repository.list_for_session(session.id)
+        self.assertTrue(any(item.event_type == "runtime_role_auto_recovery_failed" for item in events))
+        self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
 
 
 if __name__ == "__main__":
