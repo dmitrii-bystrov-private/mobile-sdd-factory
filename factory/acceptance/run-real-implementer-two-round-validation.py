@@ -36,7 +36,10 @@ def wait_for_stage(
     deadline = time.time() + timeout_seconds
     last_response = None
     output_text = ""
+    role = dependencies.role_repository.get_by_name(session_id, role_name)
+    role_id = role.id if role is not None else None
     while time.time() < deadline:
+        dependencies.loop_runner.run_once()
         response = collect_role_output(
             CollectRoleOutputRequest(
                 session_id=session_id,
@@ -46,7 +49,11 @@ def wait_for_stage(
         )
         last_response = response
         artifacts = dependencies.artifact_repository.list_for_session(session_id)
-        runtime_outputs = [item for item in artifacts if item.artifact_type == "runtime_output"]
+        runtime_outputs = [
+            item
+            for item in artifacts
+            if item.artifact_type == "runtime_output" and item.role_id == role_id
+        ]
         if runtime_outputs:
             output_path = Path(runtime_outputs[-1].path)
             if output_path.is_file():

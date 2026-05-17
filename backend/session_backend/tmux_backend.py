@@ -285,6 +285,13 @@ class TmuxSessionBackend(SessionBackend):
         previous = self.last_captured_output.get(role.role_id, "")
         self.last_captured_output[role.role_id] = current
         if current == previous:
+            if (
+                current
+                and self.tmux_interactive_driver_enabled.get(role.role_id, False)
+                and not self.tmux_role_ready.get(role.role_id, False)
+            ):
+                synthetic_markers = self._handle_tmux_interactive_driver_output(role.role_id, current)
+                return [RuntimeOutputChunk(role_id=role.role_id, text=text) for text in synthetic_markers]
             return []
         if previous and current.startswith(previous):
             delta = current[len(previous):]
@@ -521,7 +528,10 @@ class TmuxSessionBackend(SessionBackend):
                 socket_path = self._socket_path(session_id)
                 self._tmux(socket_path, "send-keys", "-t", runtime_handle, "1", "Enter")
                 self.tmux_trust_prompt_handled[role_id] = True
-            if self._contains_runner_ready_prompt(normalized):
+            if (
+                self._contains_runner_ready_prompt(recent_normalized)
+                or self._contains_runner_ready_prompt(normalized)
+            ):
                 self.tmux_role_ready[role_id] = True
                 self.tmux_pre_ready_unknown_chunks[role_id] = 0
         if (
