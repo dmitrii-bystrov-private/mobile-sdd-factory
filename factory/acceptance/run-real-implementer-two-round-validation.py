@@ -16,8 +16,8 @@ from backend.roles.contracts import IMPLEMENTER_ROLE
 
 
 def _load_build_acceptance_dependencies(repo_root: Path):
-    probe_path = repo_root / "factory" / "acceptance" / "run-real-launcher-pty-probe.py"
-    spec = importlib.util.spec_from_file_location("real_launcher_pty_probe", probe_path)
+    probe_path = repo_root / "factory" / "acceptance" / "run-real-launcher-tmux-probe.py"
+    spec = importlib.util.spec_from_file_location("real_launcher_tmux_probe", probe_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Unable to load probe module from {probe_path}")
     module = importlib.util.module_from_spec(spec)
@@ -66,7 +66,7 @@ def main() -> None:
         temp_root = Path(temp_dir)
         deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
 
-        task_key = "IOS-ACCEPT-REAL-TWO-ROUND-001"
+        task_key = f"IOS-ACCEPT-REAL-TWO-ROUND-{temp_root.name.split('.')[-1].upper()}"
         create_response = create_session(
             CreateSessionRequest(
                 task_key=task_key,

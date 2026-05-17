@@ -128,7 +128,7 @@ def main() -> None:
         temp_root = Path(temp_dir)
         deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
 
-        task_key = "IOS-ACCEPT-REAL-LAUNCHER-TMUX-001"
+        task_key = f"IOS-ACCEPT-REAL-LAUNCHER-TMUX-{temp_root.name.split('.')[-1].upper()}"
         create_response = create_session(
             CreateSessionRequest(
                 task_key=task_key,
