@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import os
 import shutil
+import subprocess
 import tempfile
 from typing import Iterator
 
@@ -26,12 +27,42 @@ def acceptance_runs_root(repo_root: Path) -> Path:
 
 
 def tmux_socket_root(repo_root: Path) -> Path:
-    root = runtime_root(repo_root) / "tmux-sockets"
+    root = repo_root / ".ts" / "runtime"
     root.mkdir(parents=True, exist_ok=True)
     return root
 
 
+def run_tmux_socket_root(run_root: Path) -> Path:
+    run_suffix = run_root.name.split(".")[-1]
+    root = run_root.parents[2] / ".ts" / "tests" / run_suffix
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def cleanup_stale_run_roots(repo_root: Path) -> None:
+    runs_root = acceptance_runs_root(repo_root)
+    for run_root in runs_root.iterdir():
+        if not run_root.is_dir():
+            continue
+        socket_root = run_tmux_socket_root(run_root)
+        if socket_root.exists():
+            for sock in socket_root.glob("*.sock"):
+                try:
+                    if sock.exists():
+                        subprocess.run(
+                            ["tmux", "-S", str(sock), "kill-server"],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                finally:
+                    sock.unlink(missing_ok=True)
+            shutil.rmtree(socket_root, ignore_errors=True)
+        shutil.rmtree(run_root, ignore_errors=True)
+
+
 def create_run_root(repo_root: Path, prefix: str) -> Path:
+    cleanup_stale_run_roots(repo_root)
     return Path(tempfile.mkdtemp(prefix=f"{prefix}.", dir=acceptance_runs_root(repo_root)))
 
 

@@ -29,7 +29,7 @@ from backend.tools.snapshot_adapter import SnapshotAdapter
 
 
 def _project_socket_root(config: AppConfig):
-    return config.repo_root / ".runtime" / "tmux-sockets"
+    return config.repo_root / ".ts" / "runtime"
 
 
 @dataclass

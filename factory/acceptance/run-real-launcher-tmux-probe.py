@@ -24,7 +24,7 @@ from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.fake_adapters import FakeGitLabAdapter, FakeJiraAdapter, FakeSnapshotAdapter
-from run_roots import managed_run_root, shutdown_dependencies, tmux_socket_root
+from run_roots import managed_run_root, run_tmux_socket_root, shutdown_dependencies
 
 
 def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDependencies:
@@ -39,7 +39,7 @@ def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDepend
     session_backend = TmuxSessionBackend(
         mode="tmux",
         runtime_root=temp_root / "workdir",
-        socket_root=tmux_socket_root(repo_root),
+        socket_root=run_tmux_socket_root(temp_root),
     )
     jira_adapter = FakeJiraAdapter(repo_root)
     snapshot_adapter = FakeSnapshotAdapter(repo_root, temp_root / "workdir")
