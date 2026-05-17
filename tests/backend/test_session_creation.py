@@ -2537,6 +2537,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("select-window", implementer["tmux_attach_command"])
         self.assertIn("capture-pane", implementer["tmux_capture_command"])
 
+        runtime_session = coordinator._runtime_session_handle_for_session(session)
+        tmux_backend.stop_session(runtime_session)
+
     def test_collect_role_output_normalizes_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
