@@ -498,6 +498,7 @@ class TmuxSessionBackend(SessionBackend):
             and normalized
             and not trust_prompt
             and not selection_blocker
+            and not self._contains_launcher_bootstrap_noise(recent_normalized)
             and not self.pty_generic_blocker_emitted.get(role_id, False)
         ):
             self.pty_pre_ready_unknown_chunks[role_id] += 1
@@ -577,6 +578,7 @@ class TmuxSessionBackend(SessionBackend):
             and normalized
             and not trust_prompt
             and not selection_blocker
+            and not self._contains_launcher_bootstrap_noise(recent_normalized)
             and not self.tmux_generic_blocker_emitted.get(role_id, False)
         ):
             self.tmux_pre_ready_unknown_chunks[role_id] += 1
@@ -646,6 +648,12 @@ class TmuxSessionBackend(SessionBackend):
             and "do you trust the contents of this directory" not in normalized_text
             and "enter to confirm" not in normalized_text
             and "enter to select" not in normalized_text
+        )
+
+    def _contains_launcher_bootstrap_noise(self, normalized_text: str) -> bool:
+        return (
+            "sdd_factory_role_launcher_ready" in normalized_text
+            or "sdd_factory_agent_bootstrap" in normalized_text
         )
 
     def _contains_codex_ready_prompt(self, normalized_text: str) -> bool:

@@ -90,9 +90,13 @@ class TmuxBackendTests(unittest.TestCase):
                 launch_command=["python3", "-u", str(fixture)],
             )
 
-            time.sleep(0.1)
-            startup_chunks = backend.read_output(role)
-            self.assertTrue(any("AGENT_READY" in chunk.text for chunk in startup_chunks))
+            startup = self._wait_for_output(
+                backend,
+                role,
+                timeout_seconds=2.0,
+                expected_substring="AGENT_READY",
+            )
+            self.assertIn("AGENT_READY", startup)
 
             backend.send_input(role, "first routed work")
             first_round = self._wait_for_output(
