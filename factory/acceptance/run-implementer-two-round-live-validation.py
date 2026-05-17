@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate two implementer rounds against one live local process host."""
+"""Validate two implementer rounds against one live tmux-backed host."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def collect_until_output(
     *,
     dependencies: AppDependencies,
     target_stage: str,
-    timeout_seconds: float = 2.0,
+    timeout_seconds: float = 10.0,
 ) -> tuple[object, list]:
     deadline = time.time() + timeout_seconds
     last_response = None
@@ -71,7 +71,7 @@ def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDepend
     artifact_repository = ArtifactRepository(database)
     work_item_repository = WorkItemRepository(database)
     session_backend = TmuxSessionBackend(
-        mode="process",
+        mode="tmux",
         runtime_root=temp_root / "workdir",
     )
     jira_adapter = FakeJiraAdapter(repo_root)
@@ -138,7 +138,7 @@ def main() -> None:
         temp_root = Path(temp_dir)
         deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
 
-        task_key = "IOS-ACCEPT-LIVE-TWO-ROUND-001"
+        task_key = f"IOS-ACCEPT-LIVE-TWO-ROUND-{temp_root.name.split('.')[-1].upper()}"
         create_response = create_session(
             CreateSessionRequest(
                 task_key=task_key,
@@ -194,8 +194,8 @@ def main() -> None:
 
         sent_inputs = deps.session_backend.get_sent_inputs(runtime_handle)
         assert len(sent_inputs) == 2
-        assert "Start implementation work for IOS-ACCEPT-LIVE-TWO-ROUND-001." in sent_inputs[0]
-        assert "Apply verification corrections for IOS-ACCEPT-LIVE-TWO-ROUND-001." in sent_inputs[1]
+        assert f"Start implementation work for {task_key}." in sent_inputs[0]
+        assert f"Apply verification corrections for {task_key}." in sent_inputs[1]
 
         events_response = list_events(session_id=session_id, dependencies=deps)
         event_types = [item.event_type for item in events_response.items]

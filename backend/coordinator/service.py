@@ -1338,7 +1338,7 @@ class CoordinatorService:
 
         runtime_role = RuntimeRoleHandle(
             role_id=role.runtime_handle or f"{role.runtime_backend}:{role.role_name}",
-            session_id=f"session:{session.id}",
+            session_id=self._runtime_session_id_for_role(role, session),
             backend_name=role.runtime_backend,
         )
         chunks = self.session_backend.read_output(runtime_role)
@@ -1382,7 +1382,7 @@ class CoordinatorService:
         for role in roles:
             runtime_role = RuntimeRoleHandle(
                 role_id=role.runtime_handle or f"{role.runtime_backend}:{role.role_name}",
-                session_id=f"session:{session.id}",
+                session_id=self._runtime_session_id_for_role(role, session),
                 backend_name=role.runtime_backend,
             )
             chunks = self.session_backend.read_output(runtime_role)
@@ -1587,7 +1587,7 @@ class CoordinatorService:
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         runtime_role = RuntimeRoleHandle(
             role_id=role.runtime_handle,
-            session_id=f"session:{session.id}",
+            session_id=self._runtime_session_id_for_role(role, session),
             backend_name=role.runtime_backend,
         )
         self.session_backend.send_input(runtime_role, text)
@@ -4424,7 +4424,7 @@ class CoordinatorService:
         )
         runtime_role = RuntimeRoleHandle(
             role_id=role.runtime_handle or f"{role.runtime_backend}:{role.role_name}",
-            session_id=f"session:{session.id}",
+            session_id=self._runtime_session_id_for_role(role, session),
             backend_name=role.runtime_backend,
         )
         self.session_backend.send_input(runtime_role, prompt_text)
@@ -4440,6 +4440,12 @@ class CoordinatorService:
                 "prompt_mode": prompt_mode,
             },
         )
+
+    def _runtime_session_id_for_role(self, role: Role, session: Session) -> str:
+        runtime_handle = role.runtime_handle
+        if runtime_handle and ":" in runtime_handle:
+            return runtime_handle.split(":", 1)[0]
+        return f"session:{session.id}"
 
     def _prompt_mode_for_dispatch(self, role: Role) -> str:
         if role.role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE, VERIFICATION_COORDINATOR_ROLE}:

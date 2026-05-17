@@ -585,7 +585,8 @@ class TmuxSessionBackend(SessionBackend):
 
     def _contains_runner_ready_prompt(self, normalized_text: str) -> bool:
         return (
-            self._contains_runner_status_signal(normalized_text)
+            "agent_ready" in normalized_text
+            or self._contains_runner_status_signal(normalized_text)
             or self._contains_interactive_input_prompt(normalized_text)
             or self._contains_codex_ready_prompt(normalized_text)
         )
