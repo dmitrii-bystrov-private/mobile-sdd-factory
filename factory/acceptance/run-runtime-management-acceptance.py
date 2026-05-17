@@ -48,8 +48,10 @@ def wait_for_stage(
     timeout_seconds: float = 150.0,
 ) -> tuple[object, str]:
     deadline = time.time() + timeout_seconds
+    idle_deadline = time.time() + 20.0
     last_response = None
     output_text = ""
+    last_output_text = ""
     role = dependencies.role_repository.get_by_name(session_id, role_name)
     role_id = role.id if role is not None else None
     while time.time() < deadline:
@@ -72,8 +74,15 @@ def wait_for_stage(
             output_path = Path(runtime_outputs[-1].path)
             if output_path.is_file():
                 output_text = output_path.read_text()
+        if output_text != last_output_text:
+            idle_deadline = time.time() + 20.0
+            last_output_text = output_text
+        if _shows_active_work(output_text):
+            idle_deadline = time.time() + 20.0
         if response.session.current_stage == target_stage:
             return response, output_text
+        if time.time() >= idle_deadline:
+            break
         time.sleep(0.5)
     assert last_response is not None
     return last_response, output_text
@@ -100,6 +109,23 @@ def _has_started_routed_work(output_text: str) -> bool:
     return (
         "read routed_work.md" in meaningful
         or "sdd_progress:" in meaningful
+        or "result.json" in meaningful
+    )
+
+
+def _shows_active_work(output_text: str) -> bool:
+    meaningful = _strip_bootstrap_noise(output_text).lower()
+    if not meaningful:
+        return False
+    return (
+        "working (" in meaningful
+        or "sdd_progress:" in meaningful
+        or "reading " in meaningful
+        or "let me " in meaningful
+        or "ran " in meaningful
+        or "edited " in meaningful
+        or "updated " in meaningful
+        or "added " in meaningful
         or "result.json" in meaningful
     )
 

@@ -1,9 +1,11 @@
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
 import time
 import unittest
 
+from backend.session_backend.runtime_models import RuntimeRoleHandle
 from backend.session_backend.tmux_backend import TmuxSessionBackend
 
 
@@ -57,6 +59,31 @@ class TmuxBackendTests(unittest.TestCase):
 
             self.assertEqual(["first line", "second line"], [chunk.text for chunk in chunks])
             self.assertEqual([], backend.read_output(role))
+
+    def test_tmux_launcher_prompt_echo_does_not_resubmit_input(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50009:implementer",
+            session_id="sdd-IOS-50009",
+            backend_name="tmux",
+        )
+        backend.tmux_interactive_driver_enabled[role.role_id] = True
+        backend.tmux_role_ready[role.role_id] = True
+
+        backend.send_input(role, "first routed work")
+        backend._handle_tmux_interactive_driver_output(role.role_id, "❯ first routed work")
+
+        submit_calls = [call for call in backend.calls if call[-1] == "C-m"]
+        self.assertEqual([("send-keys", "-t", role.role_id, "C-m")], submit_calls)
 
     def test_normalize_terminal_text_strips_ansi_noise(self) -> None:
         backend = TmuxSessionBackend(mode="recording")
@@ -543,6 +570,9 @@ class TmuxBackendTests(unittest.TestCase):
         prompt_ready = backend._normalize_terminal_text(
             "❯ Try \"refactor <filepath>\"\n[Sonnet 4.6] 0% | $0.00 | 0m 2s"
         )
+        codex_prompt_ready = backend._normalize_terminal_text(
+            "› Summarize recent commits\n\ngpt-5.5 medium · ~/repo"
+        )
 
         self.assertTrue(backend._contains_workspace_trust_prompt(trust))
         self.assertTrue(backend._contains_generic_selection_blocker(selection))
@@ -553,6 +583,8 @@ class TmuxBackendTests(unittest.TestCase):
         self.assertTrue(backend._contains_runner_ready_prompt(status_signal_long))
         self.assertTrue(backend._contains_interactive_input_prompt(prompt_ready))
         self.assertTrue(backend._contains_runner_ready_prompt(prompt_ready))
+        self.assertTrue(backend._contains_interactive_input_prompt(codex_prompt_ready))
+        self.assertTrue(backend._contains_runner_ready_prompt(codex_prompt_ready))
         self.assertFalse(backend._contains_interactive_input_prompt(trust))
         self.assertFalse(backend._contains_interactive_input_prompt(selection))
         self.assertFalse(backend._contains_interactive_input_prompt(confirmation))
