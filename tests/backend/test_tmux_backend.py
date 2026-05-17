@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 import tempfile
 import time
 import unittest
@@ -114,6 +115,109 @@ class TmuxBackendTests(unittest.TestCase):
             self.assertIn("SDD_OUTPUT", second_round)
 
             self.assertEqual("process", backend.effective_mode)
+            backend.stop_session(session)
+
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_tmux_mode_keeps_persistent_subprocess_across_rounds(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            backend = TmuxSessionBackend(
+                mode="tmux",
+                runtime_root=runtime_root,
+            )
+            session = backend.create_task_session("IOS-50002TMUX")
+            fixture = (
+                Path(__file__).resolve().parent
+                / "fixtures"
+                / "persistent_echo_agent.py"
+            )
+            role = backend.spawn_role(
+                session,
+                "implementer",
+                start_directory=runtime_root / "IOS-50002TMUX" / "runtime" / "role-workspaces" / "implementer",
+                launch_command=["python3", "-u", str(fixture)],
+            )
+
+            startup = self._wait_for_output(
+                backend,
+                role,
+                timeout_seconds=2.0,
+                expected_substring="AGENT_READY",
+            )
+            self.assertIn("AGENT_READY", startup)
+
+            backend.send_input(role, "first routed work")
+            first_round = self._wait_for_output(
+                backend,
+                role,
+                timeout_seconds=3.0,
+                expected_substring="round 1",
+            )
+            self.assertIn("round 1", first_round)
+            self.assertIn("SDD_OUTPUT", first_round)
+
+            backend.send_input(role, "second routed work")
+            second_round = self._wait_for_output(
+                backend,
+                role,
+                timeout_seconds=3.0,
+                expected_substring="round 2",
+            )
+            self.assertIn("round 2", second_round)
+            self.assertIn("SDD_OUTPUT", second_round)
+
+            self.assertEqual("tmux", backend.effective_mode)
+            backend.stop_session(session)
+
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_tmux_mode_buffers_launcher_backed_input_until_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            backend = TmuxSessionBackend(
+                mode="tmux",
+                runtime_root=runtime_root,
+            )
+            session = backend.create_task_session("IOS-50004TMUX")
+            fixture = (
+                Path(__file__).resolve().parent
+                / "fixtures"
+                / "interactive_launcher_fixture.py"
+            )
+            role_workspace = runtime_root / "IOS-50004TMUX" / "runtime" / "role-workspaces" / "implementer"
+            role_workspace.mkdir(parents=True, exist_ok=True)
+            launcher_script = role_workspace / "launch-role.sh"
+            launcher_script.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        f"exec python3 -u {fixture}",
+                        "",
+                    ]
+                )
+            )
+            launcher_script.chmod(0o755)
+            role = backend.spawn_role(
+                session,
+                "implementer",
+                start_directory=role_workspace,
+                launch_command=[str(launcher_script)],
+            )
+
+            backend.send_input(role, "first routed work")
+
+            interactive_round = self._wait_for_output(
+                backend,
+                role,
+                timeout_seconds=4.0,
+                expected_substring="interactive round done",
+            )
+            self.assertIn("Quick safety check", interactive_round)
+            self.assertIn("✻ Brewed for 1s", interactive_round)
+            self.assertIn("ROUTED:first routed work", interactive_round)
+            self.assertIn("SDD_OUTPUT", interactive_round)
+            self.assertEqual(["first routed work"], backend.get_sent_inputs(role.role_id))
+
             backend.stop_session(session)
 
     def test_pty_mode_keeps_persistent_subprocess_across_rounds(self) -> None:
@@ -434,15 +538,15 @@ class TmuxBackendTests(unittest.TestCase):
             "❯ Try \"refactor <filepath>\"\n[Sonnet 4.6] 0% | $0.00 | 0m 2s"
         )
 
-        self.assertTrue(backend._contains_claude_trust_prompt(trust))
+        self.assertTrue(backend._contains_workspace_trust_prompt(trust))
         self.assertTrue(backend._contains_generic_selection_blocker(selection))
         self.assertTrue(backend._contains_generic_confirmation_blocker(confirmation))
         self.assertTrue(backend._contains_runner_status_signal(status_signal))
-        self.assertTrue(backend._contains_claude_ready_prompt(status_signal))
+        self.assertTrue(backend._contains_runner_ready_prompt(status_signal))
         self.assertTrue(backend._contains_runner_status_signal(status_signal_long))
-        self.assertTrue(backend._contains_claude_ready_prompt(status_signal_long))
+        self.assertTrue(backend._contains_runner_ready_prompt(status_signal_long))
         self.assertTrue(backend._contains_interactive_input_prompt(prompt_ready))
-        self.assertTrue(backend._contains_claude_ready_prompt(prompt_ready))
+        self.assertTrue(backend._contains_runner_ready_prompt(prompt_ready))
         self.assertFalse(backend._contains_interactive_input_prompt(trust))
         self.assertFalse(backend._contains_interactive_input_prompt(selection))
         self.assertFalse(backend._contains_interactive_input_prompt(confirmation))
