@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import tempfile
 import time
 from pathlib import Path
@@ -79,6 +80,21 @@ def wait_for_stage(
 
 
 def _create_prepared_session(*, task_key: str, dependencies) -> int:
+    runner = os.environ.get("SDD_FACTORY_ACCEPTANCE_RUNNER", "claude").strip() or "claude"
+    role_config = None
+    if runner != "claude":
+        role_config = {
+            "implementer": {
+                "runner": runner,
+                "model": "gpt-5.5",
+                "effort": "medium",
+            },
+            "verification-coordinator": {
+                "runner": runner,
+                "model": "gpt-5.5",
+                "effort": "medium",
+            },
+        }
     create_response = create_session(
         CreateSessionRequest(
             task_key=task_key,
@@ -88,6 +104,7 @@ def _create_prepared_session(*, task_key: str, dependencies) -> int:
                 "boy_scout_policy": "disabled",
                 "doc_harvest_policy": "disabled",
             },
+            role_config=role_config,
         ),
         dependencies=dependencies,
     )
