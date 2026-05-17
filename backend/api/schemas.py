@@ -165,6 +165,9 @@ class BootstrapGuidanceResponse(BaseModel):
     required_action_count: int
     optional_action_count: int
     next_step: str
+    launch_command: str
+    backend_url: str
+    ui_url: str
     required_actions: list[BootstrapGuidanceItemResponse]
     optional_actions: list[BootstrapGuidanceItemResponse]
 

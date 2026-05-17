@@ -45,6 +45,18 @@ export function BootstrapGuidancePanel({
         </div>
       </div>
 
+      <div className="artifact-stack">
+        <article className="artifact-card">
+          <div className="artifact-meta">
+            <span>run</span>
+            <strong>Launch Stack</strong>
+          </div>
+          <p className="artifact-path">{guidanceSummary.launchCommand}</p>
+          <p className="path-label">Backend: {guidanceSummary.backendUrl}</p>
+          <p className="path-label">UI: {guidanceSummary.uiUrl}</p>
+        </article>
+      </div>
+
       {[
         { title: "Required actions", items: guidanceSummary.requiredActions },
         { title: "Optional improvements", items: guidanceSummary.optionalActions },

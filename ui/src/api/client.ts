@@ -219,6 +219,9 @@ export const apiClient = {
     required_action_count: number;
     optional_action_count: number;
     next_step: string;
+    launch_command: string;
+    backend_url: string;
+    ui_url: string;
     required_actions: Array<{
       id: string;
       label: string;

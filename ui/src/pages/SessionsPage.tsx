@@ -346,6 +346,9 @@ export function SessionsPage(): JSX.Element {
         requiredActionCount: guidanceResponse.required_action_count,
         optionalActionCount: guidanceResponse.optional_action_count,
         nextStep: guidanceResponse.next_step,
+        launchCommand: guidanceResponse.launch_command,
+        backendUrl: guidanceResponse.backend_url,
+        uiUrl: guidanceResponse.ui_url,
         requiredActions: guidanceResponse.required_actions.map((item) => ({
           id: item.id,
           label: item.label,

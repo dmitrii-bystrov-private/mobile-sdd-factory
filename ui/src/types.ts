@@ -157,6 +157,9 @@ export type BootstrapGuidanceSummary = {
   requiredActionCount: number;
   optionalActionCount: number;
   nextStep: string;
+  launchCommand: string;
+  backendUrl: string;
+  uiUrl: string;
   requiredActions: BootstrapGuidanceItem[];
   optionalActions: BootstrapGuidanceItem[];
 };

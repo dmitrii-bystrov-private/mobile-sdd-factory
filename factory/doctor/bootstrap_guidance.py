@@ -53,6 +53,9 @@ def build_bootstrap_guidance(report: dict[str, Any]) -> dict[str, Any]:
         "required_action_count": len(required_actions),
         "optional_action_count": len(optional_actions),
         "next_step": next_step,
+        "launch_command": "bash factory/run-local-stack.sh",
+        "backend_url": "http://127.0.0.1:8000",
+        "ui_url": "http://127.0.0.1:4173",
         "required_actions": [item.__dict__ for item in required_actions],
         "optional_actions": [item.__dict__ for item in optional_actions],
     }
@@ -63,6 +66,9 @@ def format_bootstrap_guidance(guidance: dict[str, Any]) -> str:
         "SDD Factory Bootstrap Guidance",
         f"Overall doctor status: {guidance['overall_status']}",
         f"Next step: {guidance['next_step']}",
+        f"Launch command: {guidance['launch_command']}",
+        f"Backend URL: {guidance['backend_url']}",
+        f"UI URL: {guidance['ui_url']}",
     ]
 
     required_actions = guidance["required_actions"]
