@@ -2500,6 +2500,43 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("implementation_requested", hydration["current_stage"])
         self.assertEqual("implementer", hydration["role_name"])
 
+    def test_runtime_state_summary_exposes_tmux_visibility_commands(self) -> None:
+        tmux_backend = TmuxSessionBackend(mode="tmux", runtime_root=Path(self.temp_dir.name))
+        coordinator = CoordinatorService(
+            session_repository=self.session_repository,
+            role_repository=self.role_repository,
+            event_repository=self.event_repository,
+            artifact_repository=self.artifact_repository,
+            work_item_repository=self.work_item_repository,
+            session_backend=tmux_backend,
+            default_roles=DEFAULT_SESSION_ROLES,
+            jira_adapter=FakeJiraAdapter(),
+            snapshot_adapter=FakeSnapshotAdapter(Path(self.temp_dir.name)),
+            gitlab_adapter=FakeGitLabAdapter(),
+            artifacts_root=Path(self.temp_dir.name) / "artifacts-tmux-visibility",
+            workdir_root=Path(self.temp_dir.name),
+            event_bus=self.event_bus,
+        )
+
+        session, _, _ = coordinator.create_task_session(
+            task_key=f"IOS-31000TMUX-{Path(self.temp_dir.name).name.upper()}",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "disabled",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+
+        summary = coordinator.get_runtime_state_summary(session.id)
+
+        self.assertTrue(summary["available"])
+        self.assertIn("tmux -S ", summary["tmux_attach_command"])
+        self.assertTrue(str(summary["tmux_socket_path"]).endswith(".sock"))
+        implementer = next(item for item in summary["roles"] if item["role_name"] == "implementer")
+        self.assertIn("select-window", implementer["tmux_attach_command"])
+        self.assertIn("capture-pane", implementer["tmux_capture_command"])
+
     def test_collect_role_output_normalizes_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")

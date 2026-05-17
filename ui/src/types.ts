@@ -115,11 +115,15 @@ export type RuntimeRoleStateSummary = {
   status: string;
   runtimeBackend: string;
   runtimeHandle: string | null;
+  tmuxAttachCommand: string | null;
+  tmuxCaptureCommand: string | null;
 };
 
 export type RuntimeSessionStateSummary = {
   available: boolean;
   runtimeSessionId: string | null;
+  tmuxSocketPath: string | null;
+  tmuxAttachCommand: string | null;
   roles: RuntimeRoleStateSummary[];
 };
 

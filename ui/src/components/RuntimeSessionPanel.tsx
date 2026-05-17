@@ -49,10 +49,24 @@ export function RuntimeSessionPanel({
               <strong>{runtimeStateSummary.runtimeSessionId ?? "unknown"}</strong>
             </div>
             <div className="table-row">
+              <span>tmux socket</span>
+              <strong>{runtimeStateSummary.tmuxSocketPath ?? "n/a"}</strong>
+            </div>
+            <div className="table-row">
               <span>Role count</span>
               <strong>{runtimeStateSummary.roles.length}</strong>
             </div>
           </div>
+
+          {runtimeStateSummary.tmuxAttachCommand ? (
+            <div className="artifact-card">
+              <div className="artifact-meta">
+                <span>tmux</span>
+                <strong>Attach Session</strong>
+              </div>
+              <pre className="artifact-path">{runtimeStateSummary.tmuxAttachCommand}</pre>
+            </div>
+          ) : null}
 
           <div className="actions-grid">
             <button
@@ -91,6 +105,12 @@ export function RuntimeSessionPanel({
                 <p className="artifact-path">
                   {role.runtimeBackend} · {role.runtimeHandle ?? "no handle"}
                 </p>
+                {role.tmuxAttachCommand ? (
+                  <pre className="artifact-path">{role.tmuxAttachCommand}</pre>
+                ) : null}
+                {role.tmuxCaptureCommand ? (
+                  <pre className="artifact-path">{role.tmuxCaptureCommand}</pre>
+                ) : null}
                 <button
                   className="action-button"
                   disabled={busy || role.runtimeHandle === null || role.status === "stopped"}

@@ -123,11 +123,15 @@ class RuntimeRoleStateResponse(BaseModel):
     status: str
     runtime_backend: str
     runtime_handle: str | None = None
+    tmux_attach_command: str | None = None
+    tmux_capture_command: str | None = None
 
 
 class RuntimeSessionStateResponse(BaseModel):
     available: bool
     runtime_session_id: str | None = None
+    tmux_socket_path: str | None = None
+    tmux_attach_command: str | None = None
     roles: list[RuntimeRoleStateResponse]
 
 

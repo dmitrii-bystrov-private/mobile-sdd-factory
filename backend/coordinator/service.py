@@ -3886,18 +3886,53 @@ class CoordinatorService:
             runtime_session_id = self._runtime_session_handle_for_session(session).session_id
         except IntakeError:
             runtime_session_id = None
-        return {
-            "available": runtime_session_id is not None,
-            "runtime_session_id": runtime_session_id,
-            "roles": [
+        tmux_session_visibility = None
+        if runtime_session_id is not None and hasattr(self.session_backend, "get_tmux_visibility"):
+            tmux_session_visibility = self.session_backend.get_tmux_visibility(runtime_session_id)
+        role_summaries = []
+        for role in roles:
+            role_tmux_visibility = None
+            if (
+                runtime_session_id is not None
+                and role.runtime_handle is not None
+                and hasattr(self.session_backend, "get_tmux_visibility")
+            ):
+                role_tmux_visibility = self.session_backend.get_tmux_visibility(
+                    runtime_session_id,
+                    role.runtime_handle,
+                )
+            role_summaries.append(
                 {
                     "role_name": role.role_name,
                     "status": role.status.value,
                     "runtime_backend": role.runtime_backend,
                     "runtime_handle": role.runtime_handle,
+                    "tmux_attach_command": (
+                        role_tmux_visibility.get("tmux_role_attach_command")
+                        if isinstance(role_tmux_visibility, dict)
+                        else None
+                    ),
+                    "tmux_capture_command": (
+                        role_tmux_visibility.get("tmux_role_capture_command")
+                        if isinstance(role_tmux_visibility, dict)
+                        else None
+                    ),
                 }
-                for role in roles
-            ],
+            )
+        return {
+            "available": runtime_session_id is not None,
+            "runtime_session_id": runtime_session_id,
+            "tmux_socket_path": (
+                tmux_session_visibility.get("tmux_socket_path")
+                if isinstance(tmux_session_visibility, dict)
+                else None
+            ),
+            "tmux_attach_command": (
+                tmux_session_visibility.get("tmux_attach_command")
+                if isinstance(tmux_session_visibility, dict)
+                else None
+            ),
+            "roles": role_summaries,
         }
 
     def stop_runtime_role(self, session_id: int, role_name: str) -> tuple[Session, Event]:

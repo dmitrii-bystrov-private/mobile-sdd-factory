@@ -183,11 +183,15 @@ export const apiClient = {
   getRuntimeState(sessionId: number): Promise<{
     available: boolean;
     runtime_session_id: string | null;
+    tmux_socket_path: string | null;
+    tmux_attach_command: string | null;
     roles: Array<{
       role_name: string;
       status: string;
       runtime_backend: string;
       runtime_handle: string | null;
+      tmux_attach_command: string | null;
+      tmux_capture_command: string | null;
     }>;
   }> {
     return request(`/sessions/${sessionId}/runtime-state`);

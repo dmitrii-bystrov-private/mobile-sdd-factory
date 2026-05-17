@@ -193,11 +193,15 @@ async function buildRuntimeStateSummary(
   return {
     available: response.available,
     runtimeSessionId: response.runtime_session_id,
+    tmuxSocketPath: response.tmux_socket_path,
+    tmuxAttachCommand: response.tmux_attach_command,
     roles: response.roles.map((role) => ({
       roleName: role.role_name,
       status: role.status,
       runtimeBackend: role.runtime_backend,
       runtimeHandle: role.runtime_handle,
+      tmuxAttachCommand: role.tmux_attach_command,
+      tmuxCaptureCommand: role.tmux_capture_command,
     })),
   };
 }

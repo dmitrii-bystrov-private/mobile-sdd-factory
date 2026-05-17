@@ -36,6 +36,8 @@ class TmuxSessionBackend(SessionBackend):
         self.pty_master_fds: dict[str, int] = {}
         self.session_role_ids: dict[str, set[str]] = defaultdict(set)
         self.tmux_buffered_inputs: dict[str, list[str]] = defaultdict(list)
+        self.tmux_submit_traces: dict[str, list[dict[str, str]]] = defaultdict(list)
+        self.tmux_submit_retry_pending: dict[str, str] = {}
         self.tmux_interactive_driver_enabled: dict[str, bool] = {}
         self.tmux_role_ready: dict[str, bool] = defaultdict(lambda: True)
         self.tmux_output_buffers: dict[str, str] = defaultdict(str)
@@ -149,6 +151,7 @@ class TmuxSessionBackend(SessionBackend):
             self.tmux_selection_blocker_emitted[role_id] = False
             self.tmux_confirmation_blocker_emitted[role_id] = False
             self.tmux_pre_ready_unknown_chunks[role_id] = 0
+            self.session_role_ids[session.session_id].add(role_id)
         elif self._effective_mode == "process":
             process = subprocess.Popen(
                 role_command,
@@ -207,7 +210,7 @@ class TmuxSessionBackend(SessionBackend):
                 self.tmux_confirmation_blocker_emitted[role.role_id] = False
                 self.tmux_generic_blocker_emitted[role.role_id] = False
                 self.tmux_pre_ready_unknown_chunks[role.role_id] = 0
-                self._write_tmux_launcher_input(role.role_id, socket_path, role.role_id, text)
+                self._write_tmux_launcher_input(role.role_id, socket_path, role.role_id, text, source="direct")
                 return
             result = self._tmux(socket_path, "send-keys", "-t", role.role_id, text, "Enter")
             if result.returncode != 0:
@@ -313,6 +316,8 @@ class TmuxSessionBackend(SessionBackend):
             socket_path = self._socket_path(role.session_id)
             self._tmux(socket_path, "kill-window", "-t", role.role_id)
             self.tmux_buffered_inputs.pop(role.role_id, None)
+            self.tmux_submit_traces.pop(role.role_id, None)
+            self.tmux_submit_retry_pending.pop(role.role_id, None)
             self.tmux_interactive_driver_enabled.pop(role.role_id, None)
             self.tmux_role_ready.pop(role.role_id, None)
             self.tmux_output_buffers.pop(role.role_id, None)
@@ -321,6 +326,9 @@ class TmuxSessionBackend(SessionBackend):
             self.tmux_confirmation_blocker_emitted.pop(role.role_id, None)
             self.tmux_generic_blocker_emitted.pop(role.role_id, None)
             self.tmux_pre_ready_unknown_chunks.pop(role.role_id, None)
+            self.last_captured_output.pop(role.role_id, None)
+            self.role_working_directories.pop(role.role_id, None)
+            self.session_role_ids.get(role.session_id, set()).discard(role.role_id)
         elif self._effective_mode == "process":
             process = self.processes.pop(role.role_id, None)
             if process is not None:
@@ -366,6 +374,8 @@ class TmuxSessionBackend(SessionBackend):
             socket_path = self._socket_path(session.session_id)
             for role_id in list(self.session_role_ids.get(session.session_id, set())):
                 self.tmux_buffered_inputs.pop(role_id, None)
+                self.tmux_submit_traces.pop(role_id, None)
+                self.tmux_submit_retry_pending.pop(role_id, None)
                 self.tmux_interactive_driver_enabled.pop(role_id, None)
                 self.tmux_role_ready.pop(role_id, None)
                 self.tmux_output_buffers.pop(role_id, None)
@@ -374,6 +384,8 @@ class TmuxSessionBackend(SessionBackend):
                 self.tmux_confirmation_blocker_emitted.pop(role_id, None)
                 self.tmux_generic_blocker_emitted.pop(role_id, None)
                 self.tmux_pre_ready_unknown_chunks.pop(role_id, None)
+                self.last_captured_output.pop(role_id, None)
+                self.role_working_directories.pop(role_id, None)
             self._tmux(socket_path, "kill-session", "-t", session.session_id)
             if socket_path.exists():
                 socket_path.unlink()
@@ -529,7 +541,7 @@ class TmuxSessionBackend(SessionBackend):
                 runtime_handle = role_id
                 session_id = runtime_handle.split(":", 1)[0]
                 socket_path = self._socket_path(session_id)
-                self._tmux(socket_path, "send-keys", "-t", runtime_handle, "1", "Enter")
+                self._tmux(socket_path, "send-keys", "-t", runtime_handle, "1", "C-m")
                 self.tmux_trust_prompt_handled[role_id] = True
             if (
                 self._contains_runner_ready_prompt(recent_normalized)
@@ -577,12 +589,14 @@ class TmuxSessionBackend(SessionBackend):
                     + preview.replace('"', '\\"')
                     + '"}'
                 )
+        if self.tmux_role_ready.get(role_id, False):
+            self._maybe_retry_tmux_submit(role_id, recent_normalized)
         if self.tmux_role_ready.get(role_id, False) and not blocker_detected:
             runtime_handle = role_id
             session_id = runtime_handle.split(":", 1)[0]
             socket_path = self._socket_path(session_id)
             for buffered_text in self.tmux_buffered_inputs.pop(role_id, []):
-                self._write_tmux_launcher_input(role_id, socket_path, runtime_handle, buffered_text)
+                self._write_tmux_launcher_input(role_id, socket_path, runtime_handle, buffered_text, source="buffered")
         return synthetic_markers
 
     def _contains_workspace_trust_prompt(self, normalized_text: str) -> bool:
@@ -672,14 +686,77 @@ class TmuxSessionBackend(SessionBackend):
         socket_path: Path,
         runtime_handle: str,
         text: str,
+        *,
+        source: str,
     ) -> None:
         payload_text = text
         if "\n" in text:
             payload_text = self._materialize_routed_input(role_id, text)
+        self.tmux_submit_traces[role_id].append(
+            {
+                "source": source,
+                "original_text": text,
+                "payload_text": payload_text,
+            }
+        )
+        self.tmux_submit_retry_pending[role_id] = self._normalize_terminal_text(payload_text)
         result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "-l", payload_text)
         if result.returncode != 0:
             raise RuntimeError(result.stderr or result.stdout or "Failed to send tmux launcher input")
         time.sleep(0.25)
-        result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "Enter")
+        result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "C-m")
         if result.returncode != 0:
             raise RuntimeError(result.stderr or result.stdout or "Failed to submit tmux launcher input")
+
+    def get_tmux_submit_traces(self, role_id: str) -> list[dict[str, str]]:
+        return list(self.tmux_submit_traces.get(role_id, []))
+
+    def get_tmux_visibility(self, session_id: str, role_id: str | None = None) -> dict[str, str] | None:
+        if self._effective_mode != "tmux":
+            return None
+        socket_path = self._socket_path(session_id)
+        payload: dict[str, str] = {
+            "tmux_socket_path": str(socket_path),
+            "tmux_attach_command": f"tmux -S {str(socket_path)!r} attach -t {session_id!r}",
+        }
+        if role_id is not None:
+            payload["tmux_role_attach_command"] = (
+                f"tmux -S {str(socket_path)!r} attach -t {session_id!r} \\; select-window -t {role_id!r}"
+            )
+            payload["tmux_role_capture_command"] = f"tmux -S {str(socket_path)!r} capture-pane -p -t {role_id!r}"
+        return payload
+
+    def _maybe_retry_tmux_submit(self, role_id: str, recent_normalized: str) -> None:
+        pending = self.tmux_submit_retry_pending.get(role_id)
+        if not pending:
+            return
+        if any(
+            marker in recent_normalized
+            for marker in (
+                "sdd_output",
+                "sdd_progress",
+                "write(result.json)",
+                "reading ",
+                "let me ",
+                "added ",
+                "edited ",
+                "updated ",
+                "working (",
+            )
+        ):
+            self.tmux_submit_retry_pending.pop(role_id, None)
+            return
+        if pending not in recent_normalized:
+            return
+        runtime_handle = role_id
+        session_id = runtime_handle.split(":", 1)[0]
+        socket_path = self._socket_path(session_id)
+        self.tmux_submit_traces[role_id].append(
+            {
+                "source": "submit-retry",
+                "original_text": "",
+                "payload_text": pending,
+            }
+        )
+        self._tmux(socket_path, "send-keys", "-t", runtime_handle, "C-m")
+        self.tmux_submit_retry_pending.pop(role_id, None)
