@@ -40,11 +40,18 @@ def load_config() -> AppConfig:
         "on",
     }
 
+    runtime_backend = os.environ.get("SDD_FACTORY_RUNTIME_BACKEND", "tmux")
+    if not use_fake_adapters and runtime_backend != "tmux":
+        raise ValueError(
+            "Unsupported SDD_FACTORY_RUNTIME_BACKEND for application runtime: "
+            f"{runtime_backend}. The supported operational host is tmux."
+        )
+
     return AppConfig(
         repo_root=repo_root,
         workdir_root=workdir_root,
         database_path=database_path,
-        runtime_backend=os.environ.get("SDD_FACTORY_RUNTIME_BACKEND", "tmux"),
+        runtime_backend=runtime_backend,
         runtime_root=Path(
             os.environ.get("SDD_FACTORY_RUNTIME_ROOT", workdir_root)
         ),
