@@ -5,6 +5,7 @@ BUG_FIXER_ROLE = "bug-fixer"
 TASK_COORDINATOR_ROLE = "task-coordinator"
 VERIFICATION_COORDINATOR_ROLE = "verification-coordinator"
 CODE_REVIEWER_ROLE = "code-reviewer"
+CODE_SCOUT_ROLE = "code-scout"
 PROPOSAL_CONTEXT_WORKER_ROLE = "proposal-context-worker"
 REQUIREMENTS_CLARIFIER_WORKER_ROLE = "requirements-clarifier-worker"
 ACCEPTANCE_CRITERIA_WORKER_ROLE = "acceptance-criteria-worker"
@@ -60,6 +61,9 @@ ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     },
     "self_review_requested": {
         CODE_REVIEWER_ROLE,
+    },
+    "boy_scout_requested": {
+        CODE_SCOUT_ROLE,
     },
     "self_review_correction_requested": {
         IMPLEMENTER_ROLE,

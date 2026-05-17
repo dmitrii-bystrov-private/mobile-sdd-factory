@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 try:
+    from backend import session_policy as session_policy_module
     from backend.api.sse import SessionEventBus
     from backend.api.routes_sessions import (
         create_session,
@@ -35,6 +36,7 @@ try:
     from backend.api.routes_operator import reopen_from_qa
     from backend.api.routes_operator import redirect_session
     from backend.api.routes_operator import complete_doc_harvest
+    from backend.api.routes_operator import skip_boy_scout
     from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
     from backend.api.routes_operator import create_knowledge, create_subtasks_from_plan
@@ -60,6 +62,7 @@ try:
         CleanupTaskRequest,
         CreateMrRequest,
         CreateSubtasksFromPlanRequest,
+        SkipBoyScoutRequest,
         IngestMrCommentsRequest,
         PollSessionOutputRequest,
         PauseSessionRequest,
@@ -187,6 +190,8 @@ class FakeGitLabAdapter:
 class SessionApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
+        self._original_boy_scout_default = session_policy_module.COMMON_DEFAULTS["boy_scout_policy"]
+        session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = "disabled"
         self.db_path = Path(self.temp_dir.name) / "factory.sqlite3"
         self.database = Database(self.db_path)
         self.database.initialize()
@@ -247,6 +252,7 @@ class SessionApiTests(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
+        session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = self._original_boy_scout_default
         self.temp_dir.cleanup()
 
     def write_statuses_file(self, task_key: str, content: str) -> None:
@@ -1979,6 +1985,120 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertFalse(response.available)
         self.assertFalse(response.needs_operator_input)
+
+    def test_requirements_clarifier_runtime_input_can_continue_story_flow(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40013REQINT",
+                workflow_profile="story_full",
+                policy={"boy_scout_policy": "disabled"},
+            ),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013REQINT"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "proposal ready"},
+            ),
+            dependencies=self.dependencies,
+        )
+        clarifier_role = self.dependencies.role_repository.get_by_name(
+            create_response.session.id,
+            REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        self.dependencies.session_backend.simulate_output(
+            clarifier_role.runtime_handle,
+            'SDD_ERROR: {"summary":"clarification required","details":"Need product decision about fallback behavior."}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=create_response.session.id,
+                role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+            ),
+            dependencies=self.dependencies,
+        )
+
+        send_runtime_input(
+            SendOperatorRuntimeInputRequest(
+                session_id=create_response.session.id,
+                text="Use the existing fallback behavior and document it explicitly.",
+            ),
+            dependencies=self.dependencies,
+        )
+        self.dependencies.session_backend.simulate_output(
+            clarifier_role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"Requirements clarified","assumptions":"Fallback stays unchanged."}}',
+        )
+
+        response = collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=create_response.session.id,
+                role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+            ),
+            dependencies=self.dependencies,
+        )
+        events_response = list_events(create_response.session.id, dependencies=self.dependencies)
+
+        self.assertEqual("acceptance_criteria_requested", response.session.current_stage)
+        self.assertTrue(any(item.event_type == "requirements_completed" for item in events_response.items))
+
+    def test_skip_boy_scout_route_moves_session_to_verification(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40013BSKIP",
+                workflow_profile="oneshot",
+                policy={"boy_scout_policy": "enabled"},
+            ),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013BSKIP"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        scout_role = self.dependencies.role_repository.get_by_name(
+            create_response.session.id,
+            "code-scout",
+        )
+        spec_dir = Path(self.temp_dir.name) / "IOS-40013BSKIP" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
+        self.dependencies.session_backend.simulate_output(
+            scout_role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"result":"findings_found","summary":"Found one improvement opportunity."}}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=create_response.session.id,
+                role_name="code-scout",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = skip_boy_scout(
+            SkipBoyScoutRequest(
+                session_id=create_response.session.id,
+                reason="Track the refactor separately.",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.skipped)
+        self.assertEqual("boy_scout_skipped_by_operator", response.event_type)
+        self.assertEqual("verification_requested", response.followup_event_type)
+        self.assertEqual("verification_requested", response.session.current_stage)
 
     def test_get_environment_doctor_route_returns_report(self) -> None:
         fake_report = {

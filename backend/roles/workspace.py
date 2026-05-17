@@ -84,6 +84,18 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Project conventions: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
             "- Project knowledge base: `{task_knowledge_root}`",
         ]
+    if role_name == "code-scout":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Diff input: `{task_snapshot_root}/spec/diff.md`",
+            "- Findings target: `{task_snapshot_root}/spec/findings.md`",
+            "- Deferred findings input: `{task_snapshot_root}/spec/scout-deferred.md`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            "- Project knowledge base: `{task_knowledge_root}`",
+        ]
     if role_name == "proposal-context-worker":
         return [
             "- Task snapshot metadata: `{task_snapshot_root}`",
@@ -208,6 +220,12 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You review only the routed task changes and produce compact review outcomes.",
             "- Across repeated passes, retain reviewer context for the same task instead of reinitializing from zero.",
         ]
+    if role_name == "code-scout":
+        return [
+            "- You execute one bounded Boy Scout pass for one completed coding session.",
+            "- You inspect only the changed code area for real maintainability improvements and do not modify product code yourself.",
+            "- You stop after writing either a clean result or structured findings for operator review.",
+        ]
     if role_name == "proposal-context-worker":
         return [
             "- You execute one bounded proposal/context preparation task for one story session.",
@@ -217,8 +235,8 @@ def _role_responsibility(role_name: str) -> list[str]:
     if role_name == "requirements-clarifier-worker":
         return [
             "- You execute one bounded requirements-clarification task for one story session.",
+            "- When critical ambiguity remains, you must ask the operator directly in the live session and continue after the operator replies.",
             "- Produce the routed requirements result and then stop; you do not remain the owner of later planning or implementation work.",
-            "- You should not assume persistence across unrelated tasks or later implementation rounds.",
         ]
     if role_name == "acceptance-criteria-worker":
         return [
@@ -293,6 +311,14 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Keep outputs compact and fixer-oriented.",
             "- Do not re-flag issues that were already raised in previous review passes when that context is provided.",
         ]
+    if role_name == "code-scout":
+        return [
+            "- Start from `spec/diff.md` and use it to decide whether the branch has strong enough maintainability signals for a Boy Scout pass.",
+            "- Read full current files only for the most promising changed code paths; do not analyze raw diff hunks alone.",
+            "- If signals are weak or no real findings exist, return a clean Boy Scout result and stop.",
+            "- If real maintainability findings exist, write `spec/findings.md`, summarize the findings, and stop without changing product code.",
+            "- Skip style nits, convention-only feedback, and speculative improvements.",
+        ]
     if role_name == "proposal-context-worker":
         return [
             "- Treat this role as a bounded one-shot worker: collect proposal/context foundations, write the routed result, and exit.",
@@ -301,8 +327,9 @@ def _role_operating_rules(role_name: str) -> list[str]:
         ]
     if role_name == "requirements-clarifier-worker":
         return [
-            "- Treat this role as a bounded one-shot worker: clarify requirements, write the routed result, and exit.",
+            "- Treat this role as a bounded worker for one story session: clarify requirements, ask live follow-up questions when needed, then write the routed result and exit.",
             "- Start from the proposal/context foundations and resolve ambiguities, assumptions, edge cases, and out-of-scope boundaries needed for implementation.",
+            "- If a risky ambiguity remains, ask the operator directly in the live session instead of guessing.",
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than unresolved requirements.",
         ]
     if role_name == "acceptance-criteria-worker":

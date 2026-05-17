@@ -34,6 +34,7 @@ def _role_lifecycle_mode(role_name: str) -> str:
         "constraints-worker",
         "spec-verifier-worker",
         "task-decomposer-worker",
+        "code-scout",
     }:
         return "one-shot"
     return "persistent"

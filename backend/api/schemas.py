@@ -588,6 +588,18 @@ class CompleteDocHarvestResponse(BaseModel):
     event_type: str
 
 
+class SkipBoyScoutRequest(BaseModel):
+    session_id: int
+    reason: str
+
+
+class SkipBoyScoutResponse(BaseModel):
+    skipped: bool
+    session: SessionResponse
+    event_type: str
+    followup_event_type: str | None = None
+
+
 class CompleteSelfReviewRequest(BaseModel):
     session_id: int
     outcome: str

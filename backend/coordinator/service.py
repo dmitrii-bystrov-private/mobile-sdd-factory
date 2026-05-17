@@ -29,6 +29,7 @@ from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
+    CODE_SCOUT_ROLE,
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
     CONSTRAINTS_WORKER_ROLE,
     PROPOSAL_CONTEXT_WORKER_ROLE,
@@ -497,6 +498,9 @@ class CoordinatorService:
         if event_type == "requirements_completed":
             session, followup_event = self._handle_requirements_completed(session, accepted_event)
             return session, followup_event
+        if event_type == "boy_scout_completed":
+            session, followup_event = self._handle_boy_scout_completed(session, accepted_event)
+            return session, followup_event
         if event_type == "acceptance_criteria_completed":
             session, followup_event = self._handle_acceptance_criteria_completed(session, accepted_event)
             return session, followup_event
@@ -734,6 +738,48 @@ class CoordinatorService:
             },
         )
         return session, event
+
+    def skip_boy_scout(
+        self,
+        session_id: int,
+        reason: str,
+    ) -> tuple[Session, Event, Event]:
+        session = self._get_session_or_raise(session_id)
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise IntakeError("Boy Scout skip reason must not be empty")
+        if session.current_stage != "boy_scout_requested":
+            raise IntakeError(f"Session {session_id} is not waiting on Boy Scout")
+        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
+            raise IntakeError(f"Session {session_id} does not have skippable Boy Scout findings")
+
+        pending_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "boy_scout_review" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not pending_items:
+            raise IntakeError(f"Session {session_id} has no pending Boy Scout review decision")
+        self.work_item_repository.update_status(pending_items[0].id, WorkItemStatus.COMPLETED)
+
+        event = self._append_event(
+            session_id=session.id,
+            event_type="boy_scout_skipped_by_operator",
+            producer_type="operator",
+            payload={
+                "task_key": session.task_key,
+                "reason": normalized_reason,
+                "current_stage": session.current_stage,
+            },
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=None,
+        )
+        session, followup_event = self._enqueue_verification(session=session, source_event=event)
+        return session, event, followup_event
 
     def complete_self_review(
         self,
@@ -1308,6 +1354,8 @@ class CoordinatorService:
             session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
         elif mapped_event_type == "requirements_completed":
             session, followup_event = self._handle_requirements_completed(session, accepted_event)
+        elif mapped_event_type == "boy_scout_completed":
+            session, followup_event = self._handle_boy_scout_completed(session, accepted_event)
         elif mapped_event_type == "acceptance_criteria_completed":
             session, followup_event = self._handle_acceptance_criteria_completed(session, accepted_event)
         elif mapped_event_type == "constraints_completed":
@@ -2869,7 +2917,10 @@ class CoordinatorService:
         ):
             return self._enqueue_self_review(session=session, source_event=source_event)
 
-        return self._enqueue_verification(session=session, source_event=source_event)
+        return self._enqueue_post_implementation_quality_gate(
+            session=session,
+            source_event=source_event,
+        )
 
     def _enqueue_self_review(
         self,
@@ -3048,6 +3099,69 @@ class CoordinatorService:
         )
         return session, event
 
+    def _handle_boy_scout_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        scout_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "boy_scout" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not scout_items:
+            raise IntakeError("No active Boy Scout work item found for the session")
+
+        active_item = scout_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, CODE_SCOUT_ROLE)
+
+        result = str(source_event.payload.get("result") or "clean").strip() or "clean"
+        if result == "findings_found":
+            findings_path = None
+            if self.workdir_root is not None:
+                candidate = self.workdir_root / session.task_key / "spec" / "findings.md"
+                if candidate.is_file():
+                    findings_path = candidate
+            if findings_path is not None:
+                self.artifact_repository.create(
+                    session_id=session.id,
+                    stage_name="boy-scout",
+                    artifact_type="boy_scout_findings",
+                    path=str(findings_path),
+                    metadata={"result": result},
+                )
+            self.work_item_repository.create(
+                session_id=session.id,
+                work_type="boy_scout_review",
+                title=f"Boy Scout review decision for {session.task_key}",
+                owner_role_id=None,
+                source_event_id=source_event.id,
+                priority=91,
+                status=WorkItemStatus.WAITING_FOR_OPERATOR,
+            )
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="boy_scout_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="session_escalated_to_operator",
+                producer_type="coordinator",
+                payload={
+                    "reason": "boy_scout_findings",
+                    "summary": "boy scout findings need operator decision",
+                    "details": str(source_event.payload.get("summary") or "").strip()
+                    or "Review Boy Scout findings and either address them separately or skip this lane.",
+                    "current_stage": session.current_stage,
+                },
+            )
+            return session, event
+
+        return self._enqueue_verification(session=session, source_event=source_event)
+
     def _enqueue_mr_followup(
         self,
         session: Session,
@@ -3203,7 +3317,7 @@ class CoordinatorService:
         source_event: Event,
     ) -> tuple[Session, Event]:
         self._complete_active_self_review_work_item(session)
-        return self._enqueue_verification(
+        return self._enqueue_post_implementation_quality_gate(
             session=session,
             source_event=source_event,
         )
@@ -3275,6 +3389,75 @@ class CoordinatorService:
         )
         return session, event
 
+    def _enqueue_post_implementation_quality_gate(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        if (session.policy or {}).get("boy_scout_policy") == "disabled":
+            return self._enqueue_verification(session=session, source_event=source_event)
+        return self._enqueue_boy_scout(session=session, source_event=source_event)
+
+    def _enqueue_boy_scout(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        scout_role = self._ensure_on_demand_role(session, CODE_SCOUT_ROLE)
+        scout_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="boy_scout",
+            title=f"Boy Scout pass for {session.task_key}",
+            owner_role_id=scout_role.id,
+            source_event_id=source_event.id,
+            priority=91,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="boy_scout_requested",
+            current_owner=CODE_SCOUT_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        findings_path = None
+        deferred_path = None
+        diff_path = None
+        if self.workdir_root is not None:
+            spec_root = self.workdir_root / session.task_key / "spec"
+            diff_path = str(spec_root / "diff.md")
+            findings_path = str(spec_root / "findings.md")
+            deferred_candidate = spec_root / "scout-deferred.md"
+            if deferred_candidate.is_file():
+                deferred_path = str(deferred_candidate)
+        self._dispatch_role_work(
+            session=session,
+            role=scout_role,
+            work_item=scout_item,
+            stage_name="boy_scout_requested",
+            instruction=(
+                f"Run a Boy Scout maintainability pass for {session.task_key}. "
+                "Start from `spec/diff.md`, inspect only the highest-signal changed files, "
+                "write `spec/findings.md` only when real maintainability findings exist, "
+                "and otherwise return a clean result."
+            ),
+            extra_hydration={
+                "diff_path": diff_path,
+                "findings_path": findings_path,
+                "deferred_findings_path": deferred_path,
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="boy_scout_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": CODE_SCOUT_ROLE,
+                "work_item_id": scout_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
 
     def _get_session_or_raise(self, session_id: int) -> Session:
         for session in self.session_repository.list_all():
@@ -3313,6 +3496,9 @@ class CoordinatorService:
                 return "self_review_passed"
             if output_type == "failed":
                 return "self_review_issues_found"
+        if role_name == CODE_SCOUT_ROLE and session.current_stage == "boy_scout_requested":
+            if output_type in {"passed", "completed"}:
+                return "boy_scout_completed"
         if role_name == PROPOSAL_CONTEXT_WORKER_ROLE and session.current_stage == "proposal_context_requested":
             if output_type in {"passed", "completed"}:
                 return "proposal_context_completed"
@@ -3845,7 +4031,15 @@ class CoordinatorService:
         if stage_name == "requirements_requested":
             return (
                 f"Clarify the implementation requirements for story {task_key}. "
-                "Resolve assumptions, edge cases, and out-of-scope boundaries before the final story-spec step."
+                "Resolve assumptions, edge cases, and out-of-scope boundaries before the final story-spec step. "
+                "If critical ambiguity remains, ask the operator directly in the live session instead of guessing."
+            )
+        if stage_name == "boy_scout_requested":
+            return (
+                f"Run a Boy Scout maintainability pass for {task_key}. "
+                "Start from `spec/diff.md`, inspect only the highest-signal changed files, "
+                "write `spec/findings.md` only when real maintainability findings exist, "
+                "and otherwise report a clean result."
             )
         if stage_name == "acceptance_criteria_requested":
             return (
@@ -3929,6 +4123,7 @@ class CoordinatorService:
             "bug_analysis_requested": "bug_analysis",
             "proposal_context_requested": "proposal_context",
             "requirements_requested": "requirements",
+            "boy_scout_requested": "boy_scout",
             "acceptance_criteria_requested": "acceptance_criteria",
             "constraints_requested": "constraints",
             "spec_verification_requested": "spec_verification",
@@ -4296,6 +4491,12 @@ class CoordinatorService:
         role_config: dict[str, str] | None,
         resume_mode: str | None = None,
     ) -> RuntimeRoleHandle:
+        if role_config is None:
+            role_config = normalize_role_runtime_config(
+                repo_root=self._repo_root(),
+                role_names=[role_name],
+                provided=None,
+            ).get(role_name)
         start_directory = None
         launch_command = None
         if self.role_workspace_manager is not None:

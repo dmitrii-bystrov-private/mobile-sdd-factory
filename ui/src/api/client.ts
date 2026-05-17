@@ -36,6 +36,9 @@ const STREAM_EVENT_TYPES = [
   "self_review_requested",
   "self_review_passed",
   "self_review_issues_found",
+  "boy_scout_requested",
+  "boy_scout_completed",
+  "boy_scout_skipped_by_operator",
   "self_review_correction_requested",
   "doc_harvest_requested",
   "doc_harvest_completed",
@@ -482,6 +485,24 @@ export const apiClient = {
       body: JSON.stringify({
         session_id: sessionId,
         summary,
+      }),
+    });
+  },
+
+  skipBoyScout(
+    sessionId: number,
+    reason: string,
+  ): Promise<{
+    skipped: boolean;
+    event_type: string;
+    followup_event_type: string | null;
+    session: Session;
+  }> {
+    return request("/operator/skip-boy-scout", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        reason,
       }),
     });
   },

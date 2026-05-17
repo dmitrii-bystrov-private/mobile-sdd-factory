@@ -13,6 +13,8 @@ from backend.api.schemas import (
     CompleteDocHarvestResponse,
     CleanupTaskRequest,
     CleanupTaskResponse,
+    SkipBoyScoutRequest,
+    SkipBoyScoutResponse,
     EnvironmentDoctorResponse,
     RuntimeCapabilitiesResponse,
     RuntimeDefaultsResponse,
@@ -413,6 +415,27 @@ def complete_doc_harvest(
         completed=True,
         session=to_session_response(session),
         event_type=event.event_type,
+    )
+
+
+@router.post("/skip-boy-scout", response_model=SkipBoyScoutResponse)
+def skip_boy_scout(
+    payload: SkipBoyScoutRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> SkipBoyScoutResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.skip_boy_scout(
+            session_id=payload.session_id,
+            reason=payload.reason,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return SkipBoyScoutResponse(
+        skipped=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
     )
 
 

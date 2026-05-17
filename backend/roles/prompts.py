@@ -42,6 +42,14 @@ def role_runtime_rules(role_name: str) -> str:
             "- Read only the convention sources relevant to the touched diff area.\n"
             "- Keep the output compact and optimized for a narrow fixer pass.\n\n"
         )
+    if role_name == "code-scout":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded one-shot worker: run a Boy Scout pass, write the routed result, and exit.\n"
+            "- Start from `spec/diff.md` and inspect only the most promising changed files for maintainability signals.\n"
+            "- If signals are weak or no real maintainability issues are found, report a clean result and stop.\n"
+            "- If real maintainability findings exist, write them to `spec/findings.md`, summarize them compactly, and stop without modifying product code.\n\n"
+        )
     if role_name == "proposal-context-worker":
         return (
             "Role-specific rules:\n"
@@ -52,8 +60,9 @@ def role_runtime_rules(role_name: str) -> str:
     if role_name == "requirements-clarifier-worker":
         return (
             "Role-specific rules:\n"
-            "- Treat this role as a bounded one-shot worker: clarify requirements, write the routed result, and exit.\n"
+            "- Treat this role as a bounded worker for one story session: clarify requirements, ask live follow-up questions when needed, then write the routed result and exit.\n"
             "- Start from the proposal/context foundations and resolve ambiguities, assumptions, edge cases, and out-of-scope boundaries needed for implementation.\n"
+            "- When critical ambiguities remain, ask the operator directly in the live session instead of making a risky assumption, then continue from the same session after the operator replies.\n"
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than unresolved requirements.\n\n"
         )
     if role_name == "acceptance-criteria-worker":

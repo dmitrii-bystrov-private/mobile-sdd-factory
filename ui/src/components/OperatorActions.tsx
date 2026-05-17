@@ -28,6 +28,7 @@ export function OperatorActions({
   const [mrId, setMrId] = useState("");
   const [qaComment, setQaComment] = useState("");
   const [docHarvestSummary, setDocHarvestSummary] = useState("");
+  const [boyScoutSkipReason, setBoyScoutSkipReason] = useState("");
   const [selfReviewOutcome, setSelfReviewOutcome] = useState<"passed" | "issues_found">("passed");
   const [selfReviewSummary, setSelfReviewSummary] = useState("");
   const [knowledgeTitle, setKnowledgeTitle] = useState("");
@@ -87,6 +88,19 @@ export function OperatorActions({
     });
   }
 
+  async function handleBoyScoutSkip(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const normalizedReason = boyScoutSkipReason.trim();
+    if (normalizedReason.length === 0) {
+      setError("Boy Scout skip reason is required");
+      return;
+    }
+    await run(async () => {
+      await apiClient.skipBoyScout(session.id, normalizedReason);
+      setBoyScoutSkipReason("");
+    });
+  }
+
   async function handleSelfReview(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const normalizedSummary = selfReviewSummary.trim();
@@ -136,6 +150,8 @@ export function OperatorActions({
   }
 
   const canOpenFollowup = session.status === "completed";
+  const canSkipBoyScout =
+    session.current_stage === "boy_scout_requested" && session.status === "waiting_for_operator";
   const canCompleteSelfReview =
     session.current_stage === "self_review_requested" && session.status === "active";
   const canCompleteDocHarvest =
@@ -317,6 +333,37 @@ export function OperatorActions({
             type="submit"
           >
             Send Runtime Input
+          </button>
+        </form>
+      </div>
+
+      <div className="operator-followup-stack">
+        <div className="operator-followup-copy">
+          <p className="eyebrow">Optional Lane</p>
+          <h4>Boy Scout</h4>
+          <p className="path-label">
+            Review Boy Scout findings and explicitly skip this maintainability lane when you want to continue to final verification.
+          </p>
+        </div>
+
+        <form className="followup-form" onSubmit={(event) => void handleBoyScoutSkip(event)}>
+          <label className="form-field">
+            <span>Skip Reason</span>
+            <textarea
+              className="text-area-input"
+              disabled={busy || !canSkipBoyScout}
+              onChange={(event) => setBoyScoutSkipReason(event.target.value)}
+              placeholder="Example: Findings acknowledged; continue with final verification and track refactors separately."
+              rows={3}
+              value={boyScoutSkipReason}
+            />
+          </label>
+          <button
+            className="action-button"
+            disabled={busy || !canSkipBoyScout}
+            type="submit"
+          >
+            Skip Boy Scout
           </button>
         </form>
       </div>

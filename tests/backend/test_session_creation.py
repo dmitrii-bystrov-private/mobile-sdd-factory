@@ -6,12 +6,14 @@ import unittest
 from unittest.mock import patch
 
 from backend.api.sse import SessionEventBus
+from backend import session_policy as session_policy_module
 from backend.coordinator.intake import IntakeError
 from backend.coordinator.service import CoordinatorService
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
+    CODE_SCOUT_ROLE,
     DEFAULT_SESSION_ROLES,
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
     CONSTRAINTS_WORKER_ROLE,
@@ -184,6 +186,8 @@ class AutoRecoveryRecordingBackend(RecordingSessionBackend):
 class SessionCreationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
+        self._original_boy_scout_default = session_policy_module.COMMON_DEFAULTS["boy_scout_policy"]
+        session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = "disabled"
         self.db_path = Path(self.temp_dir.name) / "factory.sqlite3"
         self.database = Database(self.db_path)
         self.database.initialize()
@@ -224,6 +228,7 @@ class SessionCreationTests(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
+        session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = self._original_boy_scout_default
         self.temp_dir.cleanup()
 
     def write_statuses_file(self, task_key: str, content: str) -> None:
@@ -843,7 +848,7 @@ class SessionCreationTests(unittest.TestCase):
             workflow_profile="oneshot",
             policy={
                 "self_review_policy": "required",
-                "boy_scout_policy": "enabled",
+                "boy_scout_policy": "disabled",
                 "doc_harvest_policy": "enabled",
             },
         )
@@ -1081,7 +1086,7 @@ class SessionCreationTests(unittest.TestCase):
             workflow_profile="oneshot",
             policy={
                 "self_review_policy": "required",
-                "boy_scout_policy": "enabled",
+                "boy_scout_policy": "disabled",
                 "doc_harvest_policy": "enabled",
             },
         )
@@ -1116,7 +1121,7 @@ class SessionCreationTests(unittest.TestCase):
             workflow_profile="oneshot",
             policy={
                 "self_review_policy": "required",
-                "boy_scout_policy": "enabled",
+                "boy_scout_policy": "disabled",
                 "doc_harvest_policy": "enabled",
             },
         )
@@ -1145,7 +1150,7 @@ class SessionCreationTests(unittest.TestCase):
             workflow_profile="oneshot",
             policy={
                 "self_review_policy": "required",
-                "boy_scout_policy": "enabled",
+                "boy_scout_policy": "disabled",
                 "doc_harvest_policy": "enabled",
             },
         )
@@ -3230,6 +3235,70 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
         self.assertTrue(any(item.artifact_type == "self_review_summary" for item in artifacts))
+
+    def test_implementation_completed_routes_to_boy_scout_when_policy_enabled(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BS1",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BS1")
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("boy_scout_requested", updated_session.current_stage)
+        self.assertEqual(CODE_SCOUT_ROLE, updated_session.current_owner)
+        self.assertEqual("boy_scout_requested", followup_event.event_type)
+        self.assertTrue(any(item.work_type == "boy_scout" for item in work_items))
+
+    def test_boy_scout_findings_can_be_skipped_into_verification(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BS2",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BS2")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BS2" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
+
+        updated_session, _, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={
+                "result": "findings_found",
+                "summary": "Found one maintainability improvement opportunity.",
+            },
+        )
+
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("boy_scout_requested", updated_session.current_stage)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+
+        updated_session, event, verification_event = self.coordinator.skip_boy_scout(
+            session_id=session.id,
+            reason="Track the refactor separately; continue to final verification.",
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("boy_scout_skipped_by_operator", event.event_type)
+        self.assertEqual("verification_requested", verification_event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+        self.assertTrue(any(item.artifact_type == "boy_scout_findings" for item in artifacts))
 
     def test_complete_self_review_with_issues_routes_to_implementer_correction(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
