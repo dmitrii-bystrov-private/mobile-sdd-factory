@@ -83,6 +83,7 @@ class EnvironmentDoctorTests(unittest.TestCase):
                     "glab": "/usr/bin/glab",
                     "node": "/usr/bin/node",
                     "npm": "/usr/bin/npm",
+                    "tmux": "/usr/bin/tmux",
                 }
                 return mapping.get(name)
 

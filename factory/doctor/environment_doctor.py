@@ -425,6 +425,12 @@ def build_report(
             which_func=which_func,
         ),
         _command_presence_check(
+            command_name="tmux",
+            label="tmux",
+            required=True,
+            which_func=which_func,
+        ),
+        _command_presence_check(
             command_name="claude",
             label="Claude Code",
             required=False,

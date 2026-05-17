@@ -44,7 +44,7 @@ def load_config() -> AppConfig:
         repo_root=repo_root,
         workdir_root=workdir_root,
         database_path=database_path,
-        runtime_backend=os.environ.get("SDD_FACTORY_RUNTIME_BACKEND", "auto"),
+        runtime_backend=os.environ.get("SDD_FACTORY_RUNTIME_BACKEND", "tmux"),
         runtime_root=Path(
             os.environ.get("SDD_FACTORY_RUNTIME_ROOT", workdir_root)
         ),
