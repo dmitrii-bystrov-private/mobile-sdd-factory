@@ -223,6 +223,7 @@ export type RuntimeRoleDefaultConfig = {
 export type RuntimeDefaultsSummary = {
   defaultRunner: string | null;
   roleDefaults: Record<string, RuntimeRoleDefaultConfig>;
+  policyDefaults: Record<string, Record<string, SessionPolicyEntry>>;
   knownRoles: string[];
   sourcePath: string;
 };

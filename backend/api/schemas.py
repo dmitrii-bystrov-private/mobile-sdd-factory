@@ -230,6 +230,7 @@ class RuntimeRoleDefaultConfigResponse(BaseModel):
 class RuntimeDefaultsResponse(BaseModel):
     default_runner: str | None = None
     role_defaults: dict[str, RuntimeRoleDefaultConfigResponse]
+    policy_defaults: dict[str, dict[str, str]]
     known_roles: list[str]
     source_path: str
 
@@ -243,6 +244,7 @@ class RuntimeRoleDefaultConfigPayload(BaseModel):
 class UpdateRuntimeDefaultsRequest(BaseModel):
     default_runner: str | None = None
     role_defaults: dict[str, RuntimeRoleDefaultConfigPayload]
+    policy_defaults: dict[str, dict[str, str | None]] = {}
 
 
 class RoleResponse(BaseModel):

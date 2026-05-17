@@ -368,6 +368,12 @@ class SessionApiTests(unittest.TestCase):
                         "effort": "high",
                     }
                 },
+                policy_defaults={
+                    "story_full": {
+                        "requirements_clarification_mode": "ask-a-lot",
+                        "boy_scout_policy": "required",
+                    }
+                },
             ),
             dependencies=self.dependencies,
         )
@@ -376,6 +382,11 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("claude", updated.role_defaults["implementer"].runner)
         self.assertEqual("sonnet", updated.role_defaults["implementer"].model)
         self.assertEqual("high", updated.role_defaults["implementer"].effort)
+        self.assertEqual(
+            "ask-a-lot",
+            updated.policy_defaults["story_full"]["requirements_clarification_mode"],
+        )
+        self.assertEqual("required", updated.policy_defaults["story_full"]["boy_scout_policy"])
         self.assertTrue(Path(updated.source_path).is_file())
 
     def test_list_sessions_route_returns_created_session(self) -> None:

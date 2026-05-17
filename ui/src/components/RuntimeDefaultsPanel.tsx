@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { apiClient } from "../api/client";
-import type { RuntimeCapabilitiesSummary, RuntimeDefaultsSummary } from "../types";
+import type {
+  RequirementsClarificationMode,
+  RuntimeCapabilitiesSummary,
+  RuntimeDefaultsSummary,
+  SessionPolicyValue,
+  WorkflowProfile,
+} from "../types";
 
 type RuntimeDefaultsPanelProps = {
   runtimeCapabilities: RuntimeCapabilitiesSummary | null;
@@ -15,6 +21,31 @@ type DraftRoleDefault = {
   effort: string;
 };
 
+type DraftPolicyDefaults = {
+  test_policy: SessionPolicyValue;
+  self_review_policy: SessionPolicyValue;
+  boy_scout_policy: SessionPolicyValue;
+  doc_harvest_policy: SessionPolicyValue;
+  requirements_clarification_mode: RequirementsClarificationMode;
+};
+
+const POLICY_OPTIONS: SessionPolicyValue[] = ["disabled", "enabled", "required"];
+const REQUIREMENTS_CLARIFICATION_OPTIONS: RequirementsClarificationMode[] = [
+  "ask-a-lot",
+  "ask-selectively",
+  "autonomous",
+];
+
+function defaultPolicyDefaults(): DraftPolicyDefaults {
+  return {
+    test_policy: "enabled",
+    self_review_policy: "enabled",
+    boy_scout_policy: "enabled",
+    doc_harvest_policy: "enabled",
+    requirements_clarification_mode: "ask-selectively",
+  };
+}
+
 export function RuntimeDefaultsPanel({
   runtimeCapabilities,
   runtimeDefaults,
@@ -22,6 +53,11 @@ export function RuntimeDefaultsPanel({
 }: RuntimeDefaultsPanelProps): JSX.Element {
   const [defaultRunner, setDefaultRunner] = useState("");
   const [roleDefaults, setRoleDefaults] = useState<Record<string, DraftRoleDefault>>({});
+  const [policyDefaults, setPolicyDefaults] = useState<Record<WorkflowProfile, DraftPolicyDefaults>>({
+    oneshot: defaultPolicyDefaults(),
+    bug_full: defaultPolicyDefaults(),
+    story_full: defaultPolicyDefaults(),
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,6 +89,20 @@ export function RuntimeDefaultsPanel({
     }
     setDefaultRunner(resolvedDefaultRunner);
     setRoleDefaults(nextRoleDefaults);
+    setPolicyDefaults({
+      oneshot: {
+        ...defaultPolicyDefaults(),
+        ...(runtimeDefaults.policyDefaults.oneshot ?? {}),
+      },
+      bug_full: {
+        ...defaultPolicyDefaults(),
+        ...(runtimeDefaults.policyDefaults.bug_full ?? {}),
+      },
+      story_full: {
+        ...defaultPolicyDefaults(),
+        ...(runtimeDefaults.policyDefaults.story_full ?? {}),
+      },
+    });
   }, [runnerIndex, runtimeCapabilities, runtimeDefaults]);
 
   function updateRoleDefault(
@@ -78,6 +128,20 @@ export function RuntimeDefaultsPanel({
     });
   }
 
+  function updatePolicyDefault<K extends keyof DraftPolicyDefaults>(
+    workflowProfile: WorkflowProfile,
+    key: K,
+    value: DraftPolicyDefaults[K],
+  ): void {
+    setPolicyDefaults((current) => ({
+      ...current,
+      [workflowProfile]: {
+        ...current[workflowProfile],
+        [key]: value,
+      },
+    }));
+  }
+
   async function handleSave(): Promise<void> {
     if (runtimeDefaults === null) {
       return;
@@ -97,12 +161,32 @@ export function RuntimeDefaultsPanel({
             },
           ]),
         ),
+        policyDefaults: {
+          oneshot: {
+            self_review_policy: policyDefaults.oneshot.self_review_policy,
+            boy_scout_policy: policyDefaults.oneshot.boy_scout_policy,
+            doc_harvest_policy: policyDefaults.oneshot.doc_harvest_policy,
+          },
+          bug_full: {
+            test_policy: policyDefaults.bug_full.test_policy,
+            self_review_policy: policyDefaults.bug_full.self_review_policy,
+            boy_scout_policy: policyDefaults.bug_full.boy_scout_policy,
+            doc_harvest_policy: policyDefaults.bug_full.doc_harvest_policy,
+          },
+          story_full: {
+            self_review_policy: policyDefaults.story_full.self_review_policy,
+            boy_scout_policy: policyDefaults.story_full.boy_scout_policy,
+            doc_harvest_policy: policyDefaults.story_full.doc_harvest_policy,
+            requirements_clarification_mode: policyDefaults.story_full.requirements_clarification_mode,
+          },
+        },
         knownRoles: runtimeDefaults.knownRoles,
         sourcePath: runtimeDefaults.sourcePath,
       });
       onSaved({
         defaultRunner: saved.default_runner,
         roleDefaults: saved.role_defaults,
+        policyDefaults: saved.policy_defaults,
         knownRoles: saved.known_roles,
         sourcePath: saved.source_path,
       });
@@ -141,6 +225,221 @@ export function RuntimeDefaultsPanel({
           ))}
         </select>
       </label>
+
+      <div className="runtime-defaults-list">
+        <div className="runtime-default-card">
+          <strong>oneshot policy defaults</strong>
+          <div className="followup-form-grid">
+            <label className="form-field">
+              <span>Self Review</span>
+              <select
+                className="select-input"
+                disabled={busy}
+                onChange={(event) =>
+                  updatePolicyDefault("oneshot", "self_review_policy", event.target.value as SessionPolicyValue)
+                }
+                value={policyDefaults.oneshot.self_review_policy}
+              >
+                {POLICY_OPTIONS.map((value) => (
+                  <option key={`oneshot-self-review-${value}`} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Boy Scout</span>
+              <select
+                className="select-input"
+                disabled={busy}
+                onChange={(event) =>
+                  updatePolicyDefault("oneshot", "boy_scout_policy", event.target.value as SessionPolicyValue)
+                }
+                value={policyDefaults.oneshot.boy_scout_policy}
+              >
+                {POLICY_OPTIONS.map((value) => (
+                  <option key={`oneshot-boy-scout-${value}`} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="form-field">
+            <span>Doc Harvest</span>
+            <select
+              className="select-input"
+              disabled={busy}
+              onChange={(event) =>
+                updatePolicyDefault("oneshot", "doc_harvest_policy", event.target.value as SessionPolicyValue)
+              }
+              value={policyDefaults.oneshot.doc_harvest_policy}
+            >
+              {POLICY_OPTIONS.map((value) => (
+                <option key={`oneshot-doc-harvest-${value}`} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="runtime-default-card">
+          <strong>bug_full policy defaults</strong>
+          <div className="followup-form-grid">
+            <label className="form-field">
+              <span>Test Policy</span>
+              <select
+                className="select-input"
+                disabled={busy}
+                onChange={(event) =>
+                  updatePolicyDefault("bug_full", "test_policy", event.target.value as SessionPolicyValue)
+                }
+                value={policyDefaults.bug_full.test_policy}
+              >
+                {POLICY_OPTIONS.map((value) => (
+                  <option key={`bug-test-${value}`} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Self Review</span>
+              <select
+                className="select-input"
+                disabled={busy}
+                onChange={(event) =>
+                  updatePolicyDefault("bug_full", "self_review_policy", event.target.value as SessionPolicyValue)
+                }
+                value={policyDefaults.bug_full.self_review_policy}
+              >
+                {POLICY_OPTIONS.map((value) => (
+                  <option key={`bug-self-review-${value}`} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="followup-form-grid">
+            <label className="form-field">
+              <span>Boy Scout</span>
+              <select
+                className="select-input"
+                disabled={busy}
+                onChange={(event) =>
+                  updatePolicyDefault("bug_full", "boy_scout_policy", event.target.value as SessionPolicyValue)
+                }
+                value={policyDefaults.bug_full.boy_scout_policy}
+              >
+                {POLICY_OPTIONS.map((value) => (
+                  <option key={`bug-boy-scout-${value}`} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Doc Harvest</span>
+              <select
+                className="select-input"
+                disabled={busy}
+                onChange={(event) =>
+                  updatePolicyDefault("bug_full", "doc_harvest_policy", event.target.value as SessionPolicyValue)
+                }
+                value={policyDefaults.bug_full.doc_harvest_policy}
+              >
+                {POLICY_OPTIONS.map((value) => (
+                  <option key={`bug-doc-harvest-${value}`} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div className="runtime-default-card">
+          <strong>story_full policy defaults</strong>
+          <div className="followup-form-grid">
+            <label className="form-field">
+              <span>Self Review</span>
+              <select
+                className="select-input"
+                disabled={busy}
+                onChange={(event) =>
+                  updatePolicyDefault("story_full", "self_review_policy", event.target.value as SessionPolicyValue)
+                }
+                value={policyDefaults.story_full.self_review_policy}
+              >
+                {POLICY_OPTIONS.map((value) => (
+                  <option key={`story-self-review-${value}`} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Boy Scout</span>
+              <select
+                className="select-input"
+                disabled={busy}
+                onChange={(event) =>
+                  updatePolicyDefault("story_full", "boy_scout_policy", event.target.value as SessionPolicyValue)
+                }
+                value={policyDefaults.story_full.boy_scout_policy}
+              >
+                {POLICY_OPTIONS.map((value) => (
+                  <option key={`story-boy-scout-${value}`} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="followup-form-grid">
+            <label className="form-field">
+              <span>Doc Harvest</span>
+              <select
+                className="select-input"
+                disabled={busy}
+                onChange={(event) =>
+                  updatePolicyDefault("story_full", "doc_harvest_policy", event.target.value as SessionPolicyValue)
+                }
+                value={policyDefaults.story_full.doc_harvest_policy}
+              >
+                {POLICY_OPTIONS.map((value) => (
+                  <option key={`story-doc-harvest-${value}`} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="form-field">
+              <span>Clarification Mode</span>
+              <select
+                className="select-input"
+                disabled={busy}
+                onChange={(event) =>
+                  updatePolicyDefault(
+                    "story_full",
+                    "requirements_clarification_mode",
+                    event.target.value as RequirementsClarificationMode,
+                  )
+                }
+                value={policyDefaults.story_full.requirements_clarification_mode}
+              >
+                {REQUIREMENTS_CLARIFICATION_OPTIONS.map((value) => (
+                  <option key={`story-clarification-${value}`} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+      </div>
 
       <div className="runtime-defaults-list">
         {runtimeDefaults?.knownRoles.map((roleName) => {

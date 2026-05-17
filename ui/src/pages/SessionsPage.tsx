@@ -413,6 +413,7 @@ export function SessionsPage(): JSX.Element {
       setRuntimeDefaultsSummary({
         defaultRunner: runtimeDefaultsResponse.default_runner,
         roleDefaults: runtimeDefaultsResponse.role_defaults,
+        policyDefaults: runtimeDefaultsResponse.policy_defaults,
         knownRoles: runtimeDefaultsResponse.known_roles,
         sourcePath: runtimeDefaultsResponse.source_path,
       });

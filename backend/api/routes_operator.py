@@ -140,6 +140,7 @@ def update_runtime_defaults(
             }
             for role_name, value in payload.role_defaults.items()
         },
+        policy_defaults=payload.policy_defaults,
     )
     return RuntimeDefaultsResponse(**defaults)
 

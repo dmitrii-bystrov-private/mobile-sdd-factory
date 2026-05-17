@@ -40,6 +40,24 @@ function defaultDraftPolicy(): DraftPolicy {
   };
 }
 
+function mergePolicyDefaults(
+  base: DraftPolicy,
+  overrides: Record<string, string> | undefined,
+): DraftPolicy {
+  return {
+    test_policy: (overrides?.test_policy as SessionPolicyValue | undefined) ?? base.test_policy,
+    self_review_policy:
+      (overrides?.self_review_policy as SessionPolicyValue | undefined) ?? base.self_review_policy,
+    boy_scout_policy:
+      (overrides?.boy_scout_policy as SessionPolicyValue | undefined) ?? base.boy_scout_policy,
+    doc_harvest_policy:
+      (overrides?.doc_harvest_policy as SessionPolicyValue | undefined) ?? base.doc_harvest_policy,
+    requirements_clarification_mode:
+      (overrides?.requirements_clarification_mode as RequirementsClarificationMode | undefined) ??
+      base.requirements_clarification_mode,
+  };
+}
+
 export function SessionStartForm({
   onCreated,
   runtimeCapabilities,
@@ -96,6 +114,12 @@ export function SessionStartForm({
     }
     return roleNames;
   }, [policy.self_review_policy, workflowProfile]);
+
+  useEffect(() => {
+    setPolicy(
+      mergePolicyDefaults(defaultDraftPolicy(), runtimeDefaults?.policyDefaults[workflowProfile]),
+    );
+  }, [runtimeDefaults, workflowProfile]);
 
   useEffect(() => {
     if (runtimeCapabilities === null) {

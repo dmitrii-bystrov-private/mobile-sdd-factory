@@ -6,6 +6,7 @@ import type {
   RequirementsClarificationMode,
   Role,
   RuntimeDefaultsSummary,
+  SessionPolicyEntry,
   SessionPolicyValue,
   Session,
   StreamEventPayload,
@@ -291,6 +292,7 @@ export const apiClient = {
   getRuntimeDefaults(): Promise<{
     default_runner: string | null;
     role_defaults: Record<string, { runner: string | null; model: string | null; effort: string | null }>;
+    policy_defaults: Record<string, Record<string, SessionPolicyEntry>>;
     known_roles: string[];
     source_path: string;
   }> {
@@ -300,6 +302,7 @@ export const apiClient = {
   updateRuntimeDefaults(payload: RuntimeDefaultsSummary): Promise<{
     default_runner: string | null;
     role_defaults: Record<string, { runner: string | null; model: string | null; effort: string | null }>;
+    policy_defaults: Record<string, Record<string, SessionPolicyEntry>>;
     known_roles: string[];
     source_path: string;
   }> {
@@ -308,6 +311,7 @@ export const apiClient = {
       body: JSON.stringify({
         default_runner: payload.defaultRunner,
         role_defaults: payload.roleDefaults,
+        policy_defaults: payload.policyDefaults,
       }),
     });
   },
