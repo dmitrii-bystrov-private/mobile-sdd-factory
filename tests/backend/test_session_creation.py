@@ -473,6 +473,122 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("/factory/scripts/run-role-agent.sh", script_text)
         self.assertIn("SDD_FACTORY_ROLE_LAUNCHER_READY", script_text)
 
+    def test_claude_launcher_generates_role_scoped_mcp_files(self) -> None:
+        repo_root = Path(self.temp_dir.name) / "repo-root-mcp"
+        (repo_root / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
+        (repo_root / ".claude" / "settings.local.json").write_text(
+            json.dumps(
+                {
+                    "env": {"DOC_HARVEST_ENABLED": "true"},
+                    "permissions": {
+                        "allow": [
+                            "Bash(git status)",
+                            "mcp__ios-rag__search",
+                            "mcp__frontend-rag__read_file",
+                            "mcp__notion__search",
+                        ]
+                    },
+                    "enabledMcpjsonServers": [
+                        "ios-rag",
+                        "frontend-rag",
+                        "notion",
+                    ],
+                }
+            )
+        )
+        (repo_root / ".mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "ios-rag": {"type": "http", "url": "https://example.com/ios"},
+                        "frontend-rag": {"type": "http", "url": "https://example.com/frontend"},
+                        "notion": {"type": "http", "url": "https://example.com/notion"},
+                    }
+                }
+            )
+        )
+        (repo_root / ".claude" / "agents" / "implementer.md").write_text(
+            "\n".join(
+                [
+                    "---",
+                    "name: implementer",
+                    "model: sonnet",
+                    "effort: medium",
+                    "mcpServers:",
+                    "  - ios-rag",
+                    "  - frontend-rag",
+                    "---",
+                    "",
+                ]
+            )
+        )
+        (repo_root / ".claude" / "agents" / "code-reviewer.md").write_text(
+            "\n".join(
+                [
+                    "---",
+                    "name: code-reviewer",
+                    "model: sonnet",
+                    "effort: medium",
+                    "mcpServers: []",
+                    "---",
+                    "",
+                ]
+            )
+        )
+
+        workspace_manager = RoleWorkspaceManager(
+            runtime_root=Path(self.temp_dir.name),
+            repo_root=repo_root,
+            workdir_root=Path(self.temp_dir.name),
+        )
+        launcher_manager = RoleLauncherManager(
+            repo_root=repo_root,
+            workdir_root=Path(self.temp_dir.name),
+        )
+        implementer_workspace = workspace_manager.ensure_role_workspace("IOS-30000MCP", "implementer")
+        launcher_manager.ensure_launch_plan(
+            task_key="IOS-30000MCP",
+            workspace=implementer_workspace,
+            role_config={"runner": "claude", "model": "sonnet", "effort": "medium"},
+        )
+
+        implementer_settings = json.loads(
+            (implementer_workspace.directory / "claude.settings.role.json").read_text()
+        )
+        self.assertEqual(
+            ["ios-rag", "frontend-rag"],
+            implementer_settings["enabledMcpjsonServers"],
+        )
+        self.assertEqual(
+            ["Bash(git status)", "mcp__ios-rag__search", "mcp__frontend-rag__read_file"],
+            implementer_settings["permissions"]["allow"],
+        )
+        implementer_mcp = json.loads(
+            (implementer_workspace.directory / "claude.mcp.role.json").read_text()
+        )
+        self.assertEqual(
+            {"ios-rag", "frontend-rag"},
+            set(implementer_mcp["mcpServers"].keys()),
+        )
+        implementer_script = (implementer_workspace.directory / "launch-role.sh").read_text()
+        self.assertIn("SDD_FACTORY_CLAUDE_SETTINGS=", implementer_script)
+        self.assertIn("SDD_FACTORY_CLAUDE_MCP_CONFIG=", implementer_script)
+
+        reviewer_workspace = workspace_manager.ensure_role_workspace("IOS-30000MCP", "code-reviewer")
+        launcher_manager.ensure_launch_plan(
+            task_key="IOS-30000MCP",
+            workspace=reviewer_workspace,
+            role_config={"runner": "claude", "model": "sonnet", "effort": "medium"},
+        )
+        reviewer_settings = json.loads(
+            (reviewer_workspace.directory / "claude.settings.role.json").read_text()
+        )
+        self.assertEqual([], reviewer_settings["enabledMcpjsonServers"])
+        reviewer_mcp = json.loads(
+            (reviewer_workspace.directory / "claude.mcp.role.json").read_text()
+        )
+        self.assertEqual({}, reviewer_mcp["mcpServers"])
+
     def test_real_launcher_backed_runtime_keeps_persistent_role_context_across_rounds(self) -> None:
         runtime_root = Path(self.temp_dir.name)
         repo_root = Path(self.temp_dir.name) / "repo-root-real-launcher"

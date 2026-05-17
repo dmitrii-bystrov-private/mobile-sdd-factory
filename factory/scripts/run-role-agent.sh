@@ -21,9 +21,14 @@ workdir_root="${SDD_FACTORY_WORKDIR_ROOT:-}"
 lifecycle="${SDD_FACTORY_ROLE_LIFECYCLE:-persistent}"
 role_model="${SDD_FACTORY_ROLE_MODEL:-}"
 role_effort="${SDD_FACTORY_ROLE_EFFORT:-}"
+claude_settings_file="${SDD_FACTORY_CLAUDE_SETTINGS:-}"
+claude_mcp_config="${SDD_FACTORY_CLAUDE_MCP_CONFIG:-}"
 settings_file=""
+mcp_config_file=""
 
-if [[ -n "$task_repo_root" ]]; then
+if [[ -n "$claude_settings_file" ]]; then
+  settings_file="$claude_settings_file"
+elif [[ -n "$task_repo_root" ]]; then
   if [[ -f "$task_repo_root/.claude/settings.local.json" ]]; then
     settings_file="$task_repo_root/.claude/settings.local.json"
   elif [[ -f "$task_repo_root/.claude/settings.json" ]]; then
@@ -37,6 +42,14 @@ if [[ -z "$settings_file" && -n "$repo_root" ]]; then
   elif [[ -f "$repo_root/.claude/settings.json" ]]; then
     settings_file="$repo_root/.claude/settings.json"
   fi
+fi
+
+if [[ -n "$claude_mcp_config" ]]; then
+  mcp_config_file="$claude_mcp_config"
+elif [[ -n "$task_repo_root" && -f "$task_repo_root/.mcp.json" ]]; then
+  mcp_config_file="$task_repo_root/.mcp.json"
+elif [[ -n "$repo_root" && -f "$repo_root/.mcp.json" ]]; then
+  mcp_config_file="$repo_root/.mcp.json"
 fi
 
 printf "SDD_FACTORY_AGENT_BOOTSTRAP launcher=%s role=%s task=%s lifecycle=%s\n" "$launcher_name" "$role_name" "$task_key" "$lifecycle"
@@ -65,6 +78,9 @@ case "$launcher_name" in
     fi
     if [[ -n "$settings_file" ]]; then
       args+=("--settings" "$settings_file")
+    fi
+    if [[ -n "$mcp_config_file" ]]; then
+      args+=("--mcp-config" "$mcp_config_file")
     fi
     exec claude "${args[@]}"
     ;;

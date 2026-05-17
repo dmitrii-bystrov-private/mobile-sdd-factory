@@ -2,13 +2,13 @@
 
 ## Question
 
-What should be the next concrete slice inside `Phase 44` after `Role Runtime Configuration Baseline`?
+What should be the next concrete slice inside `Phase 44` after `Runtime Session Management Surface`?
 
 ## Candidate Slices
 
-### Option 1. Role-Scoped MCP Baseline
+### Option 1. Claude Role-Scoped MCP Baseline
 
-Stop using one broad shared MCP settings surface and generate effective MCP settings per role.
+Stop using one broad shared MCP settings surface for Claude and generate effective role-scoped Claude MCP settings per role.
 
 ### Option 2. Runtime Session Management Surface
 
@@ -20,15 +20,15 @@ Deepen live validation on Codex until runtime expectations are symmetric enough 
 
 ## Decision
 
-Choose `Role-Scoped MCP Baseline`.
+Choose `Claude Role-Scoped MCP Baseline`.
 
 ## Why
 
-### 1. Runtime config without MCP isolation is still incomplete
+### 1. Runtime config without Claude MCP isolation is still incomplete
 
 The product can now choose runner/model/effort, but each role still receives MCP availability too broadly.
 
-### 2. MCP isolation is part of role correctness, not a later nicety
+### 2. Claude MCP isolation is part of role correctness, not a later nicety
 
 It directly affects:
 
@@ -38,6 +38,6 @@ It directly affects:
 
 ### 3. It stays bounded
 
-The launcher already has a settings injection seam.
+The launcher already has a settings injection seam for Claude.
 
-The next step is to make that seam role-specific instead of global.
+Codex should remain global, so the next step is to make only the Claude seam role-specific instead of global.

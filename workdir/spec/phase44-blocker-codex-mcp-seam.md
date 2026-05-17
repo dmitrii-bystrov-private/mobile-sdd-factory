@@ -1,48 +1,20 @@
-# Phase 44 Blocker: Codex MCP Isolation Seam
+# Phase 44 Note: Codex MCP Policy
 
-## Problem
+## Clarification
 
-`Role-Scoped MCP Baseline` needs a reliable way to restrict MCP availability per role for both:
+`Role-Scoped MCP Baseline` no longer treats Codex as a blocker.
 
-- `claude`
-- `codex`
+The product policy is now:
 
-For Claude, the launcher already has a clear settings seam.
+- `Claude` requires role-scoped MCP isolation
+- `Codex` keeps MCP global by design
 
-For Codex, the local CLI currently exposes:
+## Result
 
-- global/shared MCP configuration
-- `codex mcp list`
-- config overrides via `-c`
+The old assumption that role-scoped MCP had to work identically for both runners was wrong.
 
-but the local probes so far do not show a reliable per-session MCP filtering path.
+The practical implication is simple:
 
-## What Was Tested
-
-- `codex mcp list`
-- `codex mcp get ios-rag`
-- `codex mcp list -c 'mcp_servers={}'`
-- `codex mcp list -c 'mcp_servers={\"ios-rag\"={url=\"https://mcp.finom.world/mcp/swift\"}}'`
-
-## Observation
-
-The override probes did not change the active MCP list in the expected way.
-
-That means we do not yet have a trustworthy implementation seam for:
-
-- runner-agnostic role MCP isolation
-- or a Codex-specific per-launch filtered MCP set
-
-## Decision
-
-Do not ship a fake "role-scoped MCP" implementation that only truly isolates Claude.
-
-Treat this as a real blocker until the Codex config/runtime seam is understood well enough to implement the feature honestly.
-
-## Safe Next Step
-
-Before coding `Role-Scoped MCP Baseline`, reconcile the actual Codex MCP configuration model and identify one of:
-
-1. a supported per-session override mechanism
-2. a supported project-local config mechanism
-3. an explicit decision that Codex MCP isolation is unsupported and must remain deferred
+- do not spend more implementation effort trying to fake Codex role-scoped MCP
+- keep Codex launcher behavior unchanged
+- scope `Phase 44` MCP isolation work to `Claude` only

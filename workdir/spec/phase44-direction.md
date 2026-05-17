@@ -29,15 +29,20 @@ The system does not yet expose real role-level runtime configuration for:
 
 Legacy `.claude/agents/*.md` values exist, but they are not yet the runtime contract.
 
-### 3. Role-scoped MCP isolation is not implemented
+### 3. Claude role-scoped MCP isolation is not implemented
 
-The current launcher path still uses broad shared settings rather than a role-scoped effective MCP set.
+The current launcher path still uses broad shared settings rather than a role-scoped effective MCP set for Claude-backed roles.
 
 That means:
 
 - MCP availability is too coarse
 - role isolation is weaker than intended
 - runtime behavior is less predictable than the old role contracts implied
+
+Codex is different:
+
+- Codex MCP is global by design
+- this phase should not try to fake role-scoped Codex MCP
 
 ### 4. Codex parity is still shallower than Claude parity
 
@@ -52,7 +57,7 @@ This phase should produce four durable outcomes:
 1. a real runtime-session management surface
 2. explicit stop/restart/recovery semantics
 3. per-role runtime configuration with real runner/model/effort options
-4. role-scoped MCP settings instead of global launcher-wide MCP exposure
+4. Claude role-scoped MCP settings instead of global launcher-wide MCP exposure, with Codex explicitly staying global
 
 ## Non-Goal
 

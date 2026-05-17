@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Final
 
 from backend.coordinator.intake import IntakeError
 from factory.doctor.runtime_capabilities import build_runtime_capabilities
@@ -22,6 +23,8 @@ ROLE_DEFAULT_SOURCE_MAP = {
     "story-spec-worker": None,
     "task-decomposer-worker": "task-decomposer",
 }
+
+_CLAUDE_SCOPED_MCP_RUNNER: Final[str] = "claude"
 
 
 def normalize_role_runtime_config(
@@ -85,3 +88,51 @@ def normalize_role_runtime_config(
             "effort": effort,
         }
     return normalized
+
+
+def resolve_role_mcp_servers(
+    *,
+    repo_root: Path,
+    role_name: str,
+    runner: str,
+) -> list[str]:
+    if runner != _CLAUDE_SCOPED_MCP_RUNNER:
+        return []
+
+    legacy_role_name = ROLE_DEFAULT_SOURCE_MAP.get(role_name)
+    if not legacy_role_name:
+        return []
+
+    agent_path = repo_root / ".claude" / "agents" / f"{legacy_role_name}.md"
+    if not agent_path.is_file():
+        return []
+
+    return _parse_agent_mcp_servers(agent_path)
+
+
+def _parse_agent_mcp_servers(agent_path: Path) -> list[str]:
+    in_frontmatter = False
+    current_list_key: str | None = None
+    mcp_servers: list[str] = []
+
+    for raw_line in agent_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.rstrip()
+        if line.strip() == "---":
+            if not in_frontmatter:
+                in_frontmatter = True
+                continue
+            break
+        if not in_frontmatter:
+            continue
+        stripped = line.strip()
+        if current_list_key == "mcpServers" and stripped.startswith("- "):
+            mcp_servers.append(stripped[2:].strip())
+            continue
+        current_list_key = None
+        if stripped.startswith("mcpServers:"):
+            value = stripped.split(":", 1)[1].strip()
+            if value == "[]":
+                mcp_servers = []
+            else:
+                current_list_key = "mcpServers"
+    return mcp_servers

@@ -18,6 +18,19 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - clarified the MCP policy split:
+      - `Claude` requires role-scoped MCP
+      - `Codex` stays global by design
+    - updated `Phase 44` to remove the old Codex MCP blocker framing
+  - current_state:
+    - the next implementation slice is now narrowly defined as `Claude Role-Scoped MCP Baseline`
+  - next:
+    - generate role-scoped Claude settings and MCP config files in role workspaces
+  - blockers:
+    - none after the runner-specific policy clarification
+
+- date: `2026-05-17`
+  - done:
     - implemented `Runtime Session Management Surface`
     - added runtime-state inspection
     - added explicit stop role / stop session actions

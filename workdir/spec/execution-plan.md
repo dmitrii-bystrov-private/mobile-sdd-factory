@@ -22,7 +22,7 @@ Status markers:
 
 - Current phase: `Phase 44. Runtime Management, Role Configuration, And MCP Isolation`
 - Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer completion, file-backed role result handling, real two-round live implementer validation, and the setup/doctor/runtime-capability baseline are complete; the active track is now runtime management, role configuration, MCP isolation, and codex parity`
-- Current implementation mode: `launcher-backed live roles use PTY transport plus file-backed handoff/result semantics; doctor, bootstrap guidance, and runtime capabilities now exist; the next work should make roles explicitly configurable and isolated at runtime`
+- Current implementation mode: `launcher-backed live roles use PTY transport plus file-backed handoff/result semantics; doctor, bootstrap guidance, runtime capabilities, role runtime configuration, and runtime session management now exist; the next work should finish Claude-only MCP isolation and then deepen restart/recovery and Codex parity`
 - Primary source of truth for next work: `this file`
 - Filesystem/runtime source of truth: `workdir/spec/filesystem-runtime-model.md`
 - External runner session cleanup policy: `workdir/spec/external-runner-session-cleanup-policy.md`
@@ -31,7 +31,7 @@ Status markers:
 
 ## Current Immediate Next Step
 
-- `[in_progress]` continue `Phase 44` from the new runtime-management slice; the next intended slice remains `Role-Scoped MCP Baseline`, but it is currently blocked on the unresolved Codex MCP configuration seam
+- `[in_progress]` continue `Phase 44` from the runtime-management slice; the next intended slice is `Claude Role-Scoped MCP Baseline`, while `Codex` MCP remains global by design
 
 ## Reserved Next Phase
 
