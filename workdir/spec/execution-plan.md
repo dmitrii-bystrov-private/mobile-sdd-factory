@@ -21,8 +21,8 @@ Status markers:
 ## Current Position
 
 - Current phase: `Phase 44. Runtime Management, Role Configuration, And MCP Isolation`
-- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer completion, file-backed role result handling, real two-round live implementer validation, and the setup/doctor/runtime-capability baseline are complete; the active track is now runtime management, role configuration, MCP isolation, and codex parity`
-- Current implementation mode: `launcher-backed live roles use tmux transport plus file-backed handoff/result semantics; doctor, bootstrap guidance, runtime capabilities, role runtime configuration, runtime session management, and Claude-only MCP isolation now exist; the next work should tighten the live role contract toward AGENTS-first realism and then deepen Codex parity under that same contract`
+- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer and codex completion, file-backed role result handling, real two-round live validation, setup/doctor/runtime-capability baseline, role runtime configuration, runtime management, Claude-only MCP isolation, task cleanup, and acceptance-runtime cleanup are complete; the active track is now true runtime continuation semantics rather than more fallback restart logic`
+- Current implementation mode: `launcher-backed live roles use tmux transport plus file-backed handoff/result semantics; doctor, bootstrap guidance, runtime capabilities, role runtime configuration, runtime session management, Claude-only MCP isolation, runtime visibility, task cleanup, and project-scoped acceptance/runtime cleanup now exist; the next work should prove native continuation of an existing live session, with the current restart-and-redispatch path treated as transitional rather than final`
 - Primary source of truth for next work: `this file`
 - Filesystem/runtime source of truth: `workdir/spec/filesystem-runtime-model.md`
 - External runner session cleanup policy: `workdir/spec/external-runner-session-cleanup-policy.md`
@@ -31,9 +31,9 @@ Status markers:
 
 ## Current Immediate Next Step
 
-- `[in_progress]` continue `Phase 44` by tightening the live runtime contract; `Claude` MCP isolation is in place, `Codex` MCP remains global by design, and the next practical gaps are:
-  - reduce live routed work from a transitional full role packet toward an `AGENTS.md`-first contract with a shorter trigger
-  - then validate `Codex` to the same live depth already proven for `Claude``
+- `[in_progress]` continue `Phase 44` by replacing transitional restart semantics with native continuation semantics; `Claude` MCP isolation is in place, `Codex` MCP remains global by design, the `AGENTS.md`-first contract and live `Codex` parity have already been proven at the two-round level, and the next practical gaps are:
+  - make operator resume/restart actions continue the previous live runner session natively instead of recreating a fresh session
+  - reduce or remove `restart + rehydrate + redispatch` fallback complexity once native continuation is stable for supported runners
 
 ## Reserved Next Phase
 
@@ -1000,7 +1000,38 @@ Status markers:
 166. `[done]` Implement the `Bootstrap Guidance Baseline` slice.
 167. `[done]` Validate the `Bootstrap Guidance Baseline` slice.
 168. `[done]` Choose the next concrete `Phase 43` slice.
-169. `[pending]` Implement the `Bootstrap Guidance Surface` slice.
+169. `[done]` Implement the `Bootstrap Guidance Surface` slice.
+170. `[done]` Validate the `Bootstrap Guidance Surface` slice.
+171. `[done]` Choose the next concrete `Phase 43` slice.
+172. `[done]` Implement the `Local Toolchain Doctor Expansion` slice.
+173. `[done]` Validate the `Local Toolchain Doctor Expansion` slice.
+174. `[done]` Choose the next concrete `Phase 43` slice.
+175. `[done]` Implement the `Runtime Capabilities Baseline` slice.
+176. `[done]` Validate the `Runtime Capabilities Baseline` slice.
+177. `[done]` Assess `Phase 43` completion.
+178. `[done]` Choose the next named implementation phase after `Phase 43`.
+179. `[done]` Choose the first concrete `Phase 44` slice.
+180. `[done]` Implement the `Role Runtime Configuration Baseline` slice.
+181. `[done]` Validate the `Role Runtime Configuration Baseline` slice.
+182. `[done]` Implement the `Runtime Session Management Surface` slice.
+183. `[done]` Validate the `Runtime Session Management Surface` slice.
+184. `[done]` Clarify the final runner MCP policy split:
+  - `Claude` gets role-scoped MCP
+  - `Codex` keeps global MCP
+185. `[done]` Implement the `Claude Role-Scoped MCP Baseline` slice.
+186. `[done]` Validate the `Claude Role-Scoped MCP Baseline` slice.
+187. `[done]` Choose the next concrete `Phase 44` slice.
+188. `[done]` Tighten the live role contract toward an `AGENTS.md`-first model with file-backed hydration.
+189. `[done]` Validate `Claude` live runtime under that more realistic contract.
+190. `[done]` Validate `Codex` to the same two-round live depth under that contract.
+191. `[done]` Implement and validate manual runtime stop/restart flows as an explicit operator capability.
+192. `[done]` Expose tmux runtime visibility and attach/capture handles to the operator.
+193. `[done]` Move acceptance run roots and tmux sockets into project-scoped runtime directories.
+194. `[done]` Implement automatic cleanup of acceptance tmux state and runner-private test residue.
+195. `[done]` Implement task cleanup lifecycle in the operator UI and closed-task cleanup process.
+196. `[done]` Extend real task cleanup to Claude and Codex runner-private session traces.
+197. `[in_progress]` Replace transitional `restart + rehydrate + redispatch` semantics with native session continuation semantics.
+198. `[pending]` Remove restart fallback complexity once native continuation is stable for supported runners.
 
 ## What Was Going Wrong
 

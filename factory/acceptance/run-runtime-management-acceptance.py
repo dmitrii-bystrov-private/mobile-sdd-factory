@@ -79,6 +79,75 @@ def wait_for_stage(
     return last_response, output_text
 
 
+def _strip_bootstrap_noise(output_text: str) -> str:
+    meaningful_lines: list[str] = []
+    for line in output_text.splitlines():
+        normalized = line.strip()
+        if not normalized:
+            continue
+        if normalized.startswith("SDD_FACTORY_ROLE_LAUNCHER_READY"):
+            continue
+        if normalized.startswith("SDD_FACTORY_AGENT_BOOTSTRAP"):
+            continue
+        meaningful_lines.append(line)
+    return "\n".join(meaningful_lines).strip()
+
+
+def _has_started_routed_work(output_text: str) -> bool:
+    meaningful = _strip_bootstrap_noise(output_text).lower()
+    if not meaningful:
+        return False
+    return (
+        "read routed_work.md" in meaningful
+        or "sdd_progress:" in meaningful
+        or "result.json" in meaningful
+    )
+
+
+def wait_for_live_session_activity(
+    session_id: int,
+    role_name: str,
+    *,
+    dependencies,
+    timeout_seconds: float = 60.0,
+) -> tuple[object, str]:
+    deadline = time.time() + timeout_seconds
+    last_response = None
+    output_text = ""
+    role = dependencies.role_repository.get_by_name(session_id, role_name)
+    role_id = role.id if role is not None else None
+    while time.time() < deadline:
+        dependencies.loop_runner.run_once()
+        response = collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=session_id,
+                role_name=role_name,
+            ),
+            dependencies=dependencies,
+        )
+        last_response = response
+        artifacts = dependencies.artifact_repository.list_for_session(session_id)
+        runtime_outputs = [
+            item
+            for item in artifacts
+            if item.artifact_type == "runtime_output" and item.role_id == role_id
+        ]
+        if runtime_outputs:
+            output_path = Path(runtime_outputs[-1].path)
+            if output_path.is_file():
+                output_text = output_path.read_text()
+        if response.session.current_stage != "implementation_requested":
+            raise AssertionError(
+                "role progressed past implementation_requested before continuation stop point:\n"
+                + output_text[-12000:]
+            )
+        if _has_started_routed_work(output_text):
+            return response, output_text
+        time.sleep(0.5)
+    assert last_response is not None
+    return last_response, output_text
+
+
 def _runner_name() -> str:
     return os.environ.get("SDD_FACTORY_ACCEPTANCE_RUNNER", "claude").strip() or "claude"
 
@@ -145,6 +214,13 @@ def _print_runtime_debug_bundle(*, session_id: int, dependencies) -> None:
 
 
 def _validate_role_restart(*, session_id: int, dependencies) -> None:
+    response, output_text = wait_for_live_session_activity(
+        session_id=session_id,
+        role_name=IMPLEMENTER_ROLE,
+        dependencies=dependencies,
+    )
+    assert response.session.current_stage == "implementation_requested", output_text[-12000:]
+
     before = dependencies.coordinator_service.get_runtime_state_summary(session_id)
     before_runtime_session_id = before["runtime_session_id"]
     before_role = next(item for item in before["roles"] if item["role_name"] == IMPLEMENTER_ROLE)
@@ -184,6 +260,13 @@ def _validate_role_restart(*, session_id: int, dependencies) -> None:
 
 
 def _validate_session_restart(*, session_id: int, dependencies) -> None:
+    response, output_text = wait_for_live_session_activity(
+        session_id=session_id,
+        role_name=IMPLEMENTER_ROLE,
+        dependencies=dependencies,
+    )
+    assert response.session.current_stage == "implementation_requested", output_text[-12000:]
+
     before = dependencies.coordinator_service.get_runtime_state_summary(session_id)
     before_runtime_session_id = before["runtime_session_id"]
     before_handles = {

@@ -3999,6 +3999,7 @@ class CoordinatorService:
             task_key=session.task_key,
             role_name=role.role_name,
             role_config=(session.role_config or {}).get(role.role_name),
+            resume_mode="native",
         )
         role = self.role_repository.update_runtime(
             role.id,
@@ -4030,6 +4031,7 @@ class CoordinatorService:
                 task_key=session.task_key,
                 role_name=role.role_name,
                 role_config=(session.role_config or {}).get(role.role_name),
+                resume_mode="native",
             )
             updated_role = self.role_repository.update_runtime(
                 role.id,
@@ -4166,6 +4168,7 @@ class CoordinatorService:
         task_key: str,
         role_name: str,
         role_config: dict[str, str] | None,
+        resume_mode: str | None = None,
     ) -> RuntimeRoleHandle:
         start_directory = None
         launch_command = None
@@ -4177,6 +4180,7 @@ class CoordinatorService:
                     task_key=task_key,
                     workspace=workspace,
                     role_config=role_config,
+                    resume_mode=resume_mode,
                 )
                 launch_command = launch_plan.command
         return self.session_backend.spawn_role(

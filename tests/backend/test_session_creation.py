@@ -588,6 +588,27 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("/factory/scripts/run-role-agent.sh", script_text)
         self.assertIn("SDD_FACTORY_ROLE_LAUNCHER_READY", script_text)
 
+    def test_launcher_plan_can_mark_native_resume_mode(self) -> None:
+        workspace_manager = RoleWorkspaceManager(
+            runtime_root=Path(self.temp_dir.name),
+            repo_root=Path(self.temp_dir.name) / "repo-root-resume-launcher",
+            workdir_root=Path(self.temp_dir.name),
+        )
+        launcher_manager = RoleLauncherManager(
+            repo_root=Path(self.temp_dir.name) / "repo-root-resume-launcher",
+            workdir_root=Path(self.temp_dir.name),
+        )
+        workspace = workspace_manager.ensure_role_workspace("IOS-30000RESUME", "implementer")
+        launch_plan = launcher_manager.ensure_launch_plan(
+            task_key="IOS-30000RESUME",
+            workspace=workspace,
+            role_config={"runner": "claude", "model": "sonnet", "effort": "medium"},
+            resume_mode="native",
+        )
+
+        script_text = launch_plan.launcher_script.read_text()
+        self.assertIn("SDD_FACTORY_ROLE_RESUME_MODE=native", script_text)
+
     def test_claude_launcher_generates_role_scoped_mcp_files(self) -> None:
         repo_root = Path(self.temp_dir.name) / "repo-root-mcp"
         (repo_root / ".claude" / "agents").mkdir(parents=True, exist_ok=True)

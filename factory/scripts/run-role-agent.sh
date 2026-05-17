@@ -21,6 +21,7 @@ workdir_root="${SDD_FACTORY_WORKDIR_ROOT:-}"
 lifecycle="${SDD_FACTORY_ROLE_LIFECYCLE:-persistent}"
 role_model="${SDD_FACTORY_ROLE_MODEL:-}"
 role_effort="${SDD_FACTORY_ROLE_EFFORT:-}"
+resume_mode="${SDD_FACTORY_ROLE_RESUME_MODE:-}"
 claude_settings_file="${SDD_FACTORY_CLAUDE_SETTINGS:-}"
 claude_mcp_config="${SDD_FACTORY_CLAUDE_MCP_CONFIG:-}"
 settings_file=""
@@ -82,6 +83,9 @@ case "$launcher_name" in
     if [[ -n "$mcp_config_file" ]]; then
       args+=("--mcp-config" "$mcp_config_file")
     fi
+    if [[ "$resume_mode" == "native" ]]; then
+      exec claude -c "${args[@]}"
+    fi
     exec claude "${args[@]}"
     ;;
   codex)
@@ -103,6 +107,9 @@ case "$launcher_name" in
     fi
     args+=("-s" "danger-full-access")
     args+=("-a" "never")
+    if [[ "$resume_mode" == "native" ]]; then
+      exec codex "${args[@]}" resume --last
+    fi
     exec codex "${args[@]}"
     ;;
   sh)

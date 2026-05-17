@@ -61,6 +61,7 @@ class RoleLauncherManager:
         task_key: str,
         workspace: RoleWorkspace,
         role_config: dict[str, str] | None = None,
+        resume_mode: str | None = None,
     ) -> RoleLaunchPlan:
         claude_runtime_files = self._ensure_claude_runtime_files(
             task_key=task_key,
@@ -74,6 +75,7 @@ class RoleLauncherManager:
                 role_name=workspace.role_name,
                 workspace=workspace,
                 role_config=role_config,
+                resume_mode=resume_mode,
                 claude_runtime_files=claude_runtime_files,
             )
         )
@@ -92,6 +94,7 @@ class RoleLauncherManager:
         role_name: str,
         workspace: RoleWorkspace,
         role_config: dict[str, str] | None = None,
+        resume_mode: str | None = None,
         claude_runtime_files: dict[str, Path] | None = None,
     ) -> str:
         launcher_exec = " ".join(_shell_escape(part) for part in self.launcher_command)
@@ -116,6 +119,7 @@ class RoleLauncherManager:
                 f'export SDD_FACTORY_ROLE_RUNNER={_shell_escape(runner)}',
                 f'export SDD_FACTORY_ROLE_MODEL={_shell_escape(model)}',
                 f'export SDD_FACTORY_ROLE_EFFORT={_shell_escape(effort)}',
+                f'export SDD_FACTORY_ROLE_RESUME_MODE={_shell_escape(resume_mode or "")}',
                 f'export SDD_FACTORY_CLAUDE_SETTINGS={_shell_escape(claude_settings)}',
                 f'export SDD_FACTORY_CLAUDE_MCP_CONFIG={_shell_escape(claude_mcp_config)}',
                 f"cd {_shell_escape(str(workspace.directory))}",

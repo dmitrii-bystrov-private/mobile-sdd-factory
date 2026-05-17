@@ -2,54 +2,57 @@
 
 ## Question
 
-What should be the next concrete slice inside `Phase 44` after the runtime-management and Claude MCP isolation groundwork?
+What should be the next concrete slice inside `Phase 44` after runtime management, Claude MCP isolation, the more realistic live role contract, Codex live parity, and task/runtime cleanup work?
 
 ## Candidate Slices
 
-### Option 1. Runtime Restart And Recovery Baseline
+### Option 1. Native Session Continuation Baseline
 
-Add explicit operator restart flows after manual runtime stop actions.
+Make operator restart/resume actions continue the previous runner session natively instead of recreating a fresh live session and redispatching work.
 
-### Option 2. More Realistic Live Runtime Contract
+### Option 2. Runtime Crash Auto-Recovery Baseline
 
-Reduce the gap between the current transitional routed prompt packet and the intended role model:
+Add health-check and respawn behavior for unexpectedly dead persistent role sessions.
 
-- keep `AGENTS.md` as the durable role contract
-- move toward shorter live trigger text instead of repeating the full role framing in every routed work packet
-- validate that launcher-backed roles still complete correctly under that more realistic contract
+### Option 3. Permanent Documentation Start
 
-### Option 3. Codex Parity Validation Baseline
-
-Deepen live validation on Codex until runtime expectations are symmetric enough with Claude.
-
-### Option 4. Runtime Crash Auto-Recovery Baseline
-
-Move beyond manual restart into health-check and respawn behavior for killed persistent roles.
+Begin moving temporary knowledge from `workdir/spec/` into permanent project docs.
 
 ## Decision
 
-Choose `More Realistic Live Runtime Contract`.
+Choose `Native Session Continuation Baseline`.
 
 ## Why
 
-### 1. Current live tests still prove a transitional contract
+### 1. The restart path is operationally useful but architecturally transitional
 
-The system currently works with a routed `ROUTED_WORK.md` packet that still repeats:
+The current restart flow works, but it is still:
 
-- role name
-- role-specific rules
-- output protocol instructions
+- recreate runtime
+- rehydrate context
+- redispatch current work
 
-That is practical for stabilization, but it is not yet the most realistic end-state for persistent roles that should primarily rely on `AGENTS.md` plus a short per-round trigger.
+That is useful as a safety net, but it is not the desired end-state for persistent live sessions.
 
-### 2. This makes the next live proofs more meaningful
+### 2. The user-facing expectation is continuation, not reconstruction
 
-If we do not tighten the role contract now, later Codex parity work may prove the wrong thing: compatibility with an over-specified transitional prompt rather than the intended persistent-role model.
+When an operator resumes a previously interrupted role, the right behavior is:
 
-### 3. Codex parity should come immediately after this tightening
+- continue the previous native runner session
+- send a short continuation instruction if needed
+- avoid cold-starting a new session unless native continuation is impossible
 
-Once the live contract becomes more realistic for Claude, the same contract should be used to validate Codex end-to-end rather than leaving Codex on a shallower proof path.
+### 3. The older blockers are already behind us
 
-### 4. Restart/recovery still matters, but it can follow runtime-contract realism
+The next slice is no longer:
 
-Explicit restart semantics remain important, but they do not change the core question of what exactly we are proving in live runner validation.
+- AGENTS-first realism
+- Codex two-round parity
+- MCP policy clarification
+- task/test cleanup
+
+Those are already complete enough to stop driving the phase.
+
+### 4. Crash recovery should follow true continuation semantics
+
+Automatic respawn/recovery is easier to design cleanly once the explicit operator-driven continuation model is correct.

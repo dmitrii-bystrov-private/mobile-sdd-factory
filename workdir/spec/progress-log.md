@@ -18,6 +18,31 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - reconciled the temporary plan against the actually committed runtime/productization work
+    - confirmed that the `Phase 44` live-runtime contract tightening work is no longer the active gap:
+      - `AGENTS.md`-first live handoff is already in place
+      - live `Codex` two-round parity has already been validated
+    - confirmed that the unplanned-but-real work now completed inside the same broad phase is:
+      - tmux runtime visibility
+      - task cleanup lifecycle
+      - global closed-task cleanup process
+      - project-scoped acceptance runtime roots
+      - automatic cleanup of acceptance runner residue
+  - current_state:
+    - `Phase 42` is complete
+    - `Phase 43` is complete
+    - `Phase 44` is still active, but most of its originally intended slices are already done
+    - the main remaining gap is no longer basic runtime management, MCP policy, or codex live depth
+    - the main remaining gap is true native continuation of an existing runner session instead of recreating a fresh session and redispatching work
+  - next:
+    - make operator resume/restart continue the previous live runner session natively
+    - after that, remove or sharply reduce `restart + rehydrate + redispatch` fallback complexity
+  - blockers:
+    - none at the planning level
+    - the implementation-level risk is specifically runner behavior around native continuation semantics, not transport or cleanup
+
+- date: `2026-05-17`
+  - done:
     - validated that the live `tmux` role-dispatch path works again after fixing the ready-detector drift
     - clarified that current live runner proofs still use a transitional routed work contract:
       - durable role context from `AGENTS.md`
