@@ -21,8 +21,8 @@ Status markers:
 ## Current Position
 
 - Current phase: `Phase 44. Runtime Management, Role Configuration, And MCP Isolation`
-- Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer and codex completion, file-backed role result handling, real two-round live validation, setup/doctor/runtime-capability baseline, role runtime configuration, runtime management, Claude-only MCP isolation, task cleanup, and acceptance-runtime cleanup are complete; the active track is now true runtime continuation semantics rather than more fallback restart logic`
-- Current implementation mode: `launcher-backed live roles use tmux transport plus file-backed handoff/result semantics; doctor, bootstrap guidance, runtime capabilities, role runtime configuration, runtime session management, Claude-only MCP isolation, runtime visibility, task cleanup, and project-scoped acceptance/runtime cleanup now exist; the next work should prove native continuation of an existing live session, with the current restart-and-redispatch path treated as transitional rather than final`
+- Overall status: `persistent tmux runtime, launcher-backed operator recovery, native continuation for Claude and Codex, crash auto-recovery baseline, role runtime configuration, Claude-only MCP isolation, task cleanup, and acceptance-runtime cleanup are complete`
+- Current implementation mode: `launcher-backed live roles use tmux transport plus file-backed handoff/result semantics; operator restart/resume uses native continuation semantics; unexpected owner-runtime death now triggers one automatic native recovery attempt before operator escalation`
 - Primary source of truth for next work: `this file`
 - Filesystem/runtime source of truth: `workdir/spec/filesystem-runtime-model.md`
 - External runner session cleanup policy: `workdir/spec/external-runner-session-cleanup-policy.md`
@@ -31,13 +31,15 @@ Status markers:
 
 ## Current Immediate Next Step
 
-- `[in_progress]` continue `Phase 44` by replacing transitional restart semantics with native continuation semantics; `Claude` MCP isolation is in place, `Codex` MCP remains global by design, the `AGENTS.md`-first contract and live `Codex` parity have already been proven at the two-round level, and the next practical gaps are:
-  - make operator resume/restart actions continue the previous live runner session natively instead of recreating a fresh session
-  - reduce or remove `restart + rehydrate + redispatch` fallback complexity once native continuation is stable for supported runners
+- `[done]` `Phase 44` is effectively complete:
+  - operator resume/restart uses native continuation semantics for supported runners
+  - `Codex` whole-session restart parity is proven under the live tmux runtime
+  - unexpected owner-runtime death has a controlled automatic recovery baseline
+- `[pending]` the next meaningful project step is no longer runtime plumbing; it is final reconciliation into permanent documentation and end-state operator guidance
 
 ## Reserved Next Phase
 
-- `[pending]` no later named phase reserved yet
+- `[pending]` `Phase 45. Permanent Documentation And Final Reconciliation`
 
 ## Phase 1. Architecture Contract
 

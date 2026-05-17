@@ -18,6 +18,32 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - completed the native-continuation track for both `Claude` and `Codex` under the real tmux runtime
+    - removed the global tmux submit-retry workaround after proving it was no longer needed for the live continuation path
+    - tightened runner-ready detection so `Claude` and `Codex` use their actual prompt semantics instead of noisy banner/UI heuristics
+    - added automatic owner-runtime recovery baseline:
+      - detect unexpectedly dead owner runtime
+      - respawn natively once
+      - redispatch/continue current work
+      - escalate only if recovery fails
+    - exposed the last automatic runtime recovery in runtime-state and the runtime UI panel
+    - validated:
+      - full backend suite
+      - `run-runtime-management-acceptance.py` for `Claude`
+      - `run-runtime-management-acceptance.py` for `Codex`
+      - `run-auto-recovery-acceptance.py`
+      - frontend build
+  - current_state:
+    - `Phase 44` is effectively complete
+    - the main remaining work is no longer runtime transport, continuation, MCP policy, cleanup, or crash recovery
+    - the next meaningful phase is final reconciliation into permanent project documentation
+  - next:
+    - define and execute the permanent documentation / final reconciliation phase
+  - blockers:
+    - no active runtime blocker remains on the tmux-backed path
+
+- date: `2026-05-17`
+  - done:
     - reconciled the temporary plan against the actually committed runtime/productization work
     - confirmed that the `Phase 44` live-runtime contract tightening work is no longer the active gap:
       - `AGENTS.md`-first live handoff is already in place

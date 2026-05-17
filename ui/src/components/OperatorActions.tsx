@@ -8,6 +8,14 @@ type OperatorActionsProps = {
   onRefresh: () => Promise<void>;
 };
 
+type ActionDefinition = {
+  label: string;
+  description: string;
+  disabled: boolean;
+  strong?: boolean;
+  onClick: () => Promise<void>;
+};
+
 export function OperatorActions({
   session,
   onRefresh,
@@ -150,6 +158,108 @@ export function OperatorActions({
   const canSendToTest =
     session.status === "completed" && session.current_stage === "mr_handoff_completed";
 
+  const dailyActions: ActionDefinition[] = [
+    {
+      label: "Refresh Subtask State",
+      description: "Pull the latest subtask progress after new Jira subtasks or follow-up work appears.",
+      disabled: busy || !canRefreshSubtaskState,
+      onClick: () => run(() => apiClient.refreshSubtaskState(session.id)),
+    },
+    {
+      label: "Create Jira Subtasks",
+      description: "Materialize Jira subtasks from the current story plan when the session is ready for decomposition output.",
+      disabled: busy || !canCreateSubtasksFromPlan,
+      onClick: () => run(() => apiClient.createSubtasksFromPlan(session.id)),
+    },
+    {
+      label: "Create MR Handoff",
+      description: "Produce the merge request handoff after implementation and verification are already complete.",
+      disabled: busy || !canCreateMr,
+      strong: true,
+      onClick: () => run(() => apiClient.createMr(session.id)),
+    },
+    {
+      label: "Send To Test",
+      description: "Move the session into testing after the MR handoff is ready.",
+      disabled: busy || !canSendToTest,
+      strong: true,
+      onClick: () => run(() => apiClient.sendToTest(session.id)),
+    },
+  ];
+
+  const advancedActions: ActionDefinition[] = [
+    {
+      label: "Start Subtask Graph",
+      description: "Explicitly start story subtask execution when the session is ready to branch into subtask work.",
+      disabled: busy || !canStartSubtaskGraph,
+      strong: true,
+      onClick: () => run(() => apiClient.startSubtaskGraph(session.id)),
+    },
+    {
+      label: "Run Loop Once",
+      description: "Manually tick the coordinator loop once when you want to force a fresh reconciliation cycle.",
+      disabled: busy,
+      onClick: () => run(() => apiClient.runLoopOnce()),
+    },
+  ];
+
+  const recoveryActions: ActionDefinition[] = [
+    {
+      label: "Pause Session",
+      description: "Pause the current workflow so the coordinator stops advancing the session automatically.",
+      disabled: busy || session.status !== "active",
+      onClick: () => run(() => apiClient.pauseSession(session.id)),
+    },
+    {
+      label: "Resume Session",
+      description: "Resume a paused or operator-blocked session after the external blocker has been fixed.",
+      disabled: busy || !["paused", "waiting_for_operator"].includes(session.status),
+      onClick: () => run(() => apiClient.resumeSession(session.id)),
+    },
+    {
+      label: "Retry Current Stage",
+      description: "Retry the current stage after a waiting-for-operator interruption without changing the routed work.",
+      disabled: busy || session.status !== "waiting_for_operator",
+      onClick: () => run(() => apiClient.retrySession(session.id)),
+    },
+  ];
+
+  function renderActionGroup(
+    title: string,
+    eyebrow: string,
+    summary: string,
+    actions: ActionDefinition[],
+  ): JSX.Element | null {
+    if (actions.length === 0) {
+      return null;
+    }
+    return (
+      <div className="operator-action-group">
+        <div className="operator-followup-copy">
+          <p className="eyebrow">{eyebrow}</p>
+          <h4>{title}</h4>
+          <p className="path-label">{summary}</p>
+        </div>
+        <div className="actions-grid operator-actions-grid">
+          {actions.map((action) => (
+            <div key={action.label} className="operator-action-card">
+              <button
+                className={`action-button${action.strong ? " action-button-strong" : ""}`}
+                disabled={action.disabled}
+                onClick={() => void action.onClick()}
+                title={action.description}
+                type="button"
+              >
+                {action.label}
+              </button>
+              <p className="operator-action-description">{action.description}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <section className="panel">
       <div className="panel-header">
@@ -159,80 +269,26 @@ export function OperatorActions({
         </div>
       </div>
 
-      <div className="actions-grid">
-        <button
-          className="action-button"
-          disabled={busy || session.status !== "active"}
-          onClick={() => run(() => apiClient.pauseSession(session.id))}
-          type="button"
-        >
-          Pause Session
-        </button>
-        <button
-          className="action-button"
-          disabled={busy || !["paused", "waiting_for_operator"].includes(session.status)}
-          onClick={() => run(() => apiClient.resumeSession(session.id))}
-          type="button"
-        >
-          Resume Session
-        </button>
-        <button
-          className="action-button"
-          disabled={busy || session.status !== "waiting_for_operator"}
-          onClick={() => run(() => apiClient.retrySession(session.id))}
-          type="button"
-        >
-          Retry Current Stage
-        </button>
-        <button
-          className="action-button"
-          disabled={busy}
-          onClick={() => run(() => apiClient.runLoopOnce())}
-          type="button"
-        >
-          Run Loop Once
-        </button>
-        <button
-          className="action-button action-button-strong"
-          disabled={busy || !canStartSubtaskGraph}
-          onClick={() => run(() => apiClient.startSubtaskGraph(session.id))}
-          type="button"
-        >
-          Start Subtask Graph
-        </button>
-        <button
-          className="action-button"
-          disabled={busy || !canRefreshSubtaskState}
-          onClick={() => run(() => apiClient.refreshSubtaskState(session.id))}
-          type="button"
-        >
-          Refresh Subtask State
-        </button>
-        <button
-          className="action-button"
-          disabled={busy || !canCreateSubtasksFromPlan}
-          onClick={() => run(() => apiClient.createSubtasksFromPlan(session.id))}
-          type="button"
-        >
-          Create Jira Subtasks
-        </button>
-        <button
-          className="action-button action-button-strong"
-          disabled={busy || !canCreateMr}
-          onClick={() => run(() => apiClient.createMr(session.id))}
-          type="button"
-        >
-          Create MR Handoff
-        </button>
-        <button
-          className="action-button action-button-strong"
-          disabled={busy || !canSendToTest}
-          onClick={() => run(() => apiClient.sendToTest(session.id))}
-          type="button"
-        >
-          Send To Test
-        </button>
-      </div>
+      {renderActionGroup(
+        "Daily Flow",
+        "Daily",
+        "These are the operator actions that belong to normal day-to-day task handling.",
+        dailyActions,
+      )}
+
+      {renderActionGroup(
+        "Advanced Flow",
+        "Advanced",
+        "These actions are valid workflow controls, but they are used only in narrower lifecycle branches.",
+        advancedActions,
+      )}
+
+      {renderActionGroup(
+        "Recovery And Debug",
+        "Recovery",
+        "Use these controls only when the happy path is blocked or you need to intervene manually.",
+        recoveryActions,
+      )}
 
       <div className="operator-followup-stack">
         <div className="operator-followup-copy">
