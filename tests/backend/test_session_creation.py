@@ -22,6 +22,7 @@ from backend.roles.contracts import (
 )
 from backend.roles.launcher import RoleLauncherManager
 from backend.roles.workspace import RoleWorkspaceManager
+from backend.session_backend.recording_backend import RecordingSessionBackend
 from backend.session_backend.tmux_backend import TmuxSessionBackend
 from backend.session_backend.runtime_models import RuntimeSessionHandle
 from backend.state.artifact_repository import ArtifactRepository
@@ -131,7 +132,7 @@ class SessionCreationTests(unittest.TestCase):
         self.event_repository = EventRepository(self.database)
         self.artifact_repository = ArtifactRepository(self.database)
         self.work_item_repository = WorkItemRepository(self.database)
-        self.session_backend = TmuxSessionBackend(mode="recording")
+        self.session_backend = RecordingSessionBackend()
         self.event_bus = SessionEventBus()
         self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
         self.coordinator = CoordinatorService(
@@ -592,7 +593,7 @@ class SessionCreationTests(unittest.TestCase):
     def test_real_launcher_backed_runtime_keeps_persistent_role_context_across_rounds(self) -> None:
         runtime_root = Path(self.temp_dir.name)
         repo_root = Path(self.temp_dir.name) / "repo-root-real-launcher"
-        session_backend = TmuxSessionBackend(mode="recording", runtime_root=runtime_root)
+        session_backend = RecordingSessionBackend()
         coordinator = CoordinatorService(
             session_repository=self.session_repository,
             role_repository=self.role_repository,

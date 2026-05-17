@@ -89,7 +89,7 @@ try:
     )
     from backend.roles.launcher import RoleLauncherManager
     from backend.roles.workspace import RoleWorkspaceManager
-    from backend.session_backend.tmux_backend import TmuxSessionBackend
+    from backend.session_backend.recording_backend import RecordingSessionBackend
     from backend.state.artifact_repository import ArtifactRepository
     from backend.state.db import Database
     from backend.state.event_repository import EventRepository
@@ -179,7 +179,7 @@ class SessionApiTests(unittest.TestCase):
         event_repository = EventRepository(self.database)
         artifact_repository = ArtifactRepository(self.database)
         work_item_repository = WorkItemRepository(self.database)
-        session_backend = TmuxSessionBackend(mode="recording")
+        session_backend = RecordingSessionBackend()
         event_bus = SessionEventBus()
         self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
         coordinator = CoordinatorService(
