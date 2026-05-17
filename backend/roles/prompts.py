@@ -92,6 +92,7 @@ def role_handoff_prompt(
         return (
             "Continue from your existing AGENTS.md-based role context in this persistent task session.\n"
             "Use the new routed work below without reinitializing your full role definition from scratch.\n\n"
+            "If the same routed work was already in progress before an interruption, resume and finish that unfinished work now instead of restarting the analysis from zero.\n\n"
             "Refresh your per-round machine-readable context from `HYDRATION.json` in the current directory before acting.\n\n"
             "Current routed work:\n"
             f"{instruction}\n\n"

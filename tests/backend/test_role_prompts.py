@@ -40,6 +40,7 @@ class RolePromptTests(unittest.TestCase):
         )
 
         self.assertIn("Continue from your existing AGENTS.md-based role context", text)
+        self.assertIn("resume and finish that unfinished work now", text)
         self.assertIn("Refresh your per-round machine-readable context from `HYDRATION.json`", text)
         self.assertIn("Run deterministic verification for IOS-123.", text)
         self.assertNotIn("You are a persistent SDD Factory role.", text)

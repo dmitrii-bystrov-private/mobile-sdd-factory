@@ -4054,7 +4054,7 @@ class CoordinatorService:
         if work_item is None:
             return None
 
-        instruction = self._stage_instruction(
+        instruction = self._resume_stage_instruction(
             session.current_stage,
             session.task_key,
             workflow_profile=session.workflow_profile,
@@ -4075,6 +4075,29 @@ class CoordinatorService:
             work_item=work_item,
             stage_name=session.current_stage,
             instruction=instruction,
+        )
+
+    def _resume_stage_instruction(
+        self,
+        stage_name: str,
+        task_key: str,
+        *,
+        workflow_profile: str,
+        role_name: str,
+    ) -> str | None:
+        base_instruction = self._stage_instruction(
+            stage_name,
+            task_key,
+            workflow_profile=workflow_profile,
+            role_name=role_name,
+        )
+        if base_instruction is None:
+            return None
+        return (
+            f"{base_instruction}\n\n"
+            "This task session was restored after a runtime interruption.\n"
+            "If this routed work was already in progress, continue and finish the same unfinished work from your existing live session context.\n"
+            "Do not restart the whole analysis from scratch unless the current workspace files require a targeted refresh."
         )
 
     def _read_snapshot_subtasks(self, task_key: str) -> list | None:
