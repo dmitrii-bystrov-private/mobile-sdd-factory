@@ -10,7 +10,6 @@ import pty
 import re
 import shutil
 import subprocess
-import tempfile
 import time
 
 from backend.session_backend.base import SessionBackend
@@ -23,9 +22,15 @@ class TmuxSessionBackend(SessionBackend):
     The implementation will be added after coordinator/state contracts stabilize.
     """
 
-    def __init__(self, mode: str = "auto", runtime_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        mode: str = "auto",
+        runtime_root: Path | None = None,
+        socket_root: Path | None = None,
+    ) -> None:
         self.mode = mode
         self.runtime_root = runtime_root or Path.cwd() / "workdir"
+        self.socket_root = socket_root or (self.runtime_root / ".tmux-sockets")
         self.sent_inputs: dict[str, list[str]] = defaultdict(list)
         self.pending_outputs: dict[str, list[str]] = defaultdict(list)
         self.last_captured_output: dict[str, str] = {}
@@ -92,7 +97,7 @@ class TmuxSessionBackend(SessionBackend):
         return self.runtime_root / task_key / "runtime"
 
     def _socket_path(self, session_name: str) -> Path:
-        socket_root = Path(tempfile.gettempdir()) / "sdd-factory-tmux"
+        socket_root = self.socket_root
         socket_root.mkdir(parents=True, exist_ok=True)
         digest = hashlib.sha1(session_name.encode("utf-8")).hexdigest()[:12]
         return socket_root / f"{digest}.sock"

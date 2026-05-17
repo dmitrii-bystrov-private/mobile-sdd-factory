@@ -4,13 +4,13 @@
 from __future__ import annotations
 
 import importlib.util
-import tempfile
 import time
 from pathlib import Path
 
 from backend.api.routes_roles import collect_role_output
 from backend.api.routes_sessions import create_session, prepare_session
 from backend.api.schemas import CollectRoleOutputRequest, CreateSessionRequest, PrepareSessionRequest
+from run_roots import managed_run_root
 
 
 def _load_build_acceptance_dependencies(repo_root: Path):
@@ -27,8 +27,7 @@ def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     build_acceptance_dependencies = _load_build_acceptance_dependencies(repo_root)
 
-    with tempfile.TemporaryDirectory(prefix="sdd-factory-real-launcher-file-handoff.") as temp_dir:
-        temp_root = Path(temp_dir)
+    with managed_run_root(repo_root, "sdd-factory-real-launcher-file-handoff") as temp_root:
         deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
 
         task_key = f"IOS-ACCEPT-REAL-LAUNCHER-FILE-HANDOFF-{temp_root.name.split('.')[-1].upper()}"

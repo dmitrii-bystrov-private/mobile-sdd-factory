@@ -28,6 +28,10 @@ from backend.tools.jira_adapter import JiraAdapter
 from backend.tools.snapshot_adapter import SnapshotAdapter
 
 
+def _project_socket_root(config: AppConfig):
+    return config.repo_root / ".runtime" / "tmux-sockets"
+
+
 @dataclass
 class AppDependencies:
     """Shared application dependencies."""
@@ -67,6 +71,7 @@ def build_dependencies() -> AppDependencies:
         session_backend = TmuxSessionBackend(
             mode=config.runtime_backend,
             runtime_root=config.runtime_root,
+            socket_root=_project_socket_root(config),
         )
     if config.use_fake_adapters:
         jira_adapter = FakeJiraAdapter(config.repo_root)

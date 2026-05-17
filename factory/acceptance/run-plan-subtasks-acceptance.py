@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import tempfile
 
 from backend.api.routes_artifacts import list_artifacts
 from backend.api.routes_events import inject_event
@@ -16,6 +15,7 @@ from backend.api.schemas import (
     CreateSubtasksFromPlanRequest,
     PrepareSessionRequest,
 )
+from run_roots import managed_run_root
 
 from importlib.util import module_from_spec, spec_from_file_location
 
@@ -32,8 +32,7 @@ def load_story_acceptance_module():
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     story_acceptance = load_story_acceptance_module()
-    with tempfile.TemporaryDirectory(prefix="sdd-factory-plan-subtasks-acceptance.") as temp_dir:
-        temp_root = Path(temp_dir)
+    with managed_run_root(repo_root, "sdd-factory-plan-subtasks-acceptance") as temp_root:
         deps = story_acceptance.build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
 
         create_response = create_session(

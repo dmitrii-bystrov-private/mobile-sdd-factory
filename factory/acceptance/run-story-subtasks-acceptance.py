@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import tempfile
 
 from backend.api.routes_events import inject_event, list_events
 from backend.api.routes_roles import submit_role_output
@@ -30,6 +29,7 @@ from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.fake_adapters import FakeGitLabAdapter, FakeJiraAdapter, FakeSnapshotAdapter
+from run_roots import managed_run_root
 
 
 def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDependencies:
@@ -94,8 +94,7 @@ def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDepend
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    with tempfile.TemporaryDirectory(prefix="sdd-factory-story-subtasks-acceptance.") as temp_dir:
-        temp_root = Path(temp_dir)
+    with managed_run_root(repo_root, "sdd-factory-story-subtasks-acceptance") as temp_root:
         deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
 
         create_response = create_session(

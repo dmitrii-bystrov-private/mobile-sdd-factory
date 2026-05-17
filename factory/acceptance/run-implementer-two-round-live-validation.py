@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import tempfile
 import time
 
 from backend.api.routes_events import inject_event, list_events
@@ -31,6 +30,7 @@ from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.fake_adapters import FakeGitLabAdapter, FakeJiraAdapter, FakeSnapshotAdapter
+from run_roots import managed_run_root, shutdown_dependencies, tmux_socket_root
 
 
 def collect_until_output(
@@ -73,6 +73,7 @@ def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDepend
     session_backend = TmuxSessionBackend(
         mode="tmux",
         runtime_root=temp_root / "workdir",
+        socket_root=tmux_socket_root(repo_root),
     )
     jira_adapter = FakeJiraAdapter(repo_root)
     snapshot_adapter = FakeSnapshotAdapter(repo_root, temp_root / "workdir")
@@ -134,8 +135,7 @@ def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDepend
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    with tempfile.TemporaryDirectory(prefix="sdd-factory-two-round-live-validation.") as temp_dir:
-        temp_root = Path(temp_dir)
+    with managed_run_root(repo_root, "sdd-factory-two-round-live-validation") as temp_root:
         deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
 
         task_key = f"IOS-ACCEPT-LIVE-TWO-ROUND-{temp_root.name.split('.')[-1].upper()}"
@@ -203,6 +203,7 @@ def main() -> None:
         assert event_types.count("verification_requested") == 2
         assert "verification_failed" in event_types
 
+        shutdown_dependencies(deps)
         print(f"Implementer two-round live validation passed for session {session_id}.")
 
 

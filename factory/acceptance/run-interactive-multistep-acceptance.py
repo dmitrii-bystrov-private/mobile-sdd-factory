@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import tempfile
 import time
 
 from backend.api.routes_operator import send_runtime_input
@@ -31,6 +30,7 @@ from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.fake_adapters import FakeGitLabAdapter, FakeJiraAdapter, FakeSnapshotAdapter
+from run_roots import managed_run_root, shutdown_dependencies, tmux_socket_root
 
 
 def build_dependencies(repo_root: Path, temp_root: Path, fixture: Path) -> AppDependencies:
@@ -42,7 +42,11 @@ def build_dependencies(repo_root: Path, temp_root: Path, fixture: Path) -> AppDe
     event_repository = EventRepository(database)
     artifact_repository = ArtifactRepository(database)
     work_item_repository = WorkItemRepository(database)
-    session_backend = TmuxSessionBackend(mode="tmux", runtime_root=temp_root / "workdir")
+    session_backend = TmuxSessionBackend(
+        mode="tmux",
+        runtime_root=temp_root / "workdir",
+        socket_root=tmux_socket_root(repo_root),
+    )
     jira_adapter = FakeJiraAdapter(repo_root)
     snapshot_adapter = FakeSnapshotAdapter(repo_root, temp_root / "workdir")
     gitlab_adapter = FakeGitLabAdapter(repo_root)
@@ -125,8 +129,7 @@ def wait_for_status(
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     fixture = repo_root / "tests" / "backend" / "fixtures" / "interactive_multistep_fixture.py"
-    with tempfile.TemporaryDirectory(prefix="sdd-factory-interactive-multistep-acceptance.") as temp_dir:
-        temp_root = Path(temp_dir)
+    with managed_run_root(repo_root, "sdd-factory-interactive-multistep-acceptance") as temp_root:
         deps = build_dependencies(repo_root, temp_root, fixture)
         task_key = f"IOS-ACCEPT-INTERACTIVE-{temp_root.name.split('.')[-1].upper()}"
 
@@ -195,6 +198,7 @@ def main() -> None:
         interactive_after = get_interactive_state(session_id, dependencies=deps)
         assert not interactive_after.available
 
+        shutdown_dependencies(deps)
         print(f"Interactive multi-step acceptance passed for session {session_id}.")
 
 

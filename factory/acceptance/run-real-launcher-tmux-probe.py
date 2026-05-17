@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import tempfile
 import time
 
 from backend.api.routes_roles import collect_role_output
@@ -25,6 +24,7 @@ from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.fake_adapters import FakeGitLabAdapter, FakeJiraAdapter, FakeSnapshotAdapter
+from run_roots import managed_run_root, shutdown_dependencies, tmux_socket_root
 
 
 def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDependencies:
@@ -39,6 +39,7 @@ def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDepend
     session_backend = TmuxSessionBackend(
         mode="tmux",
         runtime_root=temp_root / "workdir",
+        socket_root=tmux_socket_root(repo_root),
     )
     jira_adapter = FakeJiraAdapter(repo_root)
     snapshot_adapter = FakeSnapshotAdapter(repo_root, temp_root / "workdir")
@@ -124,8 +125,7 @@ def collect_until_bootstrap(
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    with tempfile.TemporaryDirectory(prefix="sdd-factory-real-launcher-tmux-probe.") as temp_dir:
-        temp_root = Path(temp_dir)
+    with managed_run_root(repo_root, "sdd-factory-real-launcher-tmux-probe") as temp_root:
         deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
 
         task_key = f"IOS-ACCEPT-REAL-LAUNCHER-TMUX-{temp_root.name.split('.')[-1].upper()}"
@@ -158,6 +158,7 @@ def main() -> None:
         assert "SDD_FACTORY_AGENT_BOOTSTRAP" in output_text
         assert len(output_text.strip()) > len("SDD_FACTORY_ROLE_LAUNCHER_READY\nSDD_FACTORY_AGENT_BOOTSTRAP")
 
+        shutdown_dependencies(deps)
         print(f"Real launcher tmux probe passed for session {session_id}.")
 
 

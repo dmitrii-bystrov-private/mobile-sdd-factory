@@ -6,11 +6,11 @@ from __future__ import annotations
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import subprocess
-import tempfile
 
 from backend.api.routes_sessions import create_session, prepare_session
 from backend.api.schemas import CreateSessionRequest, PrepareSessionRequest
 from backend.roles.contracts import IMPLEMENTER_ROLE
+from run_roots import managed_run_root
 
 
 def load_story_acceptance_module():
@@ -60,8 +60,7 @@ def classify_probe(output: str) -> str:
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     story_acceptance = load_story_acceptance_module()
-    with tempfile.TemporaryDirectory(prefix="sdd-factory-live-agent-readiness.") as temp_dir:
-        temp_root = Path(temp_dir)
+    with managed_run_root(repo_root, "sdd-factory-live-agent-readiness") as temp_root:
         deps = story_acceptance.build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
 
         task_key = "IOS-ACCEPT-LIVE-READINESS-001"
