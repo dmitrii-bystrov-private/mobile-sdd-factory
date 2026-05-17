@@ -25,7 +25,7 @@ from backend.dependencies import AppDependencies
 from backend.roles.contracts import DEFAULT_SESSION_ROLES
 from backend.roles.launcher import RoleLauncherManager
 from backend.roles.workspace import RoleWorkspaceManager
-from backend.session_backend.tmux_backend import TmuxSessionBackend
+from backend.session_backend.recording_backend import RecordingSessionBackend
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.db import Database
 from backend.state.event_repository import EventRepository
@@ -44,10 +44,7 @@ def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDepend
     event_repository = EventRepository(database)
     artifact_repository = ArtifactRepository(database)
     work_item_repository = WorkItemRepository(database)
-    session_backend = TmuxSessionBackend(
-        mode="recording",
-        runtime_root=temp_root / "workdir",
-    )
+    session_backend = RecordingSessionBackend()
     jira_adapter = FakeJiraAdapter(repo_root)
     snapshot_adapter = FakeSnapshotAdapter(repo_root, temp_root / "workdir")
     gitlab_adapter = FakeGitLabAdapter(repo_root)
