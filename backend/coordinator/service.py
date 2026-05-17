@@ -1513,7 +1513,7 @@ class CoordinatorService:
         )
         return session, event
 
-    def resume_session(self, session_id: int) -> tuple[Session, Event, Event]:
+    def resume_session(self, session_id: int) -> tuple[Session, Event, Event | None]:
         session = self._get_session_or_raise(session_id)
         if session.status == SessionStatus.WAITING_FOR_OPERATOR:
             return self._resume_waiting_session(session)
@@ -1523,7 +1523,7 @@ class CoordinatorService:
             f"Session {session_id} is not resumable; current status is {session.status.value}"
         )
 
-    def _resume_waiting_session(self, session: Session) -> tuple[Session, Event, Event]:
+    def _resume_waiting_session(self, session: Session) -> tuple[Session, Event, Event | None]:
         work_item = self._find_operator_pending_work_item(session.id)
         if work_item is None:
             raise IntakeError(f"Session {session.id} has no operator-pending work item to resume")
@@ -1552,6 +1552,9 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
             },
         )
+        runtime_blocker = self._latest_runtime_blocker_event(session.id)
+        if runtime_blocker is not None and runtime_blocker.payload.get("resume_strategy") == "reactivate_only":
+            return session, resumed_event, None
         instruction = self._stage_instruction(
             session.current_stage,
             session.task_key,
@@ -1568,6 +1571,15 @@ class CoordinatorService:
             instruction=instruction,
         )
         return session, resumed_event, dispatch_event
+
+    def _latest_runtime_blocker_event(self, session_id: int) -> Event | None:
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if (
+                event.event_type == "session_escalated_to_operator"
+                and event.payload.get("reason") == "runtime_error"
+            ) or event.event_type == "role_runtime_error_reported":
+                return event
+        return None
 
     def send_operator_runtime_input(self, session_id: int, text: str) -> tuple[Session, Event]:
         session = self._get_session_or_raise(session_id)

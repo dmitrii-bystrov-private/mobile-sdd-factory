@@ -3285,6 +3285,31 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Start implementation work for IOS-30019.", sent_inputs[-1])
         self.assertTrue(any(item.event_type == "session_resumed_by_operator" for item in events))
 
+    def test_resume_session_reactivates_mcp_availability_blocker_without_redispatch(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30019MCP")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"required mcp access unavailable","details":"restore vpn","resume_strategy":"reactivate_only"}',
+        )
+        escalated_session, _, _ = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+
+        resumed_session, resumed_event, followup_event = self.coordinator.resume_session(session.id)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("waiting_for_operator", escalated_session.status.value)
+        self.assertEqual("active", resumed_session.status.value)
+        self.assertEqual("implementer", resumed_session.current_owner)
+        self.assertEqual("session_resumed_by_operator", resumed_event.event_type)
+        self.assertIsNone(followup_event)
+        self.assertEqual(1, len(work_items))
+        self.assertEqual("assigned", work_items[0].status.value)
+        self.assertEqual(1, len(sent_inputs))
+
     def test_resume_session_requires_waiting_for_operator_status(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30020")
 

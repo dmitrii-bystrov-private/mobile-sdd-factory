@@ -22,6 +22,9 @@ class TmuxSessionBackend(SessionBackend):
     The implementation will be added after coordinator/state contracts stabilize.
     """
 
+    _MCP_FAILED_CLIENT_RE = re.compile(r"mcp client for [`']?([a-z0-9][a-z0-9_-]*)[`']? failed to start")
+    _MCP_FAILED_LIST_RE = re.compile(r"failed:\s*([a-z0-9_, -]+)")
+
     def __init__(
         self,
         mode: str = "auto",
@@ -462,6 +465,7 @@ class TmuxSessionBackend(SessionBackend):
         trust_prompt = self._contains_workspace_trust_prompt(normalized)
         selection_blocker = self._contains_generic_selection_blocker(normalized)
         confirmation_blocker = self._contains_generic_confirmation_blocker(normalized)
+        mcp_blocker_details = self._build_mcp_availability_blocker_details(normalized)
 
         if not self.pty_role_ready.get(role_id, False):
             if (
@@ -510,12 +514,19 @@ class TmuxSessionBackend(SessionBackend):
             if self.pty_pre_ready_unknown_chunks[role_id] >= 3:
                 self.pty_generic_blocker_emitted[role_id] = True
                 blocker_detected = True
-                preview = normalized[:160]
-                synthetic_markers.append(
-                    'SDD_ERROR: {"summary":"interactive operator input required","details":"launcher-backed role emitted unresolved interactive output before ready: '
-                    + preview.replace('"', '\\"')
-                    + '"}'
-                )
+                if mcp_blocker_details is not None:
+                    synthetic_markers.append(
+                        'SDD_ERROR: {"summary":"required mcp access unavailable","details":"'
+                        + mcp_blocker_details.replace('"', '\\"')
+                        + '","resume_strategy":"reactivate_only"}'
+                    )
+                else:
+                    preview = normalized[:160]
+                    synthetic_markers.append(
+                        'SDD_ERROR: {"summary":"interactive operator input required","details":"launcher-backed role emitted unresolved interactive output before ready: '
+                        + preview.replace('"', '\\"')
+                        + '"}'
+                    )
         if self.pty_role_ready.get(role_id, False) and not blocker_detected:
             master_fd = self.pty_master_fds.get(role_id)
             if master_fd is not None:
@@ -538,6 +549,7 @@ class TmuxSessionBackend(SessionBackend):
         trust_prompt = self._contains_workspace_trust_prompt(normalized)
         selection_blocker = self._contains_generic_selection_blocker(recent_normalized)
         confirmation_blocker = self._contains_generic_confirmation_blocker(recent_normalized)
+        mcp_blocker_details = self._build_mcp_availability_blocker_details(normalized)
 
         if not self.tmux_role_ready.get(role_id, False):
             if (
@@ -590,12 +602,19 @@ class TmuxSessionBackend(SessionBackend):
             if self.tmux_pre_ready_unknown_chunks[role_id] >= 3:
                 self.tmux_generic_blocker_emitted[role_id] = True
                 blocker_detected = True
-                preview = normalized[:160]
-                synthetic_markers.append(
-                    'SDD_ERROR: {"summary":"interactive operator input required","details":"launcher-backed role emitted unresolved interactive output before ready: '
-                    + preview.replace('"', '\\"')
-                    + '"}'
-                )
+                if mcp_blocker_details is not None:
+                    synthetic_markers.append(
+                        'SDD_ERROR: {"summary":"required mcp access unavailable","details":"'
+                        + mcp_blocker_details.replace('"', '\\"')
+                        + '","resume_strategy":"reactivate_only"}'
+                    )
+                else:
+                    preview = normalized[:160]
+                    synthetic_markers.append(
+                        'SDD_ERROR: {"summary":"interactive operator input required","details":"launcher-backed role emitted unresolved interactive output before ready: '
+                        + preview.replace('"', '\\"')
+                        + '"}'
+                    )
         if self.tmux_role_ready.get(role_id, False):
             self._maybe_retry_tmux_submit(role_id, recent_normalized)
         if self.tmux_role_ready.get(role_id, False) and not blocker_detected:
@@ -659,6 +678,43 @@ class TmuxSessionBackend(SessionBackend):
         return (
             "sdd_factory_role_launcher_ready" in normalized_text
             or "sdd_factory_agent_bootstrap" in normalized_text
+        )
+
+    def _build_mcp_availability_blocker_details(self, normalized_text: str) -> str | None:
+        if "mcp" not in normalized_text:
+            return None
+        if not any(
+            marker in normalized_text
+            for marker in (
+                "failed to start",
+                "mcp startup incomplete",
+                "mcp startup failed",
+                "needs auth",
+                "unauthorized",
+                "authentication",
+                "http request failed",
+                "send initialize request",
+            )
+        ):
+            return None
+
+        server_names: set[str] = set(self._MCP_FAILED_CLIENT_RE.findall(normalized_text))
+        for match in self._MCP_FAILED_LIST_RE.findall(normalized_text):
+            for item in match.split(","):
+                candidate = item.strip()
+                if (
+                    candidate
+                    and re.fullmatch(r"[a-z0-9][a-z0-9_-]*", candidate)
+                    and ("-" in candidate or candidate == "notion")
+                ):
+                    server_names.add(candidate)
+        if not server_names:
+            return None
+
+        ordered_names = ", ".join(sorted(server_names))
+        return (
+            f"required MCP access is unavailable for: {ordered_names}. "
+            "Restore availability first, for example by authorizing the affected MCP, enabling VPN, or fixing network access, then use Resume Session to continue the current work."
         )
 
     def _contains_codex_ready_prompt(self, normalized_text: str) -> bool:

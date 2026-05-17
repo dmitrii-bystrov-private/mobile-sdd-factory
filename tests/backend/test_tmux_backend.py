@@ -557,6 +557,21 @@ class TmuxBackendTests(unittest.TestCase):
         self.assertFalse(backend._contains_interactive_input_prompt(selection))
         self.assertFalse(backend._contains_interactive_input_prompt(confirmation))
 
+    def test_mcp_availability_blocker_details_extracts_servers(self) -> None:
+        backend = TmuxSessionBackend(mode="recording")
+        details = backend._build_mcp_availability_blocker_details(
+            "⚠ mcp client for `android-rag` failed to start "
+            "⚠ mcp client for `frontend-rag` failed to start "
+            "⚠ mcp startup incomplete (failed: android-rag, frontend-rag, ios-rag)"
+        )
+
+        self.assertIsNotNone(details)
+        assert details is not None
+        self.assertIn("android-rag", details)
+        self.assertIn("frontend-rag", details)
+        self.assertIn("ios-rag", details)
+        self.assertIn("Resume Session", details)
+
 
 if __name__ == "__main__":
     unittest.main()

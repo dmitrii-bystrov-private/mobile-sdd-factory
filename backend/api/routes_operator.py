@@ -145,7 +145,7 @@ def resume_session(
         resumed=True,
         session=to_session_response(session),
         event_type=event.event_type,
-        followup_event_type=followup_event.event_type,
+        followup_event_type=followup_event.event_type if followup_event is not None else None,
     )
 
 
