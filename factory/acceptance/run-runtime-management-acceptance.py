@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -79,8 +80,12 @@ def wait_for_stage(
     return last_response, output_text
 
 
+def _runner_name() -> str:
+    return os.environ.get("SDD_FACTORY_ACCEPTANCE_RUNNER", "claude").strip() or "claude"
+
+
 def _create_prepared_session(*, task_key: str, dependencies) -> int:
-    runner = os.environ.get("SDD_FACTORY_ACCEPTANCE_RUNNER", "claude").strip() or "claude"
+    runner = _runner_name()
     role_config = None
     if runner != "claude":
         role_config = {
@@ -115,6 +120,29 @@ def _create_prepared_session(*, task_key: str, dependencies) -> int:
     )
     assert prepare_response.followup_event_type == "implementation_requested"
     return session_id
+
+
+def _print_runtime_debug_bundle(*, session_id: int, dependencies) -> None:
+    try:
+        summary = dependencies.coordinator_service.get_runtime_state_summary(session_id)
+    except Exception as exc:  # pragma: no cover - debug-only path
+        print(f"Unable to read runtime state for session {session_id}: {exc}")
+        return
+    print(f"\n[debug] session_id={session_id}")
+    print(f"[debug] runtime_session_id={summary.get('runtime_session_id')}")
+    if summary.get("tmux_socket_path"):
+        print(f"[debug] tmux_socket_path={summary['tmux_socket_path']}")
+    if summary.get("tmux_attach_command"):
+        print(f"[debug] tmux_attach_command={summary['tmux_attach_command']}")
+    for role in summary.get("roles", []):
+        print(
+            f"[debug] role={role.get('role_name')} status={role.get('status')} "
+            f"handle={role.get('runtime_handle')}"
+        )
+        if role.get("tmux_attach_command"):
+            print(f"[debug]   attach={role['tmux_attach_command']}")
+        if role.get("tmux_capture_command"):
+            print(f"[debug]   capture={role['tmux_capture_command']}")
 
 
 def _validate_role_restart(*, session_id: int, dependencies) -> None:
@@ -200,11 +228,13 @@ def _validate_session_restart(*, session_id: int, dependencies) -> None:
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     build_acceptance_dependencies = _load_build_acceptance_dependencies(repo_root)
-
-    with tempfile.TemporaryDirectory(prefix="sdd-factory-runtime-management.") as temp_dir:
-        temp_root = Path(temp_dir)
-        deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
-
+    temp_root = Path(tempfile.mkdtemp(prefix="sdd-factory-runtime-management."))
+    deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
+    keep_temp = os.environ.get("SDD_FACTORY_KEEP_TEMP", "").strip().lower() in {"1", "true", "yes"}
+    role_session_id: int | None = None
+    session_session_id: int | None = None
+    success = False
+    try:
         role_task_key = f"IOS-ACCEPT-RUNTIME-ROLE-{temp_root.name.split('.')[-1].upper()}"
         role_session_id = _create_prepared_session(task_key=role_task_key, dependencies=deps)
         _validate_role_restart(session_id=role_session_id, dependencies=deps)
@@ -213,7 +243,21 @@ def main() -> None:
         session_session_id = _create_prepared_session(task_key=session_task_key, dependencies=deps)
         _validate_session_restart(session_id=session_session_id, dependencies=deps)
 
+        success = True
         print("Runtime management acceptance passed.")
+    except Exception:
+        print(f"\n[debug] acceptance temp_root={temp_root}")
+        if role_session_id is not None:
+            _print_runtime_debug_bundle(session_id=role_session_id, dependencies=deps)
+        if session_session_id is not None:
+            _print_runtime_debug_bundle(session_id=session_session_id, dependencies=deps)
+        print("[debug] temp root preserved for inspection")
+        raise
+    finally:
+        if success and not keep_temp:
+            shutil.rmtree(temp_root, ignore_errors=True)
+        elif success and keep_temp:
+            print(f"[debug] kept temp_root={temp_root}")
 
 
 if __name__ == "__main__":
