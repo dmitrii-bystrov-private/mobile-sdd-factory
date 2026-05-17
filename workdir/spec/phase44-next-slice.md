@@ -2,42 +2,38 @@
 
 ## Question
 
-What should be the next concrete slice inside `Phase 44` after `Runtime Session Management Surface`?
+What should be the next concrete slice inside `Phase 44` after `Claude Role-Scoped MCP Baseline`?
 
 ## Candidate Slices
 
-### Option 1. Claude Role-Scoped MCP Baseline
+### Option 1. Runtime Restart And Recovery Baseline
 
-Stop using one broad shared MCP settings surface for Claude and generate effective role-scoped Claude MCP settings per role.
+Add explicit operator restart flows after manual runtime stop actions.
 
-### Option 2. Runtime Session Management Surface
-
-Add explicit operator visibility and stop controls for live runtime sessions and roles.
-
-### Option 3. Codex Parity Validation Baseline
+### Option 2. Codex Parity Validation Baseline
 
 Deepen live validation on Codex until runtime expectations are symmetric enough with Claude.
 
+### Option 3. Runtime Crash Auto-Recovery Baseline
+
+Move beyond manual restart into health-check and respawn behavior for killed persistent roles.
+
 ## Decision
 
-Choose `Claude Role-Scoped MCP Baseline`.
+Choose `Runtime Restart And Recovery Baseline`.
 
 ## Why
 
-### 1. Runtime config without Claude MCP isolation is still incomplete
+### 1. Manual stop without restart semantics is still incomplete
 
-The product can now choose runner/model/effort, but each role still receives MCP availability too broadly.
+The operator can now stop runtime roles and sessions, but cannot yet bring them back through an explicit product flow.
 
-### 2. Claude MCP isolation is part of role correctness, not a later nicety
+### 2. Restart is a direct follow-up to the new runtime-management surface
 
-It directly affects:
-
-- context cleanliness
-- predictability
-- role boundary discipline
+Without restart, stop control is only half of the operational story.
 
 ### 3. It stays bounded
 
-The launcher already has a settings injection seam for Claude.
+The launch plan, role workspace, and runtime-state surfaces already exist.
 
-Codex should remain global, so the next step is to make only the Claude seam role-specific instead of global.
+The next step is to reconnect those existing pieces into an explicit restart path.

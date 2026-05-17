@@ -42,6 +42,8 @@ try:
     from backend.api.routes_operator import get_environment_doctor
     from backend.api.routes_operator import get_runtime_capabilities
     from backend.api.routes_operator import refresh_subtask_state
+    from backend.api.routes_operator import restart_runtime_role
+    from backend.api.routes_operator import restart_runtime_session
     from backend.api.routes_operator import stop_runtime_role
     from backend.api.routes_operator import stop_runtime_session
     from backend.api.routes_operator import send_to_test
@@ -61,6 +63,8 @@ try:
         ReopenFromQaRequest,
         RedirectSessionRequest,
         ResumeSessionRequest,
+        RestartRuntimeRoleRequest,
+        RestartRuntimeSessionRequest,
         RetrySessionRequest,
         SendOperatorRuntimeInputRequest,
         SendToTestRequest,
@@ -2015,6 +2019,54 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(response.stopped)
         self.assertEqual("runtime_session_stopped_by_operator", response.event_type)
         self.assertEqual("paused", response.session.status)
+
+    def test_restart_runtime_role_route_restarts_owner_and_redispatches_work(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013U"),
+            dependencies=self.dependencies,
+        )
+        stopped = stop_runtime_role(
+            StopRuntimeRoleRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = restart_runtime_role(
+            RestartRuntimeRoleRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(stopped.stopped)
+        self.assertTrue(response.restarted)
+        self.assertEqual("runtime_role_restarted_by_operator", response.event_type)
+        self.assertEqual("role_input_dispatched", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+
+    def test_restart_runtime_session_route_restarts_roles_and_redispatches_owner(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013V"),
+            dependencies=self.dependencies,
+        )
+        stopped = stop_runtime_session(
+            StopRuntimeSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        response = restart_runtime_session(
+            RestartRuntimeSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(stopped.stopped)
+        self.assertTrue(response.restarted)
+        self.assertEqual("runtime_session_restarted_by_operator", response.event_type)
+        self.assertEqual("role_input_dispatched", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
 
     def test_pause_session_route_pauses_active_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

@@ -57,11 +57,27 @@ export function RuntimeSessionPanel({
           <div className="actions-grid">
             <button
               className="action-button"
-              disabled={busy}
+              disabled={busy || runtimeStateSummary.roles.every((role) => role.status === "stopped")}
               onClick={() => run(() => apiClient.stopRuntimeSession(session.id))}
               type="button"
             >
               Stop Runtime Session
+            </button>
+            <button
+              className="action-button"
+              disabled={busy || runtimeStateSummary.roles.some((role) => role.status !== "stopped")}
+              onClick={() => run(() => apiClient.restartRuntimeSession(session.id))}
+              type="button"
+            >
+              Restart Runtime Session
+            </button>
+            <button
+              className="action-button"
+              disabled={busy}
+              onClick={() => run(() => onRefresh())}
+              type="button"
+            >
+              Refresh Runtime View
             </button>
           </div>
 
@@ -82,6 +98,14 @@ export function RuntimeSessionPanel({
                   type="button"
                 >
                   Stop Role Runtime
+                </button>
+                <button
+                  className="action-button"
+                  disabled={busy || role.status !== "stopped"}
+                  onClick={() => run(() => apiClient.restartRuntimeRole(session.id, role.roleName))}
+                  type="button"
+                >
+                  Restart Role Runtime
                 </button>
               </article>
             ))}

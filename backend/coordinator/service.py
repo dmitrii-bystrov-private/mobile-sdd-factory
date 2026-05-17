@@ -129,23 +129,11 @@ class CoordinatorService:
         )
         runtime_session = self.session_backend.create_task_session(task_key)
         for role_name in effective_roles:
-            start_directory = None
-            launch_command = None
-            if self.role_workspace_manager is not None:
-                workspace = self.role_workspace_manager.ensure_role_workspace(task_key, role_name)
-                start_directory = workspace.directory
-                if self.role_launcher_manager is not None:
-                    launch_plan = self.role_launcher_manager.ensure_launch_plan(
-                        task_key=task_key,
-                        workspace=workspace,
-                        role_config=normalized_role_config.get(role_name),
-                    )
-                    launch_command = launch_plan.command
-            runtime_role = self.session_backend.spawn_role(
-                runtime_session,
-                role_name,
-                start_directory=start_directory,
-                launch_command=launch_command,
+            runtime_role = self._spawn_role_runtime(
+                runtime_session=runtime_session,
+                task_key=task_key,
+                role_name=role_name,
+                role_config=normalized_role_config.get(role_name),
             )
             self.role_repository.create(
                 session_id=session.id,
@@ -3846,28 +3834,15 @@ class CoordinatorService:
             return existing
 
         runtime_session = self._runtime_session_handle_for_session(session)
-        start_directory = None
-        launch_command = None
-        if self.role_workspace_manager is not None:
-            workspace = self.role_workspace_manager.ensure_role_workspace(session.task_key, role_name)
-            start_directory = workspace.directory
-            if self.role_launcher_manager is not None:
-                launch_plan = self.role_launcher_manager.ensure_launch_plan(
-                    task_key=session.task_key,
-                    workspace=workspace,
-                )
-                launch_command = launch_plan.command
-
-        runtime_role = self.session_backend.spawn_role(
-            runtime_session,
-            role_name,
-            start_directory=start_directory,
-            launch_command=launch_command,
+        runtime_role = self._spawn_role_runtime(
+            runtime_session=runtime_session,
+            task_key=session.task_key,
+            role_name=role_name,
+            role_config=(session.role_config or {}).get(role_name),
         )
         if existing is not None:
-            return self.role_repository.create(
-                session_id=session.id,
-                role_name=role_name,
+            return self.role_repository.update_runtime(
+                existing.id,
                 runtime_backend=runtime_role.backend_name,
                 runtime_handle=runtime_role.role_id,
                 status=RoleStatus.RUNNING,
@@ -3968,12 +3943,137 @@ class CoordinatorService:
         )
         return session, event
 
+    def restart_runtime_role(self, session_id: int, role_name: str) -> tuple[Session, Event, Event | None]:
+        session = self._get_session_or_raise(session_id)
+        role = self.role_repository.get_by_name(session_id, role_name)
+        if role is None:
+            raise IntakeError(f"Role {role_name} is missing for session {session_id}")
+        if role.status != RoleStatus.STOPPED:
+            raise IntakeError(f"Role {role_name} is not stopped")
+
+        runtime_role = self._spawn_role_runtime(
+            runtime_session=self._runtime_session_handle_for_session(session),
+            task_key=session.task_key,
+            role_name=role.role_name,
+            role_config=(session.role_config or {}).get(role.role_name),
+        )
+        role = self.role_repository.update_runtime(
+            role.id,
+            runtime_backend=runtime_role.backend_name,
+            runtime_handle=runtime_role.role_id,
+            status=RoleStatus.RUNNING,
+        )
+        followup_event = self._reactivate_restarted_owner_work(session, role)
+        refreshed = self._get_session_or_raise(session_id)
+        event = self._append_event(
+            session_id=refreshed.id,
+            event_type="runtime_role_restarted_by_operator",
+            producer_type="operator",
+            payload={
+                "role_name": role.role_name,
+                "runtime_handle": role.runtime_handle,
+                "session_reactivated": followup_event is not None,
+            },
+        )
+        return refreshed, event, followup_event
+
+    def restart_runtime_session(self, session_id: int) -> tuple[Session, Event, Event | None]:
+        session = self._get_session_or_raise(session_id)
+        runtime_session = self.session_backend.create_task_session(session.task_key)
+        updated_owner: Role | None = None
+        for role in self.role_repository.list_for_session(session.id):
+            runtime_role = self._spawn_role_runtime(
+                runtime_session=runtime_session,
+                task_key=session.task_key,
+                role_name=role.role_name,
+                role_config=(session.role_config or {}).get(role.role_name),
+            )
+            updated_role = self.role_repository.update_runtime(
+                role.id,
+                runtime_backend=runtime_role.backend_name,
+                runtime_handle=runtime_role.role_id,
+                status=RoleStatus.RUNNING,
+            )
+            if updated_role.role_name == session.current_owner:
+                updated_owner = updated_role
+
+        followup_event = self._reactivate_restarted_owner_work(session, updated_owner)
+        refreshed = self._get_session_or_raise(session_id)
+        event = self._append_event(
+            session_id=refreshed.id,
+            event_type="runtime_session_restarted_by_operator",
+            producer_type="operator",
+            payload={
+                "runtime_session_id": runtime_session.session_id,
+                "session_reactivated": followup_event is not None,
+            },
+        )
+        return refreshed, event, followup_event
+
     def _knowledge_store_for_session_or_raise(self, session: Session) -> KnowledgeStore:
         if self.workdir_root is not None:
             return KnowledgeStore(self.workdir_root / session.task_key / "repo" / "knowledge")
         if self.knowledge_root is not None:
             return KnowledgeStore(self.knowledge_root)
         raise IntakeError("Coordinator is missing knowledge root")
+
+    def _spawn_role_runtime(
+        self,
+        *,
+        runtime_session: RuntimeSessionHandle,
+        task_key: str,
+        role_name: str,
+        role_config: dict[str, str] | None,
+    ) -> RuntimeRoleHandle:
+        start_directory = None
+        launch_command = None
+        if self.role_workspace_manager is not None:
+            workspace = self.role_workspace_manager.ensure_role_workspace(task_key, role_name)
+            start_directory = workspace.directory
+            if self.role_launcher_manager is not None:
+                launch_plan = self.role_launcher_manager.ensure_launch_plan(
+                    task_key=task_key,
+                    workspace=workspace,
+                    role_config=role_config,
+                )
+                launch_command = launch_plan.command
+        return self.session_backend.spawn_role(
+            runtime_session,
+            role_name,
+            start_directory=start_directory,
+            launch_command=launch_command,
+        )
+
+    def _reactivate_restarted_owner_work(self, session: Session, role: Role | None) -> Event | None:
+        if role is None or session.current_owner != role.role_name:
+            return None
+
+        work_item = self._find_active_work_item_for_role(session.id, role.id)
+        if work_item is None:
+            return None
+
+        instruction = self._stage_instruction(
+            session.current_stage,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=role.role_name,
+        )
+        if instruction is None:
+            return None
+
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=role.role_name,
+        )
+        return self._dispatch_role_work(
+            session=session,
+            role=role,
+            work_item=work_item,
+            stage_name=session.current_stage,
+            instruction=instruction,
+        )
 
     def _read_snapshot_subtasks(self, task_key: str) -> list | None:
         if self.workdir_root is None:

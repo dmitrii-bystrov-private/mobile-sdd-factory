@@ -96,3 +96,29 @@ class RoleRepository:
                 (role_id,),
             ).fetchone()
         return role_from_row(row)
+
+    def update_runtime(
+        self,
+        role_id: int,
+        *,
+        runtime_backend: str,
+        runtime_handle: str | None,
+        status: RoleStatus,
+    ) -> Role:
+        with self.db.connect() as connection:
+            connection.execute(
+                """
+                UPDATE roles
+                SET runtime_backend = ?,
+                    runtime_handle = ?,
+                    status = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (runtime_backend, runtime_handle, status.value, role_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM roles WHERE id = ?",
+                (role_id,),
+            ).fetchone()
+        return role_from_row(row)

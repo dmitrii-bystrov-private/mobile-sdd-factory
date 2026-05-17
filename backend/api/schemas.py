@@ -401,6 +401,19 @@ class StopRuntimeRoleResponse(BaseModel):
     stopped: bool
     session: SessionResponse
     event_type: str
+    followup_event_type: str | None = None
+
+
+class RestartRuntimeRoleRequest(BaseModel):
+    session_id: int
+    role_name: str
+
+
+class RestartRuntimeRoleResponse(BaseModel):
+    restarted: bool
+    session: SessionResponse
+    event_type: str
+    followup_event_type: str | None = None
 
 
 class StopRuntimeSessionRequest(BaseModel):
@@ -411,6 +424,18 @@ class StopRuntimeSessionResponse(BaseModel):
     stopped: bool
     session: SessionResponse
     event_type: str
+    followup_event_type: str | None = None
+
+
+class RestartRuntimeSessionRequest(BaseModel):
+    session_id: int
+
+
+class RestartRuntimeSessionResponse(BaseModel):
+    restarted: bool
+    session: SessionResponse
+    event_type: str
+    followup_event_type: str | None = None
 
 
 class IngestMrCommentsRequest(BaseModel):

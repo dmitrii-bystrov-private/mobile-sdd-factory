@@ -60,6 +60,8 @@ const STREAM_EVENT_TYPES = [
   "session_paused_by_operator",
   "session_resumed_by_operator",
   "session_retried_by_operator",
+  "runtime_role_restarted_by_operator",
+  "runtime_session_restarted_by_operator",
   "operator_runtime_input_sent",
   "session_escalated_to_operator",
   "session_dispatch_reconciled",
@@ -312,8 +314,27 @@ export const apiClient = {
     });
   },
 
+  restartRuntimeRole(
+    sessionId: number,
+    roleName: string,
+  ): Promise<{ event_type: string; followup_event_type: string | null; session: Session }> {
+    return request("/operator/restart-runtime-role", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, role_name: roleName }),
+    });
+  },
+
   stopRuntimeSession(sessionId: number): Promise<{ event_type: string; session: Session }> {
     return request("/operator/stop-runtime-session", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  },
+
+  restartRuntimeSession(
+    sessionId: number,
+  ): Promise<{ event_type: string; followup_event_type: string | null; session: Session }> {
+    return request("/operator/restart-runtime-session", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId }),
     });

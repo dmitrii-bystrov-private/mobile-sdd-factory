@@ -29,6 +29,10 @@ from backend.api.schemas import (
     ReopenFromQaResponse,
     RedirectSessionRequest,
     RedirectSessionResponse,
+    RestartRuntimeRoleRequest,
+    RestartRuntimeRoleResponse,
+    RestartRuntimeSessionRequest,
+    RestartRuntimeSessionResponse,
     StopRuntimeRoleRequest,
     StopRuntimeRoleResponse,
     StopRuntimeSessionRequest,
@@ -224,6 +228,27 @@ def stop_runtime_role(
     )
 
 
+@router.post("/restart-runtime-role", response_model=RestartRuntimeRoleResponse)
+def restart_runtime_role(
+    payload: RestartRuntimeRoleRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RestartRuntimeRoleResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.restart_runtime_role(
+            session_id=payload.session_id,
+            role_name=payload.role_name,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return RestartRuntimeRoleResponse(
+        restarted=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
 @router.post("/stop-runtime-session", response_model=StopRuntimeSessionResponse)
 def stop_runtime_session(
     payload: StopRuntimeSessionRequest,
@@ -240,6 +265,26 @@ def stop_runtime_session(
         stopped=True,
         session=to_session_response(session),
         event_type=event.event_type,
+    )
+
+
+@router.post("/restart-runtime-session", response_model=RestartRuntimeSessionResponse)
+def restart_runtime_session(
+    payload: RestartRuntimeSessionRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RestartRuntimeSessionResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.restart_runtime_session(
+            session_id=payload.session_id,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return RestartRuntimeSessionResponse(
+        restarted=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
     )
 
 

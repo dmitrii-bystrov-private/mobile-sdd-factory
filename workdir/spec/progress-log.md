@@ -18,6 +18,23 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - closed the `Claude Role-Scoped MCP Baseline` direction
+    - clarified the final runner policy:
+      - `Claude` gets role-scoped MCP
+      - `Codex` stays global
+    - promoted `Runtime Restart And Recovery Baseline` as the next active `Phase 44` slice
+  - current_state:
+    - runtime configuration and isolation are now stronger
+    - the next practical gap is reversibility after explicit runtime stop actions
+  - next:
+    - add operator restart flows for:
+      - one stopped runtime role
+      - one stopped runtime session
+  - blockers:
+    - none at the slice-definition level
+
+- date: `2026-05-17`
+  - done:
     - clarified the MCP policy split:
       - `Claude` requires role-scoped MCP
       - `Codex` stays global by design
