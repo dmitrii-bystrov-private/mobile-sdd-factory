@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal interactive fixture for launcher-backed PTY driver tests."""
+"""Minimal interactive fixture for launcher-backed tmux driver tests."""
 
 from __future__ import annotations
 

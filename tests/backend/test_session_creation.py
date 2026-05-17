@@ -350,8 +350,8 @@ class SessionCreationTests(unittest.TestCase):
             / "fixtures"
             / "interactive_selection_blocker_fixture.py"
         )
-        pty_backend = TmuxSessionBackend(
-            mode="pty",
+        tmux_backend = TmuxSessionBackend(
+            mode="tmux",
             runtime_root=Path(self.temp_dir.name),
         )
         self.coordinator = CoordinatorService(
@@ -360,7 +360,7 @@ class SessionCreationTests(unittest.TestCase):
             event_repository=self.event_repository,
             artifact_repository=self.artifact_repository,
             work_item_repository=self.work_item_repository,
-            session_backend=pty_backend,
+            session_backend=tmux_backend,
             default_roles=DEFAULT_SESSION_ROLES,
             jira_adapter=FakeJiraAdapter(),
             snapshot_adapter=self.snapshot_adapter,
@@ -412,7 +412,7 @@ class SessionCreationTests(unittest.TestCase):
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         self.assertIsNotNone(implementer_role)
         runtime_session_id = implementer_role.runtime_handle.split(":", 1)[0]
-        pty_backend.stop_session(RuntimeSessionHandle(session_id=runtime_session_id))
+        tmux_backend.stop_session(RuntimeSessionHandle(session_id=runtime_session_id))
 
     def test_send_operator_runtime_input_reactivates_waiting_session_without_new_handoff(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

@@ -6,7 +6,6 @@ from collections import defaultdict
 import hashlib
 from pathlib import Path
 import os
-import pty
 import re
 import shutil
 import subprocess
@@ -40,8 +39,6 @@ class TmuxSessionBackend(SessionBackend):
         self.last_spawn_commands: dict[str, list[str]] = {}
         self.role_working_directories: dict[str, Path] = {}
         self.session_runtime_roots: dict[str, Path] = {}
-        self.processes: dict[str, subprocess.Popen[bytes]] = {}
-        self.pty_master_fds: dict[str, int] = {}
         self.session_role_ids: dict[str, set[str]] = defaultdict(set)
         self.tmux_buffered_inputs: dict[str, list[str]] = defaultdict(list)
         self.tmux_submit_traces: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -53,15 +50,6 @@ class TmuxSessionBackend(SessionBackend):
         self.tmux_confirmation_blocker_emitted: dict[str, bool] = defaultdict(bool)
         self.tmux_generic_blocker_emitted: dict[str, bool] = defaultdict(bool)
         self.tmux_pre_ready_unknown_chunks: dict[str, int] = defaultdict(int)
-        self.pty_buffered_inputs: dict[str, list[str]] = defaultdict(list)
-        self.pty_interactive_driver_enabled: dict[str, bool] = {}
-        self.pty_role_ready: dict[str, bool] = defaultdict(lambda: True)
-        self.pty_output_buffers: dict[str, str] = defaultdict(str)
-        self.pty_trust_prompt_handled: dict[str, bool] = defaultdict(bool)
-        self.pty_selection_blocker_emitted: dict[str, bool] = defaultdict(bool)
-        self.pty_confirmation_blocker_emitted: dict[str, bool] = defaultdict(bool)
-        self.pty_generic_blocker_emitted: dict[str, bool] = defaultdict(bool)
-        self.pty_pre_ready_unknown_chunks: dict[str, int] = defaultdict(int)
         self._available = shutil.which("tmux") is not None
         self._effective_mode = self._resolve_mode(mode)
 
@@ -72,13 +60,11 @@ class TmuxSessionBackend(SessionBackend):
     def _resolve_mode(self, mode: str) -> str:
         if mode == "recording":
             return "recording"
-        if mode == "process":
-            return "process"
-        if mode == "pty":
-            return "pty"
-        if mode == "tmux":
+        if mode in {"auto", "tmux"}:
+            if not self._available:
+                raise ValueError("tmux is required for the operational runtime host")
             return "tmux"
-        return "tmux" if self._available else "process"
+        raise ValueError(f"Unsupported runtime backend mode: {mode}")
 
     _ANSI_CSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
     _ANSI_OSC_RE = re.compile(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\\\)")
@@ -159,41 +145,6 @@ class TmuxSessionBackend(SessionBackend):
             self.tmux_confirmation_blocker_emitted[role_id] = False
             self.tmux_pre_ready_unknown_chunks[role_id] = 0
             self.session_role_ids[session.session_id].add(role_id)
-        elif self._effective_mode == "process":
-            process = subprocess.Popen(
-                role_command,
-                cwd=start_directory,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
-            if process.stdout is None or process.stdin is None:
-                raise RuntimeError("Failed to start process runtime with pipes")
-            os.set_blocking(process.stdout.fileno(), False)
-            self.processes[role_id] = process
-            self.session_role_ids[session.session_id].add(role_id)
-        elif self._effective_mode == "pty":
-            master_fd, slave_fd = pty.openpty()
-            process = subprocess.Popen(
-                role_command,
-                cwd=start_directory,
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                close_fds=True,
-            )
-            os.close(slave_fd)
-            os.set_blocking(master_fd, False)
-            self.processes[role_id] = process
-            self.pty_master_fds[role_id] = master_fd
-            self.session_role_ids[session.session_id].add(role_id)
-            interactive_driver_enabled = bool(role_command) and Path(role_command[0]).name == "launch-role.sh"
-            self.pty_interactive_driver_enabled[role_id] = interactive_driver_enabled
-            self.pty_role_ready[role_id] = not interactive_driver_enabled
-            self.pty_trust_prompt_handled[role_id] = False
-            self.pty_generic_blocker_emitted[role_id] = False
-            self.pty_selection_blocker_emitted[role_id] = False
-            self.pty_pre_ready_unknown_chunks[role_id] = 0
         self.last_spawn_commands[role_id] = role_command
         if start_directory is not None:
             self.role_working_directories[role_id] = start_directory
@@ -222,70 +173,11 @@ class TmuxSessionBackend(SessionBackend):
             result = self._tmux(socket_path, "send-keys", "-t", role.role_id, text, "Enter")
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to send tmux input")
-        elif self._effective_mode == "process":
-            process = self.processes.get(role.role_id)
-            if process is None or process.stdin is None:
-                raise RuntimeError(f"Unknown process role runtime: {role.role_id}")
-            process.stdin.write((text + "\n").encode())
-            process.stdin.flush()
-        elif self._effective_mode == "pty":
-            master_fd = self.pty_master_fds.get(role.role_id)
-            if master_fd is None:
-                raise RuntimeError(f"Unknown PTY role runtime: {role.role_id}")
-            if self.pty_interactive_driver_enabled.get(role.role_id, False) and not self.pty_role_ready.get(role.role_id, True):
-                self.pty_buffered_inputs[role.role_id].append(text)
-                return
-            if self.pty_interactive_driver_enabled.get(role.role_id, False):
-                self.pty_output_buffers[role.role_id] = ""
-                self.pty_selection_blocker_emitted[role.role_id] = False
-                self.pty_confirmation_blocker_emitted[role.role_id] = False
-                self.pty_generic_blocker_emitted[role.role_id] = False
-                self.pty_pre_ready_unknown_chunks[role.role_id] = 0
-                self._write_pty_launcher_input(role.role_id, master_fd, text)
-                return
-            os.write(master_fd, (text + "\n").encode())
 
     def read_output(self, role: RuntimeRoleHandle) -> list[RuntimeOutputChunk]:
         if self._effective_mode == "recording":
             outputs = self.pending_outputs.pop(role.role_id, [])
             return [RuntimeOutputChunk(role_id=role.role_id, text=text) for text in outputs]
-        if self._effective_mode == "process":
-            process = self.processes.get(role.role_id)
-            if process is None or process.stdout is None:
-                return []
-            chunks: list[RuntimeOutputChunk] = []
-            while True:
-                try:
-                    data = os.read(process.stdout.fileno(), 65536)
-                except BlockingIOError:
-                    break
-                if not data:
-                    break
-                text = data.decode(errors="replace")
-                if text:
-                    chunks.append(RuntimeOutputChunk(role_id=role.role_id, text=text))
-            return chunks
-        if self._effective_mode == "pty":
-            master_fd = self.pty_master_fds.get(role.role_id)
-            if master_fd is None:
-                return []
-            chunks: list[RuntimeOutputChunk] = []
-            while True:
-                try:
-                    data = os.read(master_fd, 65536)
-                except BlockingIOError:
-                    break
-                except OSError:
-                    break
-                if not data:
-                    break
-                text = data.decode(errors="replace")
-                if text:
-                    synthetic_markers = self._handle_pty_interactive_driver_output(role.role_id, text)
-                    chunks.append(RuntimeOutputChunk(role_id=role.role_id, text=text))
-                    for marker_text in synthetic_markers:
-                        chunks.append(RuntimeOutputChunk(role_id=role.role_id, text=marker_text))
-            return chunks
 
         socket_path = self._socket_path(role.session_id)
         result = self._tmux(socket_path, "capture-pane", "-p", "-t", role.role_id)
@@ -323,12 +215,6 @@ class TmuxSessionBackend(SessionBackend):
             socket_path = self._socket_path(role.session_id)
             result = self._tmux(socket_path, "list-panes", "-t", role.role_id)
             return result.returncode == 0
-        if self._effective_mode == "process":
-            process = self.processes.get(role.role_id)
-            return process is not None and process.poll() is None
-        if self._effective_mode == "pty":
-            process = self.processes.get(role.role_id)
-            return process is not None and process.poll() is None
         return role.role_id in self.pending_outputs or role.role_id in self.sent_inputs or role.role_id in self.last_spawn_commands
 
     def stop_role(self, role: RuntimeRoleHandle) -> None:
@@ -347,45 +233,6 @@ class TmuxSessionBackend(SessionBackend):
             self.tmux_pre_ready_unknown_chunks.pop(role.role_id, None)
             self.last_captured_output.pop(role.role_id, None)
             self.role_working_directories.pop(role.role_id, None)
-            self.session_role_ids.get(role.session_id, set()).discard(role.role_id)
-        elif self._effective_mode == "process":
-            process = self.processes.pop(role.role_id, None)
-            if process is not None:
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=5)
-                if process.stdin is not None:
-                    process.stdin.close()
-                if process.stdout is not None:
-                    process.stdout.close()
-            self.session_role_ids.get(role.session_id, set()).discard(role.role_id)
-        elif self._effective_mode == "pty":
-            process = self.processes.pop(role.role_id, None)
-            master_fd = self.pty_master_fds.pop(role.role_id, None)
-            self.pty_buffered_inputs.pop(role.role_id, None)
-            self.pty_interactive_driver_enabled.pop(role.role_id, None)
-            self.pty_role_ready.pop(role.role_id, None)
-            self.pty_output_buffers.pop(role.role_id, None)
-            self.pty_trust_prompt_handled.pop(role.role_id, None)
-            self.pty_selection_blocker_emitted.pop(role.role_id, None)
-            self.pty_confirmation_blocker_emitted.pop(role.role_id, None)
-            self.pty_generic_blocker_emitted.pop(role.role_id, None)
-            self.pty_pre_ready_unknown_chunks.pop(role.role_id, None)
-            self.role_working_directories.pop(role.role_id, None)
-            if process is not None:
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=5)
-            if master_fd is not None:
-                os.close(master_fd)
             self.session_role_ids.get(role.session_id, set()).discard(role.role_id)
 
     def stop_session(self, session: RuntimeSessionHandle) -> None:
@@ -408,47 +255,6 @@ class TmuxSessionBackend(SessionBackend):
             if socket_path.exists():
                 socket_path.unlink()
             self.session_role_ids.pop(session.session_id, None)
-        elif self._effective_mode == "process":
-            for role_id in list(self.session_role_ids.get(session.session_id, set())):
-                process = self.processes.pop(role_id, None)
-                if process is not None:
-                    if process.poll() is None:
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait(timeout=5)
-                    if process.stdin is not None:
-                        process.stdin.close()
-                    if process.stdout is not None:
-                        process.stdout.close()
-            self.session_role_ids.pop(session.session_id, None)
-        elif self._effective_mode == "pty":
-            for role_id in list(self.session_role_ids.get(session.session_id, set())):
-                process = self.processes.pop(role_id, None)
-                master_fd = self.pty_master_fds.pop(role_id, None)
-                self.pty_buffered_inputs.pop(role_id, None)
-                self.pty_interactive_driver_enabled.pop(role_id, None)
-                self.pty_role_ready.pop(role_id, None)
-                self.pty_output_buffers.pop(role_id, None)
-                self.pty_trust_prompt_handled.pop(role_id, None)
-                self.pty_selection_blocker_emitted.pop(role_id, None)
-                self.pty_confirmation_blocker_emitted.pop(role_id, None)
-                self.pty_generic_blocker_emitted.pop(role_id, None)
-                self.pty_pre_ready_unknown_chunks.pop(role_id, None)
-                self.role_working_directories.pop(role_id, None)
-                if process is not None:
-                    if process.poll() is None:
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait(timeout=5)
-                if master_fd is not None:
-                    os.close(master_fd)
-            self.session_role_ids.pop(session.session_id, None)
         self.session_runtime_roots.pop(session.session_id, None)
 
     def get_sent_inputs(self, role_id: str) -> list[str]:
@@ -459,90 +265,6 @@ class TmuxSessionBackend(SessionBackend):
 
     def get_spawn_command(self, role_id: str) -> list[str]:
         return list(self.last_spawn_commands.get(role_id, []))
-
-    def _handle_pty_interactive_driver_output(self, role_id: str, text: str) -> list[str]:
-        if not self.pty_interactive_driver_enabled.get(role_id, False):
-            return []
-
-        accumulated = self.pty_output_buffers.get(role_id, "") + text
-        self.pty_output_buffers[role_id] = accumulated[-32768:]
-        synthetic_markers: list[str] = []
-        blocker_detected = False
-        ready_before_chunk = self.pty_role_ready.get(role_id, False)
-
-        normalized = self._normalize_terminal_text(accumulated)
-        recent_normalized = self._normalize_terminal_text(text[-4000:])
-        trust_prompt = self._contains_workspace_trust_prompt(normalized)
-        selection_blocker = self._contains_generic_selection_blocker(normalized)
-        confirmation_blocker = self._contains_generic_confirmation_blocker(normalized)
-        mcp_blocker_details = self._build_mcp_availability_blocker_details(normalized)
-
-        if not self.pty_role_ready.get(role_id, False):
-            if (
-                not self.pty_trust_prompt_handled.get(role_id, False)
-                and trust_prompt
-            ):
-                master_fd = self.pty_master_fds.get(role_id)
-                if master_fd is not None:
-                    os.write(master_fd, b"1\n")
-                    self.pty_trust_prompt_handled[role_id] = True
-            if self._contains_runner_ready_prompt(normalized):
-                self.pty_role_ready[role_id] = True
-                self.pty_pre_ready_unknown_chunks[role_id] = 0
-        if (
-            self.pty_role_ready.get(role_id, False)
-            and not confirmation_blocker
-            and not self.pty_selection_blocker_emitted.get(role_id, False)
-            and selection_blocker
-        ):
-            self.pty_selection_blocker_emitted[role_id] = True
-            blocker_detected = True
-            synthetic_markers.append(
-                'SDD_ERROR: {"summary":"interactive selection required","details":"launcher-backed role requested explicit selection input"}'
-            )
-        elif (
-            self.pty_role_ready.get(role_id, False)
-            and not self.pty_confirmation_blocker_emitted.get(role_id, False)
-            and confirmation_blocker
-        ):
-            self.pty_confirmation_blocker_emitted[role_id] = True
-            blocker_detected = True
-            synthetic_markers.append(
-                'SDD_ERROR: {"summary":"interactive confirmation required","details":"launcher-backed role requested explicit confirmation"}'
-            )
-        elif (
-            not ready_before_chunk
-            and not self.pty_role_ready.get(role_id, False)
-            and self.pty_buffered_inputs.get(role_id)
-            and normalized
-            and not trust_prompt
-            and not selection_blocker
-            and not self._contains_launcher_bootstrap_noise(recent_normalized)
-            and not self.pty_generic_blocker_emitted.get(role_id, False)
-        ):
-            self.pty_pre_ready_unknown_chunks[role_id] += 1
-            if self.pty_pre_ready_unknown_chunks[role_id] >= 3:
-                self.pty_generic_blocker_emitted[role_id] = True
-                blocker_detected = True
-                if mcp_blocker_details is not None:
-                    synthetic_markers.append(
-                        'SDD_ERROR: {"summary":"required mcp access unavailable","details":"'
-                        + mcp_blocker_details.replace('"', '\\"')
-                        + '","resume_strategy":"reactivate_only"}'
-                    )
-                else:
-                    preview = normalized[:160]
-                    synthetic_markers.append(
-                        'SDD_ERROR: {"summary":"interactive operator input required","details":"launcher-backed role emitted unresolved interactive output before ready: '
-                        + preview.replace('"', '\\"')
-                        + '"}'
-                    )
-        if self.pty_role_ready.get(role_id, False) and not blocker_detected:
-            master_fd = self.pty_master_fds.get(role_id)
-            if master_fd is not None:
-                for buffered_text in self.pty_buffered_inputs.pop(role_id, []):
-                    self._write_pty_launcher_input(role_id, master_fd, buffered_text)
-        return synthetic_markers
 
     def _handle_tmux_interactive_driver_output(self, role_id: str, text: str) -> list[str]:
         if not self.tmux_interactive_driver_enabled.get(role_id, False):
@@ -734,16 +456,6 @@ class TmuxSessionBackend(SessionBackend):
             "Read ROUTED_WORK.md in the current directory, read HYDRATION.json too if it exists, follow the routed instructions exactly, "
             "and reply only through the SDD_* protocol described in AGENTS.md."
         )
-
-    def _write_pty_launcher_input(self, role_id: str, master_fd: int, text: str) -> None:
-        payload_text = text
-        if "\n" in text:
-            payload_text = self._materialize_routed_input(role_id, text)
-        # Launcher-backed interactive roles expect a real submit keypress rather than
-        # relying on a single text+LF write, which can leave the input staged in the prompt.
-        os.write(master_fd, payload_text.encode())
-        time.sleep(0.25)
-        os.write(master_fd, b"\r")
 
     def _write_tmux_launcher_input(
         self,

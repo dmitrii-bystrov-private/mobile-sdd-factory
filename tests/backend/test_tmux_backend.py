@@ -97,57 +97,6 @@ class TmuxBackendTests(unittest.TestCase):
         self.assertIn("enter to confirm", normalized)
         self.assertIn("esc to cancel", normalized)
 
-    def test_process_mode_keeps_persistent_subprocess_across_rounds(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            runtime_root = Path(temp_dir)
-            backend = TmuxSessionBackend(
-                mode="process",
-                runtime_root=runtime_root,
-            )
-            session = backend.create_task_session("IOS-50002")
-            fixture = (
-                Path(__file__).resolve().parent
-                / "fixtures"
-                / "persistent_echo_agent.py"
-            )
-            role = backend.spawn_role(
-                session,
-                "implementer",
-                start_directory=runtime_root / "IOS-50002" / "runtime" / "role-workspaces" / "implementer",
-                launch_command=["python3", "-u", str(fixture)],
-            )
-
-            startup = self._wait_for_output(
-                backend,
-                role,
-                timeout_seconds=2.0,
-                expected_substring="AGENT_READY",
-            )
-            self.assertIn("AGENT_READY", startup)
-
-            backend.send_input(role, "first routed work")
-            first_round = self._wait_for_output(
-                backend,
-                role,
-                timeout_seconds=2.0,
-                expected_substring="round 1",
-            )
-            self.assertIn("round 1", first_round)
-            self.assertIn("SDD_OUTPUT", first_round)
-
-            backend.send_input(role, "second routed work")
-            second_round = self._wait_for_output(
-                backend,
-                role,
-                timeout_seconds=2.0,
-                expected_substring="round 2",
-            )
-            self.assertIn("round 2", second_round)
-            self.assertIn("SDD_OUTPUT", second_round)
-
-            self.assertEqual("process", backend.effective_mode)
-            backend.stop_session(session)
-
     @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
     def test_tmux_mode_keeps_persistent_subprocess_across_rounds(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -251,97 +200,12 @@ class TmuxBackendTests(unittest.TestCase):
 
             backend.stop_session(session)
 
-    def test_pty_mode_keeps_persistent_subprocess_across_rounds(self) -> None:
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_tmux_mode_materializes_multiline_routed_input_for_launcher_backed_role(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir)
             backend = TmuxSessionBackend(
-                mode="pty",
-                runtime_root=runtime_root,
-            )
-            session = backend.create_task_session("IOS-50003")
-            fixture = (
-                Path(__file__).resolve().parent
-                / "fixtures"
-                / "persistent_echo_agent.py"
-            )
-            role = backend.spawn_role(
-                session,
-                "implementer",
-                start_directory=runtime_root / "IOS-50003" / "runtime" / "role-workspaces" / "implementer",
-                launch_command=["python3", "-u", str(fixture)],
-            )
-
-            startup = self._wait_for_output(backend, role, expected_substring="AGENT_READY")
-            self.assertIn("AGENT_READY", startup)
-
-            backend.send_input(role, "first routed work")
-            first_round = self._wait_for_output(backend, role, expected_substring="round 1")
-            self.assertIn("round 1", first_round)
-            self.assertIn("SDD_OUTPUT", first_round)
-
-            backend.send_input(role, "second routed work")
-            second_round = self._wait_for_output(backend, role, expected_substring="round 2")
-            self.assertIn("round 2", second_round)
-            self.assertIn("SDD_OUTPUT", second_round)
-
-            self.assertEqual("pty", backend.effective_mode)
-            backend.stop_session(session)
-
-    def test_pty_mode_buffers_launcher_backed_input_until_ready(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            runtime_root = Path(temp_dir)
-            backend = TmuxSessionBackend(
-                mode="pty",
-                runtime_root=runtime_root,
-            )
-            session = backend.create_task_session("IOS-50004")
-            fixture = (
-                Path(__file__).resolve().parent
-                / "fixtures"
-                / "interactive_launcher_fixture.py"
-            )
-            role_workspace = runtime_root / "IOS-50004" / "runtime" / "role-workspaces" / "implementer"
-            role_workspace.mkdir(parents=True, exist_ok=True)
-            launcher_script = role_workspace / "launch-role.sh"
-            launcher_script.write_text(
-                "\n".join(
-                    [
-                        "#!/usr/bin/env bash",
-                        "set -euo pipefail",
-                        f"exec python3 -u {fixture}",
-                        "",
-                    ]
-                )
-            )
-            launcher_script.chmod(0o755)
-            role = backend.spawn_role(
-                session,
-                "implementer",
-                start_directory=role_workspace,
-                launch_command=[str(launcher_script)],
-            )
-
-            backend.send_input(role, "first routed work")
-
-            interactive_round = self._wait_for_output(
-                backend,
-                role,
-                timeout_seconds=3.0,
-                expected_substring="interactive round done",
-            )
-            self.assertIn("Quick safety check", interactive_round)
-            self.assertIn("✻ Brewed for 1s", interactive_round)
-            self.assertIn("ROUTED:first routed work", interactive_round)
-            self.assertIn("SDD_OUTPUT", interactive_round)
-            self.assertEqual(["first routed work"], backend.get_sent_inputs(role.role_id))
-
-            backend.stop_session(session)
-
-    def test_pty_mode_materializes_multiline_routed_input_for_launcher_backed_role(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            runtime_root = Path(temp_dir)
-            backend = TmuxSessionBackend(
-                mode="pty",
+                mode="tmux",
                 runtime_root=runtime_root,
             )
             session = backend.create_task_session("IOS-50004B")
@@ -387,11 +251,12 @@ class TmuxBackendTests(unittest.TestCase):
 
             backend.stop_session(session)
 
-    def test_pty_mode_emits_synthetic_selection_error_for_launcher_blocker(self) -> None:
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_tmux_mode_emits_synthetic_selection_error_for_launcher_blocker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir)
             backend = TmuxSessionBackend(
-                mode="pty",
+                mode="tmux",
                 runtime_root=runtime_root,
             )
             session = backend.create_task_session("IOS-50005")
@@ -434,11 +299,12 @@ class TmuxBackendTests(unittest.TestCase):
 
             backend.stop_session(session)
 
-    def test_pty_mode_emits_second_confirmation_blocker_after_operator_reply(self) -> None:
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_tmux_mode_emits_second_confirmation_blocker_after_operator_reply(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir)
             backend = TmuxSessionBackend(
-                mode="pty",
+                mode="tmux",
                 runtime_root=runtime_root,
             )
             session = backend.create_task_session("IOS-50007")
@@ -501,11 +367,12 @@ class TmuxBackendTests(unittest.TestCase):
 
             backend.stop_session(session)
 
-    def test_pty_mode_keeps_buffered_work_during_unknown_pre_ready_output(self) -> None:
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_tmux_mode_keeps_buffered_work_during_unknown_pre_ready_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runtime_root = Path(temp_dir)
             backend = TmuxSessionBackend(
-                mode="pty",
+                mode="tmux",
                 runtime_root=runtime_root,
             )
             session = backend.create_task_session("IOS-50008")
@@ -545,8 +412,8 @@ class TmuxBackendTests(unittest.TestCase):
             )
             self.assertIn("SDD_FACTORY_AGENT_BOOTSTRAP", pre_ready_output)
             self.assertNotIn("SDD_OUTPUT", pre_ready_output)
-            self.assertFalse(backend.pty_role_ready[role.role_id])
-            self.assertEqual(["first routed work"], backend.pty_buffered_inputs[role.role_id])
+            self.assertFalse(backend.tmux_role_ready[role.role_id])
+            self.assertEqual(["first routed work"], backend.tmux_buffered_inputs[role.role_id])
 
             backend.stop_session(session)
 
