@@ -19,12 +19,13 @@ class RolePromptTests(unittest.TestCase):
         )
 
         self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now", text)
+        self.assertIn("Read `HYDRATION.json` in the current directory", text)
         self.assertIn("Current routed work:\nStart implementation work for IOS-123.", text)
-        self.assertIn('"task_key": "IOS-123"', text)
-        self.assertIn("Per-round context:", text)
         self.assertNotIn("You are a persistent SDD Factory role.", text)
         self.assertNotIn("Role-specific rules:", text)
         self.assertNotIn("Preferred terminal outcome path:", text)
+        self.assertNotIn('"task_key": "IOS-123"', text)
+        self.assertNotIn("Per-round context:", text)
 
     def test_live_continuation_prompt_reuses_existing_agents_context(self) -> None:
         text = role_handoff_prompt(
@@ -39,11 +40,12 @@ class RolePromptTests(unittest.TestCase):
         )
 
         self.assertIn("Continue from your existing AGENTS.md-based role context", text)
+        self.assertIn("Refresh your per-round machine-readable context from `HYDRATION.json`", text)
         self.assertIn("Run deterministic verification for IOS-123.", text)
-        self.assertIn('"current_stage": "verification_requested"', text)
         self.assertNotIn("You are a persistent SDD Factory role.", text)
         self.assertNotIn("Role-specific rules:", text)
         self.assertNotIn("Preferred terminal outcome path:", text)
+        self.assertNotIn('"current_stage": "verification_requested"', text)
 
 
 if __name__ == "__main__":

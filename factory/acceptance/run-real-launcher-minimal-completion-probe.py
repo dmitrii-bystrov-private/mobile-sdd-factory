@@ -15,7 +15,7 @@ from backend.roles.workspace import RoleWorkspaceManager
 
 
 PROMPT = (
-    "Read ROUTED_WORK.md in the current directory, follow it exactly, "
+    "Read ROUTED_WORK.md in the current directory, read HYDRATION.json too if it exists, follow the routed instructions exactly, "
     "and reply only through the SDD_* protocol described in AGENTS.md."
 )
 

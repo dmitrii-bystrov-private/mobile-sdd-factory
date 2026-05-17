@@ -2486,6 +2486,20 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(result_path.exists())
         self.assertTrue(any(artifact.artifact_type == "role_result_json" for artifact in artifacts))
 
+    def test_prepare_task_session_materializes_hydration_json_in_role_workspace(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30008C")
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            "implementer",
+        )
+        hydration_path = role_workspace / "HYDRATION.json"
+
+        self.assertTrue(hydration_path.is_file())
+        hydration = json.loads(hydration_path.read_text())
+        self.assertEqual("IOS-30008C", hydration["task_key"])
+        self.assertEqual("implementation_requested", hydration["current_stage"])
+        self.assertEqual("implementer", hydration["role_name"])
+
     def test_collect_role_output_normalizes_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")

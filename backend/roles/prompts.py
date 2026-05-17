@@ -84,19 +84,17 @@ def role_handoff_prompt(
         return (
             "Read AGENTS.md/CLAUDE.md in the current directory now and use it as the primary durable role contract for this session.\n"
             "Do not rebuild your role from scratch outside that file unless the coordinator explicitly tells you to.\n\n"
+            "Read `HYDRATION.json` in the current directory for machine-readable per-round context before acting.\n\n"
             "Current routed work:\n"
             f"{instruction}\n\n"
-            "Per-round context:\n"
-            f"{json.dumps(hydration_payload, indent=2, sort_keys=True)}\n"
         )
     if prompt_mode == "live_continuation":
         return (
             "Continue from your existing AGENTS.md-based role context in this persistent task session.\n"
             "Use the new routed work below without reinitializing your full role definition from scratch.\n\n"
+            "Refresh your per-round machine-readable context from `HYDRATION.json` in the current directory before acting.\n\n"
             "Current routed work:\n"
             f"{instruction}\n\n"
-            "Per-round context:\n"
-            f"{json.dumps(hydration_payload, indent=2, sort_keys=True)}\n"
         )
     if prompt_mode == "bootstrap":
         prefix = (

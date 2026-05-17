@@ -4390,6 +4390,9 @@ class CoordinatorService:
             f"{role.role_name}.hydration.json",
             json.dumps(hydration, indent=2, sort_keys=True),
         )
+        workspace = self.role_workspace_manager.ensure_role_workspace(session.task_key, role.role_name)
+        workspace_hydration_path = workspace.directory / "HYDRATION.json"
+        workspace_hydration_path.write_text(json.dumps(hydration, indent=2, sort_keys=True))
         prompt_path = write_text_artifact(
             self.artifacts_root,
             session.task_key,
