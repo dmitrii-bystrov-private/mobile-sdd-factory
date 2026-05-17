@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe a real launcher-backed role under PTY hosting."""
+"""Probe a real launcher-backed role under tmux hosting."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def build_acceptance_dependencies(repo_root: Path, temp_root: Path) -> AppDepend
     artifact_repository = ArtifactRepository(database)
     work_item_repository = WorkItemRepository(database)
     session_backend = TmuxSessionBackend(
-        mode="pty",
+        mode="tmux",
         runtime_root=temp_root / "workdir",
     )
     jira_adapter = FakeJiraAdapter(repo_root)
@@ -124,11 +124,11 @@ def collect_until_bootstrap(
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    with tempfile.TemporaryDirectory(prefix="sdd-factory-real-launcher-pty-probe.") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="sdd-factory-real-launcher-tmux-probe.") as temp_dir:
         temp_root = Path(temp_dir)
         deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
 
-        task_key = "IOS-ACCEPT-REAL-LAUNCHER-PTY-001"
+        task_key = "IOS-ACCEPT-REAL-LAUNCHER-TMUX-001"
         create_response = create_session(
             CreateSessionRequest(
                 task_key=task_key,
@@ -158,7 +158,7 @@ def main() -> None:
         assert "SDD_FACTORY_AGENT_BOOTSTRAP" in output_text
         assert len(output_text.strip()) > len("SDD_FACTORY_ROLE_LAUNCHER_READY\nSDD_FACTORY_AGENT_BOOTSTRAP")
 
-        print(f"Real launcher PTY probe passed for session {session_id}.")
+        print(f"Real launcher tmux probe passed for session {session_id}.")
 
 
 if __name__ == "__main__":
