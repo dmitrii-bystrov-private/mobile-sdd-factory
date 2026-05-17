@@ -195,6 +195,16 @@ async function buildRuntimeStateSummary(
     runtimeSessionId: response.runtime_session_id,
     tmuxSocketPath: response.tmux_socket_path,
     tmuxAttachCommand: response.tmux_attach_command,
+    lastAutoRecovery: response.last_auto_recovery
+      ? {
+          roleName: response.last_auto_recovery.role_name,
+          currentStage: response.last_auto_recovery.current_stage,
+          runtimeHandle: response.last_auto_recovery.runtime_handle,
+          deadRuntimeHandle: response.last_auto_recovery.dead_runtime_handle,
+          eventId: response.last_auto_recovery.event_id,
+          createdAt: response.last_auto_recovery.created_at,
+        }
+      : null,
     roles: response.roles.map((role) => ({
       roleName: role.role_name,
       status: role.status,

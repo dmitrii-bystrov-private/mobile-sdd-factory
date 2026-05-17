@@ -68,6 +68,23 @@ export function RuntimeSessionPanel({
             </div>
           ) : null}
 
+          {runtimeStateSummary.lastAutoRecovery ? (
+            <div className="artifact-card">
+              <div className="artifact-meta">
+                <span>auto recovery</span>
+                <strong>{runtimeStateSummary.lastAutoRecovery.roleName ?? "unknown role"}</strong>
+              </div>
+              <p className="artifact-path">
+                recovered at stage {runtimeStateSummary.lastAutoRecovery.currentStage ?? "unknown"} ·
+                event #{runtimeStateSummary.lastAutoRecovery.eventId}
+              </p>
+              <p className="artifact-path">
+                replaced {runtimeStateSummary.lastAutoRecovery.deadRuntimeHandle ?? "unknown handle"} with{" "}
+                {runtimeStateSummary.lastAutoRecovery.runtimeHandle ?? "unknown handle"}
+              </p>
+            </div>
+          ) : null}
+
           <div className="actions-grid">
             <button
               className="action-button"

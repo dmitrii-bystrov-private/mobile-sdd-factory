@@ -3525,6 +3525,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "role_input_dispatched" for item in events))
         sent_inputs = backend.get_sent_inputs(refreshed_role.runtime_handle)
         self.assertEqual(1, len(sent_inputs))
+        summary = self.coordinator.get_runtime_state_summary(session.id)
+        self.assertIsNotNone(summary["last_auto_recovery"])
+        self.assertEqual("implementer", summary["last_auto_recovery"]["role_name"])
 
     def test_run_loop_once_escalates_when_auto_recovery_fails(self) -> None:
         backend = AutoRecoveryRecordingBackend()

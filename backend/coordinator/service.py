@@ -4038,6 +4038,18 @@ class CoordinatorService:
                     ),
                 }
             )
+        last_auto_recovery = None
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.event_type == "runtime_role_auto_recovery_attempted":
+                last_auto_recovery = {
+                    "role_name": event.payload.get("role_name"),
+                    "current_stage": event.payload.get("current_stage"),
+                    "runtime_handle": event.payload.get("runtime_handle"),
+                    "dead_runtime_handle": event.payload.get("dead_runtime_handle"),
+                    "event_id": event.id,
+                    "created_at": event.created_at,
+                }
+                break
         return {
             "available": runtime_session_id is not None,
             "runtime_session_id": runtime_session_id,
@@ -4051,6 +4063,7 @@ class CoordinatorService:
                 if isinstance(tmux_session_visibility, dict)
                 else None
             ),
+            "last_auto_recovery": last_auto_recovery,
             "roles": role_summaries,
         }
 

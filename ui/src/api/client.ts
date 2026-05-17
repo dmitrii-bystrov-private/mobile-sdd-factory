@@ -185,6 +185,14 @@ export const apiClient = {
     runtime_session_id: string | null;
     tmux_socket_path: string | null;
     tmux_attach_command: string | null;
+    last_auto_recovery: {
+      role_name: string | null;
+      current_stage: string | null;
+      runtime_handle: string | null;
+      dead_runtime_handle: string | null;
+      event_id: number;
+      created_at: string;
+    } | null;
     roles: Array<{
       role_name: string;
       status: string;

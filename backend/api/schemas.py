@@ -127,11 +127,21 @@ class RuntimeRoleStateResponse(BaseModel):
     tmux_capture_command: str | None = None
 
 
+class RuntimeAutoRecoveryStateResponse(BaseModel):
+    role_name: str | None = None
+    current_stage: str | None = None
+    runtime_handle: str | None = None
+    dead_runtime_handle: str | None = None
+    event_id: int
+    created_at: str
+
+
 class RuntimeSessionStateResponse(BaseModel):
     available: bool
     runtime_session_id: str | None = None
     tmux_socket_path: str | None = None
     tmux_attach_command: str | None = None
+    last_auto_recovery: RuntimeAutoRecoveryStateResponse | None = None
     roles: list[RuntimeRoleStateResponse]
 
 

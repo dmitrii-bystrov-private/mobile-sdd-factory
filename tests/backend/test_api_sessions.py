@@ -2071,6 +2071,32 @@ class SessionApiTests(unittest.TestCase):
         self.assertGreaterEqual(len(response.roles), 1)
         self.assertTrue(any(role.role_name == "implementer" for role in response.roles))
 
+    def test_get_runtime_state_route_returns_last_auto_recovery(self) -> None:
+        from tests.backend.test_session_creation import AutoRecoveryRecordingBackend
+
+        backend = AutoRecoveryRecordingBackend()
+        self.dependencies.session_backend = backend
+        self.dependencies.coordinator_service.session_backend = backend
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013RA"),
+            dependencies=self.dependencies,
+        )
+        session_id = prepare_response.session.id
+        implementer_role = self.dependencies.role_repository.get_by_name(session_id, "implementer")
+        assert implementer_role is not None
+        assert implementer_role.runtime_handle is not None
+        backend.mark_dead(implementer_role.runtime_handle)
+        self.dependencies.coordinator_service.run_loop_once()
+
+        response = get_runtime_state(
+            session_id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertIsNotNone(response.last_auto_recovery)
+        assert response.last_auto_recovery is not None
+        self.assertEqual("implementer", response.last_auto_recovery.role_name)
+
     def test_stop_runtime_role_route_stops_role_and_pauses_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40013S"),

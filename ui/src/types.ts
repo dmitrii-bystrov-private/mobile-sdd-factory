@@ -119,11 +119,21 @@ export type RuntimeRoleStateSummary = {
   tmuxCaptureCommand: string | null;
 };
 
+export type RuntimeAutoRecoveryStateSummary = {
+  roleName: string | null;
+  currentStage: string | null;
+  runtimeHandle: string | null;
+  deadRuntimeHandle: string | null;
+  eventId: number;
+  createdAt: string;
+};
+
 export type RuntimeSessionStateSummary = {
   available: boolean;
   runtimeSessionId: string | null;
   tmuxSocketPath: string | null;
   tmuxAttachCommand: string | null;
+  lastAutoRecovery: RuntimeAutoRecoveryStateSummary | null;
   roles: RuntimeRoleStateSummary[];
 };
 
