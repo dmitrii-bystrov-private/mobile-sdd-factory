@@ -12,6 +12,8 @@ from backend.coordinator.service import CoordinatorService
 from backend.roles.contracts import DEFAULT_SESSION_ROLES
 from backend.roles.launcher import RoleLauncherManager
 from backend.roles.workspace import RoleWorkspaceManager
+from backend.session_backend.base import SessionBackend
+from backend.session_backend.recording_backend import RecordingSessionBackend
 from backend.session_backend.tmux_backend import TmuxSessionBackend
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.db import Database
@@ -37,7 +39,7 @@ class AppDependencies:
     event_repository: EventRepository
     artifact_repository: ArtifactRepository
     work_item_repository: WorkItemRepository
-    session_backend: TmuxSessionBackend
+    session_backend: SessionBackend
     jira_adapter: JiraAdapter
     snapshot_adapter: SnapshotAdapter
     gitlab_adapter: GitLabAdapter
@@ -59,10 +61,13 @@ def build_dependencies() -> AppDependencies:
     event_repository = EventRepository(database)
     artifact_repository = ArtifactRepository(database)
     work_item_repository = WorkItemRepository(database)
-    session_backend = TmuxSessionBackend(
-        mode=config.runtime_backend,
-        runtime_root=config.runtime_root,
-    )
+    if config.runtime_backend == "recording":
+        session_backend = RecordingSessionBackend()
+    else:
+        session_backend = TmuxSessionBackend(
+            mode=config.runtime_backend,
+            runtime_root=config.runtime_root,
+        )
     if config.use_fake_adapters:
         jira_adapter = FakeJiraAdapter(config.repo_root)
         snapshot_adapter = FakeSnapshotAdapter(config.repo_root, config.workdir_root)

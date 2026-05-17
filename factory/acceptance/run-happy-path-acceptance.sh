@@ -118,6 +118,6 @@ jq -e '
 
 ARTIFACTS_RESPONSE="$(curl -fsS "${BASE_URL}/artifacts?session_id=${SESSION_ID}")"
 jq -e '([.items[].artifact_type] | index("role_prompt")) != null' <<<"${ARTIFACTS_RESPONSE}" >/dev/null
-jq -e '([.items[].artifact_type] | index("self_review_summary")) != null' <<<"${ARTIFACTS_RESPONSE}" >/dev/null
+jq -e '([.items[].artifact_type] | index("role_output_summary")) != null' <<<"${ARTIFACTS_RESPONSE}" >/dev/null
 
 echo "Happy-path operator acceptance passed for session ${SESSION_ID}."
