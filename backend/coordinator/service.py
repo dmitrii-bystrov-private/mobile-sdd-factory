@@ -4693,16 +4693,10 @@ class CoordinatorService:
 
     def _remove_runner_private_residue(self, task_key: str) -> list[str]:
         removed: list[str] = []
-        roots = (
-            Path.home() / ".claude" / "projects",
-            Path.home() / ".codex" / "projects",
-            Path.home() / ".codex" / "sessions",
-        )
         task_key_lower = task_key.lower()
-        for root in roots:
-            if not root.exists() or not root.is_dir():
-                continue
-            for child in root.iterdir():
+        claude_projects_root = Path.home() / ".claude" / "projects"
+        if claude_projects_root.exists() and claude_projects_root.is_dir():
+            for child in claude_projects_root.iterdir():
                 if task_key_lower not in child.name.lower():
                     continue
                 if child.is_dir():
@@ -4710,7 +4704,53 @@ class CoordinatorService:
                 else:
                     child.unlink(missing_ok=True)
                 removed.append(str(child))
+
+        codex_sessions_root = Path.home() / ".codex" / "sessions"
+        if codex_sessions_root.exists() and codex_sessions_root.is_dir():
+            for session_file in codex_sessions_root.rglob("*.jsonl"):
+                if not self._codex_session_file_matches_task(session_file, task_key_lower):
+                    continue
+                session_file.unlink(missing_ok=True)
+                removed.append(str(session_file))
+                self._prune_empty_parents(session_file.parent, stop_root=codex_sessions_root)
         return removed
+
+    def _codex_session_file_matches_task(self, session_file: Path, task_key_lower: str) -> bool:
+        try:
+            with session_file.open("r", encoding="utf-8") as handle:
+                for _ in range(20):
+                    line = handle.readline()
+                    if not line:
+                        break
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    cwd = (
+                        payload.get("payload", {}).get("cwd")
+                        if isinstance(payload, dict)
+                        else None
+                    )
+                    if isinstance(cwd, str) and task_key_lower in cwd.lower():
+                        return True
+                    session_text = json.dumps(payload).lower()
+                    if task_key_lower in session_text:
+                        return True
+        except OSError:
+            return False
+        return False
+
+    def _prune_empty_parents(self, path: Path, *, stop_root: Path) -> None:
+        current = path
+        while current != stop_root and current.is_dir():
+            try:
+                next(current.iterdir())
+                break
+            except StopIteration:
+                current.rmdir()
+                current = current.parent
+            except OSError:
+                break
 
     def _remove_task_worktree_and_directory(self, task_key: str) -> list[str]:
         if self.workdir_root is None:

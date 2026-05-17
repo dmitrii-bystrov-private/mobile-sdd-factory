@@ -3,6 +3,7 @@ import json
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from backend.api.sse import SessionEventBus
 from backend.coordinator.intake import IntakeError
@@ -235,6 +236,66 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(result["deleted_session"])
         self.assertFalse(task_root.exists())
         self.assertIsNone(self.session_repository.get_by_id(session.id))
+
+    def test_cleanup_task_removes_claude_project_session_directory(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30000CLAUDE",
+            workflow_profile="oneshot",
+            policy={},
+        )
+        fake_home = Path(self.temp_dir.name) / "home"
+        claude_dir = (
+            fake_home
+            / ".claude"
+            / "projects"
+            / "-Users-d-bystrov-Projects-Finom-workdir-IOS-30000CLAUDE-repo"
+        )
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        (claude_dir / "session.jsonl").write_text("{}\n")
+
+        with patch("backend.coordinator.service.Path.home", return_value=fake_home):
+            result = self.coordinator.cleanup_task(session.id, cleanup_mode="soft")
+
+        self.assertTrue(result["cleaned"])
+        self.assertFalse(claude_dir.exists())
+        self.assertTrue(
+            any(".claude/projects" in path for path in result["removed_paths"]),
+            "expected claude project residue to be reported",
+        )
+
+    def test_cleanup_task_removes_codex_session_file_by_cwd_match(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30000CODEX",
+            workflow_profile="oneshot",
+            policy={},
+        )
+        fake_home = Path(self.temp_dir.name) / "home"
+        codex_session_dir = fake_home / ".codex" / "sessions" / "2026" / "05" / "17"
+        codex_session_dir.mkdir(parents=True, exist_ok=True)
+        session_file = codex_session_dir / "rollout-test.jsonl"
+        session_file.write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-05-17T20:00:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "cwd": f"~/workdir/{session.task_key}/runtime/role-workspaces/implementer"
+                    },
+                }
+            )
+            + "\n"
+        )
+
+        with patch("backend.coordinator.service.Path.home", return_value=fake_home):
+            result = self.coordinator.cleanup_task(session.id, cleanup_mode="soft")
+
+        self.assertTrue(result["cleaned"])
+        self.assertFalse(session_file.exists())
+        self.assertFalse(codex_session_dir.exists())
+        self.assertTrue(
+            any(".codex/sessions" in path for path in result["removed_paths"]),
+            "expected codex session residue to be reported",
+        )
 
     def test_collect_role_output_escalates_launcher_selection_blocker_to_operator(self) -> None:
         fixture = (
