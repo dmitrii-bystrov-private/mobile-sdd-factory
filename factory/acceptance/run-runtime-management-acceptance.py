@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import shutil
 import time
 from pathlib import Path
 
@@ -27,7 +26,7 @@ from backend.api.schemas import (
     StopRuntimeSessionRequest,
 )
 from backend.roles.contracts import IMPLEMENTER_ROLE
-from run_roots import create_run_root, shutdown_dependencies
+from run_roots import managed_run_root, shutdown_dependencies
 
 
 def _load_build_acceptance_dependencies(repo_root: Path):
@@ -228,37 +227,29 @@ def _validate_session_restart(*, session_id: int, dependencies) -> None:
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     build_acceptance_dependencies = _load_build_acceptance_dependencies(repo_root)
-    temp_root = create_run_root(repo_root, "sdd-factory-runtime-management")
-    deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
-    keep_temp = os.environ.get("SDD_FACTORY_KEEP_TEMP", "").strip().lower() in {"1", "true", "yes"}
-    role_session_id: int | None = None
-    session_session_id: int | None = None
-    success = False
-    try:
-        role_task_key = f"IOS-ACCEPT-RUNTIME-ROLE-{temp_root.name.split('.')[-1].upper()}"
-        role_session_id = _create_prepared_session(task_key=role_task_key, dependencies=deps)
-        _validate_role_restart(session_id=role_session_id, dependencies=deps)
+    with managed_run_root(repo_root, "sdd-factory-runtime-management") as temp_root:
+        deps = build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
+        role_session_id: int | None = None
+        session_session_id: int | None = None
+        try:
+            role_task_key = f"IOS-ACCEPT-RUNTIME-ROLE-{temp_root.name.split('.')[-1].upper()}"
+            role_session_id = _create_prepared_session(task_key=role_task_key, dependencies=deps)
+            _validate_role_restart(session_id=role_session_id, dependencies=deps)
 
-        session_task_key = f"IOS-ACCEPT-RUNTIME-SESSION-{temp_root.name.split('.')[-1].upper()}"
-        session_session_id = _create_prepared_session(task_key=session_task_key, dependencies=deps)
-        _validate_session_restart(session_id=session_session_id, dependencies=deps)
+            session_task_key = f"IOS-ACCEPT-RUNTIME-SESSION-{temp_root.name.split('.')[-1].upper()}"
+            session_session_id = _create_prepared_session(task_key=session_task_key, dependencies=deps)
+            _validate_session_restart(session_id=session_session_id, dependencies=deps)
 
-        shutdown_dependencies(deps)
-        success = True
-        print("Runtime management acceptance passed.")
-    except Exception:
-        print(f"\n[debug] acceptance temp_root={temp_root}")
-        if role_session_id is not None:
-            _print_runtime_debug_bundle(session_id=role_session_id, dependencies=deps)
-        if session_session_id is not None:
-            _print_runtime_debug_bundle(session_id=session_session_id, dependencies=deps)
-        print("[debug] temp root preserved for inspection")
-        raise
-    finally:
-        if success and not keep_temp:
-            shutil.rmtree(temp_root, ignore_errors=True)
-        elif success and keep_temp:
-            print(f"[debug] kept temp_root={temp_root}")
+            shutdown_dependencies(deps)
+            print("Runtime management acceptance passed.")
+        except Exception:
+            print(f"\n[debug] acceptance temp_root={temp_root}")
+            if role_session_id is not None:
+                _print_runtime_debug_bundle(session_id=role_session_id, dependencies=deps)
+            if session_session_id is not None:
+                _print_runtime_debug_bundle(session_id=session_session_id, dependencies=deps)
+            print("[debug] temp root preserved for inspection")
+            raise
 
 
 if __name__ == "__main__":
