@@ -92,6 +92,17 @@ case "$launcher_name" in
     if [[ -n "$role_effort" ]]; then
       args+=("-c" "model_reasoning_effort=\"$role_effort\"")
     fi
+    if [[ -n "$repo_root" ]]; then
+      args+=("--add-dir" "$repo_root")
+    fi
+    if [[ -n "$task_repo_root" ]]; then
+      args+=("--add-dir" "$task_repo_root")
+    fi
+    if [[ -n "$workdir_root" ]]; then
+      args+=("--add-dir" "$workdir_root")
+    fi
+    args+=("-s" "danger-full-access")
+    args+=("-a" "never")
     exec codex "${args[@]}"
     ;;
   sh)

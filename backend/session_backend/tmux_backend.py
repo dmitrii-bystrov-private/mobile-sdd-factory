@@ -280,6 +280,9 @@ class TmuxSessionBackend(SessionBackend):
         socket_path = self._socket_path(role.session_id)
         result = self._tmux(socket_path, "capture-pane", "-p", "-t", role.role_id)
         if result.returncode != 0:
+            error_text = (result.stderr or result.stdout or "").lower()
+            if "can't find window" in error_text or "can't find pane" in error_text:
+                return []
             raise RuntimeError(result.stderr or result.stdout or "Failed to capture tmux output")
         current = result.stdout
         previous = self.last_captured_output.get(role.role_id, "")
