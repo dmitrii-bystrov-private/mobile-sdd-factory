@@ -4369,7 +4369,7 @@ class CoordinatorService:
         )
         if extra_hydration:
             merged_hydration.update(extra_hydration)
-        prompt_mode = self._prompt_mode_for_dispatch(role)
+        prompt_mode = self._prompt_mode_for_dispatch(session, role)
         hydration = build_role_hydration(
             role_name=role.role_name,
             task_key=session.task_key,
@@ -4449,8 +4449,15 @@ class CoordinatorService:
             return runtime_handle.split(":", 1)[0]
         return f"session:{session.id}"
 
-    def _prompt_mode_for_dispatch(self, role: Role) -> str:
+    def _prompt_mode_for_dispatch(self, session: Session, role: Role) -> str:
+        role_runtime_config = (session.role_config or {}).get(role.role_name, {})
+        is_live_launcher_role = role.runtime_backend == "tmux" and role_runtime_config.get("runner") in {
+            "claude",
+            "codex",
+        }
         if role.role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE, VERIFICATION_COORDINATOR_ROLE}:
+            if is_live_launcher_role:
+                return "live_bootstrap" if role.last_hydration_version == 0 else "live_continuation"
             return "bootstrap" if role.last_hydration_version == 0 else "continuation"
         return "full"
 

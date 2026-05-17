@@ -18,6 +18,26 @@ Each entry should include:
 
 - date: `2026-05-17`
   - done:
+    - validated that the live `tmux` role-dispatch path works again after fixing the ready-detector drift
+    - clarified that current live runner proofs still use a transitional routed work contract:
+      - durable role context from `AGENTS.md`
+      - but also a large per-round `ROUTED_WORK.md` packet that repeats role framing and protocol rules
+    - promoted a new immediate `Phase 44` priority:
+      - make live tests more realistic before chasing deeper parity claims
+  - current_state:
+    - `Claude` now has real live two-round validation under `tmux`
+    - `Codex` still does not have matching end-to-end depth
+    - the next live-runtime question is no longer basic transport, but contract realism
+  - next:
+    - tighten the live runner contract toward:
+      - `AGENTS.md` as the main durable role source
+      - a shorter per-round trigger instead of repeating the full role packet
+    - then repeat the same live depth for `Codex`
+  - blockers:
+    - none at the planning level
+
+- date: `2026-05-17`
+  - done:
     - closed the `Claude Role-Scoped MCP Baseline` direction
     - clarified the final runner policy:
       - `Claude` gets role-scoped MCP

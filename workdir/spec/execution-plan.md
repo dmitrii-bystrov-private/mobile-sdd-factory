@@ -22,7 +22,7 @@ Status markers:
 
 - Current phase: `Phase 44. Runtime Management, Role Configuration, And MCP Isolation`
 - Overall status: `persistent runtime, story and bug runtime acceptance, launcher-backed operator recovery acceptance, launcher-backed MR follow-up acceptance, real launcher-backed implementer completion, file-backed role result handling, real two-round live implementer validation, and the setup/doctor/runtime-capability baseline are complete; the active track is now runtime management, role configuration, MCP isolation, and codex parity`
-- Current implementation mode: `launcher-backed live roles use PTY transport plus file-backed handoff/result semantics; doctor, bootstrap guidance, runtime capabilities, role runtime configuration, runtime session management, and Claude-only MCP isolation now exist; the next work should make runtime restart/recovery explicit and then deepen Codex parity`
+- Current implementation mode: `launcher-backed live roles use tmux transport plus file-backed handoff/result semantics; doctor, bootstrap guidance, runtime capabilities, role runtime configuration, runtime session management, and Claude-only MCP isolation now exist; the next work should tighten the live role contract toward AGENTS-first realism and then deepen Codex parity under that same contract`
 - Primary source of truth for next work: `this file`
 - Filesystem/runtime source of truth: `workdir/spec/filesystem-runtime-model.md`
 - External runner session cleanup policy: `workdir/spec/external-runner-session-cleanup-policy.md`
@@ -31,7 +31,9 @@ Status markers:
 
 ## Current Immediate Next Step
 
-- `[in_progress]` continue `Phase 44` from the new restart/recovery slice; `Claude` MCP isolation is in place, `Codex` MCP remains global by design, and the next practical gap is explicit runtime restart semantics after manual stop`
+- `[in_progress]` continue `Phase 44` by tightening the live runtime contract; `Claude` MCP isolation is in place, `Codex` MCP remains global by design, and the next practical gaps are:
+  - reduce live routed work from a transitional full role packet toward an `AGENTS.md`-first contract with a shorter trigger
+  - then validate `Codex` to the same live depth already proven for `Claude``
 
 ## Reserved Next Phase
 
