@@ -16,7 +16,11 @@ from backend.api.schemas import (
     PrepareSessionRequest,
     RoleOutputRequest,
 )
-from backend.roles.contracts import IMPLEMENTER_ROLE, VERIFICATION_COORDINATOR_ROLE
+from backend.roles.contracts import (
+    IMPLEMENTER_ROLE,
+    MR_COMMENTS_ANALYST_ROLE,
+    VERIFICATION_COORDINATOR_ROLE,
+)
 from run_roots import managed_run_root
 
 
@@ -121,10 +125,30 @@ def main() -> None:
         )
         assert mr_followup_response.ingested
         assert mr_followup_response.event_type == "mr_comments_received"
-        assert mr_followup_response.followup_event_type == "mr_followup_requested"
-        assert mr_followup_response.session.current_stage == "mr_followup_requested"
-        assert mr_followup_response.session.current_owner == IMPLEMENTER_ROLE
+        assert mr_followup_response.followup_event_type == "mr_comments_analysis_requested"
+        assert mr_followup_response.session.current_stage == "mr_comments_analysis_requested"
+        assert mr_followup_response.session.current_owner == MR_COMMENTS_ANALYST_ROLE
         assert mr_followup_response.session.status == "active"
+
+        analyst_role = deps.role_repository.get_by_name(session_id, MR_COMMENTS_ANALYST_ROLE)
+        assert analyst_role is not None
+        analyst_inputs = deps.session_backend.get_sent_inputs(analyst_role.runtime_handle)
+        assert len(analyst_inputs) == 1
+        assert "Analyze unresolved MR comments for IOS-ACCEPT-REAL-MR-001" in analyst_inputs[-1]
+        assert '"work_item_type": "mr_comments_analysis"' in analyst_inputs[-1]
+
+        analysis_response = submit_role_output(
+            RoleOutputRequest(
+                session_id=session_id,
+                role_name=MR_COMMENTS_ANALYST_ROLE,
+                output_type="completed",
+                payload={"summary": "Grouped MR comments into actionable follow-up themes."},
+            ),
+            dependencies=deps,
+        )
+        assert analysis_response.followup_event_type == "mr_followup_requested"
+        assert analysis_response.session.current_stage == "mr_followup_requested"
+        assert analysis_response.session.current_owner == IMPLEMENTER_ROLE
 
         implementer_inputs = deps.session_backend.get_sent_inputs(implementation_role.runtime_handle)
         assert len(implementer_inputs) == 2
@@ -164,6 +188,8 @@ def main() -> None:
         events_response = list_events(session_id=session_id, dependencies=deps)
         event_types = [item.event_type for item in events_response.items]
         assert "mr_comments_received" in event_types
+        assert "mr_comments_analysis_requested" in event_types
+        assert "mr_comments_analysis_completed" in event_types
         assert "mr_followup_requested" in event_types
         assert event_types.count("verification_requested") == 2
         assert event_types.count("verification_passed") == 2

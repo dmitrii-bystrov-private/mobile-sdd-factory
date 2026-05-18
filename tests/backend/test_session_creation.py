@@ -17,6 +17,7 @@ from backend.roles.contracts import (
     DEFAULT_SESSION_ROLES,
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
     CONSTRAINTS_WORKER_ROLE,
+    MR_COMMENTS_ANALYST_ROLE,
     PROPOSAL_CONTEXT_WORKER_ROLE,
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
     SPEC_VERIFIER_WORKER_ROLE,
@@ -3066,18 +3067,54 @@ class SessionCreationTests(unittest.TestCase):
         events = self.event_repository.list_for_session(session.id)
 
         self.assertEqual("active", updated_session.status.value)
-        self.assertEqual("mr_followup_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertEqual("mr_comments_analysis_requested", updated_session.current_stage)
+        self.assertEqual(MR_COMMENTS_ANALYST_ROLE, updated_session.current_owner)
         self.assertEqual("mr_comments_received", event.event_type)
-        self.assertEqual("mr_followup_requested", followup_event.event_type)
+        self.assertEqual("mr_comments_analysis_requested", followup_event.event_type)
         self.assertEqual(2, discussion_count)
         self.assertTrue(
-            any(item.title == "MR follow-up for IOS-30020 from !2942" for item in work_items)
+            any(item.title == "MR comment analysis for IOS-30020 from !2942" for item in work_items)
         )
         self.assertTrue(
-            any(item.work_type == "followup_implementation" for item in work_items)
+            any(item.work_type == "mr_comments_analysis" for item in work_items)
         )
         self.assertTrue(any(item.event_type == "mr_comments_received" for item in events))
+        self.assertTrue(any(item.event_type == "mr_comments_analysis_requested" for item in events))
+
+    def test_mr_comments_analysis_completion_routes_to_followup_implementation(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30020A")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        completed_session, _ = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.ingest_mr_comments(
+            session_id=completed_session.id,
+            platform="ios",
+            mr_id="2943",
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=MR_COMMENTS_ANALYST_ROLE,
+            output_type="completed",
+            payload={"summary": "Grouped two review themes into actionable follow-up plan."},
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("mr_comments_analysis_completed", mapped_event.event_type)
+        self.assertEqual("mr_followup_requested", followup_event.event_type)
+        self.assertEqual("mr_followup_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertTrue(any(item.work_type == "mr_comments_analysis" for item in work_items))
+        self.assertTrue(any(item.work_type == "followup_implementation" for item in work_items))
+        self.assertTrue(any(item.event_type == "mr_comments_analysis_completed" for item in events))
         self.assertTrue(any(item.event_type == "mr_followup_requested" for item in events))
 
     def test_reopen_from_qa_reactivates_completed_session(self) -> None:

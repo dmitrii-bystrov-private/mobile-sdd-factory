@@ -51,6 +51,15 @@ def role_runtime_rules(role_name: str) -> str:
             "- If signals are weak or no real maintainability issues are found, report a clean result and stop.\n"
             "- If real maintainability findings exist, write them to `spec/findings.md`, summarize them compactly, and stop without modifying product code.\n\n"
         )
+    if role_name == "mr-comments-analyst-worker":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded one-shot worker: analyze unresolved MR comments, write the follow-up plan package, and exit.\n"
+            "- Start from the latest MR comments artifact and group related discussions into actionable themes for the implementer.\n"
+            "- Use `spec/context/feature-overview.md` first when it exists; pull in other `spec/context/*` files only when they help explain the review comment or the correct codebase pattern.\n"
+            "- Write `plan/index.md` plus one or more `plan/NN-*.md` files when grouped follow-up work is needed.\n"
+            "- Keep the output compact and downstream-oriented so the implementer can act on the generated plan package directly.\n\n"
+        )
     if role_name == "proposal-context-worker":
         return (
             "Role-specific rules:\n"

@@ -6,13 +6,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.api.routes_artifacts import list_artifacts
-from backend.api.routes_events import inject_event, list_events
+from backend.api.routes_events import list_events
 from backend.api.routes_operator import ingest_mr_comments
 from backend.api.routes_roles import submit_role_output
 from backend.api.routes_sessions import create_session, prepare_session
 from backend.api.schemas import (
     CreateSessionRequest,
-    InjectEventRequest,
     IngestMrCommentsRequest,
     PrepareSessionRequest,
     RoleOutputRequest,
@@ -21,7 +20,7 @@ from backend.api.sse import SessionEventBus
 from backend.coordinator.loop_runner import CoordinatorLoopRunner
 from backend.coordinator.service import CoordinatorService
 from backend.dependencies import AppDependencies
-from backend.roles.contracts import DEFAULT_SESSION_ROLES
+from backend.roles.contracts import DEFAULT_SESSION_ROLES, IMPLEMENTER_ROLE, MR_COMMENTS_ANALYST_ROLE
 from backend.roles.launcher import RoleLauncherManager
 from backend.roles.workspace import RoleWorkspaceManager
 from backend.session_backend.recording_backend import RecordingSessionBackend
@@ -163,15 +162,29 @@ def main() -> None:
             dependencies=deps,
         )
         assert mr_followup_response.event_type == "mr_comments_received"
-        assert mr_followup_response.followup_event_type == "mr_followup_requested"
-        assert mr_followup_response.session.current_stage == "mr_followup_requested"
+        assert mr_followup_response.followup_event_type == "mr_comments_analysis_requested"
+        assert mr_followup_response.session.current_stage == "mr_comments_analysis_requested"
         assert mr_followup_response.session.status == "active"
         assert mr_followup_response.discussion_count == 1
 
-        followup_response = inject_event(
-            InjectEventRequest(
+        analysis_response = submit_role_output(
+            RoleOutputRequest(
                 session_id=session_id,
-                event_type="implementation_completed",
+                role_name=MR_COMMENTS_ANALYST_ROLE,
+                output_type="completed",
+                payload={"summary": "Grouped MR comments into actionable follow-up themes."},
+            ),
+            dependencies=deps,
+        )
+        assert analysis_response.followup_event_type == "mr_followup_requested"
+        assert analysis_response.session.current_stage == "mr_followup_requested"
+        assert analysis_response.session.current_owner == IMPLEMENTER_ROLE
+
+        followup_response = submit_role_output(
+            RoleOutputRequest(
+                session_id=session_id,
+                role_name=IMPLEMENTER_ROLE,
+                output_type="completed",
                 payload={"summary": "mr follow-up done"},
             ),
             dependencies=deps,
@@ -206,6 +219,9 @@ def main() -> None:
             "verification_passed",
             "task_completed",
             "mr_comments_received",
+            "role_input_dispatched",
+            "mr_comments_analysis_requested",
+            "mr_comments_analysis_completed",
             "role_input_dispatched",
             "mr_followup_requested",
             "implementation_completed",

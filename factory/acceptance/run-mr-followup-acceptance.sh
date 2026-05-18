@@ -83,10 +83,14 @@ curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json'
 
 curl -fsS -X POST "${BASE_URL}/operator/ingest-mr-comments" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"platform\":\"ios\",\"mr_id\":\"2942\"}" \
+  | jq -e '.followup_event_type == "mr_comments_analysis_requested"' >/dev/null
+
+curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
+  -d "{\"session_id\":${SESSION_ID},\"role_name\":\"mr-comments-analyst-worker\",\"output_type\":\"completed\",\"payload\":{\"summary\":\"grouped MR comments into actionable follow-up themes\"}}" \
   | jq -e '.followup_event_type == "mr_followup_requested"' >/dev/null
 
-curl -fsS -X POST "${BASE_URL}/events" -H 'content-type: application/json' \
-  -d "{\"session_id\":${SESSION_ID},\"event_type\":\"implementation_completed\",\"payload\":{\"summary\":\"mr follow-up done\"}}" \
+curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
+  -d "{\"session_id\":${SESSION_ID},\"role_name\":\"implementer\",\"output_type\":\"completed\",\"payload\":{\"summary\":\"mr follow-up done\"}}" \
   | jq -e '.followup_event_type == "verification_requested"' >/dev/null
 
 FINAL_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \

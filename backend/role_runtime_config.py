@@ -17,6 +17,7 @@ ROLE_DEFAULT_SOURCE_MAP = {
     "verification-coordinator": "final-verifier",
     "code-reviewer": "code-reviewer",
     "code-scout": "code-scout",
+    "mr-comments-analyst-worker": "mr-comments-analyst",
     "proposal-context-worker": "context-collector",
     "requirements-clarifier-worker": "requirements-clarifier",
     "acceptance-criteria-worker": "acceptance-criteria-writer",

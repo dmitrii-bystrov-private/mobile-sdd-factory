@@ -30,6 +30,7 @@ from backend.roles.contracts import (
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
     CODE_SCOUT_ROLE,
+    MR_COMMENTS_ANALYST_ROLE,
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
     CONSTRAINTS_WORKER_ROLE,
     PROPOSAL_CONTEXT_WORKER_ROLE,
@@ -495,6 +496,9 @@ class CoordinatorService:
         if event_type == "proposal_context_completed":
             session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
             return session, followup_event
+        if event_type == "mr_comments_analysis_completed":
+            session, followup_event = self._handle_mr_comments_analysis_completed(session, accepted_event)
+            return session, followup_event
         if event_type == "requirements_completed":
             session, followup_event = self._handle_requirements_completed(session, accepted_event)
             return session, followup_event
@@ -590,7 +594,7 @@ class CoordinatorService:
                 "discussion_count": discussion_count,
             },
         )
-        followup_event = self._enqueue_mr_followup(
+        followup_event = self._enqueue_mr_comments_analysis(
             session=session,
             source_event=event,
             mr_id=mr_id,
@@ -598,6 +602,54 @@ class CoordinatorService:
         )
         refreshed = self._get_session_or_raise(session.id)
         return refreshed, event, followup_event, discussion_count
+
+    def _enqueue_mr_comments_analysis(
+        self,
+        session: Session,
+        source_event: Event,
+        mr_id: str,
+        discussion_count: int,
+    ) -> Event:
+        analyst_role = self._ensure_on_demand_role(session, MR_COMMENTS_ANALYST_ROLE)
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="mr_comments_analysis",
+            title=f"MR comment analysis for {session.task_key} from !{mr_id}",
+            owner_role_id=analyst_role.id,
+            source_event_id=source_event.id,
+            priority=111,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="mr_comments_analysis_requested",
+            current_owner=MR_COMMENTS_ANALYST_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = (
+            f"Analyze unresolved MR comments for {session.task_key} from MR !{mr_id}. "
+            f"Group the {discussion_count} unresolved discussion threads into actionable themes, "
+            "write the follow-up plan package under `plan/`, and produce a compact routed summary for the implementer."
+        )
+        self._dispatch_role_work(
+            session=session,
+            role=analyst_role,
+            work_item=work_item,
+            stage_name="mr_comments_analysis_requested",
+            instruction=instruction,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="mr_comments_analysis_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": MR_COMMENTS_ANALYST_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+                "mr_id": mr_id,
+                "discussion_count": discussion_count,
+            },
+        )
 
     def create_mr_handoff(
         self,
@@ -1352,6 +1404,8 @@ class CoordinatorService:
             session, followup_event = self._handle_bug_analysis_completed(session, accepted_event)
         elif mapped_event_type == "proposal_context_completed":
             session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
+        elif mapped_event_type == "mr_comments_analysis_completed":
+            session, followup_event = self._handle_mr_comments_analysis_completed(session, accepted_event)
         elif mapped_event_type == "requirements_completed":
             session, followup_event = self._handle_requirements_completed(session, accepted_event)
         elif mapped_event_type == "boy_scout_completed":
@@ -2478,6 +2532,42 @@ class CoordinatorService:
         session = self._get_session_or_raise(session.id)
         return session, event
 
+    def _handle_mr_comments_analysis_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        analysis_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "mr_comments_analysis" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not analysis_items:
+            raise IntakeError("No active MR comments analysis work item found for the session")
+
+        active_item = analysis_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, MR_COMMENTS_ANALYST_ROLE)
+
+        mr_id = str(source_event.payload.get("mr_id") or "").strip() or "unknown"
+        discussion_count = int(source_event.payload.get("discussion_count") or 0)
+        summary = str(source_event.payload.get("summary") or "").strip()
+        additional_context_lines: list[str] = []
+        if summary:
+            additional_context_lines.append(f"MR analysis summary: {summary}")
+        additional_context_lines.append(
+            "Follow-up plan package available under `plan/`; start from `plan/index.md` and the generated `plan/NN-*.md` files before touching product code."
+        )
+        event = self._enqueue_mr_followup(
+            session=session,
+            source_event=source_event,
+            mr_id=mr_id,
+            discussion_count=discussion_count,
+            additional_context="\n".join(additional_context_lines),
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event
+
     def _handle_requirements_completed(
         self,
         session: Session,
@@ -3185,17 +3275,21 @@ class CoordinatorService:
         source_event: Event,
         mr_id: str,
         discussion_count: int,
+        additional_context: str | None = None,
     ) -> Event:
+        instruction = (
+            f"Apply MR follow-up changes for {session.task_key} from MR !{mr_id}. "
+            f"There are {discussion_count} unresolved discussion groups recorded in artifacts."
+        )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
         return self._enqueue_followup_implementation(
             session=session,
             source_event=source_event,
             stage_name="mr_followup_requested",
             event_type="mr_followup_requested",
             title=f"MR follow-up for {session.task_key} from !{mr_id}",
-            instruction=(
-                f"Apply MR follow-up changes for {session.task_key} from MR !{mr_id}. "
-                f"There are {discussion_count} unresolved discussion groups recorded in artifacts."
-            ),
+            instruction=instruction,
             priority=110,
             payload={
                 "mr_id": mr_id,
@@ -3518,6 +3612,9 @@ class CoordinatorService:
         if role_name == CODE_SCOUT_ROLE and session.current_stage == "boy_scout_requested":
             if output_type in {"passed", "completed"}:
                 return "boy_scout_completed"
+        if role_name == MR_COMMENTS_ANALYST_ROLE and session.current_stage == "mr_comments_analysis_requested":
+            if output_type in {"passed", "completed"}:
+                return "mr_comments_analysis_completed"
         if role_name == PROPOSAL_CONTEXT_WORKER_ROLE and session.current_stage == "proposal_context_requested":
             if output_type in {"passed", "completed"}:
                 return "proposal_context_completed"
@@ -3974,6 +4071,16 @@ class CoordinatorService:
                 session.id,
                 "mr_comments_markdown",
             )
+            payload["followup_plan_index_path"] = str(self.workdir_root / session.task_key / "plan" / "index.md") if self.workdir_root is not None else None
+            payload["followup_plan_directory_path"] = str(self.workdir_root / session.task_key / "plan") if self.workdir_root is not None else None
+        if stage_name == "mr_comments_analysis_requested":
+            payload["followup_comments_path"] = self._latest_artifact_path(
+                session.id,
+                "mr_comments_markdown",
+            )
+            if self.workdir_root is not None:
+                payload["followup_plan_index_path"] = str(self.workdir_root / session.task_key / "plan" / "index.md")
+                payload["followup_plan_directory_path"] = str(self.workdir_root / session.task_key / "plan")
         if stage_name == "qa_reopen_requested":
             payload["followup_comments_path"] = self._latest_artifact_path(
                 session.id,
@@ -4148,8 +4255,16 @@ class CoordinatorService:
             )
         if stage_name == "self_review_correction_requested":
             return f"Apply self review corrections for {task_key}."
+        if stage_name == "mr_comments_analysis_requested":
+            return (
+                f"Analyze unresolved MR comments for {task_key}. "
+                "Group them into actionable follow-up themes, write the follow-up plan package under `plan/`, and summarize the implementer-ready next steps."
+            )
         if stage_name == "mr_followup_requested":
-            return f"Apply MR follow-up changes for {task_key}."
+            return (
+                f"Apply MR follow-up changes for {task_key}. "
+                "Start from `plan/index.md` when it exists and use the generated follow-up plan files plus the latest MR comments artifact as the highest-priority scope."
+            )
         if stage_name == "qa_reopen_requested":
             return f"Apply QA reopen follow-up changes for {task_key}."
         return None
@@ -4163,6 +4278,8 @@ class CoordinatorService:
         return role_names
 
     def _primary_coding_role_name_for_work_type(self, session: Session, work_type: str) -> str:
+        if work_type == "mr_comments_analysis":
+            return MR_COMMENTS_ANALYST_ROLE
         if session.workflow_profile != "bug_full":
             return IMPLEMENTER_ROLE
         if work_type in {
@@ -4195,6 +4312,7 @@ class CoordinatorService:
             "task_decomposition_requested": "task_decomposition",
             "subtask_implementation_requested": "subtask_implementation",
             "implementation_requested": "implementation",
+            "mr_comments_analysis_requested": "mr_comments_analysis",
             "self_review_correction_requested": "self_review_correction",
             "verification_correction_requested": "verification_correction",
             "mr_followup_requested": "followup_implementation",

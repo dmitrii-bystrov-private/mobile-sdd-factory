@@ -96,6 +96,18 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
             "- Project knowledge base: `{task_knowledge_root}`",
         ]
+    if role_name == "mr-comments-analyst-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Raw MR comments input: `{task_artifacts_root}/mr-followup`",
+            "- Follow-up plan directory: `{task_snapshot_root}/plan`",
+            "- Context directory: `{task_snapshot_root}/spec/context`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            "- Project knowledge base: `{task_knowledge_root}`",
+        ]
     if role_name == "proposal-context-worker":
         return [
             "- Task snapshot metadata: `{task_snapshot_root}`",
@@ -228,6 +240,12 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You inspect only the changed code area for real maintainability improvements and do not modify product code yourself.",
             "- You stop after writing either a clean result or structured findings for operator review.",
         ]
+    if role_name == "mr-comments-analyst-worker":
+        return [
+            "- You execute one bounded MR review analysis task for one task session.",
+            "- You transform unresolved MR comments into an actionable grouped follow-up plan package for the implementer.",
+            "- You stop after writing the follow-up plan package and the routed summary; you do not remain the owner of later implementation work.",
+        ]
     if role_name == "proposal-context-worker":
         return [
             "- You execute one bounded proposal/context preparation task for one story session.",
@@ -320,6 +338,13 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- If signals are weak or no real findings exist, return a clean Boy Scout result and stop.",
             "- If real maintainability findings exist, write `spec/findings.md`, summarize the findings, and stop without changing product code.",
             "- Skip style nits, convention-only feedback, and speculative improvements.",
+        ]
+    if role_name == "mr-comments-analyst-worker":
+        return [
+            "- Treat this role as a bounded one-shot worker: analyze unresolved MR comments, write the grouped follow-up plan package, and exit.",
+            "- Start from the latest MR comments artifact, group related discussions into actionable themes, and enrich them with just enough source-code context to make the plan executable.",
+            "- Use `spec/context/feature-overview.md` first when it exists and pull in the rest of `spec/context/*` selectively when they clarify the expected pattern.",
+            "- Write `plan/index.md` plus one or more `plan/NN-*.md` files only with grounded task-specific content; do not modify product code.",
         ]
     if role_name == "proposal-context-worker":
         return [

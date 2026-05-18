@@ -51,6 +51,8 @@ const STREAM_EVENT_TYPES = [
   "task_completed",
   "mr_comments_empty",
   "mr_comments_received",
+  "mr_comments_analysis_requested",
+  "mr_comments_analysis_completed",
   "mr_followup_requested",
   "mr_handoff_completed",
   "mr_handoff_failed",

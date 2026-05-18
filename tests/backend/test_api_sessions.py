@@ -2400,9 +2400,9 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertTrue(response.ingested)
         self.assertEqual("mr_comments_received", response.event_type)
-        self.assertEqual("mr_followup_requested", response.followup_event_type)
+        self.assertEqual("mr_comments_analysis_requested", response.followup_event_type)
         self.assertEqual("active", response.session.status)
-        self.assertEqual("mr_followup_requested", response.session.current_stage)
+        self.assertEqual("mr_comments_analysis_requested", response.session.current_stage)
         self.assertEqual(1, response.discussion_count)
 
     def test_create_mr_route_marks_completed_session_as_handed_off(self) -> None:

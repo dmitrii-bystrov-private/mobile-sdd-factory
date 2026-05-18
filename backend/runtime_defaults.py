@@ -15,6 +15,7 @@ KNOWN_ROLE_NAMES = [
     "verification-coordinator",
     "code-reviewer",
     "code-scout",
+    "mr-comments-analyst-worker",
     "proposal-context-worker",
     "requirements-clarifier-worker",
     "acceptance-criteria-worker",
