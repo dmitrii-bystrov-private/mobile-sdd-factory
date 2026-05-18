@@ -41,6 +41,7 @@ const STREAM_EVENT_TYPES = [
   "self_review_requested",
   "self_review_passed",
   "self_review_issues_found",
+  "self_review_blocked",
   "boy_scout_requested",
   "boy_scout_completed",
   "boy_scout_skipped_by_operator",

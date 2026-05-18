@@ -1635,6 +1635,8 @@ class CoordinatorService:
             session, followup_event = self._handle_self_review_passed(session, accepted_event)
         elif mapped_event_type == "self_review_issues_found":
             session, followup_event = self._handle_self_review_issues_found(session, accepted_event)
+        elif mapped_event_type == "self_review_blocked":
+            session, followup_event = self._handle_self_review_blocked(session, accepted_event)
         return session, accepted_event, followup_event
 
     def collect_role_output(
@@ -3937,6 +3939,46 @@ class CoordinatorService:
             source_event=source_event,
         )
 
+    def _handle_self_review_blocked(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        self._complete_active_self_review_work_item(session)
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        if reviewer_role is None:
+            raise IntakeError("Code reviewer role is missing for the session")
+        self.work_item_repository.create(
+            session_id=session.id,
+            work_type="self_review_cycle_review",
+            title=f"Self review cycle resolution for {session.task_key}",
+            owner_role_id=reviewer_role.id,
+            source_event_id=source_event.id,
+            priority=92,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="self_review_requested",
+            current_owner=CODE_REVIEWER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        report_paths = self._previous_self_review_report_paths(session.id)[-2:]
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "self_review_cycle",
+                "summary": str(source_event.payload.get("summary") or "").strip() or "self review cycle blocked",
+                "details": str(source_event.payload.get("details") or "").strip()
+                or "The reviewer reported a non-converging review cycle and stopped automatic retries.",
+                "review_report_paths": report_paths,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
     def _enqueue_verification(
         self,
         session: Session,
@@ -4234,6 +4276,8 @@ class CoordinatorService:
                 return "self_review_passed"
             if output_type == "failed":
                 return "self_review_issues_found"
+            if output_type == "blocked_review_cycle":
+                return "self_review_blocked"
         if role_name == CODE_SCOUT_ROLE and session.current_stage == "boy_scout_requested":
             if output_type in {"passed", "completed"}:
                 return "boy_scout_completed"
@@ -4961,12 +5005,14 @@ class CoordinatorService:
             if policy_mode == "required":
                 return (
                     f"Review the current task changes for {task_key}. "
-                    "Emit passed if the review is clean, or failed if issues still require correction. "
+                    "Emit passed if the review is clean, failed if issues still require correction, "
+                    "or blocked_review_cycle if the same review loop is no longer converging and needs operator intervention. "
                     "This self-review lane is required for this session, so do not emit skipped_not_needed."
                 )
             return (
                 f"Review the current task changes for {task_key}. "
                 "Emit passed if the review is clean, failed if issues still require correction, "
+                "blocked_review_cycle if the same review loop is no longer converging, "
                 "or skipped_not_needed if this diff is too small or too low-signal to justify a real review pass."
             )
         if stage_name == "self_review_correction_requested":

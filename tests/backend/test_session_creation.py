@@ -1289,6 +1289,98 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn('"issues_file_path"', sent_inputs[-1])
         self.assertIn("pass-01.md", sent_inputs[-1])
 
+    def test_reviewer_can_block_non_converging_self_review_cycle(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RBLOCK",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RBLOCK")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="blocked_review_cycle",
+            payload={
+                "summary": "Repeated reducer violation remains unresolved.",
+                "details": "Two review passes raised the same reducer issue and the loop no longer converges.",
+                "issues": [
+                    {
+                        "severity": "error",
+                        "file": "Sources/Feature/FeatureViewModel.swift",
+                        "convention": "Feature template",
+                        "problem": "State mutation still bypasses the reducer.",
+                        "required_change": "Route the mutation through the reducer path.",
+                    }
+                ],
+            },
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("self_review_blocked", mapped_event.event_type)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("self_review_requested", updated_session.current_stage)
+        self.assertEqual(CODE_REVIEWER_ROLE, updated_session.current_owner)
+        self.assertEqual("self_review_cycle", str(followup_event.payload.get("reason") or ""))
+        self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
+
+    def test_resume_session_retries_reviewer_after_blocked_self_review_cycle(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RBLOCKRESUME",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RBLOCKRESUME")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="blocked_review_cycle",
+            payload={
+                "summary": "Repeated reducer violation remains unresolved.",
+                "details": "The review loop no longer converges.",
+                "issues": [
+                    {
+                        "severity": "error",
+                        "file": "Sources/Feature/FeatureViewModel.swift",
+                        "convention": "Feature template",
+                        "problem": "State mutation still bypasses the reducer.",
+                        "required_change": "Route the mutation through the reducer path.",
+                    }
+                ],
+            },
+        )
+
+        resumed_session, resumed_event, dispatch_event = self.coordinator.resume_session(session.id)
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
+
+        self.assertEqual("active", resumed_session.status.value)
+        self.assertEqual(CODE_REVIEWER_ROLE, resumed_session.current_owner)
+        self.assertEqual("session_resumed_by_operator", resumed_event.event_type)
+        self.assertIsNotNone(dispatch_event)
+        assert dispatch_event is not None
+        self.assertEqual("role_input_dispatched", dispatch_event.event_type)
+        self.assertIn("blocked_review_cycle", sent_inputs[-1])
+
     def test_second_self_review_dispatch_includes_previous_review_report_paths(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003R2",

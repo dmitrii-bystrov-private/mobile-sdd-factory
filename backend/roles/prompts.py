@@ -41,6 +41,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Start from the current diff and review only the touched changes.\n"
             "- Write or refresh the structured review report at the routed review report path before you finish this pass.\n"
             "- If previous review reports are provided, read them first and do not re-flag already raised issues.\n"
+            "- If the review loop is no longer converging and you would otherwise repeat the same issues again, emit `blocked_review_cycle` instead of another normal failed pass.\n"
             "- Read only the convention sources relevant to the touched diff area.\n"
             "- Keep the output compact and optimized for a narrow fixer pass.\n\n"
         )
