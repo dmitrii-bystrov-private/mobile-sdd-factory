@@ -181,8 +181,8 @@ export function OperatorActions({
 
   const dailyActions: ActionDefinition[] = [
     {
-      label: "Refresh Snapshot",
-      description: "Rerun snapshot collection and let the coordinator process the refreshed task state once.",
+      label: "Process Updates",
+      description: "Refresh the task snapshot and let the coordinator decide whether to continue active work or reopen the flow from new subtasks and other external changes.",
       disabled: busy || !canRefreshSnapshot,
       onClick: () => run(() => apiClient.refreshSnapshot(session.id)),
     },

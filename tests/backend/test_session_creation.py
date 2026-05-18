@@ -2532,6 +2532,89 @@ class SessionCreationTests(unittest.TestCase):
             ),
         )
 
+    def test_refresh_snapshot_reopens_completed_story_into_subtask_execution(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004REOPEN",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004REOPEN")
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            self.coordinator.handle_operator_event(
+                session_id=session.id,
+                event_type=event_type,
+                payload={"summary": "prepared"},
+            )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload=decomposition_payload("Execution chunks prepared"),
+        )
+        self.write_statuses_file(
+            "IOS-30004REOPEN",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004REOPEN | Story | Parent story | In Progress |
+| IOS-30060 | Sub-task | Add data source | To Do |
+| IOS-30061 | Sub-task | Wire view state | To Do |
+""",
+        )
+        self.coordinator.create_subtasks_from_plan(session.id)
+        self.coordinator.resume_session(session.id)
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="subtask_completed",
+            payload={"summary": "Implemented IOS-30060"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="subtask_completed",
+            payload={"summary": "Implemented IOS-30061"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-30004REOPEN",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004REOPEN | Story | Parent story | In Progress |
+| IOS-30062 | Sub-task | Fix review feedback | To Do |
+""",
+        )
+
+        updated_session, event, followup_event = self.coordinator.refresh_snapshot_and_continue(session.id)
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("snapshot_refreshed_by_operator", event.event_type)
+        self.assertIsNotNone(followup_event)
+        assert followup_event is not None
+        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertTrue(
+            any(
+                item.work_type == "subtask_implementation"
+                and "IOS-30062" in item.title
+                and item.status.value == "assigned"
+                for item in work_items
+            )
+        )
+
     def test_verification_failed_moves_session_back_to_implementer(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")
         self.coordinator.handle_operator_event(

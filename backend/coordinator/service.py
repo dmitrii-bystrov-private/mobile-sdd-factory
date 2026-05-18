@@ -1275,6 +1275,38 @@ class CoordinatorService:
             },
         )
 
+        if session.status == SessionStatus.COMPLETED and session.workflow_profile == "story_full":
+            subtasks = self._read_snapshot_subtasks(session.task_key)
+            unresolved = unresolved_subtasks(subtasks) if subtasks is not None else []
+            decomposition_artifact = self._latest_artifact_for_session_type(
+                session.id,
+                "task_decomposition_markdown",
+            )
+            if unresolved and subtasks is not None and decomposition_artifact is not None:
+                implementation_item = self.work_item_repository.create(
+                    session_id=session.id,
+                    work_type="implementation",
+                    title=f"Post-delivery implementation follow-up for {session.task_key}",
+                    owner_role_id=None,
+                    source_event_id=event.id,
+                    priority=95,
+                )
+                session = self.session_repository.update_stage_and_owner(
+                    session.id,
+                    current_stage="implementation_requested",
+                    current_owner=None,
+                )
+                session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+                _graph_event, followup_event = self._start_subtask_graph_flow(
+                    session=session,
+                    producer_type="operator",
+                    subtasks=subtasks,
+                    initial_work_item=implementation_item,
+                    decomposition_artifact=decomposition_artifact,
+                )
+                session = self._get_session_or_raise(session.id)
+                return session, event, followup_event
+
         if session.status != SessionStatus.ACTIVE:
             return session, event, None
 

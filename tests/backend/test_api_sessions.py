@@ -666,6 +666,97 @@ class SessionApiTests(unittest.TestCase):
             any(item.artifact_type == "snapshot_refresh_stderr" for item in artifacts_response.items)
         )
 
+    def test_refresh_snapshot_route_reopens_completed_story_into_subtask_execution(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005SNAPREOPEN", workflow_profile="story_full"),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005SNAPREOPEN"),
+            dependencies=self.dependencies,
+        )
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": "prepared"},
+                ),
+                dependencies=self.dependencies,
+            )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload=decomposition_payload("Decomposition prepared"),
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40005SNAPREOPEN",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005SNAPREOPEN | Story | Parent story | In Progress |",
+                    "| IOS-40160 | Sub-task | Add data source | To Do |",
+                ]
+            ),
+        )
+        create_subtasks_from_plan(
+            CreateSubtasksFromPlanRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+        resume_session(
+            ResumeSessionRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="subtask_completed",
+                payload={"summary": "Implemented IOS-40160"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-40005SNAPREOPEN",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005SNAPREOPEN | Story | Parent story | In Progress |",
+                    "| IOS-40161 | Sub-task | Address QA feedback | To Do |",
+                ]
+            ),
+        )
+
+        response = refresh_snapshot(
+            RefreshSnapshotRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.refreshed)
+        self.assertEqual("snapshot_refreshed_by_operator", response.event_type)
+        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
+
     def test_create_session_route_rejects_irrelevant_policy_for_profile(self) -> None:
         from fastapi import HTTPException
 
