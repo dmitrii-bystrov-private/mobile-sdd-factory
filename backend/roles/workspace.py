@@ -108,6 +108,19 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
             "- Project knowledge base: `{task_knowledge_root}`",
         ]
+    if role_name == "doc-harvest-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Diff source of truth: `{task_snapshot_root}/spec/full-diff.md`",
+            "- Changed-doc targets inside the task repo worktree: `{task_repo_root}`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Task artifacts and documentation outputs: `{task_artifacts_root}`",
+            "- Main repo diff helper: `{repo_root}/scripts/generate-diff.sh`",
+            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            "- Project knowledge base: `{task_knowledge_root}`",
+        ]
     if role_name == "proposal-context-worker":
         return [
             "- Task snapshot metadata: `{task_snapshot_root}`",
@@ -246,6 +259,12 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You transform unresolved MR comments into an actionable grouped follow-up plan package for the implementer.",
             "- You stop after writing the follow-up plan package and the routed summary; you do not remain the owner of later implementation work.",
         ]
+    if role_name == "doc-harvest-worker":
+        return [
+            "- You execute one bounded documentation-harvest task for one completed task session.",
+            "- You update or create feature-level README files from grounded diff evidence in the task worktree.",
+            "- You stop after committing only the documentation updates and reporting the compact result summary.",
+        ]
     if role_name == "proposal-context-worker":
         return [
             "- You execute one bounded proposal/context preparation task for one story session.",
@@ -345,6 +364,13 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Start from the latest MR comments artifact, group related discussions into actionable themes, and enrich them with just enough source-code context to make the plan executable.",
             "- Use `spec/context/feature-overview.md` first when it exists and pull in the rest of `spec/context/*` selectively when they clarify the expected pattern.",
             "- Write `plan/index.md` plus one or more `plan/NN-*.md` files only with grounded task-specific content; do not modify product code.",
+        ]
+    if role_name == "doc-harvest-worker":
+        return [
+            "- Treat this role as a bounded one-shot worker: generate or refresh `spec/full-diff.md`, update grounded feature-level README targets, and exit.",
+            "- Use `spec/full-diff.md` as the primary source of truth for branch changes and prefer changed README/doc anchors over broad repo scanning.",
+            "- Read selectively and skip ambiguous multi-feature diffs instead of inventing a single arbitrary documentation target.",
+            "- Commit only the README/doc files you changed, then report a compact summary for the coordinator.",
         ]
     if role_name == "proposal-context-worker":
         return [

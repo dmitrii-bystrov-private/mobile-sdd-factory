@@ -16,6 +16,7 @@ KNOWN_ROLE_NAMES = [
     "code-reviewer",
     "code-scout",
     "mr-comments-analyst-worker",
+    "doc-harvest-worker",
     "proposal-context-worker",
     "requirements-clarifier-worker",
     "acceptance-criteria-worker",

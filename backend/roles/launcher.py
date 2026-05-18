@@ -36,6 +36,7 @@ def _role_lifecycle_mode(role_name: str) -> str:
         "task-decomposer-worker",
         "code-scout",
         "mr-comments-analyst-worker",
+        "doc-harvest-worker",
     }:
         return "one-shot"
     return "persistent"

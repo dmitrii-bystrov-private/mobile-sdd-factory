@@ -18,6 +18,7 @@ ROLE_DEFAULT_SOURCE_MAP = {
     "code-reviewer": "code-reviewer",
     "code-scout": "code-scout",
     "mr-comments-analyst-worker": "mr-comments-analyst",
+    "doc-harvest-worker": "doc-harvest",
     "proposal-context-worker": "context-collector",
     "requirements-clarifier-worker": "requirements-clarifier",
     "acceptance-criteria-worker": "acceptance-criteria-writer",

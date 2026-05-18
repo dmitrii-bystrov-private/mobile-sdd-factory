@@ -14,6 +14,7 @@ from backend.roles.contracts import (
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
     CODE_SCOUT_ROLE,
+    DOC_HARVEST_ROLE,
     DEFAULT_SESSION_ROLES,
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
     CONSTRAINTS_WORKER_ROLE,
@@ -3290,6 +3291,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual("active", updated_session.status.value)
         self.assertEqual("doc_harvest_requested", updated_session.current_stage)
+        self.assertEqual(DOC_HARVEST_ROLE, updated_session.current_owner)
         self.assertEqual("doc_harvest_requested", followup_event.event_type)
 
     def test_implementation_completed_routes_to_self_review_when_policy_required(self) -> None:
@@ -3482,6 +3484,38 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("completed", updated_session.status.value)
         self.assertEqual("doc_harvest_completed", updated_session.current_stage)
         self.assertEqual("doc_harvest_completed", event.event_type)
+        self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
+
+    def test_doc_harvest_role_output_marks_lane_completed(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021FH",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021FH")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=DOC_HARVEST_ROLE,
+            output_type="completed",
+            payload={"summary": "README enriched for the touched feature area."},
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("doc_harvest_completed", mapped_event.event_type)
+        self.assertIsNone(followup_event)
+        self.assertEqual("completed", updated_session.status.value)
+        self.assertEqual("doc_harvest_completed", updated_session.current_stage)
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
 
     def test_followup_implementation_completed_reenters_verification_loop(self) -> None:

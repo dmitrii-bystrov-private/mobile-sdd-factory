@@ -60,6 +60,15 @@ def role_runtime_rules(role_name: str) -> str:
             "- Write `plan/index.md` plus one or more `plan/NN-*.md` files when grouped follow-up work is needed.\n"
             "- Keep the output compact and downstream-oriented so the implementer can act on the generated plan package directly.\n\n"
         )
+    if role_name == "doc-harvest-worker":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded one-shot worker: update feature-level documentation from the completed task diff, then exit.\n"
+            "- Start by generating or refreshing `spec/full-diff.md`, then use it as the primary source of truth for what changed on the branch.\n"
+            "- Resolve documentation targets conservatively: prefer changed README/doc anchors first, then docs near changed code, and skip ambiguous multi-feature diffs.\n"
+            "- Read selectively, update only grounded README targets, and commit only the documentation files you touched.\n"
+            "- Report a compact summary that states whether READMEs were created, enriched, already complete, or skipped due to ambiguity.\n\n"
+        )
     if role_name == "proposal-context-worker":
         return (
             "Role-specific rules:\n"

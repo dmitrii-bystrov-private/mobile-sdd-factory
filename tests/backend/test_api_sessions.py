@@ -2520,6 +2520,7 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertEqual("doc_harvest_requested", response.followup_event_type)
         self.assertEqual("doc_harvest_requested", response.session.current_stage)
+        self.assertEqual("doc-harvest-worker", response.session.current_owner)
         self.assertEqual("active", response.session.status)
 
     def test_implementation_completed_routes_to_self_review_when_policy_required(self) -> None:

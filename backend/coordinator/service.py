@@ -30,6 +30,7 @@ from backend.roles.contracts import (
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
     CODE_SCOUT_ROLE,
+    DOC_HARVEST_ROLE,
     MR_COMMENTS_ANALYST_ROLE,
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
     CONSTRAINTS_WORKER_ROLE,
@@ -757,39 +758,21 @@ class CoordinatorService:
             )
         if (session.policy or {}).get("doc_harvest_policy") == "disabled":
             raise IntakeError(f"Session {session_id} has doc harvest disabled by policy")
-
-        artifact_path = write_text_artifact(
-            self.artifacts_root,
-            session.task_key,
-            "doc-harvest",
-            "doc-harvest-summary.md",
-            normalized_summary,
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="doc-harvest",
-            artifact_type="doc_harvest_summary",
-            path=str(artifact_path),
-            metadata={"summary_length": len(normalized_summary)},
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="doc_harvest_completed",
-            current_owner=None,
-        )
-        session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
-        event = self._append_event(
-            session_id=session.id,
-            event_type="doc_harvest_completed",
+        if session.current_stage == "doc_harvest_requested":
+            doc_items = [
+                item
+                for item in self.work_item_repository.list_for_session(session.id)
+                if item.work_type == "doc_harvest" and item.status != WorkItemStatus.COMPLETED
+            ]
+            if doc_items:
+                self.work_item_repository.update_status(doc_items[0].id, WorkItemStatus.COMPLETED)
+            self._stop_on_demand_role(session, DOC_HARVEST_ROLE)
+        return self._finalize_doc_harvest(
+            session=session,
+            summary=normalized_summary,
             producer_type="coordinator",
-            payload={
-                "task_key": session.task_key,
-                "summary_length": len(normalized_summary),
-                "current_stage": session.current_stage,
-                "status": session.status.value,
-            },
+            producer_id=None,
         )
-        return session, event
 
     def skip_boy_scout(
         self,
@@ -1410,6 +1393,8 @@ class CoordinatorService:
             session, followup_event = self._handle_requirements_completed(session, accepted_event)
         elif mapped_event_type == "boy_scout_completed":
             session, followup_event = self._handle_boy_scout_completed(session, accepted_event)
+        elif mapped_event_type == "doc_harvest_completed":
+            session, followup_event = self._handle_doc_harvest_completed(session, accepted_event)
         elif mapped_event_type == "acceptance_criteria_completed":
             session, followup_event = self._handle_acceptance_criteria_completed(session, accepted_event)
         elif mapped_event_type == "constraints_completed":
@@ -3169,23 +3154,7 @@ class CoordinatorService:
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         doc_harvest_policy = (session.policy or {}).get("doc_harvest_policy")
         if doc_harvest_policy == "required":
-            session = self.session_repository.update_stage_and_owner(
-                session.id,
-                current_stage="doc_harvest_requested",
-                current_owner=None,
-            )
-            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-            event = self._append_event(
-                session_id=session.id,
-                event_type="doc_harvest_requested",
-                producer_type="coordinator",
-                payload={
-                    "task_key": session.task_key,
-                    "source_event_id": source_event.id,
-                    "current_stage": session.current_stage,
-                    "status": session.status.value,
-                },
-            )
+            session, event = self._enqueue_doc_harvest(session=session, source_event=source_event)
             return session, event
         session = self.session_repository.update_stage_and_owner(
             session.id,
@@ -3502,6 +3471,134 @@ class CoordinatorService:
         )
         return session, event
 
+    def _handle_doc_harvest_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event | None]:
+        doc_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "doc_harvest" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not doc_items:
+            raise IntakeError("No active doc harvest work item found for the session")
+
+        active_item = doc_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, DOC_HARVEST_ROLE)
+        summary = str(source_event.payload.get("summary") or "").strip()
+        if not summary:
+            summary = "Documentation harvest completed."
+        session, _ = self._finalize_doc_harvest(
+            session=self._get_session_or_raise(session.id),
+            summary=summary,
+            producer_type="coordinator",
+            producer_id=DOC_HARVEST_ROLE,
+            emit_event=False,
+        )
+        return session, None
+
+    def _finalize_doc_harvest(
+        self,
+        session: Session,
+        summary: str,
+        producer_type: str,
+        producer_id: str | None,
+        emit_event: bool = True,
+    ) -> tuple[Session, Event | None]:
+        if self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing artifact root")
+
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "doc-harvest",
+            "doc-harvest-summary.md",
+            summary,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="doc-harvest",
+            artifact_type="doc_harvest_summary",
+            path=str(artifact_path),
+            metadata={"summary_length": len(summary)},
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="doc_harvest_completed",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        if not emit_event:
+            return session, None
+        event = self._append_event(
+            session_id=session.id,
+            event_type="doc_harvest_completed",
+            producer_type=producer_type,
+            producer_id=producer_id,
+            payload={
+                "task_key": session.task_key,
+                "summary_length": len(summary),
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event
+
+    def _enqueue_doc_harvest(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        doc_role = self._ensure_on_demand_role(session, DOC_HARVEST_ROLE)
+        doc_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="doc_harvest",
+            title=f"Doc harvest for {session.task_key}",
+            owner_role_id=doc_role.id,
+            source_event_id=source_event.id,
+            priority=112,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="doc_harvest_requested",
+            current_owner=DOC_HARVEST_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        full_diff_path = None
+        if self.workdir_root is not None:
+            full_diff_path = str(self.workdir_root / session.task_key / "spec" / "full-diff.md")
+        self._dispatch_role_work(
+            session=session,
+            role=doc_role,
+            work_item=doc_item,
+            stage_name="doc_harvest_requested",
+            instruction=(
+                f"Run documentation harvest for {session.task_key}. "
+                "Generate or refresh `spec/full-diff.md`, use it as the source of truth, "
+                "update grounded feature-level README targets only, commit only the documentation changes, "
+                "and report a compact result summary."
+            ),
+            extra_hydration={
+                "full_diff_path": full_diff_path,
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="doc_harvest_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": DOC_HARVEST_ROLE,
+                "work_item_id": doc_item.id,
+                "source_event_id": source_event.id,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event
+
     def _enqueue_post_implementation_quality_gate(
         self,
         session: Session,
@@ -3612,6 +3709,9 @@ class CoordinatorService:
         if role_name == CODE_SCOUT_ROLE and session.current_stage == "boy_scout_requested":
             if output_type in {"passed", "completed"}:
                 return "boy_scout_completed"
+        if role_name == DOC_HARVEST_ROLE and session.current_stage == "doc_harvest_requested":
+            if output_type in {"passed", "completed"}:
+                return "doc_harvest_completed"
         if role_name == MR_COMMENTS_ANALYST_ROLE and session.current_stage == "mr_comments_analysis_requested":
             if output_type in {"passed", "completed"}:
                 return "mr_comments_analysis_completed"
@@ -4255,6 +4355,11 @@ class CoordinatorService:
             )
         if stage_name == "self_review_correction_requested":
             return f"Apply self review corrections for {task_key}."
+        if stage_name == "doc_harvest_requested":
+            return (
+                f"Run documentation harvest for {task_key}. "
+                "Generate or refresh `spec/full-diff.md`, use it as the source of truth, update grounded feature-level README targets only, commit only the documentation changes, and report a compact result summary."
+            )
         if stage_name == "mr_comments_analysis_requested":
             return (
                 f"Analyze unresolved MR comments for {task_key}. "
@@ -4278,6 +4383,8 @@ class CoordinatorService:
         return role_names
 
     def _primary_coding_role_name_for_work_type(self, session: Session, work_type: str) -> str:
+        if work_type == "doc_harvest":
+            return DOC_HARVEST_ROLE
         if work_type == "mr_comments_analysis":
             return MR_COMMENTS_ANALYST_ROLE
         if session.workflow_profile != "bug_full":
@@ -4305,6 +4412,7 @@ class CoordinatorService:
             "proposal_context_requested": "proposal_context",
             "requirements_requested": "requirements",
             "boy_scout_requested": "boy_scout",
+            "doc_harvest_requested": "doc_harvest",
             "acceptance_criteria_requested": "acceptance_criteria",
             "constraints_requested": "constraints",
             "spec_verification_requested": "spec_verification",
