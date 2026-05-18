@@ -2890,10 +2890,44 @@ class CoordinatorService:
         additional_context_lines.append(
             "Follow-up plan package available under `plan/`; start from `plan/index.md` and the generated `plan/NN-*.md` files before touching product code."
         )
+        plan_artifact: Artifact | None = None
         if self.workdir_root is not None:
             plan_index_path = self.workdir_root / session.task_key / "plan" / "index.md"
             if plan_index_path.exists():
+                plan_artifact = self.artifact_repository.create(
+                    session_id=session.id,
+                    stage_name="mr_comments_analysis_requested",
+                    artifact_type="mr_followup_plan_markdown",
+                    path=str(plan_index_path),
+                    metadata={
+                        "task_key": session.task_key,
+                        "mr_id": mr_id,
+                        "discussion_count": discussion_count,
+                    },
+                )
                 session, _subtasks_event, _subtasks_followup = self.create_subtasks_from_plan(session.id)
+        if plan_artifact is not None:
+            subtasks = self._read_snapshot_subtasks(session.task_key)
+            unresolved = unresolved_subtasks(subtasks) if subtasks is not None else []
+            if unresolved:
+                coding_role = self._primary_coding_role_for_work_type(session, "followup_implementation")
+                work_item = self.work_item_repository.create(
+                    session_id=session.id,
+                    work_type="followup_implementation",
+                    title=f"MR follow-up execution for {session.task_key} from !{mr_id}",
+                    owner_role_id=coding_role.id,
+                    source_event_id=source_event.id,
+                    priority=110,
+                )
+                _graph_event, followup_event = self._start_subtask_graph_flow(
+                    session=session,
+                    producer_type="coordinator",
+                    subtasks=subtasks,
+                    initial_work_item=work_item,
+                    decomposition_artifact=plan_artifact,
+                )
+                session = self._get_session_or_raise(session.id)
+                return session, followup_event
         event = self._enqueue_mr_followup(
             session=session,
             source_event=source_event,
@@ -3239,11 +3273,12 @@ class CoordinatorService:
             stage_name="subtask_implementation_requested",
             instruction=(
                 f"Implement subtask {first_subtask.key} for parent task {session.task_key}. "
-                "Use the latest task decomposition artifact as the primary execution plan input. "
+                "Use the routed execution plan artifact as the primary execution plan input. "
                 "Focus only on this subtask scope before moving to the next one."
             ),
             extra_hydration={
                 "decomposition_artifact_path": decomposition_artifact.path,
+                "execution_plan_artifact_path": decomposition_artifact.path,
             },
         )
         return self._append_event(

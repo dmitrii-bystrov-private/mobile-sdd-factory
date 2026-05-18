@@ -179,6 +179,14 @@ def main() -> None:
             "## What to implement\n"
             "Apply the grouped MR follow-up changes.\n"
         )
+        (temp_root / "workdir" / "IOS-ACCEPT-MR-001" / "statuses.md").write_text(
+            "# Statuses\n\n"
+            "| Key | Type | Title | Status |\n"
+            "| --- | --- | --- | --- |\n"
+            "| IOS-ACCEPT-MR-001 | Story | Parent story | Ready for test |\n"
+            "| IOS-90001 | Sub-task | Address MR feedback | To Do |\n"
+            "| IOS-90002 | Sub-task | Cleanup review leftovers | Ready for test |\n"
+        )
 
         analysis_response = submit_role_output(
             RoleOutputRequest(
@@ -189,8 +197,8 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert analysis_response.followup_event_type == "mr_followup_requested"
-        assert analysis_response.session.current_stage == "mr_followup_requested"
+        assert analysis_response.followup_event_type == "subtask_implementation_requested"
+        assert analysis_response.session.current_stage == "subtask_implementation_requested"
         assert analysis_response.session.current_owner == IMPLEMENTER_ROLE
 
         followup_response = submit_role_output(
@@ -202,7 +210,18 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert followup_response.followup_event_type == "verification_requested"
+        assert followup_response.followup_event_type == "self_review_requested"
+
+        followup_review_response = submit_role_output(
+            RoleOutputRequest(
+                session_id=session_id,
+                role_name="code-reviewer",
+                output_type="passed",
+                payload={"summary": "clean review after mr follow-up"},
+            ),
+            dependencies=deps,
+        )
+        assert followup_review_response.followup_event_type == "verification_requested"
 
         final_verification_response = submit_role_output(
             RoleOutputRequest(
@@ -238,9 +257,14 @@ def main() -> None:
             "mr_comments_analysis_requested",
             "mr_comments_analysis_completed",
             "jira_subtasks_created",
+            "subtask_graph_requested",
             "role_input_dispatched",
-            "mr_followup_requested",
-            "implementation_completed",
+            "subtask_implementation_requested",
+            "subtask_completed",
+            "subtask_snapshot_refreshed",
+            "role_input_dispatched",
+            "self_review_requested",
+            "self_review_passed",
             "role_input_dispatched",
             "verification_requested",
             "verification_passed",
@@ -253,6 +277,7 @@ def main() -> None:
         artifact_types = [item.artifact_type for item in artifacts_response.items]
         assert "jira_subtasks_summary" in artifact_types
         assert "mr_comments_markdown" in artifact_types
+        assert "mr_followup_plan_markdown" in artifact_types
         assert "role_prompt" in artifact_types
         assert "role_output_summary" in artifact_types
 

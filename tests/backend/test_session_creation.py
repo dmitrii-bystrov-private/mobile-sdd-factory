@@ -2385,7 +2385,7 @@ class SessionCreationTests(unittest.TestCase):
             sorted((item.work_type, item.status.value) for item in work_items),
         )
         self.assertIn("Implement subtask IOS-30010", sent_inputs[-1])
-        self.assertIn("Use the latest task decomposition artifact as the primary execution plan input.", sent_inputs[-1])
+        self.assertIn("Use the routed execution plan artifact as the primary execution plan input.", sent_inputs[-1])
         self.assertIn("decomposition_artifact_path", sent_inputs[-1])
 
     def test_subtask_completion_assigns_next_subtask_before_verification(self) -> None:
@@ -3619,7 +3619,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "mr_comments_received" for item in events))
         self.assertTrue(any(item.event_type == "mr_comments_analysis_requested" for item in events))
 
-    def test_mr_comments_analysis_completion_routes_to_followup_implementation(self) -> None:
+    def test_mr_comments_analysis_completion_routes_to_subtask_graph_when_snapshot_contains_followup_subtasks(
+        self,
+    ) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30020A")
         self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -3644,6 +3646,17 @@ class SessionCreationTests(unittest.TestCase):
         (plan_dir / "01-address-mr-feedback.md").write_text(
             "# Address MR feedback\n\n## What to implement\nApply the grouped MR follow-up changes.\n"
         )
+        self.write_statuses_file(
+            "IOS-30020A",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30020A | Story | Parent story | Ready for test |
+| IOS-90001 | Sub-task | Address MR feedback | To Do |
+| IOS-90002 | Sub-task | Cleanup review leftovers | To Do |
+""",
+        )
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
@@ -3656,15 +3669,60 @@ class SessionCreationTests(unittest.TestCase):
         artifacts = self.artifact_repository.list_for_session(session.id)
 
         self.assertEqual("mr_comments_analysis_completed", mapped_event.event_type)
-        self.assertEqual("mr_followup_requested", followup_event.event_type)
-        self.assertEqual("mr_followup_requested", updated_session.current_stage)
+        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
         self.assertEqual("implementer", updated_session.current_owner)
         self.assertTrue(any(item.work_type == "mr_comments_analysis" for item in work_items))
-        self.assertTrue(any(item.work_type == "followup_implementation" for item in work_items))
+        self.assertTrue(any(item.work_type == "subtask_implementation" for item in work_items))
         self.assertTrue(any(item.event_type == "mr_comments_analysis_completed" for item in events))
         self.assertTrue(any(item.event_type == "jira_subtasks_created" for item in events))
-        self.assertTrue(any(item.event_type == "mr_followup_requested" for item in events))
+        self.assertTrue(any(item.event_type == "subtask_graph_requested" for item in events))
+        self.assertTrue(any(item.event_type == "subtask_implementation_requested" for item in events))
         self.assertTrue(any(item.artifact_type == "jira_subtasks_summary" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "mr_followup_plan_markdown" for item in artifacts))
+
+    def test_mr_comments_analysis_completion_falls_back_to_direct_followup_without_resolved_snapshot_subtasks(
+        self,
+    ) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30020B")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        completed_session, _ = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.ingest_mr_comments(
+            session_id=completed_session.id,
+            platform="ios",
+            mr_id="2944",
+        )
+        plan_dir = Path(self.temp_dir.name) / "IOS-30020B" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Address MR feedback](./01-address-mr-feedback.md) | — | ☐ |\n"
+        )
+        (plan_dir / "01-address-mr-feedback.md").write_text(
+            "# Address MR feedback\n\n## What to implement\nApply the grouped MR follow-up changes.\n"
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=MR_COMMENTS_ANALYST_ROLE,
+            output_type="completed",
+            payload={"summary": "Grouped two review themes into actionable follow-up plan."},
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("mr_comments_analysis_completed", mapped_event.event_type)
+        self.assertEqual("mr_followup_requested", followup_event.event_type)
+        self.assertEqual("mr_followup_requested", updated_session.current_stage)
+        self.assertTrue(any(item.work_type == "followup_implementation" for item in work_items))
+        self.assertTrue(any(item.event_type == "mr_followup_requested" for item in events))
 
     def test_reopen_from_qa_reactivates_completed_session(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021")
