@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +9,10 @@ from unittest.mock import patch
 
 from factory.acceptance.run_roots import (
     cleanup_runner_test_residue_for_run_root,
+    cleanup_stale_run_roots,
     cleanup_stale_runner_test_residue,
+    run_active_marker,
+    run_tmux_socket_root,
 )
 
 
@@ -135,3 +139,26 @@ class AcceptanceRunRootsTests(unittest.TestCase):
         self.assertTrue(other_claude_dir.exists())
         self.assertFalse(matching_codex_file.exists())
         self.assertTrue(other_codex_file.exists())
+
+    def test_cleanup_stale_run_roots_keeps_active_run_root(self) -> None:
+        runs_root = self.repo_root / ".runtime" / "test-runs"
+        active_run = runs_root / "sdd-factory-runtime-management.active1234"
+        stale_run = runs_root / "sdd-factory-runtime-management.stale5678"
+        active_run.mkdir(parents=True, exist_ok=True)
+        stale_run.mkdir(parents=True, exist_ok=True)
+
+        active_socket_root = run_tmux_socket_root(active_run)
+        stale_socket_root = run_tmux_socket_root(stale_run)
+        active_socket_root.mkdir(parents=True, exist_ok=True)
+        stale_socket_root.mkdir(parents=True, exist_ok=True)
+        run_active_marker(active_run).write_text(json.dumps({"pid": os.getpid()}))
+        run_active_marker(stale_run).write_text(json.dumps({"pid": 999999}))
+
+        with patch("factory.acceptance.run_roots.subprocess.run") as mocked_run:
+            cleanup_stale_run_roots(self.repo_root)
+
+        self.assertTrue(active_run.exists())
+        self.assertTrue(active_socket_root.exists())
+        self.assertFalse(stale_run.exists())
+        self.assertFalse(stale_socket_root.exists())
+        mocked_run.assert_not_called()

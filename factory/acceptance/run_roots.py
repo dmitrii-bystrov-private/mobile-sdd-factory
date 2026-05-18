@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 import json
-from pathlib import Path
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import tempfile
@@ -40,10 +40,40 @@ def run_tmux_socket_root(run_root: Path) -> Path:
     return root
 
 
+def run_active_marker(run_root: Path) -> Path:
+    return run_root / ".active-run.json"
+
+
+def _pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _is_active_run_root(run_root: Path) -> bool:
+    marker = run_active_marker(run_root)
+    if not marker.is_file():
+        return False
+    try:
+        payload = json.loads(marker.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    pid = payload.get("pid")
+    if not isinstance(pid, int):
+        return False
+    return _pid_is_alive(pid)
+
+
 def cleanup_stale_run_roots(repo_root: Path) -> None:
     runs_root = acceptance_runs_root(repo_root)
     for run_root in runs_root.iterdir():
         if not run_root.is_dir():
+            continue
+        if _is_active_run_root(run_root):
             continue
         socket_root = run_tmux_socket_root(run_root)
         if socket_root.exists():
@@ -157,7 +187,9 @@ def cleanup_runner_test_residue_for_run_root(repo_root: Path, run_root: Path) ->
 def create_run_root(repo_root: Path, prefix: str) -> Path:
     cleanup_stale_run_roots(repo_root)
     cleanup_stale_runner_test_residue(repo_root)
-    return Path(tempfile.mkdtemp(prefix=f"{prefix}.", dir=acceptance_runs_root(repo_root)))
+    root = Path(tempfile.mkdtemp(prefix=f"{prefix}.", dir=acceptance_runs_root(repo_root)))
+    run_active_marker(root).write_text(json.dumps({"pid": os.getpid()}))
+    return root
 
 
 def shutdown_dependencies(dependencies) -> None:
@@ -198,3 +230,5 @@ def managed_run_root(
             shutil.rmtree(root, ignore_errors=True)
         elif keep_root:
             print(f"[debug] kept temp_root={root}")
+        else:
+            run_active_marker(root).unlink(missing_ok=True)

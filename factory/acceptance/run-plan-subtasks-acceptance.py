@@ -108,16 +108,8 @@ def main() -> None:
         )
         assert response.created
         assert response.event_type == "jira_subtasks_created"
-        assert response.followup_event_type is None
-        assert response.session.current_stage == "subtask_creation_requested"
-
-        resume_response = resume_session(
-            ResumeSessionRequest(session_id=session_id),
-            dependencies=deps,
-        )
-        assert resume_response.event_type == "session_resumed_by_operator"
-        assert resume_response.followup_event_type == "subtask_implementation_requested"
-        assert resume_response.session.current_stage == "subtask_implementation_requested"
+        assert response.followup_event_type == "subtask_implementation_requested"
+        assert response.session.current_stage == "subtask_implementation_requested"
 
         artifacts_response = list_artifacts(session_id=session_id, dependencies=deps)
         artifact_types = [item.artifact_type for item in artifacts_response.items]
