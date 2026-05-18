@@ -5501,9 +5501,15 @@ class CoordinatorService:
         if self.workdir_root is None or self.artifacts_root is None:
             return
 
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / "final-verification.md"
         explicit_markdown = str(source_event.payload.get("final_verification_markdown") or "").strip()
         if explicit_markdown:
             content = explicit_markdown.rstrip() + "\n"
+        elif target_path.is_file():
+            existing_content = target_path.read_text().strip()
+            content = existing_content.rstrip() + "\n" if existing_content else ""
         else:
             summary = str(source_event.payload.get("summary") or "").strip()
             failures = source_event.payload.get("failures")
@@ -5553,9 +5559,6 @@ class CoordinatorService:
                     )
             content = "\n".join(lines).rstrip() + "\n"
 
-        spec_root = self.workdir_root / session.task_key / "spec"
-        spec_root.mkdir(parents=True, exist_ok=True)
-        target_path = spec_root / "final-verification.md"
         target_path.write_text(content)
 
         artifact_path = write_text_artifact(

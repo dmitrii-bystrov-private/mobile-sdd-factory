@@ -2803,6 +2803,29 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
 
+    def test_verification_passed_preserves_existing_final_verification_report(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30005EXISTING")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        verification_report = Path(self.temp_dir.name) / "IOS-30005EXISTING" / "spec" / "final-verification.md"
+        verification_report.parent.mkdir(parents=True, exist_ok=True)
+        verification_report.write_text(
+            "# Final Verification: IOS-30005EXISTING\n\n"
+            "## Result\nFAIL\n\n"
+            "## Output: run-test.sh\n```text\nrich verifier output\n```\n"
+        )
+
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all checks passed"},
+        )
+
+        self.assertIn("rich verifier output", verification_report.read_text())
+
     def test_role_output_completed_moves_implementer_flow_forward(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30006")
 
