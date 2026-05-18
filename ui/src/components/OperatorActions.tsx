@@ -206,22 +206,9 @@ export function OperatorActions({
       disabled: busy || !canRefreshSubtaskState,
       onClick: () => run(() => apiClient.refreshSubtaskState(session.id)),
     },
-    {
-      label: "Create Jira Subtasks",
-      description: "Retry Jira subtask materialization after the automatic story setup failed before execution could start.",
-      disabled: busy || !canCreateSubtasksFromPlan,
-      onClick: () => run(() => apiClient.createSubtasksFromPlan(session.id)),
-    },
   ];
 
   const advancedActions: ActionDefinition[] = [
-    {
-      label: "Start Subtask Graph",
-      description: "Force story subtask execution from a recovery checkpoint when Jira subtasks already exist and only graph dispatch remains.",
-      disabled: busy || !canStartSubtaskGraph,
-      strong: true,
-      onClick: () => run(() => apiClient.startSubtaskGraph(session.id)),
-    },
     {
       label: "Run Loop Once",
       description: "Manually tick the coordinator loop once when you want to force a fresh reconciliation cycle.",
@@ -248,6 +235,19 @@ export function OperatorActions({
       description: "Retry the current stage after a waiting-for-operator interruption without changing the routed work.",
       disabled: busy || session.status !== "waiting_for_operator",
       onClick: () => run(() => apiClient.retrySession(session.id)),
+    },
+    {
+      label: "Create Jira Subtasks",
+      description: "Retry Jira subtask materialization after the automatic story setup failed before execution could start.",
+      disabled: busy || !canCreateSubtasksFromPlan,
+      onClick: () => run(() => apiClient.createSubtasksFromPlan(session.id)),
+    },
+    {
+      label: "Start Subtask Graph",
+      description: "Force story subtask execution from a recovery checkpoint when Jira subtasks already exist and only graph dispatch remains.",
+      disabled: busy || !canStartSubtaskGraph,
+      strong: true,
+      onClick: () => run(() => apiClient.startSubtaskGraph(session.id)),
     },
     {
       label: "Retry MR Handoff",
