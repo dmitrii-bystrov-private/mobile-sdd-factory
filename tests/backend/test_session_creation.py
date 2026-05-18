@@ -3737,7 +3737,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021BS1",
             workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled"},
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30021BS1")
 
@@ -3754,11 +3754,64 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("boy_scout_requested", followup_event.event_type)
         self.assertTrue(any(item.work_type == "boy_scout" for item in work_items))
 
+    def test_boy_scout_skipped_not_needed_routes_to_verification_when_policy_enabled(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BS1E",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BS1E")
+
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="skipped_not_needed",
+            payload={"summary": "The change is too small to justify a meaningful Boy Scout pass."},
+        )
+
+        self.assertEqual("boy_scout_completed", mapped_event.event_type)
+        self.assertIsNotNone(followup_event)
+        assert followup_event is not None
+        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+
+    def test_boy_scout_skipped_not_needed_is_rejected_when_policy_required(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BS1R",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "required", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BS1R")
+
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Boy Scout cannot be skipped when boy_scout_policy is required",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name=CODE_SCOUT_ROLE,
+                output_type="skipped_not_needed",
+                payload={"summary": "The change is too small to justify a meaningful Boy Scout pass."},
+            )
+
     def test_boy_scout_findings_can_be_skipped_into_verification(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021BS2",
             workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled"},
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30021BS2")
         self.coordinator.handle_operator_event(

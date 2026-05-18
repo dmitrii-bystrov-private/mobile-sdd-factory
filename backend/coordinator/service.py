@@ -4075,6 +4075,10 @@ class CoordinatorService:
         if role_name == CODE_SCOUT_ROLE and session.current_stage == "boy_scout_requested":
             if output_type in {"passed", "completed"}:
                 return "boy_scout_completed"
+            if output_type == "skipped_not_needed":
+                if self._optional_lane_policy_mode(session.policy, "boy_scout_policy") != "enabled":
+                    raise IntakeError("Boy Scout cannot be skipped when boy_scout_policy is required")
+                return "boy_scout_completed"
         if role_name == DOC_HARVEST_ROLE and session.current_stage == "doc_harvest_requested":
             if output_type in {"passed", "completed"}:
                 return "doc_harvest_completed"
@@ -4717,11 +4721,21 @@ class CoordinatorService:
                 "If critical ambiguity remains, ask the operator directly in the live session instead of guessing."
             )
         if stage_name == "boy_scout_requested":
+            policy_mode = self._optional_lane_policy_mode(session_policy, "boy_scout_policy")
+            if policy_mode == "required":
+                return (
+                    f"Run a Boy Scout maintainability pass for {task_key}. "
+                    "Start from `spec/diff.md`, inspect only the highest-signal changed files, "
+                    "write `spec/findings.md` only when real maintainability findings exist, "
+                    "and otherwise report a clean result. "
+                    "This Boy Scout lane is required for this session, so do not emit skipped_not_needed."
+                )
             return (
                 f"Run a Boy Scout maintainability pass for {task_key}. "
                 "Start from `spec/diff.md`, inspect only the highest-signal changed files, "
                 "write `spec/findings.md` only when real maintainability findings exist, "
-                "and otherwise report a clean result."
+                "and otherwise report a clean result. "
+                "Emit skipped_not_needed when the change surface is too weak to justify a meaningful maintainability pass."
             )
         if stage_name == "acceptance_criteria_requested":
             return (
