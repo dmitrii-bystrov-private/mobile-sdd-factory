@@ -1905,6 +1905,13 @@ class CoordinatorService:
             and session.current_owner != VERIFICATION_COORDINATOR_ROLE
         ):
             return True
+        if (
+            role_name == CODE_REVIEWER_ROLE
+            and output_type in {"passed", "completed", "failed", "blocked_review_cycle"}
+            and session.current_stage == "self_review_correction_requested"
+            and session.current_owner != CODE_REVIEWER_ROLE
+        ):
+            return True
         return False
 
     def run_loop_once(self) -> tuple[Event | None, int, int]:
