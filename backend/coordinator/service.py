@@ -1074,9 +1074,12 @@ class CoordinatorService:
             raise IntakeError("Coordinator is missing Jira adapter, snapshot adapter, workdir root, or artifact root")
 
         session = self._get_session_or_raise(session_id)
-        if session.workflow_profile != "story_full":
+        if (
+            session.workflow_profile != "story_full"
+            and session.current_stage != "mr_comments_analysis_requested"
+        ):
             raise IntakeError(
-                f"Session {session_id} is {session.workflow_profile}, but plan-based subtask creation is only supported for story_full"
+                f"Session {session_id} is {session.workflow_profile}, but plan-based subtask creation is only supported for story_full or MR follow-up plan materialization"
             )
 
         plan_index_path = self.workdir_root / session.task_key / "plan" / "index.md"
@@ -2887,6 +2890,10 @@ class CoordinatorService:
         additional_context_lines.append(
             "Follow-up plan package available under `plan/`; start from `plan/index.md` and the generated `plan/NN-*.md` files before touching product code."
         )
+        if self.workdir_root is not None:
+            plan_index_path = self.workdir_root / session.task_key / "plan" / "index.md"
+            if plan_index_path.exists():
+                session, _subtasks_event, _subtasks_followup = self.create_subtasks_from_plan(session.id)
         event = self._enqueue_mr_followup(
             session=session,
             source_event=source_event,

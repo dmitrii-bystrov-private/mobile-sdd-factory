@@ -150,7 +150,7 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert verification_passed_response.followup_event_type == "task_completed"
+        assert verification_passed_response.followup_event_type == "send_to_test_completed"
         assert verification_passed_response.session.status == "completed"
 
         mr_followup_response = ingest_mr_comments(
@@ -166,6 +166,19 @@ def main() -> None:
         assert mr_followup_response.session.current_stage == "mr_comments_analysis_requested"
         assert mr_followup_response.session.status == "active"
         assert mr_followup_response.discussion_count == 1
+        plan_dir = temp_root / "workdir" / "IOS-ACCEPT-MR-001" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n"
+            "| # | Task | Depends on | Status |\n"
+            "|---|------|------------|--------|\n"
+            "| 01 | [Address MR feedback](./01-address-mr-feedback.md) | — | ☐ |\n"
+        )
+        (plan_dir / "01-address-mr-feedback.md").write_text(
+            "# Address MR feedback\n\n"
+            "## What to implement\n"
+            "Apply the grouped MR follow-up changes.\n"
+        )
 
         analysis_response = submit_role_output(
             RoleOutputRequest(
@@ -200,7 +213,7 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert final_verification_response.followup_event_type == "task_completed"
+        assert final_verification_response.followup_event_type == "send_to_test_completed"
         assert final_verification_response.session.status == "completed"
 
         events_response = list_events(session_id=session_id, dependencies=deps)
@@ -218,10 +231,13 @@ def main() -> None:
             "verification_requested",
             "verification_passed",
             "task_completed",
+            "mr_handoff_completed",
+            "send_to_test_completed",
             "mr_comments_received",
             "role_input_dispatched",
             "mr_comments_analysis_requested",
             "mr_comments_analysis_completed",
+            "jira_subtasks_created",
             "role_input_dispatched",
             "mr_followup_requested",
             "implementation_completed",
@@ -229,10 +245,13 @@ def main() -> None:
             "verification_requested",
             "verification_passed",
             "task_completed",
+            "mr_handoff_completed",
+            "send_to_test_completed",
         ]
 
         artifacts_response = list_artifacts(session_id=session_id, dependencies=deps)
         artifact_types = [item.artifact_type for item in artifacts_response.items]
+        assert "jira_subtasks_summary" in artifact_types
         assert "mr_comments_markdown" in artifact_types
         assert "role_prompt" in artifact_types
         assert "role_output_summary" in artifact_types
