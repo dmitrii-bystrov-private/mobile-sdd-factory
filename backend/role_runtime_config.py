@@ -17,7 +17,7 @@ ROLE_DEFAULT_SOURCE_MAP = {
     "verification-coordinator": "final-verifier",
     "code-reviewer": "code-reviewer",
     "code-scout": "code-scout",
-    "proposal-context-worker": "proposal-collector",
+    "proposal-context-worker": "context-collector",
     "requirements-clarifier-worker": "requirements-clarifier",
     "acceptance-criteria-worker": "acceptance-criteria-writer",
     "constraints-worker": "constraints-definer",
@@ -119,6 +119,17 @@ def resolve_role_mcp_servers(
 ) -> list[str]:
     if runner != _CLAUDE_SCOPED_MCP_RUNNER:
         return []
+
+    if role_name == "proposal-context-worker":
+        merged: list[str] = []
+        for legacy_role_name in ("proposal-collector", "context-collector"):
+            agent_path = repo_root / ".claude" / "agents" / f"{legacy_role_name}.md"
+            if not agent_path.is_file():
+                continue
+            for server_name in _parse_agent_mcp_servers(agent_path):
+                if server_name not in merged:
+                    merged.append(server_name)
+        return merged
 
     legacy_role_name = ROLE_DEFAULT_SOURCE_MAP.get(role_name)
     if not legacy_role_name:

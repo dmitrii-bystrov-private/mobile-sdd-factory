@@ -101,6 +101,8 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task snapshot metadata: `{task_snapshot_root}`",
             "- Proposal target: `{task_snapshot_root}/spec/proposal.md`",
             "- Context directory: `{task_snapshot_root}/spec/context`",
+            "- Required context output: `{task_snapshot_root}/spec/context/feature-overview.md`",
+            "- Optional context outputs: `{task_snapshot_root}/spec/context/relevant-code.md`, `{task_snapshot_root}/spec/context/documentation.md`, `{task_snapshot_root}/spec/context/implementation-patterns.md`, `{task_snapshot_root}/spec/context/preconditions.md`",
             "- Task repo worktree: `{task_repo_root}`",
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
@@ -229,7 +231,7 @@ def _role_responsibility(role_name: str) -> list[str]:
     if role_name == "proposal-context-worker":
         return [
             "- You execute one bounded proposal/context preparation task for one story session.",
-            "- Produce the routed proposal/context result and then stop; you do not remain the owner of later planning or implementation work.",
+            "- Produce `spec/proposal.md` plus the `spec/context/` package, then stop; you do not remain the owner of later planning or implementation work.",
             "- You should not assume persistence across unrelated tasks or later implementation rounds.",
         ]
     if role_name == "requirements-clarifier-worker":
@@ -321,46 +323,47 @@ def _role_operating_rules(role_name: str) -> list[str]:
         ]
     if role_name == "proposal-context-worker":
         return [
-            "- Treat this role as a bounded one-shot worker: collect proposal/context foundations, write the routed result, and exit.",
-            "- Read snapshot description/comments first; read repo sources only when they are directly needed to ground the proposal/context result.",
-            "- Keep the output compact and downstream-oriented so the later story-spec worker can build on it instead of redoing the same discovery.",
+            "- Treat this role as a bounded one-shot worker: produce `spec/proposal.md` and the `spec/context/` package, then exit.",
+            "- Always write `spec/context/feature-overview.md`; write the other `spec/context/*` files only when they contain concrete task-specific findings.",
+            "- Read snapshot description/comments first; use repo sources and local docs only when they are directly needed to ground the proposal/context outputs.",
+            "- Keep the output compact and downstream-oriented so later story roles can reuse the written context package instead of rediscovering it.",
         ]
     if role_name == "requirements-clarifier-worker":
         return [
             "- Treat this role as a bounded worker for one story session: clarify requirements, ask live follow-up questions when needed, then write the routed result and exit.",
-            "- Start from the proposal/context foundations and resolve ambiguities, assumptions, edge cases, and out-of-scope boundaries needed for implementation.",
+            "- Start from `spec/proposal.md` and `spec/context/feature-overview.md`; read the rest of `spec/context/*` selectively when it materially helps resolve ambiguity.",
             "- If a risky ambiguity remains, ask the operator directly in the live session instead of guessing.",
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than unresolved requirements.",
         ]
     if role_name == "acceptance-criteria-worker":
         return [
             "- Treat this role as a bounded one-shot worker: prepare acceptance criteria, write the routed result, and exit.",
-            "- Start from the proposal plus clarified requirements and cover happy paths, edge cases, and error scenarios needed for later implementation and verification.",
+            "- Start from `spec/proposal.md`, clarified requirements, and `spec/context/feature-overview.md`; read other context files only when they materially affect behavior coverage.",
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than behavioral coverage gaps.",
         ]
     if role_name == "constraints-worker":
         return [
             "- Treat this role as a bounded one-shot worker: prepare implementation constraints, write the routed result, and exit.",
-            "- Start from the proposal, clarified requirements, and acceptance criteria and surface architecture, convention, dependency, and integration constraints that should shape the final story spec.",
+            "- Start from the proposal, clarified requirements, acceptance criteria, and `spec/context/feature-overview.md`; use `implementation-patterns.md`, `documentation.md`, and `preconditions.md` when they materially shape constraints.",
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than rediscovering constraints.",
         ]
     if role_name == "spec-verifier-worker":
         return [
             "- Treat this role as a bounded one-shot worker: verify the assembled planning package, write the routed result, and exit.",
-            "- Start from the proposal, requirements, acceptance criteria, and constraints and check that the package is coherent, complete enough for implementation, and free of obvious contradictions.",
+            "- Start from the proposal, requirements, acceptance criteria, constraints, and `spec/context/feature-overview.md`; use the rest of `spec/context/*` selectively when checking planning coherence.",
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than re-checking the planning package.",
         ]
     if role_name == "task-decomposer-worker":
         return [
             "- Treat this role as a bounded one-shot worker: prepare task decomposition, write the routed result, and exit.",
-            "- Start from the verified planning package and final story spec and break the work into the smallest useful execution-oriented chunks for later implementation/subtask flow.",
+            "- Start from the verified planning package, final story spec, and `spec/context/feature-overview.md`; use `relevant-code.md` and `implementation-patterns.md` when they materially affect task boundaries.",
             "- When the decomposition naturally maps to Jira-subtask-sized execution units, include a legacy-compatible plan package in the routed output: `plan_index_markdown` plus `plan_task_files` with self-contained Markdown task files.",
             "- Keep the output compact and downstream-oriented so execution can start from an explicit decomposition instead of implicit planning assumptions.",
         ]
     if role_name == "story-spec-worker":
         return [
             "- Treat this role as a bounded one-shot worker: launch, produce the routed spec result, and exit.",
-            "- Read only the planning/spec inputs relevant to the current task.",
+            "- Read `spec/context/feature-overview.md` first when it exists and pull in other `spec/context/*` files only when they materially sharpen the final story spec.",
             "- Do not retain ownership after the planning/spec result is produced.",
         ]
     return [

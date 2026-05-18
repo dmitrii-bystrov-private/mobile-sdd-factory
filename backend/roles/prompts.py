@@ -18,6 +18,7 @@ def role_runtime_rules(role_name: str) -> str:
         return (
             "Role-specific rules:\n"
             "- Read all routed spec inputs completely before writing code.\n"
+            "- If `spec/context/feature-overview.md` exists, read it before broader code exploration; pull in other `spec/context/*` files only when they directly help the current implementation decision.\n"
             "- Use RAG tools first for code exploration; use plain filesystem search only for structural queries.\n"
             "- If the routed work is a narrow correction pass, keep scope limited to the listed issues unless a tiny directly-related change is required.\n"
             "- Do not run workflow-level build/test/lint gates here unless the routed work explicitly requires a narrow task-specific check.\n"
@@ -53,15 +54,17 @@ def role_runtime_rules(role_name: str) -> str:
     if role_name == "proposal-context-worker":
         return (
             "Role-specific rules:\n"
-            "- Treat this role as a bounded one-shot worker: collect proposal/context foundations, write the routed result, and exit.\n"
-            "- Read snapshot description/comments first; read repo sources only when they are directly needed to ground the proposal/context result.\n"
-            "- Keep the output compact and downstream-oriented so the later story-spec worker can build on it instead of redoing the same discovery.\n\n"
+            "- Treat this role as a bounded one-shot worker: produce the proposal/context package, write the routed result, and exit.\n"
+            "- Read snapshot description/comments first; synthesize or refresh `spec/proposal.md` before finishing this pass.\n"
+            "- Build a real `spec/context/` package: always write `feature-overview.md`, and write `relevant-code.md`, `documentation.md`, `implementation-patterns.md`, and `preconditions.md` only when they contain task-specific grounded findings.\n"
+            "- Use repo sources and local docs only when they are directly needed to ground the proposal/context result; prefer RAG tools first for code exploration.\n"
+            "- Keep the output compact and downstream-oriented so later story roles can reuse the written context package instead of rediscovering it.\n\n"
         )
     if role_name == "requirements-clarifier-worker":
         return (
             "Role-specific rules:\n"
             "- Treat this role as a bounded worker for one story session: clarify requirements, ask live follow-up questions when needed, then write the routed result and exit.\n"
-            "- Start from the proposal/context foundations and resolve ambiguities, assumptions, edge cases, and out-of-scope boundaries needed for implementation.\n"
+            "- Start from `spec/proposal.md` plus `spec/context/feature-overview.md`; pull in other `spec/context/*` files selectively when they materially help resolve an ambiguity.\n"
             "- When critical ambiguities remain, ask the operator directly in the live session instead of making a risky assumption, then continue from the same session after the operator replies.\n"
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than unresolved requirements.\n\n"
         )
@@ -69,7 +72,7 @@ def role_runtime_rules(role_name: str) -> str:
         return (
             "Role-specific rules:\n"
             "- Treat this role as a bounded one-shot worker: prepare acceptance criteria, write the routed result, and exit.\n"
-            "- Start from the proposal plus clarified requirements and cover happy paths, edge cases, and error scenarios needed for later implementation and verification.\n"
+            "- Start from `spec/proposal.md`, clarified requirements, and `spec/context/feature-overview.md`; read other `spec/context/*` files only when they help clarify behavior coverage.\n"
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than behavioral coverage gaps.\n\n"
         )
     if role_name == "verification-coordinator":

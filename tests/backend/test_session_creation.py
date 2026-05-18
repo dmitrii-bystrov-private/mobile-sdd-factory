@@ -760,6 +760,35 @@ class SessionCreationTests(unittest.TestCase):
                 ]
             )
         )
+        (repo_root / ".claude" / "agents" / "proposal-collector.md").write_text(
+            "\n".join(
+                [
+                    "---",
+                    "name: proposal-collector",
+                    "model: sonnet",
+                    "effort: medium",
+                    "mcpServers:",
+                    "  - notion",
+                    "---",
+                    "",
+                ]
+            )
+        )
+        (repo_root / ".claude" / "agents" / "context-collector.md").write_text(
+            "\n".join(
+                [
+                    "---",
+                    "name: context-collector",
+                    "model: sonnet",
+                    "effort: high",
+                    "mcpServers:",
+                    "  - ios-rag",
+                    "  - frontend-rag",
+                    "---",
+                    "",
+                ]
+            )
+        )
 
         workspace_manager = RoleWorkspaceManager(
             runtime_root=Path(self.temp_dir.name),
@@ -813,6 +842,30 @@ class SessionCreationTests(unittest.TestCase):
             (reviewer_workspace.directory / "claude.mcp.role.json").read_text()
         )
         self.assertEqual({}, reviewer_mcp["mcpServers"])
+
+        proposal_context_workspace = workspace_manager.ensure_role_workspace(
+            "IOS-30000MCP",
+            PROPOSAL_CONTEXT_WORKER_ROLE,
+        )
+        launcher_manager.ensure_launch_plan(
+            task_key="IOS-30000MCP",
+            workspace=proposal_context_workspace,
+            role_config={"runner": "claude", "model": "sonnet", "effort": "medium"},
+        )
+        proposal_context_settings = json.loads(
+            (proposal_context_workspace.directory / "claude.settings.role.json").read_text()
+        )
+        self.assertEqual(
+            {"ios-rag", "frontend-rag", "notion"},
+            set(proposal_context_settings["enabledMcpjsonServers"]),
+        )
+        proposal_context_mcp = json.loads(
+            (proposal_context_workspace.directory / "claude.mcp.role.json").read_text()
+        )
+        self.assertEqual(
+            {"ios-rag", "frontend-rag", "notion"},
+            set(proposal_context_mcp["mcpServers"].keys()),
+        )
 
     def test_real_launcher_backed_runtime_keeps_persistent_role_context_across_rounds(self) -> None:
         runtime_root = Path(self.temp_dir.name)
@@ -1293,7 +1346,7 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
         self.assertEqual(1, len(sent_inputs))
-        self.assertIn("Collect compact proposal and context foundations for story IOS-30002STORY before final story spec.", sent_inputs[0])
+        self.assertIn("Produce the proposal and context package for story IOS-30002STORY before requirements and final story spec.", sent_inputs[0])
         self.assertIn("Role-specific rules:", sent_inputs[0])
         launch_script = (
             Path(self.temp_dir.name)
@@ -1315,6 +1368,7 @@ class SessionCreationTests(unittest.TestCase):
         ).read_text()
         self.assertIn("Proposal target:", proposal_agents)
         self.assertIn("Context directory:", proposal_agents)
+        self.assertIn("Required context output:", proposal_agents)
         self.assertIn("bounded one-shot worker", proposal_agents)
         self.assertIn("SDD_FACTORY_ROLE_LIFECYCLE=one-shot", launch_script_text)
         self.assertIn("lifecycle=%s", launch_script_text)
@@ -1353,7 +1407,10 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Clarification mode for this session: ask-a-lot.", sent_inputs[0])
         self.assertIn("Proposal/context summary: Scope clarified", sent_inputs[0])
         self.assertIn("Key context findings: Reuse existing presenter flow", sent_inputs[0])
+        self.assertIn("Context package available under `spec/context/`", sent_inputs[0])
         self.assertEqual("ask-a-lot", hydration["requirements_clarification_mode"])
+        self.assertTrue(hydration["feature_overview_path"].endswith("spec/context/feature-overview.md"))
+        self.assertTrue(hydration["proposal_path"].endswith("spec/proposal.md"))
 
     def test_requirements_completed_moves_story_session_to_acceptance_criteria(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

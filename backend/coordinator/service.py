@@ -2146,8 +2146,10 @@ class CoordinatorService:
             current_owner=PROPOSAL_CONTEXT_WORKER_ROLE,
         )
         instruction = (
-            f"Collect compact proposal and context foundations for story {session.task_key} before final story spec. "
-            "Synthesize the key problem statement, any conflicts or clarifications from the snapshot, and the smallest useful project/context findings for the later story-spec worker."
+            f"Produce the proposal and context package for story {session.task_key} before requirements and final story spec. "
+            "Write or refresh `spec/proposal.md`, always write `spec/context/feature-overview.md`, "
+            "write the other `spec/context/*` files only when they contain grounded task-specific findings, "
+            "and synthesize the key problem statement, conflicts or clarifications from the snapshot, and the smallest useful project/context findings for later story roles."
         )
         if additional_context:
             instruction = f"{instruction}\n\n{additional_context}"
@@ -2463,6 +2465,9 @@ class CoordinatorService:
             context_lines.append(f"Proposal/context summary: {summary}")
         if context_findings:
             context_lines.append(f"Key context findings: {context_findings}")
+        context_lines.append(
+            "Context package available under `spec/context/`; read `feature-overview.md` first and use the other context files selectively."
+        )
         additional_context = "\n".join(context_lines) if context_lines else None
 
         event = self._enqueue_requirements(
@@ -3913,6 +3918,23 @@ class CoordinatorService:
         role: Role,
         stage_name: str,
     ) -> dict[str, str | int | None]:
+        if session.workflow_profile == "story_full":
+            story_payload = self._story_context_extra_hydration(session.task_key)
+            if role.role_name == PROPOSAL_CONTEXT_WORKER_ROLE and stage_name == "proposal_context_requested":
+                return story_payload
+            if role.role_name == REQUIREMENTS_CLARIFIER_WORKER_ROLE and stage_name == "requirements_requested":
+                payload = dict(story_payload)
+                payload["requirements_clarification_mode"] = self._requirements_clarification_mode(session.policy)
+                return payload
+            if role.role_name in {
+                ACCEPTANCE_CRITERIA_WORKER_ROLE,
+                CONSTRAINTS_WORKER_ROLE,
+                SPEC_VERIFIER_WORKER_ROLE,
+                STORY_SPEC_WORKER_ROLE,
+                TASK_DECOMPOSER_WORKER_ROLE,
+                IMPLEMENTER_ROLE,
+            }:
+                return story_payload
         if role.role_name == REQUIREMENTS_CLARIFIER_WORKER_ROLE and stage_name == "requirements_requested":
             return {
                 "requirements_clarification_mode": self._requirements_clarification_mode(session.policy),
@@ -3961,6 +3983,23 @@ class CoordinatorService:
 
     def _requirements_clarification_mode(self, policy: dict[str, str] | None) -> str:
         return (policy or {}).get("requirements_clarification_mode", "ask-selectively")
+
+    def _story_context_extra_hydration(
+        self,
+        task_key: str,
+    ) -> dict[str, str | int | None]:
+        if self.workdir_root is None:
+            return {}
+        context_root = self.workdir_root / task_key / "spec" / "context"
+        return {
+            "proposal_path": str(self.workdir_root / task_key / "spec" / "proposal.md"),
+            "context_directory_path": str(context_root),
+            "feature_overview_path": str(context_root / "feature-overview.md"),
+            "relevant_code_path": str(context_root / "relevant-code.md"),
+            "documentation_path": str(context_root / "documentation.md"),
+            "implementation_patterns_path": str(context_root / "implementation-patterns.md"),
+            "preconditions_path": str(context_root / "preconditions.md"),
+        }
 
     def _find_operator_pending_work_item(self, session_id: int) -> WorkItem | None:
         for item in self.work_item_repository.list_for_session(session_id):
