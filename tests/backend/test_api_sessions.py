@@ -221,7 +221,11 @@ class SessionApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self._original_boy_scout_default = session_policy_module.COMMON_DEFAULTS["boy_scout_policy"]
+        self._original_self_review_default = session_policy_module.COMMON_DEFAULTS["self_review_policy"]
+        self._original_doc_harvest_default = session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"]
         session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = "disabled"
+        session_policy_module.COMMON_DEFAULTS["self_review_policy"] = "disabled"
+        session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"] = "disabled"
         self.db_path = Path(self.temp_dir.name) / "factory.sqlite3"
         self.database = Database(self.db_path)
         self.database.initialize()
@@ -283,6 +287,8 @@ class SessionApiTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = self._original_boy_scout_default
+        session_policy_module.COMMON_DEFAULTS["self_review_policy"] = self._original_self_review_default
+        session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"] = self._original_doc_harvest_default
         self.temp_dir.cleanup()
 
     def write_statuses_file(self, task_key: str, content: str) -> None:
@@ -350,7 +356,7 @@ class SessionApiTests(unittest.TestCase):
         )
 
         self.assertTrue(response.created)
-        for role_name in DEFAULT_SESSION_ROLES + [CODE_REVIEWER_ROLE]:
+        for role_name in DEFAULT_SESSION_ROLES:
             role_dir = Path(self.temp_dir.name) / "IOS-40000W" / "runtime" / "role-workspaces" / role_name
             self.assertTrue(role_dir.is_dir())
             self.assertTrue((role_dir / "AGENTS.md").is_file())
@@ -1962,7 +1968,7 @@ class SessionApiTests(unittest.TestCase):
         )
 
         self.assertTrue(response.polled)
-        self.assertEqual(4, response.role_count)
+        self.assertEqual(3, response.role_count)
         self.assertEqual(2, response.chunk_count)
         self.assertEqual("session_output_polled", response.event_type)
         runtime_outputs = [a for a in artifacts_response.items if a.artifact_type == "runtime_output"]
@@ -1993,7 +1999,7 @@ class SessionApiTests(unittest.TestCase):
         )
 
         self.assertTrue(response.polled)
-        self.assertEqual(4, response.role_count)
+        self.assertEqual(3, response.role_count)
         self.assertEqual(1, response.chunk_count)
         self.assertEqual("session_output_polled", response.event_type)
         self.assertEqual("verification_requested", response.session.current_stage)
@@ -2778,6 +2784,42 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("doc-harvest-worker", response.session.current_owner)
         self.assertEqual("active", response.session.status)
 
+    def test_verification_passed_routes_to_doc_harvest_when_policy_enabled(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40014DHE",
+                workflow_profile="oneshot",
+                policy={"doc_harvest_policy": "enabled"},
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014DHE"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("doc_harvest_requested", response.followup_event_type)
+        self.assertEqual("doc_harvest_requested", response.session.current_stage)
+        self.assertEqual("doc-harvest-worker", response.session.current_owner)
+        self.assertEqual("active", response.session.status)
+
     def test_implementation_completed_routes_to_self_review_when_policy_required(self) -> None:
         create_response = create_session(
             CreateSessionRequest(
@@ -2789,6 +2831,33 @@ class SessionApiTests(unittest.TestCase):
         )
         __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40014SR"),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("self_review_requested", response.followup_event_type)
+        self.assertEqual("self_review_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
+
+    def test_implementation_completed_routes_to_self_review_when_policy_enabled(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40014SRE",
+                workflow_profile="oneshot",
+                policy={"self_review_policy": "enabled"},
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014SRE"),
             dependencies=self.dependencies,
         )
 

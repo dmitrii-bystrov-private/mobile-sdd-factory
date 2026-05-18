@@ -218,7 +218,11 @@ class SessionCreationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self._original_boy_scout_default = session_policy_module.COMMON_DEFAULTS["boy_scout_policy"]
+        self._original_self_review_default = session_policy_module.COMMON_DEFAULTS["self_review_policy"]
+        self._original_doc_harvest_default = session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"]
         session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = "disabled"
+        session_policy_module.COMMON_DEFAULTS["self_review_policy"] = "disabled"
+        session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"] = "disabled"
         self.db_path = Path(self.temp_dir.name) / "factory.sqlite3"
         self.database = Database(self.db_path)
         self.database.initialize()
@@ -260,6 +264,8 @@ class SessionCreationTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = self._original_boy_scout_default
+        session_policy_module.COMMON_DEFAULTS["self_review_policy"] = self._original_self_review_default
+        session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"] = self._original_doc_harvest_default
         self.temp_dir.cleanup()
 
     def write_statuses_file(self, task_key: str, content: str) -> None:
@@ -586,7 +592,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30000W",
             workflow_profile="oneshot",
-            policy=None,
+            policy={"self_review_policy": "required"},
         )
 
         self.assertIsNotNone(session.id)
@@ -1009,7 +1015,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(created)
         self.assertEqual(first_session.id, second_session.id)
         self.assertEqual("task_session_reused", event.event_type)
-        self.assertEqual(4, len(roles))
+        self.assertEqual(3, len(roles))
 
     def test_create_task_session_rejects_conflicting_existing_policy(self) -> None:
         self.coordinator.create_task_session(
@@ -1022,7 +1028,7 @@ class SessionCreationTests(unittest.TestCase):
             self.coordinator.create_task_session(
                 "IOS-30001A",
                 workflow_profile="oneshot",
-                policy={"self_review_policy": "disabled"},
+                policy={"self_review_policy": "required"},
             )
 
     def test_prepare_task_session_runs_intake_and_registers_artifacts(self) -> None:
@@ -3046,7 +3052,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertEqual("session_output_polled", event.event_type)
-        self.assertEqual(4, role_count)
+        self.assertEqual(3, role_count)
         self.assertEqual(2, chunk_count)
         self.assertEqual(
             2,
@@ -3076,7 +3082,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertEqual("session_output_polled", event.event_type)
-        self.assertEqual(4, role_count)
+        self.assertEqual(3, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertFalse(result_path.exists())
@@ -3587,6 +3593,30 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(DOC_HARVEST_ROLE, updated_session.current_owner)
         self.assertEqual("doc_harvest_requested", followup_event.event_type)
 
+    def test_verification_passed_routes_to_doc_harvest_when_policy_enabled(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021EE",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "enabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021EE")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("doc_harvest_requested", updated_session.current_stage)
+        self.assertEqual(DOC_HARVEST_ROLE, updated_session.current_owner)
+        self.assertEqual("doc_harvest_requested", followup_event.event_type)
+
     def test_implementation_completed_routes_to_self_review_when_policy_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021SR1",
@@ -3594,6 +3624,25 @@ class SessionCreationTests(unittest.TestCase):
             policy={"self_review_policy": "required"},
         )
         self.coordinator.prepare_task_session("IOS-30021SR1")
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("self_review_requested", updated_session.current_stage)
+        self.assertEqual("code-reviewer", updated_session.current_owner)
+        self.assertEqual("self_review_requested", followup_event.event_type)
+
+    def test_implementation_completed_routes_to_self_review_when_policy_enabled(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021SR1E",
+            workflow_profile="oneshot",
+            policy={"self_review_policy": "enabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021SR1E")
 
         updated_session, followup_event = self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -3632,6 +3681,57 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification-coordinator", updated_session.current_owner)
         self.assertTrue(any(item.artifact_type == "self_review_summary" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
+
+    def test_self_review_skipped_not_needed_routes_to_verification_when_policy_enabled(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021SR2E",
+            workflow_profile="oneshot",
+            policy={"self_review_policy": "enabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021SR2E")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="skipped_not_needed",
+            payload={"summary": "The diff is too small to justify a meaningful self-review pass."},
+        )
+
+        self.assertEqual("self_review_passed", mapped_event.event_type)
+        self.assertIsNotNone(followup_event)
+        assert followup_event is not None
+        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+
+    def test_self_review_skipped_not_needed_is_rejected_when_policy_required(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021SR2R",
+            workflow_profile="oneshot",
+            policy={"self_review_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021SR2R")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Self review cannot be skipped when self_review_policy is required",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name=CODE_REVIEWER_ROLE,
+                output_type="skipped_not_needed",
+                payload={"summary": "The diff is too small to justify a meaningful self-review pass."},
+            )
 
     def test_implementation_completed_routes_to_boy_scout_when_policy_enabled(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -3823,6 +3923,69 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("completed", updated_session.status.value)
         self.assertEqual("send_to_test_completed", updated_session.current_stage)
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
+
+    def test_doc_harvest_skipped_not_needed_completes_session_when_policy_enabled(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021FHE",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "enabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021FHE")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=DOC_HARVEST_ROLE,
+            output_type="skipped_not_needed",
+            payload={"summary": "No grounded README target was affected by this change."},
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("doc_harvest_completed", mapped_event.event_type)
+        self.assertIsNotNone(followup_event)
+        assert followup_event is not None
+        self.assertEqual("send_to_test_completed", followup_event.event_type)
+        self.assertEqual("completed", updated_session.status.value)
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
+
+    def test_doc_harvest_skipped_not_needed_is_rejected_when_policy_required(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021FHR",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021FHR")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Doc harvest cannot be skipped when doc_harvest_policy is required",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name=DOC_HARVEST_ROLE,
+                output_type="skipped_not_needed",
+                payload={"summary": "No grounded README target was affected by this change."},
+            )
 
     def test_followup_implementation_completed_reenters_verification_loop(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022")

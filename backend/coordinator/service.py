@@ -3304,7 +3304,7 @@ class CoordinatorService:
 
         if (
             completed_work_type in {"implementation", "subtask_implementation"}
-            and (session.policy or {}).get("self_review_policy") == "required"
+            and self._optional_lane_policy_mode(session.policy, "self_review_policy") != "disabled"
         ):
             return self._enqueue_self_review(session=session, source_event=source_event)
 
@@ -3500,8 +3500,8 @@ class CoordinatorService:
         active_item = verification_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._materialize_final_verification_file(session=session, source_event=source_event)
-        doc_harvest_policy = (session.policy or {}).get("doc_harvest_policy")
-        if doc_harvest_policy == "required":
+        doc_harvest_policy = self._optional_lane_policy_mode(session.policy, "doc_harvest_policy")
+        if doc_harvest_policy != "disabled":
             session, event = self._enqueue_doc_harvest(session=session, source_event=source_event)
             return session, event
         return self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
@@ -4066,6 +4066,10 @@ class CoordinatorService:
         if role_name == CODE_REVIEWER_ROLE and session.current_stage == "self_review_requested":
             if output_type in {"passed", "completed"}:
                 return "self_review_passed"
+            if output_type == "skipped_not_needed":
+                if self._optional_lane_policy_mode(session.policy, "self_review_policy") != "enabled":
+                    raise IntakeError("Self review cannot be skipped when self_review_policy is required")
+                return "self_review_passed"
             if output_type == "failed":
                 return "self_review_issues_found"
         if role_name == CODE_SCOUT_ROLE and session.current_stage == "boy_scout_requested":
@@ -4073,6 +4077,10 @@ class CoordinatorService:
                 return "boy_scout_completed"
         if role_name == DOC_HARVEST_ROLE and session.current_stage == "doc_harvest_requested":
             if output_type in {"passed", "completed"}:
+                return "doc_harvest_completed"
+            if output_type == "skipped_not_needed":
+                if self._optional_lane_policy_mode(session.policy, "doc_harvest_policy") != "enabled":
+                    raise IntakeError("Doc harvest cannot be skipped when doc_harvest_policy is required")
                 return "doc_harvest_completed"
         if role_name == MR_COMMENTS_ANALYST_ROLE and session.current_stage == "mr_comments_analysis_requested":
             if output_type in {"passed", "completed"}:
@@ -4581,6 +4589,16 @@ class CoordinatorService:
     def _requirements_clarification_mode(self, policy: dict[str, str] | None) -> str:
         return (policy or {}).get("requirements_clarification_mode", "ask-selectively")
 
+    def _optional_lane_policy_mode(
+        self,
+        policy: dict[str, str] | None,
+        policy_key: str,
+    ) -> str:
+        value = str((policy or {}).get(policy_key, "enabled")).strip()
+        if value in {"disabled", "enabled", "required"}:
+            return value
+        return "enabled"
+
     def _story_context_extra_hydration(
         self,
         task_key: str,
@@ -4745,16 +4763,33 @@ class CoordinatorService:
         if stage_name == "verification_correction_requested":
             return f"Apply verification corrections for {task_key}."
         if stage_name == "self_review_requested":
+            policy_mode = self._optional_lane_policy_mode(session_policy, "self_review_policy")
+            if policy_mode == "required":
+                return (
+                    f"Review the current task changes for {task_key}. "
+                    "Emit passed if the review is clean, or failed if issues still require correction. "
+                    "This self-review lane is required for this session, so do not emit skipped_not_needed."
+                )
             return (
                 f"Review the current task changes for {task_key}. "
-                "Emit passed if the review is clean, or failed if issues still require correction."
+                "Emit passed if the review is clean, failed if issues still require correction, "
+                "or skipped_not_needed if this diff is too small or too low-signal to justify a real review pass."
             )
         if stage_name == "self_review_correction_requested":
             return f"Apply self review corrections for {task_key}."
         if stage_name == "doc_harvest_requested":
+            policy_mode = self._optional_lane_policy_mode(session_policy, "doc_harvest_policy")
+            if policy_mode == "required":
+                return (
+                    f"Run documentation harvest for {task_key}. "
+                    "Generate or refresh `spec/full-diff.md`, use it as the source of truth, update grounded feature-level README targets only, "
+                    "commit only the documentation changes, and report a compact result summary. "
+                    "This documentation lane is required for this session, so do not emit skipped_not_needed."
+                )
             return (
                 f"Run documentation harvest for {task_key}. "
                 "Generate or refresh `spec/full-diff.md`, use it as the source of truth, update grounded feature-level README targets only, commit only the documentation changes, and report a compact result summary."
+                " Emit skipped_not_needed when the completed change has no grounded README/doc target or does not warrant a documentation update."
             )
         if stage_name == "mr_comments_analysis_requested":
             return (
