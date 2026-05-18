@@ -93,6 +93,15 @@ def role_runtime_rules(role_name: str) -> str:
             "- Start from `spec/proposal.md`, clarified requirements, and `spec/context/feature-overview.md`; read other `spec/context/*` files only when they help clarify behavior coverage.\n"
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than behavioral coverage gaps.\n\n"
         )
+    if role_name == "spec-verifier-worker":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded planning verifier for one story session.\n"
+            "- Fix non-blocking planning issues autonomously inside the spec package when you can do so confidently.\n"
+            "- If critical blockers remain, stop the planning flow, summarize the blockers clearly, and ask the operator direct follow-up questions in the live session instead of guessing.\n"
+            "- Use `failed` output when blocker resolution from the operator is required; after the operator replies, continue verification in the same live session.\n"
+            "- Use `completed` output only when the planning package is ready for the next story-spec step.\n\n"
+        )
     if role_name == "verification-coordinator":
         return (
             "Role-specific rules:\n"

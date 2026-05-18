@@ -431,10 +431,7 @@ class CoordinatorService:
             if (
                 blocker_event is None
                 and (
-                    (
-                        event.event_type == "session_escalated_to_operator"
-                        and event.payload.get("reason") == "runtime_error"
-                    )
+                    event.event_type == "session_escalated_to_operator"
                     or event.event_type == "role_runtime_error_reported"
                 )
             ):
@@ -496,6 +493,9 @@ class CoordinatorService:
             return session, followup_event
         if event_type == "proposal_context_completed":
             session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "spec_verification_blocked":
+            session, followup_event = self._handle_spec_verification_blocked(session, accepted_event)
             return session, followup_event
         if event_type == "mr_comments_analysis_completed":
             session, followup_event = self._handle_mr_comments_analysis_completed(session, accepted_event)
@@ -1387,6 +1387,8 @@ class CoordinatorService:
             session, followup_event = self._handle_bug_analysis_completed(session, accepted_event)
         elif mapped_event_type == "proposal_context_completed":
             session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
+        elif mapped_event_type == "spec_verification_blocked":
+            session, followup_event = self._handle_spec_verification_blocked(session, accepted_event)
         elif mapped_event_type == "mr_comments_analysis_completed":
             session, followup_event = self._handle_mr_comments_analysis_completed(session, accepted_event)
         elif mapped_event_type == "requirements_completed":
@@ -3075,6 +3077,49 @@ class CoordinatorService:
         )
         return session, event
 
+    def _handle_spec_verification_blocked(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        verification_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "spec_verification" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not verification_items:
+            raise IntakeError("No active spec verification work item found for the session")
+
+        active_item = verification_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="spec_verification_requested",
+            current_owner=SPEC_VERIFIER_WORKER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        summary = str(source_event.payload.get("summary") or "").strip() or "spec verification blockers require operator input"
+        details = str(source_event.payload.get("details") or "").strip()
+        blocker_questions = source_event.payload.get("blocker_questions")
+        if isinstance(blocker_questions, list) and blocker_questions:
+            rendered = "\n".join(f"- {str(item).strip()}" for item in blocker_questions if str(item).strip())
+            if rendered:
+                details = f"{details}\n\nQuestions:\n{rendered}".strip() if details else f"Questions:\n{rendered}"
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "spec_verification_blockers",
+                "role_name": SPEC_VERIFIER_WORKER_ROLE,
+                "work_item_id": active_item.id,
+                "summary": summary,
+                "details": details or "Resolve planning blockers with the verifier, then continue in the same live session.",
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
     def _handle_verification_failed(
         self,
         session: Session,
@@ -3730,6 +3775,8 @@ class CoordinatorService:
         if role_name == SPEC_VERIFIER_WORKER_ROLE and session.current_stage == "spec_verification_requested":
             if output_type in {"passed", "completed"}:
                 return "spec_verification_completed"
+            if output_type == "failed":
+                return "spec_verification_blocked"
         if role_name == STORY_SPEC_WORKER_ROLE and session.current_stage == "story_spec_requested":
             if output_type in {"passed", "completed"}:
                 return "story_spec_completed"

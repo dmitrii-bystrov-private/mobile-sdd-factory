@@ -1603,6 +1603,56 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Planning verification summary: Planning package is coherent", sent_inputs[0])
         self.assertIn("Verified focus: navigation + state ownership", sent_inputs[0])
 
+    def test_spec_verification_failed_escalates_story_session_to_operator(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003VERIFYBLOCK",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003VERIFYBLOCK")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Scope clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="requirements_completed",
+            payload={"summary": "Requirements clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="acceptance_criteria_completed",
+            payload={"summary": "Acceptance prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=SPEC_VERIFIER_WORKER_ROLE,
+            output_type="failed",
+            payload={
+                "summary": "Planning blockers require operator decisions.",
+                "details": "Two contradictory scope choices remain unresolved.",
+                "blocker_questions": [
+                    "Should notifications remain inline or move to a separate settings screen?",
+                    "Must offline draft persistence be required in v1?",
+                ],
+            },
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("spec_verification_blocked", mapped_event.event_type)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("spec_verification_requested", updated_session.current_stage)
+        self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, updated_session.current_owner)
+        self.assertTrue(any(item.work_type == "spec_verification" and item.status.value == "waiting_for_operator" for item in work_items))
+
     def test_story_spec_completed_moves_session_to_task_decomposition(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003STORY",

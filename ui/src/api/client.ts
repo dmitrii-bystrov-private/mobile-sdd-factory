@@ -44,6 +44,7 @@ const STREAM_EVENT_TYPES = [
   "self_review_correction_requested",
   "doc_harvest_requested",
   "doc_harvest_completed",
+  "spec_verification_blocked",
   "verification_requested",
   "verification_failed",
   "verification_correction_requested",

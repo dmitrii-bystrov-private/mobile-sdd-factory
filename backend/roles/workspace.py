@@ -292,7 +292,7 @@ def _role_responsibility(role_name: str) -> list[str]:
     if role_name == "spec-verifier-worker":
         return [
             "- You execute one bounded planning-verification task for one story session.",
-            "- Produce the routed verification result and then stop; you do not remain the owner of later planning or implementation work.",
+            "- Produce the routed verification result and then stop only when the planning package is actually clean; if critical blockers remain, continue after the operator replies in the same live session.",
             "- You should not assume persistence across unrelated tasks or later implementation rounds.",
         ]
     if role_name == "task-decomposer-worker":
@@ -400,8 +400,9 @@ def _role_operating_rules(role_name: str) -> list[str]:
         ]
     if role_name == "spec-verifier-worker":
         return [
-            "- Treat this role as a bounded one-shot worker: verify the assembled planning package, write the routed result, and exit.",
+            "- Treat this role as a bounded planning verifier: verify the assembled planning package, write the routed result, and exit only when the package is actually clean.",
             "- Start from the proposal, requirements, acceptance criteria, constraints, and `spec/context/feature-overview.md`; use the rest of `spec/context/*` selectively when checking planning coherence.",
+            "- Fix non-blocking issues autonomously. If critical blockers remain, summarize them clearly, ask the operator direct live questions, and continue verification after answers arrive.",
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than re-checking the planning package.",
         ]
     if role_name == "task-decomposer-worker":

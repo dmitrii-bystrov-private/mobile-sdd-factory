@@ -975,6 +975,52 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("story_spec_requested", response.followup_event_type)
         self.assertEqual("story_spec_requested", response.session.current_stage)
 
+    def test_spec_verification_failed_output_route_escalates_to_operator(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003VERIFYBLOCK",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003VERIFYBLOCK"),
+            dependencies=self.dependencies,
+        )
+        for event_type, summary in [
+            ("proposal_context_completed", "Context prepared"),
+            ("requirements_completed", "Requirements prepared"),
+            ("acceptance_criteria_completed", "Acceptance prepared"),
+            ("constraints_completed", "Constraints prepared"),
+        ]:
+            inject_event(
+                InjectEventRequest(
+                    session_id=prepare_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": summary},
+                ),
+                dependencies=self.dependencies,
+            )
+
+        response = submit_role_output(
+            RoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name=SPEC_VERIFIER_WORKER_ROLE,
+                output_type="failed",
+                payload={
+                    "summary": "Planning blockers require operator decisions.",
+                    "details": "Two contradictory scope choices remain unresolved.",
+                    "blocker_questions": ["Choose notification model", "Confirm offline persistence scope"],
+                },
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("spec_verification_blocked", response.mapped_event_type)
+        self.assertEqual("session_escalated_to_operator", response.followup_event_type)
+        self.assertEqual("spec_verification_requested", response.session.current_stage)
+        self.assertEqual("waiting_for_operator", response.session.status)
+
     def test_story_spec_completed_event_returns_task_decomposition_handoff(self) -> None:
         prepare_response = create_session(
             CreateSessionRequest(
