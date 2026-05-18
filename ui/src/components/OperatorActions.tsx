@@ -193,7 +193,8 @@ export function OperatorActions({
     ["subtask_creation_requested", "implementation_requested", "subtask_implementation_requested", "verification_requested"].includes(
       session.current_stage,
     );
-  const canCreateMr = session.status === "completed" && session.current_stage !== "mr_handoff_completed";
+  const canCreateMr =
+    session.status === "completed" && session.current_stage === "task_completed";
   const canSendToTest =
     session.status === "completed" && session.current_stage === "mr_handoff_completed";
 
@@ -215,20 +216,6 @@ export function OperatorActions({
       description: "Materialize Jira subtasks from the current story plan when the session is ready for decomposition output.",
       disabled: busy || !canCreateSubtasksFromPlan,
       onClick: () => run(() => apiClient.createSubtasksFromPlan(session.id)),
-    },
-    {
-      label: "Create MR Handoff",
-      description: "Produce the merge request handoff after implementation and verification are already complete.",
-      disabled: busy || !canCreateMr,
-      strong: true,
-      onClick: () => run(() => apiClient.createMr(session.id)),
-    },
-    {
-      label: "Send To Test",
-      description: "Move the session into testing after the MR handoff is ready.",
-      disabled: busy || !canSendToTest,
-      strong: true,
-      onClick: () => run(() => apiClient.sendToTest(session.id)),
     },
   ];
 
@@ -266,6 +253,20 @@ export function OperatorActions({
       description: "Retry the current stage after a waiting-for-operator interruption without changing the routed work.",
       disabled: busy || session.status !== "waiting_for_operator",
       onClick: () => run(() => apiClient.retrySession(session.id)),
+    },
+    {
+      label: "Retry MR Handoff",
+      description: "Manually rerun MR handoff only after automatic delivery failed at the merge request creation step.",
+      disabled: busy || !canCreateMr,
+      strong: true,
+      onClick: () => run(() => apiClient.createMr(session.id)),
+    },
+    {
+      label: "Retry Send To Test",
+      description: "Manually rerun send-to-test only after automatic delivery failed after MR handoff completed.",
+      disabled: busy || !canSendToTest,
+      strong: true,
+      onClick: () => run(() => apiClient.sendToTest(session.id)),
     },
   ];
 
