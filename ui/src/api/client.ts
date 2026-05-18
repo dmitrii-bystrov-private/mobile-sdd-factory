@@ -27,6 +27,9 @@ const STREAM_EVENT_TYPES = [
   "bug_analysis_completed",
   "story_spec_requested",
   "story_spec_completed",
+  "snapshot_refreshed_by_operator",
+  "snapshot_refresh_failed_by_operator",
+  "snapshot_continue_processed",
   "subtask_state_refreshed_by_operator",
   "subtask_state_refresh_failed_by_operator",
   "subtask_graph_requested",
@@ -592,6 +595,22 @@ export const apiClient = {
     session: Session;
   }> {
     return request("/operator/refresh-subtask-state", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+      }),
+    });
+  },
+
+  refreshSnapshot(
+    sessionId: number,
+  ): Promise<{
+    refreshed: boolean;
+    event_type: string;
+    followup_event_type?: string | null;
+    session: Session;
+  }> {
+    return request("/operator/refresh-snapshot", {
       method: "POST",
       body: JSON.stringify({
         session_id: sessionId,

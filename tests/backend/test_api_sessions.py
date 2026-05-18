@@ -45,6 +45,7 @@ try:
     from backend.api.routes_operator import get_environment_doctor
     from backend.api.routes_operator import get_runtime_capabilities
     from backend.api.routes_operator import get_runtime_defaults
+    from backend.api.routes_operator import refresh_snapshot
     from backend.api.routes_operator import refresh_subtask_state
     from backend.api.routes_operator import restart_runtime_role
     from backend.api.routes_operator import restart_runtime_session
@@ -66,6 +67,7 @@ try:
         IngestMrCommentsRequest,
         PollSessionOutputRequest,
         PauseSessionRequest,
+        RefreshSnapshotRequest,
         RefreshSubtaskStateRequest,
         ReopenFromQaRequest,
         RedirectSessionRequest,
@@ -630,6 +632,38 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("subtask_state_refreshed_by_operator", response.event_type)
         self.assertEqual("subtask_implementation_requested", response.followup_event_type)
         self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+
+    def test_refresh_snapshot_route_reruns_snapshot_and_ticks_loop(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005SNAP", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005SNAP"),
+            dependencies=self.dependencies,
+        )
+        initial_calls = self.snapshot_adapter.calls.count("IOS-40005SNAP")
+
+        response = refresh_snapshot(
+            RefreshSnapshotRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=create_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.refreshed)
+        self.assertEqual("snapshot_refreshed_by_operator", response.event_type)
+        self.assertEqual("snapshot_continue_processed", response.followup_event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertEqual(initial_calls + 1, self.snapshot_adapter.calls.count("IOS-40005SNAP"))
+        self.assertTrue(
+            any(item.artifact_type == "snapshot_refresh_stdout" for item in artifacts_response.items)
+        )
+        self.assertTrue(
+            any(item.artifact_type == "snapshot_refresh_stderr" for item in artifacts_response.items)
+        )
 
     def test_create_session_route_rejects_irrelevant_policy_for_profile(self) -> None:
         from fastapi import HTTPException

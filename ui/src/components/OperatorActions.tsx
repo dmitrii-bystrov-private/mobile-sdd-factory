@@ -150,6 +150,9 @@ export function OperatorActions({
   }
 
   const canOpenFollowup = session.status === "completed";
+  const canRefreshSnapshot =
+    session.status !== "completed" ||
+    ["mr_handoff_completed", "send_to_test_completed", "qa_reopen_requested"].includes(session.current_stage);
   const canSkipBoyScout =
     session.current_stage === "boy_scout_requested" && session.status === "waiting_for_operator";
   const canCompleteSelfReview =
@@ -175,6 +178,12 @@ export function OperatorActions({
     session.status === "completed" && session.current_stage === "mr_handoff_completed";
 
   const dailyActions: ActionDefinition[] = [
+    {
+      label: "Refresh Snapshot",
+      description: "Rerun snapshot collection and let the coordinator process the refreshed task state once.",
+      disabled: busy || !canRefreshSnapshot,
+      onClick: () => run(() => apiClient.refreshSnapshot(session.id)),
+    },
     {
       label: "Refresh Subtask State",
       description: "Pull the latest subtask progress after new Jira subtasks or follow-up work appears.",

@@ -567,6 +567,17 @@ class RefreshSubtaskStateResponse(BaseModel):
     followup_event_type: str | None = None
 
 
+class RefreshSnapshotRequest(BaseModel):
+    session_id: int
+
+
+class RefreshSnapshotResponse(BaseModel):
+    refreshed: bool
+    session: SessionResponse
+    event_type: str
+    followup_event_type: str | None = None
+
+
 class CreateKnowledgeRequest(BaseModel):
     session_id: int
     title: str

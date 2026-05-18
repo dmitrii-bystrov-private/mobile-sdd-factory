@@ -21,6 +21,8 @@ from backend.api.schemas import (
     UpdateRuntimeDefaultsRequest,
     CreateSubtasksFromPlanRequest,
     CreateSubtasksFromPlanResponse,
+    RefreshSnapshotRequest,
+    RefreshSnapshotResponse,
     RefreshSubtaskStateRequest,
     RefreshSubtaskStateResponse,
     CreateKnowledgeRequest,
@@ -535,6 +537,26 @@ def refresh_subtask_state(
 
     return RefreshSubtaskStateResponse(
         refreshed=event.event_type == "subtask_state_refreshed_by_operator",
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
+@router.post("/refresh-snapshot", response_model=RefreshSnapshotResponse)
+def refresh_snapshot(
+    payload: RefreshSnapshotRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RefreshSnapshotResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.refresh_snapshot_and_continue(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return RefreshSnapshotResponse(
+        refreshed=event.event_type == "snapshot_refreshed_by_operator",
         session=to_session_response(session),
         event_type=event.event_type,
         followup_event_type=followup_event.event_type if followup_event else None,

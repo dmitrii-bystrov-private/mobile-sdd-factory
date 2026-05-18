@@ -1203,6 +1203,91 @@ class CoordinatorService:
         session = self._get_session_or_raise(session.id)
         return session, event, followup_event
 
+    def refresh_snapshot_and_continue(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event, Event | None]:
+        if self.snapshot_adapter is None or self.workdir_root is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing snapshot adapter or workdir root")
+
+        session = self._get_session_or_raise(session_id)
+        result = self.snapshot_adapter.run(session.task_key)
+
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "operator-refresh",
+            "snapshot-refresh.stdout.txt",
+            result.stdout,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="operator-refresh",
+            artifact_type="snapshot_refresh_stdout",
+            path=str(stdout_path),
+            metadata={"task_key": session.task_key, "command": result.command, "exit_code": result.returncode},
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "operator-refresh",
+            "snapshot-refresh.stderr.txt",
+            result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="operator-refresh",
+            artifact_type="snapshot_refresh_stderr",
+            path=str(stderr_path),
+            metadata={"task_key": session.task_key, "command": result.command, "exit_code": result.returncode},
+        )
+
+        if not result.ok:
+            event = self._append_event(
+                session_id=session.id,
+                event_type="snapshot_refresh_failed_by_operator",
+                producer_type="operator",
+                payload={
+                    "task_key": session.task_key,
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                    "snapshot_exit_code": result.returncode,
+                },
+            )
+            return session, event, None
+
+        event = self._append_event(
+            session_id=session.id,
+            event_type="snapshot_refreshed_by_operator",
+            producer_type="operator",
+            payload={
+                "task_key": session.task_key,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+                "snapshot_exit_code": result.returncode,
+            },
+        )
+
+        if session.status != SessionStatus.ACTIVE:
+            return session, event, None
+
+        loop_event, session_count, chunk_count = self.run_loop_once()
+        session = self._get_session_or_raise(session.id)
+        followup_event = None
+        if loop_event is not None:
+            followup_event = self._append_event(
+                session_id=session.id,
+                event_type="snapshot_continue_processed",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "session_count": session_count,
+                    "chunk_count": chunk_count,
+                    "loop_event_type": loop_event.event_type,
+                },
+            )
+        return session, event, followup_event
+
     def reopen_from_qa(
         self,
         session_id: int,
