@@ -48,6 +48,22 @@ class RolePromptTests(unittest.TestCase):
         self.assertNotIn("Preferred terminal outcome path:", text)
         self.assertNotIn('"current_stage": "verification_requested"', text)
 
+    def test_full_prompt_restores_proposal_context_fetch_and_conflict_rules(self) -> None:
+        text = role_handoff_prompt(
+            role_name="proposal-context-worker",
+            instruction="Collect proposal and context foundations for story IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "proposal_context_requested",
+                "work_item_id": 3,
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("Read `description.md` and `comments.md` first; comments take precedence", text)
+        self.assertIn("use Notion MCP for `notion.so` links", text)
+        self.assertIn("stop instead of writing a partial proposal when a required fetch fails", text)
+
 
 if __name__ == "__main__":
     unittest.main()

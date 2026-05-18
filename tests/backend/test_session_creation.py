@@ -1349,6 +1349,9 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Produce the proposal and context package for story IOS-30002STORY before requirements and final story spec.", sent_inputs[0])
+        self.assertIn("Read `description.md` and `comments.md`", sent_inputs[0])
+        self.assertIn("comments take precedence over description when they conflict", sent_inputs[0])
+        self.assertIn("stop instead of writing a partial proposal when a required fetch fails", sent_inputs[0])
         self.assertIn("Role-specific rules:", sent_inputs[0])
         launch_script = (
             Path(self.temp_dir.name)
@@ -1369,9 +1372,12 @@ class SessionCreationTests(unittest.TestCase):
             / "AGENTS.md"
         ).read_text()
         self.assertIn("Proposal target:", proposal_agents)
+        self.assertIn("Required snapshot inputs:", proposal_agents)
         self.assertIn("Context directory:", proposal_agents)
         self.assertIn("Required context output:", proposal_agents)
         self.assertIn("bounded one-shot worker", proposal_agents)
+        self.assertIn("comments.md` as the fresher source", proposal_agents)
+        self.assertIn("Notion MCP for `notion.so` content", proposal_agents)
         self.assertIn("SDD_FACTORY_ROLE_LIFECYCLE=one-shot", launch_script_text)
         self.assertIn("lifecycle=%s", launch_script_text)
 

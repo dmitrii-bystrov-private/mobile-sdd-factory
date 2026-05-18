@@ -124,6 +124,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
     if role_name == "proposal-context-worker":
         return [
             "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Required snapshot inputs: `{task_snapshot_root}/description.md`, `{task_snapshot_root}/comments.md`",
             "- Proposal target: `{task_snapshot_root}/spec/proposal.md`",
             "- Context directory: `{task_snapshot_root}/spec/context`",
             "- Required context output: `{task_snapshot_root}/spec/context/feature-overview.md`",
@@ -269,6 +270,9 @@ def _role_responsibility(role_name: str) -> list[str]:
         return [
             "- You execute one bounded proposal/context preparation task for one story session.",
             "- Produce `spec/proposal.md` plus the `spec/context/` package, then stop; you do not remain the owner of later planning or implementation work.",
+            "- Read `description.md` and `comments.md` first; when they conflict, treat `comments.md` as the fresher source and record the conflict explicitly in the proposal.",
+            "- Resolve explicit HTTP/HTTPS links from the snapshot; use Notion MCP for `notion.so` content, and stop instead of writing a partial proposal when a required external fetch fails.",
+            "- Resolve only explicit local file references from the snapshot before broadening to any narrower repo exploration.",
             "- You should not assume persistence across unrelated tasks or later implementation rounds.",
         ]
     if role_name == "requirements-clarifier-worker":

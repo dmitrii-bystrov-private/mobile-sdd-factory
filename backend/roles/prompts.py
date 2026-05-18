@@ -73,9 +73,11 @@ def role_runtime_rules(role_name: str) -> str:
         return (
             "Role-specific rules:\n"
             "- Treat this role as a bounded one-shot worker: produce the proposal/context package, write the routed result, and exit.\n"
-            "- Read snapshot description/comments first; synthesize or refresh `spec/proposal.md` before finishing this pass.\n"
+            "- Read `description.md` and `comments.md` first; comments take precedence over description when they conflict because they are the fresher source.\n"
+            "- Synthesize or refresh `spec/proposal.md` before finishing this pass, but stop and report instead of overwriting a manually preserved proposal when the routed work explicitly says regeneration is not allowed.\n"
+            "- Extract explicit HTTP/HTTPS links and explicit local file references from the snapshot; use Notion MCP for `notion.so` links, use normal fetch capability for other URLs, and stop instead of writing a partial proposal when a required fetch fails.\n"
             "- Build a real `spec/context/` package: always write `feature-overview.md`, and write `relevant-code.md`, `documentation.md`, `implementation-patterns.md`, and `preconditions.md` only when they contain task-specific grounded findings.\n"
-            "- Use repo sources and local docs only when they are directly needed to ground the proposal/context result; prefer RAG tools first for code exploration.\n"
+            "- Use repo sources and local docs only when they are directly needed to ground the proposal/context result; resolve only explicit local references from the snapshot first, and otherwise prefer RAG tools for narrow code exploration.\n"
             "- Keep the output compact and downstream-oriented so later story roles can reuse the written context package instead of rediscovering it.\n\n"
         )
     if role_name == "requirements-clarifier-worker":

@@ -4410,7 +4410,9 @@ class CoordinatorService:
         if stage_name == "proposal_context_requested":
             return (
                 f"Collect proposal and context foundations for story {task_key}. "
-                "Extract the compact problem statement, key clarifications, and the smallest useful project/context findings for the later story-spec step."
+                "Read `description.md` and `comments.md`, treat comments as the fresher source when they conflict, "
+                "resolve explicit links and file references from the snapshot, stop instead of writing a partial proposal when a required fetch fails, "
+                "and extract the compact problem statement, key clarifications, and the smallest useful project/context findings for the later story-spec step."
             )
         if stage_name == "requirements_requested":
             clarification_mode = self._requirements_clarification_mode(session_policy)
