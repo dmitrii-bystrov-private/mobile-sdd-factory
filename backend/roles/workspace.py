@@ -417,13 +417,15 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Treat this role as a bounded one-shot worker: prepare task decomposition, write the routed result, and exit.",
             "- Start from the verified planning package, final story spec, and `spec/context/feature-overview.md`; use `relevant-code.md` and `implementation-patterns.md` when they materially affect task boundaries.",
-            "- When the decomposition naturally maps to Jira-subtask-sized execution units, include a legacy-compatible plan package in the routed output: `plan_index_markdown` plus `plan_task_files` with self-contained Markdown task files.",
+            "- Always include a plan package in the routed output: `plan_index_markdown` plus `plan_task_files` with self-contained Markdown task files.",
+            "- Make every task file self-contained: copy relevant acceptance criteria, constraints, exact repo file paths, and validation steps into the task instead of pointing back to spec files.",
             "- Keep the output compact and downstream-oriented so execution can start from an explicit decomposition instead of implicit planning assumptions.",
         ]
     if role_name == "story-spec-worker":
         return [
-            "- Treat this role as a bounded one-shot worker: launch, produce the routed spec result, and exit.",
+            "- Treat this role as a bounded one-shot worker: assemble the final implementation-shaping story spec, produce the routed spec result, and exit.",
             "- Read `spec/context/feature-overview.md` first when it exists and pull in other `spec/context/*` files only when they materially sharpen the final story spec.",
+            "- Turn the verified planning package into a durable implementation guide that captures scope, approach, and architecture-sensitive decisions clearly enough for decomposition and coding.",
             "- Do not retain ownership after the planning/spec result is produced.",
         ]
     return [

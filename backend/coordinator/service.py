@@ -2141,8 +2141,9 @@ class CoordinatorService:
             current_owner=STORY_SPEC_WORKER_ROLE,
         )
         instruction = (
-            f"Prepare a concise implementation spec for story {session.task_key} before coding. "
-            "Clarify the intended scope, key constraints, and an implementation approach that will guide the next coding step."
+            f"Prepare the final implementation-shaping story spec for {session.task_key} before coding. "
+            "Turn the verified planning package into a durable implementation guide that clarifies intended scope, key constraints, implementation approach, "
+            "and architecture-sensitive decisions that should guide decomposition and coding."
         )
         if additional_context:
             instruction = f"{instruction}\n\n{additional_context}"
@@ -2426,8 +2427,8 @@ class CoordinatorService:
             current_owner=TASK_DECOMPOSER_WORKER_ROLE,
         )
         instruction = (
-            f"Prepare compact task decomposition for story {session.task_key} before implementation starts. "
-            "Break the verified planning package into the smallest useful execution-oriented chunks for later implementation or subtask flow."
+            f"Prepare task decomposition for story {session.task_key} before implementation starts. "
+            "Always produce a durable `plan/index.md` plus self-contained `plan/NN-*.md` task package, and break the verified planning package into the smallest useful execution-oriented chunks for later implementation or subtask flow."
         )
         if additional_context:
             instruction = f"{instruction}\n\n{additional_context}"
@@ -2814,6 +2815,10 @@ class CoordinatorService:
         task_breakdown = str(source_event.payload.get("task_breakdown") or "").strip()
         plan_index_markdown = str(source_event.payload.get("plan_index_markdown") or "").strip()
         raw_plan_task_files = source_event.payload.get("plan_task_files") or []
+        if not plan_index_markdown:
+            raise IntakeError("Task decomposition must include plan_index_markdown")
+        if not isinstance(raw_plan_task_files, list) or not raw_plan_task_files:
+            raise IntakeError("Task decomposition must include non-empty plan_task_files")
         context_lines: list[str] = []
         if summary:
             context_lines.append(f"Task decomposition summary: {summary}")
@@ -2838,12 +2843,11 @@ class CoordinatorService:
                     "task_key": session.task_key,
                 },
             )
-            if plan_index_markdown:
-                self._write_task_decomposition_plan_package(
-                    session=session,
-                    plan_index_markdown=plan_index_markdown,
-                    raw_plan_task_files=raw_plan_task_files,
-                )
+            self._write_task_decomposition_plan_package(
+                session=session,
+                plan_index_markdown=plan_index_markdown,
+                raw_plan_task_files=raw_plan_task_files,
+            )
 
         event = self._enqueue_initial_implementation(
             session=session,
@@ -4450,13 +4454,14 @@ class CoordinatorService:
             )
         if stage_name == "story_spec_requested":
             return (
-                f"Prepare a concise implementation spec for story {task_key} before coding. "
-                "Clarify the intended scope, key constraints, and an implementation approach that will guide the next coding step."
+                f"Prepare the final implementation-shaping story spec for {task_key} before coding. "
+                "Turn the verified planning package into a durable implementation guide that clarifies intended scope, key constraints, implementation approach, "
+                "and architecture-sensitive decisions that should guide decomposition and coding."
             )
         if stage_name == "task_decomposition_requested":
             return (
-                f"Prepare compact task decomposition for story {task_key}. "
-                "Break the verified planning package into the smallest useful execution-oriented chunks before implementation starts."
+                f"Prepare task decomposition for story {task_key}. "
+                "Always produce a durable `plan/index.md` plus self-contained `plan/NN-*.md` task package, and break the verified planning package into the smallest useful execution-oriented chunks before implementation starts."
             )
         if stage_name == "subtask_implementation_requested":
             return (

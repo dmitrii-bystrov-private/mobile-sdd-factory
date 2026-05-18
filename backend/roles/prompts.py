@@ -106,6 +106,22 @@ def role_runtime_rules(role_name: str) -> str:
             "- Express constraints as imperative MUST, MUST NOT, and SHOULD statements across architectural, performance, security, and platform-specific categories when they are applicable.\n"
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than rediscovering constraints.\n\n"
         )
+    if role_name == "story-spec-worker":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded one-shot worker: assemble the final implementation-shaping story spec, write the routed result, and exit.\n"
+            "- Synthesize proposal, requirements, acceptance criteria, constraints, and verified planning findings into a durable implementation guide rather than another compact summary.\n"
+            "- Clarify intended scope, implementation approach, architecture-sensitive decisions, and repo-facing change shape so later decomposition and implementation do not have to rediscover them.\n"
+            "- Keep the output grounded, implementation-oriented, and precise enough that the decomposer can derive self-contained execution tasks from it.\n\n"
+        )
+    if role_name == "task-decomposer-worker":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded one-shot worker: decompose the verified story package into execution tasks, write the routed result, and exit.\n"
+            "- Always produce a durable `plan/index.md` plus `plan/NN-*.md` task package when decomposition is requested; do not treat the plan package as optional.\n"
+            "- Make each task file self-contained: copy the relevant acceptance criteria, constraints, exact file paths, and validation steps into the task instead of pointing back to spec files.\n"
+            "- Keep the decomposition execution-oriented so implementation can start from the generated plan package without reopening the full planning process.\n\n"
+        )
     if role_name == "spec-verifier-worker":
         return (
             "Role-specific rules:\n"

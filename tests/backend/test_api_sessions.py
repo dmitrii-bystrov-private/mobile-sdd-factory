@@ -111,6 +111,33 @@ except ModuleNotFoundError:
     FASTAPI_AVAILABLE = False
 
 
+def decomposition_payload(summary: str, task_breakdown: str | None = None) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "summary": summary,
+        "plan_index_markdown": (
+            "# Execution Task List\n\n"
+            "| # | Task | Depends on | Status |\n"
+            "|---|------|------------|--------|\n"
+            "| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
+        ),
+        "plan_task_files": [
+            {
+                "filename": "01-build-data-source.md",
+                "content": (
+                    "# Build data source\n\n"
+                    "## What to implement\n"
+                    "Create the feature data source.\n\n"
+                    "## Validation\n"
+                    "The data source exists and is wired into the intended flow.\n"
+                ),
+            }
+        ],
+    }
+    if task_breakdown is not None:
+        payload["task_breakdown"] = task_breakdown
+    return payload
+
+
 class FakeJiraAdapter:
     def __init__(self) -> None:
         self.status_by_task: dict[str, str] = {}
@@ -448,7 +475,11 @@ class SessionApiTests(unittest.TestCase):
                 InjectEventRequest(
                     session_id=create_response.session.id,
                     event_type=event_type,
-                    payload={"summary": summary},
+                    payload=(
+                        decomposition_payload(summary)
+                        if event_type == "task_decomposition_completed"
+                        else {"summary": summary}
+                    ),
                 ),
                 dependencies=self.dependencies,
             )
@@ -573,7 +604,7 @@ class SessionApiTests(unittest.TestCase):
             InjectEventRequest(
                 session_id=create_response.session.id,
                 event_type="task_decomposition_completed",
-                payload={"summary": "Decomposition prepared"},
+                payload=decomposition_payload("Decomposition prepared"),
             ),
             dependencies=self.dependencies,
         )
@@ -1173,7 +1204,7 @@ class SessionApiTests(unittest.TestCase):
             InjectEventRequest(
                 session_id=prepare_response.session.id,
                 event_type="task_decomposition_completed",
-                payload={"summary": "Split into execution chunks"},
+                payload=decomposition_payload("Split into execution chunks"),
             ),
             dependencies=self.dependencies,
         )
@@ -1258,7 +1289,7 @@ class SessionApiTests(unittest.TestCase):
             InjectEventRequest(
                 session_id=create_response.session.id,
                 event_type="task_decomposition_completed",
-                payload={"summary": "Execution chunks prepared"},
+                payload=decomposition_payload("Execution chunks prepared"),
             ),
             dependencies=self.dependencies,
         )
@@ -1368,7 +1399,7 @@ class SessionApiTests(unittest.TestCase):
             InjectEventRequest(
                 session_id=create_response.session.id,
                 event_type="task_decomposition_completed",
-                payload={"summary": "Execution chunks prepared"},
+                payload=decomposition_payload("Execution chunks prepared"),
             ),
             dependencies=self.dependencies,
         )

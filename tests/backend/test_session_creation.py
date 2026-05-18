@@ -40,6 +40,33 @@ from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.command_runner import CommandResult
 
 
+def decomposition_payload(summary: str, task_breakdown: str | None = None) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "summary": summary,
+        "plan_index_markdown": (
+            "# Execution Task List\n\n"
+            "| # | Task | Depends on | Status |\n"
+            "|---|------|------------|--------|\n"
+            "| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
+        ),
+        "plan_task_files": [
+            {
+                "filename": "01-build-data-source.md",
+                "content": (
+                    "# Build data source\n\n"
+                    "## What to implement\n"
+                    "Create the feature data source.\n\n"
+                    "## Validation\n"
+                    "The data source exists and is wired into the intended flow.\n"
+                ),
+            }
+        ],
+    }
+    if task_breakdown is not None:
+        payload["task_breakdown"] = task_breakdown
+    return payload
+
+
 class FakeJiraAdapter:
     def __init__(self) -> None:
         self.status_by_task: dict[str, str] = {}
@@ -1607,7 +1634,8 @@ class SessionCreationTests(unittest.TestCase):
             sorted((item.work_type, item.status.value) for item in work_items),
         )
         self.assertEqual(1, len(sent_inputs))
-        self.assertIn("Prepare a concise implementation spec for story IOS-30003VERIFY before coding.", sent_inputs[0])
+        self.assertIn("Prepare the final implementation-shaping story spec for IOS-30003VERIFY before coding.", sent_inputs[0])
+        self.assertIn("durable implementation guide", sent_inputs[0])
         self.assertIn("Planning verification summary: Planning package is coherent", sent_inputs[0])
         self.assertIn("Verified focus: navigation + state ownership", sent_inputs[0])
 
@@ -1753,7 +1781,8 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
         self.assertEqual(1, len(sent_inputs))
-        self.assertIn("Prepare compact task decomposition for story IOS-30003STORY before implementation starts.", sent_inputs[0])
+        self.assertIn("Prepare task decomposition for story IOS-30003STORY before implementation starts.", sent_inputs[0])
+        self.assertIn("Always produce a durable `plan/index.md` plus self-contained `plan/NN-*.md` task package", sent_inputs[0])
         self.assertIn("Story spec summary: Need a new screen plus navigation wiring", sent_inputs[0])
 
     def test_task_decomposition_completed_moves_session_to_implementation(self) -> None:
@@ -1808,7 +1837,10 @@ class SessionCreationTests(unittest.TestCase):
         updated_session, followup_event = self.coordinator.handle_operator_event(
             session_id=session.id,
             event_type="task_decomposition_completed",
-            payload={"summary": "Split into execution chunks", "task_breakdown": "Networking, state, UI wiring"},
+            payload=decomposition_payload(
+                "Split into execution chunks",
+                task_breakdown="Networking, state, UI wiring",
+            ),
         )
         work_items = self.work_item_repository.list_for_session(session.id)
         events = self.event_repository.list_for_session(session.id)
@@ -1943,6 +1975,51 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(
             any(artifact.artifact_type == "task_decomposition_plan_package" for artifact in artifacts)
         )
+
+    def test_task_decomposition_completed_requires_plan_package(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003PLANREQ",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003PLANREQ")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Scope clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="requirements_completed",
+            payload={"summary": "Requirements clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="acceptance_criteria_completed",
+            payload={"summary": "Acceptance prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning verified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="story_spec_completed",
+            payload={"summary": "Need explicit decomposition package"},
+        )
+
+        with self.assertRaisesRegex(IntakeError, "plan_index_markdown"):
+            self.coordinator.handle_operator_event(
+                session_id=session.id,
+                event_type="task_decomposition_completed",
+                payload={"summary": "Decomposition prepared"},
+            )
 
     def test_create_subtasks_from_plan_records_batch_artifacts(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -2111,7 +2188,7 @@ class SessionCreationTests(unittest.TestCase):
         self.coordinator.handle_operator_event(
             session_id=session.id,
             event_type="task_decomposition_completed",
-            payload={"summary": "Execution chunks prepared"},
+            payload=decomposition_payload("Execution chunks prepared"),
         )
         self.write_statuses_file(
             "IOS-30003SUBTASK",
@@ -2206,7 +2283,7 @@ class SessionCreationTests(unittest.TestCase):
         self.coordinator.handle_operator_event(
             session_id=session.id,
             event_type="task_decomposition_completed",
-            payload={"summary": "Execution chunks prepared"},
+            payload=decomposition_payload("Execution chunks prepared"),
         )
         self.write_statuses_file(
             "IOS-30004SUBTASK",
@@ -2284,7 +2361,7 @@ class SessionCreationTests(unittest.TestCase):
         self.coordinator.handle_operator_event(
             session_id=session.id,
             event_type="task_decomposition_completed",
-            payload={"summary": "Execution chunks prepared"},
+            payload=decomposition_payload("Execution chunks prepared"),
         )
         self.write_statuses_file(
             "IOS-30004SUBREFRESH",
@@ -2377,7 +2454,7 @@ class SessionCreationTests(unittest.TestCase):
         self.coordinator.handle_operator_event(
             session_id=session.id,
             event_type="task_decomposition_completed",
-            payload={"summary": "Execution chunks prepared"},
+            payload=decomposition_payload("Execution chunks prepared"),
         )
         self.write_statuses_file(
             "IOS-30004SUBTRUTH",
@@ -2735,7 +2812,7 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             role_name=TASK_DECOMPOSER_WORKER_ROLE,
             output_type="completed",
-            payload={"summary": "Decomposition prepared"},
+            payload=decomposition_payload("Decomposition prepared"),
         )
         events = self.event_repository.list_for_session(session.id)
 

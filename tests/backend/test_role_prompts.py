@@ -96,6 +96,38 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("MUST, MUST NOT, and SHOULD", text)
         self.assertIn("task-specific and grounded", text)
 
+    def test_full_prompt_restores_story_spec_implementation_guide_contract(self) -> None:
+        text = role_handoff_prompt(
+            role_name="story-spec-worker",
+            instruction="Prepare the final implementation-shaping story spec for IOS-123 before coding.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "story_spec_requested",
+                "work_item_id": 6,
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("final implementation-shaping story spec", text)
+        self.assertIn("durable implementation guide", text)
+        self.assertIn("architecture-sensitive decisions", text)
+
+    def test_full_prompt_restores_task_decomposer_self_contained_plan_contract(self) -> None:
+        text = role_handoff_prompt(
+            role_name="task-decomposer-worker",
+            instruction="Prepare task decomposition for story IOS-123 before implementation starts.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "task_decomposition_requested",
+                "work_item_id": 7,
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("Always produce a durable `plan/index.md` plus `plan/NN-*.md` task package", text)
+        self.assertIn("Make each task file self-contained", text)
+        self.assertIn("without reopening the full planning process", text)
+
 
 if __name__ == "__main__":
     unittest.main()
