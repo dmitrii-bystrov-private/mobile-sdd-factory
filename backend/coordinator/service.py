@@ -3374,6 +3374,8 @@ class CoordinatorService:
             return self._enqueue_verification(session=session, source_event=source_event)
         if active_item.work_type == "self_review_correction":
             return self._enqueue_self_review(session=session, source_event=source_event)
+        if active_item.work_type == "verification_correction":
+            return self._enqueue_verification(session=session, source_event=source_event)
 
         return self._advance_after_coding_completion(
             session=session,

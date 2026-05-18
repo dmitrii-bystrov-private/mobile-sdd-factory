@@ -2778,6 +2778,57 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
 
+    def test_verification_correction_reenters_verification_without_reopening_optional_quality_lanes(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004V2QUAL",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30004V2QUAL")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="passed",
+            payload={"summary": "review clean"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={"result": "clean", "summary": "no improvements"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_failed",
+            payload={"failures": ["test"]},
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "verification corrections done"},
+        )
+
+        verification_role = self.role_repository.get_by_name(session.id, "verification-coordinator")
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        reviewer_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
+        verification_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
+
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual(2, len(verification_inputs))
+        self.assertEqual(1, len(reviewer_inputs))
+
     def test_verification_passed_completes_session(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30005")
         self.coordinator.handle_operator_event(
