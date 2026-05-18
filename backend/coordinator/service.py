@@ -837,6 +837,13 @@ class CoordinatorService:
         if (session.policy or {}).get("self_review_policy") == "disabled":
             raise IntakeError(f"Session {session_id} has self review disabled by policy")
 
+        review_output_type = "passed" if outcome == "passed" else "failed"
+        self._materialize_self_review_report(
+            session=session,
+            output_type=review_output_type,
+            payload={"summary": normalized_summary},
+        )
+
         artifact_path = write_text_artifact(
             self.artifacts_root,
             session.task_key,
@@ -3328,16 +3335,18 @@ class CoordinatorService:
             current_owner=CODE_REVIEWER_ROLE,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        previous_review_summaries = self._previous_reviewer_summary_paths(session.id)
+        previous_review_reports = self._previous_self_review_report_paths(session.id)
+        review_report_path = self._next_self_review_report_target_path(session)
         instruction = (
             f"Review the current task changes for {session.task_key}. "
             "Start from the current diff, read only the relevant convention sources, "
+            "write or refresh the current structured review report at the routed review report path, "
             "and report a clean pass or remaining issues."
         )
-        if previous_review_summaries:
+        if previous_review_reports:
             instruction += (
-                "\nPrevious review summaries (read first and do not re-flag the same issues):\n"
-                + "\n".join(previous_review_summaries)
+                "\nPrevious review reports (read first and do not re-flag the same issues):\n"
+                + "\n".join(previous_review_reports)
             )
         self._dispatch_role_work(
             session=session,
@@ -3347,8 +3356,9 @@ class CoordinatorService:
             instruction=instruction,
             extra_hydration={
                 "review_scope": "current_diff_only",
-                "previous_review_summary_paths": "\n".join(previous_review_summaries)
-                if previous_review_summaries
+                "review_report_path": str(review_report_path) if review_report_path is not None else None,
+                "previous_review_report_paths": "\n".join(previous_review_reports)
+                if previous_review_reports
                 else None,
             },
         )
@@ -4141,6 +4151,12 @@ class CoordinatorService:
             path=str(summary_path),
             metadata=metadata,
         )
+        if role_name == CODE_REVIEWER_ROLE and session.current_stage == "self_review_requested":
+            self._materialize_self_review_report(
+                session=session,
+                output_type=output_type,
+                payload=payload,
+            )
 
     def _record_runtime_output_artifacts(
         self,
@@ -4421,15 +4437,10 @@ class CoordinatorService:
             raise IntakeError("No active self review work item found for the session")
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
 
-    def _previous_reviewer_summary_paths(self, session_id: int) -> list[str]:
-        reviewer_role = self.role_repository.get_by_name(session_id, CODE_REVIEWER_ROLE)
-        if reviewer_role is None:
-            return []
+    def _previous_self_review_report_paths(self, session_id: int) -> list[str]:
         paths: list[str] = []
         for artifact in self.artifact_repository.list_for_session(session_id):
-            if artifact.role_id != reviewer_role.id:
-                continue
-            if artifact.artifact_type != "role_output_summary":
+            if artifact.artifact_type != "self_review_report_markdown":
                 continue
             paths.append(artifact.path)
         return paths
@@ -4482,13 +4493,39 @@ class CoordinatorService:
                 SPEC_VERIFIER_WORKER_ROLE,
                 STORY_SPEC_WORKER_ROLE,
                 TASK_DECOMPOSER_WORKER_ROLE,
-                IMPLEMENTER_ROLE,
             }:
                 return story_payload
+            if role.role_name == IMPLEMENTER_ROLE:
+                payload = dict(story_payload)
+                if stage_name == "verification_correction_requested":
+                    payload["issues_file_path"] = self._latest_artifact_path(
+                        session.id,
+                        "final_verification_markdown",
+                    )
+                if stage_name == "self_review_correction_requested":
+                    payload["issues_file_path"] = self._latest_artifact_path(
+                        session.id,
+                        "self_review_report_markdown",
+                    )
+                return payload
         if role.role_name == REQUIREMENTS_CLARIFIER_WORKER_ROLE and stage_name == "requirements_requested":
             return {
                 "requirements_clarification_mode": self._requirements_clarification_mode(session.policy),
             }
+        if role.role_name == IMPLEMENTER_ROLE:
+            payload: dict[str, str | int | None] = {}
+            if stage_name == "verification_correction_requested":
+                payload["issues_file_path"] = self._latest_artifact_path(
+                    session.id,
+                    "final_verification_markdown",
+                )
+            if stage_name == "self_review_correction_requested":
+                payload["issues_file_path"] = self._latest_artifact_path(
+                    session.id,
+                    "self_review_report_markdown",
+                )
+            if payload:
+                return payload
         if session.workflow_profile != "bug_full" or role.role_name != BUG_FIXER_ROLE:
             return {}
 
@@ -4516,8 +4553,7 @@ class CoordinatorService:
         if stage_name == "self_review_correction_requested":
             payload["issues_file_path"] = self._latest_artifact_path(
                 session.id,
-                "role_output_summary",
-                role_name=CODE_REVIEWER_ROLE,
+                "self_review_report_markdown",
             )
         if stage_name == "mr_followup_requested":
             payload["followup_comments_path"] = self._latest_artifact_path(
@@ -5538,6 +5574,94 @@ class CoordinatorService:
                 "source_path": str(target_path),
             },
         )
+
+    def _materialize_self_review_report(
+        self,
+        *,
+        session: Session,
+        output_type: str,
+        payload: dict,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        target_path = self._next_self_review_report_target_path(session)
+        if target_path is None:
+            return
+        explicit_markdown = str(payload.get("review_markdown") or "").strip()
+        if explicit_markdown:
+            content = explicit_markdown.rstrip() + "\n"
+        else:
+            summary = str(payload.get("summary") or "").strip()
+            issues_markdown = str(payload.get("issues_markdown") or "").strip()
+            issues = payload.get("issues")
+            lines: list[str] = []
+            if output_type == "passed":
+                lines.extend(["REVIEW_RESULT: clean"])
+                if summary:
+                    lines.extend(["", "## Summary", "", summary])
+            else:
+                lines.extend(["REVIEW_RESULT: issues_found"])
+                if issues_markdown:
+                    lines.extend(["", issues_markdown])
+                elif isinstance(issues, list) and issues:
+                    lines.extend(["", "## Issues", ""])
+                    for raw_issue in issues:
+                        if isinstance(raw_issue, dict):
+                            severity = str(raw_issue.get("severity") or "warning").strip()
+                            file_path = str(raw_issue.get("file") or "unknown").strip()
+                            convention = str(raw_issue.get("convention") or "").strip()
+                            problem = str(raw_issue.get("problem") or "").strip()
+                            required_change = str(raw_issue.get("required_change") or "").strip()
+                            lines.extend([f"### [{severity}] {file_path}"])
+                            if convention:
+                                lines.append(f"- Convention: {convention}")
+                            if problem:
+                                lines.append(f"- Problem: {problem}")
+                            if required_change:
+                                lines.append(f"- Required change: {required_change}")
+                            lines.append("")
+                        else:
+                            rendered = str(raw_issue).strip()
+                            if rendered:
+                                lines.append(f"- {rendered}")
+                    if lines and lines[-1] == "":
+                        lines.pop()
+                elif summary:
+                    lines.extend(["", "## Issues", "", f"- {summary}"])
+            content = "\n".join(lines).rstrip() + "\n"
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(content)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "self-review",
+            target_path.name,
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="self-review",
+            artifact_type="self_review_report_markdown",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "output_type": output_type,
+            },
+        )
+
+    def _next_self_review_report_target_path(self, session: Session) -> Path | None:
+        if self.workdir_root is None:
+            return None
+        review_dir = self.workdir_root / session.task_key / "review"
+        pass_count = sum(
+            1
+            for artifact in self.artifact_repository.list_for_session(session.id)
+            if artifact.artifact_type == "self_review_report_markdown"
+        )
+        return review_dir / f"pass-{pass_count + 1:02d}.md"
 
     def _write_task_decomposition_plan_package(
         self,

@@ -39,7 +39,8 @@ def role_runtime_rules(role_name: str) -> str:
         return (
             "Role-specific rules:\n"
             "- Start from the current diff and review only the touched changes.\n"
-            "- If previous review summaries are provided, read them first and do not re-flag already raised issues.\n"
+            "- Write or refresh the structured review report at the routed review report path before you finish this pass.\n"
+            "- If previous review reports are provided, read them first and do not re-flag already raised issues.\n"
             "- Read only the convention sources relevant to the touched diff area.\n"
             "- Keep the output compact and optimized for a narrow fixer pass.\n\n"
         )

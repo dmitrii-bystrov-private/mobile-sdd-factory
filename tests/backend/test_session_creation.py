@@ -19,6 +19,7 @@ from backend.roles.contracts import (
     DEFAULT_SESSION_ROLES,
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
     CONSTRAINTS_WORKER_ROLE,
+    IMPLEMENTER_ROLE,
     MR_COMMENTS_ANALYST_ROLE,
     PROPOSAL_CONTEXT_WORKER_ROLE,
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
@@ -634,7 +635,7 @@ class SessionCreationTests(unittest.TestCase):
             / "AGENTS.md"
         ).read_text()
         self.assertIn("Project conventions:", reviewer_agents)
-        self.assertIn("Read previous review summaries first when they are provided", reviewer_agents)
+        self.assertIn("Read previous review reports first when they are provided", reviewer_agents)
         self.assertIn("Keep outputs compact and fixer-oriented.", reviewer_agents)
 
     def test_create_task_session_creates_bug_fixer_workspace_contract(self) -> None:
@@ -1221,11 +1222,13 @@ class SessionCreationTests(unittest.TestCase):
             output_type="passed",
             payload={"summary": "clean review"},
         )
+        artifacts = self.artifact_repository.list_for_session(session.id)
 
         self.assertEqual("self_review_passed", mapped_event.event_type)
         self.assertEqual("verification_requested", followup_event.event_type)
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
+        self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
 
     def test_reviewer_output_failed_routes_self_review_to_correction(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -1250,13 +1253,19 @@ class SessionCreationTests(unittest.TestCase):
             output_type="failed",
             payload={"summary": "issues remain"},
         )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
 
         self.assertEqual("self_review_issues_found", mapped_event.event_type)
         self.assertEqual("self_review_correction_requested", followup_event.event_type)
         self.assertEqual("self_review_correction_requested", updated_session.current_stage)
         self.assertEqual("implementer", updated_session.current_owner)
+        self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
+        self.assertIn('"issues_file_path"', sent_inputs[-1])
+        self.assertIn("pass-01.md", sent_inputs[-1])
 
-    def test_second_self_review_dispatch_includes_previous_review_summary_paths(self) -> None:
+    def test_second_self_review_dispatch_includes_previous_review_report_paths(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003R2",
             workflow_profile="oneshot",
@@ -1286,10 +1295,11 @@ class SessionCreationTests(unittest.TestCase):
         sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
         self.assertEqual(2, len(sent_inputs))
         self.assertIn(
-            "Previous review summaries (read first and do not re-flag the same issues):",
+            "Previous review reports (read first and do not re-flag the same issues):",
             sent_inputs[-1],
         )
-        self.assertIn("previous_review_summary_paths", sent_inputs[-1])
+        self.assertIn("previous_review_report_paths", sent_inputs[-1])
+        self.assertIn("review_report_path", sent_inputs[-1])
 
     def test_bug_analysis_completed_moves_session_to_implementation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -3598,6 +3608,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
         self.assertTrue(any(item.artifact_type == "self_review_summary" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
 
     def test_implementation_completed_routes_to_boy_scout_when_policy_enabled(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -3682,12 +3693,18 @@ class SessionCreationTests(unittest.TestCase):
             summary="Found two naming issues and one missing guard branch.",
         )
         work_items = self.work_item_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
 
         self.assertEqual("self_review_issues_found", event.event_type)
         self.assertEqual("self_review_correction_requested", followup_event.event_type)
         self.assertEqual("self_review_correction_requested", updated_session.current_stage)
         self.assertEqual("implementer", updated_session.current_owner)
         self.assertTrue(any(item.work_type == "self_review_correction" for item in work_items))
+        self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
+        self.assertIn('"issues_file_path"', sent_inputs[-1])
+        self.assertIn("pass-01.md", sent_inputs[-1])
 
     def test_self_review_correction_completed_reenters_verification_loop(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

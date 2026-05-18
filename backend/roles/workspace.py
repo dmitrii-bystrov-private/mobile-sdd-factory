@@ -78,6 +78,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
         return [
             "- Task repo worktree: `{task_repo_root}`",
             "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Review report directory and current pass target: `{task_snapshot_root}/review`",
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and review outputs: `{task_artifacts_root}`",
@@ -245,7 +246,7 @@ def _role_responsibility(role_name: str) -> list[str]:
     if role_name == "code-reviewer":
         return [
             "- You execute routed code review work for one task session.",
-            "- You review only the routed task changes and produce compact review outcomes.",
+            "- You review only the routed task changes and produce compact review outcomes plus a durable structured review report for the current pass.",
             "- Across repeated passes, retain reviewer context for the same task instead of reinitializing from zero.",
         ]
     if role_name == "code-scout":
@@ -350,7 +351,8 @@ def _role_operating_rules(role_name: str) -> list[str]:
     if role_name == "code-reviewer":
         return [
             "- Review only the routed diff and conventions relevant to that diff.",
-            "- Read previous review summaries first when they are provided and do not re-flag the same issue twice.",
+            "- Write or refresh the structured review report for the current pass before you finish.",
+            "- Read previous review reports first when they are provided and do not re-flag the same issue twice.",
             "- Read only the convention files relevant to the touched diff area; do not broaden the review scope speculatively.",
             "- Keep outputs compact and fixer-oriented.",
             "- Do not re-flag issues that were already raised in previous review passes when that context is provided.",
