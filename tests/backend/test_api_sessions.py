@@ -1594,6 +1594,9 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("verification_correction_requested", response.session.current_stage)
         self.assertEqual("implementer", response.session.current_owner)
         self.assertEqual(3, len(work_items_response.items))
+        verification_report = Path(self.temp_dir.name) / "IOS-40004" / "spec" / "final-verification.md"
+        self.assertTrue(verification_report.exists())
+        self.assertIn("FAIL", verification_report.read_text())
 
     def test_verification_passed_event_completes_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
@@ -1626,6 +1629,9 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("completed", response.session.current_stage)
         self.assertEqual("completed", response.session.status)
         self.assertEqual(9, len(events_response.items))
+        verification_report = Path(self.temp_dir.name) / "IOS-40005" / "spec" / "final-verification.md"
+        self.assertTrue(verification_report.exists())
+        self.assertIn("PASS", verification_report.read_text())
 
     def test_role_output_route_maps_to_domain_event(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

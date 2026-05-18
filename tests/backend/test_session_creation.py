@@ -2464,11 +2464,15 @@ class SessionCreationTests(unittest.TestCase):
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         self.assertEqual(2, implementer_role.last_hydration_version)
         sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        verification_report = Path(self.temp_dir.name) / "IOS-30004" / "spec" / "final-verification.md"
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Apply verification corrections for IOS-30004.", sent_inputs[-1])
         self.assertIn("Continue from your existing implementer role context", sent_inputs[-1])
         self.assertIn("If the routed work is a narrow correction pass", sent_inputs[-1])
         self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
+        self.assertTrue(verification_report.exists())
+        self.assertIn("## Result", verification_report.read_text())
+        self.assertIn("FAIL", verification_report.read_text())
 
     def test_bug_full_verification_failed_routes_back_to_bug_fixer_with_fix_only_mode(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -2549,11 +2553,14 @@ class SessionCreationTests(unittest.TestCase):
         )
         work_items = self.work_item_repository.list_for_session(session.id)
         events = self.event_repository.list_for_session(session.id)
+        verification_report = Path(self.temp_dir.name) / "IOS-30005" / "spec" / "final-verification.md"
 
         self.assertEqual("completed", updated_session.current_stage)
         self.assertIsNone(updated_session.current_owner)
         self.assertEqual("completed", updated_session.status.value)
         self.assertEqual("task_completed", followup_event.event_type)
+        self.assertTrue(verification_report.exists())
+        self.assertIn("PASS", verification_report.read_text())
         self.assertEqual(
             sorted(
                 [

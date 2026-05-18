@@ -3201,6 +3201,7 @@ class CoordinatorService:
 
         active_item = verification_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._materialize_final_verification_file(session=session, source_event=source_event)
 
         coding_role = self._primary_coding_role_for_work_type(session, "verification_correction")
 
@@ -3263,6 +3264,7 @@ class CoordinatorService:
 
         active_item = verification_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._materialize_final_verification_file(session=session, source_event=source_event)
         doc_harvest_policy = (session.policy or {}).get("doc_harvest_policy")
         if doc_harvest_policy == "required":
             session, event = self._enqueue_doc_harvest(session=session, source_event=source_event)
@@ -5202,6 +5204,71 @@ class CoordinatorService:
             session_id=session.id,
             stage_name="planning",
             artifact_type=artifact_type,
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+            },
+        )
+
+    def _materialize_final_verification_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        explicit_markdown = str(source_event.payload.get("final_verification_markdown") or "").strip()
+        if explicit_markdown:
+            content = explicit_markdown.rstrip() + "\n"
+        else:
+            summary = str(source_event.payload.get("summary") or "").strip()
+            failures = source_event.payload.get("failures")
+            failure_list: list[str] = []
+            if isinstance(failures, list):
+                failure_list = [str(item).strip() for item in failures if str(item).strip()]
+            passed = source_event.event_type == "verification_passed"
+            lines = [f"# Final Verification: {session.task_key}", ""]
+            if passed:
+                lines.extend(
+                    [
+                        "## Result",
+                        "PASS",
+                        "",
+                        "## Checks",
+                        "- Tests: passed",
+                        "- Linter: passed",
+                    ]
+                )
+                if summary:
+                    lines.extend(["", "## Summary", "", summary])
+            else:
+                lines.extend(["## Result", "FAIL"])
+                if failure_list:
+                    lines.extend(["", "## Failed checks", ""])
+                    lines.extend(f"- {item}" for item in failure_list)
+                if summary:
+                    lines.extend(["", "## Summary", "", summary])
+            content = "\n".join(lines).rstrip() + "\n"
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / "final-verification.md"
+        target_path.write_text(content)
+
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "verification",
+            "final-verification.md",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="verification",
+            artifact_type="final_verification_markdown",
             path=str(artifact_path),
             metadata={
                 "task_key": session.task_key,
