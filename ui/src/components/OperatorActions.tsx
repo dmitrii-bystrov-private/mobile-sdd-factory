@@ -101,6 +101,14 @@ export function OperatorActions({
     });
   }
 
+  async function handleBoyScoutResolution(
+    resolution: "implement_now" | "create_tech_debt",
+  ): Promise<void> {
+    await run(async () => {
+      await apiClient.resolveBoyScoutFindings(session.id, resolution);
+    });
+  }
+
   async function handleSelfReview(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const normalizedSummary = selfReviewSummary.trim();
@@ -157,6 +165,9 @@ export function OperatorActions({
     session.current_stage === "boy_scout_requested" &&
     session.status === "waiting_for_operator" &&
     session.policy["boy_scout_policy"] === "enabled";
+  const canResolveBoyScoutFindings =
+    session.current_stage === "boy_scout_requested" &&
+    session.status === "waiting_for_operator";
   const canCompleteSelfReview =
     session.current_stage === "self_review_requested" &&
     session.status === "active" &&
@@ -360,8 +371,39 @@ export function OperatorActions({
           <p className="eyebrow">Optional Lane</p>
           <h4>Boy Scout</h4>
           <p className="path-label">
-            Review Boy Scout findings and explicitly skip this maintainability lane when you want to continue to final verification.
+            Resolve Boy Scout findings after the scout finishes. Use implement now when all findings should go back to the coder, create tech debt when only the old-code candidates should become separate stories, or skip the lane entirely when policy allows it.
           </p>
+        </div>
+
+        <div className="actions-grid operator-actions-grid">
+          <div className="operator-action-card">
+            <button
+              className="action-button action-button-strong"
+              disabled={busy || !canResolveBoyScoutFindings}
+              onClick={() => void handleBoyScoutResolution("implement_now")}
+              title="Send every Boy Scout finding back to the coding lane immediately."
+              type="button"
+            >
+              Implement Boy Scout Findings
+            </button>
+            <p className="operator-action-description">
+              Route all current Boy Scout findings back into a narrow correction pass without creating separate tech-debt stories.
+            </p>
+          </div>
+          <div className="operator-action-card">
+            <button
+              className="action-button"
+              disabled={busy || !canResolveBoyScoutFindings}
+              onClick={() => void handleBoyScoutResolution("create_tech_debt")}
+              title="Create tech-debt stories for the old-code findings and route the remaining actionable findings back to the coder."
+              type="button"
+            >
+              Create Tech Debt And Continue
+            </button>
+            <p className="operator-action-description">
+              Materialize separate tech-debt stories for the old-code findings, then send the remaining implement-now findings back to the coding lane.
+            </p>
+          </div>
         </div>
 
         <form className="followup-form" onSubmit={(event) => void handleBoyScoutSkip(event)}>

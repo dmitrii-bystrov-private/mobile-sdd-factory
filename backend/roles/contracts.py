@@ -67,6 +67,10 @@ ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     "boy_scout_requested": {
         CODE_SCOUT_ROLE,
     },
+    "boy_scout_correction_requested": {
+        IMPLEMENTER_ROLE,
+        BUG_FIXER_ROLE,
+    },
     "doc_harvest_requested": {
         DOC_HARVEST_ROLE,
     },

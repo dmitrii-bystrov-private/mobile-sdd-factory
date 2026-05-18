@@ -823,6 +823,80 @@ class CoordinatorService:
         session, followup_event = self._enqueue_verification(session=session, source_event=event)
         return session, event, followup_event
 
+    def resolve_boy_scout_findings(
+        self,
+        session_id: int,
+        resolution: str,
+    ) -> tuple[Session, Event, Event]:
+        session = self._get_session_or_raise(session_id)
+        if session.current_stage != "boy_scout_requested":
+            raise IntakeError(f"Session {session_id} is not waiting on Boy Scout")
+        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
+            raise IntakeError(f"Session {session_id} does not have resolvable Boy Scout findings")
+        if resolution not in {"implement_now", "create_tech_debt"}:
+            raise IntakeError("Boy Scout resolution must be 'implement_now' or 'create_tech_debt'")
+
+        pending_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "boy_scout_review" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not pending_items:
+            raise IntakeError(f"Session {session_id} has no pending Boy Scout review decision")
+        self.work_item_repository.update_status(pending_items[0].id, WorkItemStatus.COMPLETED)
+
+        implement_now_findings, tech_debt_findings = self._classify_boy_scout_findings(session)
+        if resolution == "create_tech_debt" and not tech_debt_findings:
+            raise IntakeError("No tech-debt-eligible Boy Scout findings are available")
+
+        created_issues: list[dict[str, str]] = []
+        chosen_findings = list(implement_now_findings)
+        if resolution == "create_tech_debt":
+            created_issues = self._create_boy_scout_tech_debt_stories(session, tech_debt_findings)
+            self._materialize_boy_scout_deferred_entries(session=session, created_issues=created_issues)
+        else:
+            chosen_findings = implement_now_findings + tech_debt_findings
+
+        event = self._append_event(
+            session_id=session.id,
+            event_type=(
+                "boy_scout_tech_debt_created"
+                if resolution == "create_tech_debt"
+                else "boy_scout_implement_now_selected"
+            ),
+            producer_type="operator",
+            payload={
+                "task_key": session.task_key,
+                "resolution": resolution,
+                "implement_now_count": len(chosen_findings),
+                "tech_debt_count": len(tech_debt_findings),
+                "created_issues": created_issues,
+                "current_stage": session.current_stage,
+            },
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=None,
+        )
+
+        if chosen_findings:
+            actionable_path = self._materialize_boy_scout_actionable_findings(
+                session=session,
+                findings=chosen_findings,
+                filename="boy-scout-actionable.md",
+            )
+            session, followup_event = self._enqueue_boy_scout_correction(
+                session=session,
+                source_event=event,
+                actionable_findings_path=actionable_path,
+            )
+            return session, event, followup_event
+
+        session, followup_event = self._enqueue_verification(session=session, source_event=event)
+        return session, event, followup_event
+
     def complete_self_review(
         self,
         session_id: int,
@@ -3296,6 +3370,8 @@ class CoordinatorService:
         if active_item is None:
             raise IntakeError("No active coding work item found for the session")
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        if active_item.work_type == "boy_scout_correction":
+            return self._enqueue_verification(session=session, source_event=source_event)
 
         return self._advance_after_coding_completion(
             session=session,
@@ -3576,6 +3652,18 @@ class CoordinatorService:
                     path=str(findings_path),
                     metadata={"result": result},
                 )
+            implement_now_findings, tech_debt_findings = self._classify_boy_scout_findings(session)
+            if implement_now_findings and not tech_debt_findings:
+                actionable_path = self._materialize_boy_scout_actionable_findings(
+                    session=session,
+                    findings=implement_now_findings,
+                    filename="boy-scout-actionable.md",
+                )
+                return self._enqueue_boy_scout_correction(
+                    session=session,
+                    source_event=source_event,
+                    actionable_findings_path=actionable_path,
+                )
             self.work_item_repository.create(
                 session_id=session.id,
                 work_type="boy_scout_review",
@@ -3599,7 +3687,9 @@ class CoordinatorService:
                     "reason": "boy_scout_findings",
                     "summary": "boy scout findings need operator decision",
                     "details": str(source_event.payload.get("summary") or "").strip()
-                    or "Review Boy Scout findings and either address them separately or skip this lane.",
+                    or "Review Boy Scout findings and choose whether to implement all of them now or create tech-debt stories for the old-code candidates.",
+                    "implement_now_count": len(implement_now_findings),
+                    "tech_debt_candidate_count": len(tech_debt_findings),
                     "current_stage": session.current_stage,
                 },
             )
@@ -3752,6 +3842,65 @@ class CoordinatorService:
         event = self._append_event(
             session_id=session.id,
             event_type="self_review_correction_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": coding_role.role_name,
+                "work_item_id": correction_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _enqueue_boy_scout_correction(
+        self,
+        session: Session,
+        source_event: Event,
+        actionable_findings_path: Path,
+    ) -> tuple[Session, Event]:
+        coding_role = self._primary_coding_role_for_work_type(session, "boy_scout_correction")
+        correction_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="boy_scout_correction",
+            title=f"Boy Scout improvements for {session.task_key}",
+            owner_role_id=coding_role.id,
+            source_event_id=source_event.id,
+            priority=93,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="boy-scout",
+            artifact_type="boy_scout_actionable_markdown",
+            path=str(actionable_findings_path),
+            metadata={"source_event_id": source_event.id},
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="boy_scout_correction_requested",
+            current_owner=coding_role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = self._stage_instruction(
+            "boy_scout_correction_requested",
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(
+                f"No Boy Scout correction instruction is available for role {coding_role.role_name}"
+            )
+        self._dispatch_role_work(
+            session=session,
+            role=coding_role,
+            work_item=correction_item,
+            stage_name="boy_scout_correction_requested",
+            instruction=instruction,
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="boy_scout_correction_requested",
             producer_type="coordinator",
             payload={
                 "task_key": session.task_key,
@@ -4060,6 +4209,7 @@ class CoordinatorService:
                 return "subtask_completed"
             if session.current_stage in {
                 "implementation_requested",
+                "boy_scout_correction_requested",
                 "self_review_correction_requested",
                 "verification_correction_requested",
                 "mr_followup_requested",
@@ -4518,6 +4668,11 @@ class CoordinatorService:
                 return story_payload
             if role.role_name == IMPLEMENTER_ROLE:
                 payload = dict(story_payload)
+                if stage_name == "boy_scout_correction_requested":
+                    payload["issues_file_path"] = self._latest_artifact_path(
+                        session.id,
+                        "boy_scout_actionable_markdown",
+                    )
                 if stage_name == "verification_correction_requested":
                     payload["issues_file_path"] = self._latest_artifact_path(
                         session.id,
@@ -4535,6 +4690,11 @@ class CoordinatorService:
             }
         if role.role_name == IMPLEMENTER_ROLE:
             payload: dict[str, str | int | None] = {}
+            if stage_name == "boy_scout_correction_requested":
+                payload["issues_file_path"] = self._latest_artifact_path(
+                    session.id,
+                    "boy_scout_actionable_markdown",
+                )
             if stage_name == "verification_correction_requested":
                 payload["issues_file_path"] = self._latest_artifact_path(
                     session.id,
@@ -4556,6 +4716,7 @@ class CoordinatorService:
         mode_by_stage = {
             "bug_analysis_requested": "analysis-only",
             "implementation_requested": "fix-only",
+            "boy_scout_correction_requested": "fix-only",
             "verification_correction_requested": "fix-only",
             "self_review_correction_requested": "fix-only",
             "mr_followup_requested": "fix-only",
@@ -4575,6 +4736,11 @@ class CoordinatorService:
             payload["issues_file_path"] = self._latest_artifact_path(
                 session.id,
                 "self_review_report_markdown",
+            )
+        if stage_name == "boy_scout_correction_requested":
+            payload["issues_file_path"] = self._latest_artifact_path(
+                session.id,
+                "boy_scout_actionable_markdown",
             )
         if stage_name == "mr_followup_requested":
             payload["followup_comments_path"] = self._latest_artifact_path(
@@ -4780,6 +4946,8 @@ class CoordinatorService:
             )
         if stage_name == "implementation_requested":
             return f"Start implementation work for {task_key}."
+        if stage_name == "boy_scout_correction_requested":
+            return f"Apply Boy Scout improvements for {task_key} from the routed findings file as a narrow correction pass."
         if stage_name == "verification_requested":
             return f"Run deterministic verification for {task_key}."
         if stage_name == "verification_correction_requested":
@@ -4845,6 +5013,7 @@ class CoordinatorService:
         if work_type in {
             "bug_analysis",
             "implementation",
+            "boy_scout_correction",
             "followup_implementation",
             "self_review_correction",
             "verification_correction",
@@ -4873,6 +5042,7 @@ class CoordinatorService:
             "task_decomposition_requested": "task_decomposition",
             "subtask_implementation_requested": "subtask_implementation",
             "implementation_requested": "implementation",
+            "boy_scout_correction_requested": "boy_scout_correction",
             "mr_comments_analysis_requested": "mr_comments_analysis",
             "self_review_correction_requested": "self_review_correction",
             "verification_correction_requested": "verification_correction",
@@ -5793,6 +5963,216 @@ class CoordinatorService:
                 if prefix.isalpha() and suffix.isdigit():
                     keys.append(candidate)
         return keys
+
+    def _parse_boy_scout_findings(self, session: Session) -> list[dict[str, object]]:
+        if self.workdir_root is None:
+            return []
+        findings_path = self.workdir_root / session.task_key / "spec" / "findings.md"
+        if not findings_path.is_file():
+            return []
+        text = findings_path.read_text(encoding="utf-8")
+        sections = [section.strip() for section in text.split("\n---") if section.strip()]
+        findings: list[dict[str, object]] = []
+        for section in sections:
+            if section.startswith("SCOUT_RESULT:"):
+                _, _, remainder = section.partition("\n")
+                section = remainder.strip()
+            if not section:
+                continue
+            title_match = re.search(r"^## Finding \d+:\s+(.+)$", section, re.MULTILINE)
+            if not title_match:
+                continue
+            files_match = re.search(r"^\*\*Files\*\*:\s+(.+)$", section, re.MULTILINE)
+            principle_match = re.search(r"^\*\*Principle\*\*:\s+(.+)$", section, re.MULTILINE)
+            problem_match = re.search(r"^\*\*Problem\*\*:\s+(.+)$", section, re.MULTILINE)
+            suggestion_match = re.search(r"^\*\*Suggestion\*\*:\s+(.+)$", section, re.MULTILINE)
+            raw_files = files_match.group(1).strip() if files_match else ""
+            files = [
+                item.strip().strip("`")
+                for item in raw_files.split(",")
+                if item.strip().strip("`")
+            ]
+            findings.append(
+                {
+                    "title": title_match.group(1).strip(),
+                    "files": files,
+                    "principle": principle_match.group(1).strip() if principle_match else "",
+                    "problem": problem_match.group(1).strip() if problem_match else "",
+                    "suggestion": suggestion_match.group(1).strip() if suggestion_match else "",
+                }
+            )
+        return findings
+
+    def _added_source_paths_from_diff(self, task_key: str) -> set[str]:
+        if self.workdir_root is None:
+            return set()
+        diff_path = self.workdir_root / task_key / "spec" / "diff.md"
+        if not diff_path.is_file():
+            return set()
+        added_paths: set[str] = set()
+        in_table = False
+        for raw_line in diff_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if line == "## Changed Files":
+                in_table = True
+                continue
+            if in_table and line.startswith("## "):
+                break
+            if not in_table or not line.startswith("|"):
+                continue
+            if line.startswith("| Status |") or line.startswith("|---|"):
+                continue
+            parts = [part.strip() for part in line.strip("|").split("|")]
+            if len(parts) < 2:
+                continue
+            if parts[0] != "added":
+                continue
+            added_paths.add(parts[1].strip("`"))
+        return added_paths
+
+    def _classify_boy_scout_findings(self, session: Session) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        added_paths = self._added_source_paths_from_diff(session.task_key)
+        added_basenames = {Path(path).name for path in added_paths}
+        implement_now: list[dict[str, object]] = []
+        tech_debt: list[dict[str, object]] = []
+        for finding in self._parse_boy_scout_findings(session):
+            files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
+            if files and all(file_path in added_paths or Path(file_path).name in added_basenames for file_path in files):
+                implement_now.append(finding)
+            else:
+                tech_debt.append(finding)
+        return implement_now, tech_debt
+
+    def _render_boy_scout_findings_markdown(self, findings: list[dict[str, object]]) -> str:
+        lines = ["SCOUT_RESULT: findings_found", ""]
+        for index, finding in enumerate(findings, start=1):
+            title = str(finding.get("title") or f"Finding {index}").strip()
+            files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
+            principle = str(finding.get("principle") or "").strip()
+            problem = str(finding.get("problem") or "").strip()
+            suggestion = str(finding.get("suggestion") or "").strip()
+            lines.append(f"## Finding {index}: {title}")
+            lines.append("")
+            if files:
+                lines.append("**Files**: " + ", ".join(f"`{item}`" for item in files))
+            if principle:
+                lines.append(f"**Principle**: {principle}")
+            if problem:
+                lines.append(f"**Problem**: {problem}")
+            if suggestion:
+                lines.append(f"**Suggestion**: {suggestion}")
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+        if lines[-2:] == ["---", ""]:
+            lines = lines[:-2]
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _materialize_boy_scout_actionable_findings(
+        self,
+        *,
+        session: Session,
+        findings: list[dict[str, object]],
+        filename: str,
+    ) -> Path:
+        if self.workdir_root is None:
+            raise IntakeError("Coordinator is missing workdir root")
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / filename
+        target_path.write_text(self._render_boy_scout_findings_markdown(findings), encoding="utf-8")
+        return target_path
+
+    def _render_boy_scout_issue_description(self, finding: dict[str, object]) -> str:
+        title = str(finding.get("title") or "Boy Scout finding").strip()
+        files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
+        principle = str(finding.get("principle") or "").strip()
+        problem = str(finding.get("problem") or "").strip()
+        suggestion = str(finding.get("suggestion") or "").strip()
+        lines = [f"# {title}", ""]
+        if files:
+            lines.extend(["## Files", ""])
+            lines.extend(f"- `{item}`" for item in files)
+            lines.append("")
+        if principle:
+            lines.extend(["## Principle", "", principle, ""])
+        if problem:
+            lines.extend(["## Problem", "", problem, ""])
+        if suggestion:
+            lines.extend(["## Suggested change", "", suggestion, ""])
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _create_boy_scout_tech_debt_stories(
+        self,
+        session: Session,
+        findings: list[dict[str, object]],
+    ) -> list[dict[str, str]]:
+        if self.jira_adapter is None or self.workdir_root is None:
+            raise IntakeError("Jira adapter is required to create Boy Scout tech-debt stories")
+        if not findings:
+            return []
+        project = session.task_key.split("-", 1)[0]
+        tmp_dir = self.workdir_root / session.task_key / "tmp" / "boy-scout-tech-debt"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        created: list[dict[str, str]] = []
+        for index, finding in enumerate(findings, start=1):
+            title = str(finding.get("title") or f"Boy Scout finding {index}").strip()
+            description_path = tmp_dir / f"{index:02d}-description.md"
+            description_path.write_text(
+                self._render_boy_scout_issue_description(finding),
+                encoding="utf-8",
+            )
+            result = self.jira_adapter.create_issue(
+                project=project,
+                issue_type="Story",
+                summary=f"[Tech debt] {title}",
+                description_file=description_path,
+            )
+            if result.returncode != 0:
+                raise IntakeError(f"Failed to create Boy Scout tech-debt story for '{title}'")
+            issue_key = ""
+            issue_url = ""
+            for part in result.stdout.split():
+                if _TASK_KEY_PATTERN.match(part.strip()):
+                    issue_key = part.strip()
+                if part.startswith("http://") or part.startswith("https://"):
+                    issue_url = part.strip()
+            created.append({"title": title, "issue_key": issue_key, "issue_url": issue_url})
+        return created
+
+    def _materialize_boy_scout_deferred_entries(
+        self,
+        *,
+        session: Session,
+        created_issues: list[dict[str, str]],
+    ) -> None:
+        if self.workdir_root is None:
+            return
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        deferred_path = spec_root / "scout-deferred.md"
+        existing = deferred_path.read_text(encoding="utf-8").rstrip() + "\n" if deferred_path.is_file() else ""
+        additions = [
+            f"- {issue['title']} ({issue['issue_key']})"
+            for issue in created_issues
+            if issue.get("title")
+        ]
+        deferred_path.write_text(existing + "\n".join(additions).rstrip() + ("\n" if additions else ""), encoding="utf-8")
+        if self.artifacts_root is not None:
+            artifact_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "boy-scout",
+                "scout-deferred.md",
+                deferred_path.read_text(encoding="utf-8"),
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="boy-scout",
+                artifact_type="boy_scout_deferred_markdown",
+                path=str(artifact_path),
+                metadata={"entry_count": len(created_issues)},
+            )
 
     def _count_mr_discussions(self, markdown: str) -> int:
         return sum(1 for line in markdown.splitlines() if line.startswith("## Discussion "))

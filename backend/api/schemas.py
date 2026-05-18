@@ -614,6 +614,18 @@ class SkipBoyScoutResponse(BaseModel):
     followup_event_type: str | None = None
 
 
+class ResolveBoyScoutFindingsRequest(BaseModel):
+    session_id: int
+    resolution: str
+
+
+class ResolveBoyScoutFindingsResponse(BaseModel):
+    resolved: bool
+    session: SessionResponse
+    event_type: str
+    followup_event_type: str | None = None
+
+
 class CompleteSelfReviewRequest(BaseModel):
     session_id: int
     outcome: str

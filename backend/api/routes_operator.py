@@ -13,6 +13,8 @@ from backend.api.schemas import (
     CompleteDocHarvestResponse,
     CleanupTaskRequest,
     CleanupTaskResponse,
+    ResolveBoyScoutFindingsRequest,
+    ResolveBoyScoutFindingsResponse,
     SkipBoyScoutRequest,
     SkipBoyScoutResponse,
     EnvironmentDoctorResponse,
@@ -436,6 +438,27 @@ def skip_boy_scout(
 
     return SkipBoyScoutResponse(
         skipped=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
+@router.post("/resolve-boy-scout-findings", response_model=ResolveBoyScoutFindingsResponse)
+def resolve_boy_scout_findings(
+    payload: ResolveBoyScoutFindingsRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> ResolveBoyScoutFindingsResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.resolve_boy_scout_findings(
+            session_id=payload.session_id,
+            resolution=payload.resolution,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ResolveBoyScoutFindingsResponse(
+        resolved=True,
         session=to_session_response(session),
         event_type=event.event_type,
         followup_event_type=followup_event.event_type if followup_event else None,

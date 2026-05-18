@@ -72,6 +72,7 @@ def decomposition_payload(summary: str, task_breakdown: str | None = None) -> di
 class FakeJiraAdapter:
     def __init__(self) -> None:
         self.status_by_task: dict[str, str] = {}
+        self.created_issue_counter = 0
 
     def resolve_parent(self, task_key: str) -> CommandResult:
         return CommandResult(
@@ -103,6 +104,23 @@ class FakeJiraAdapter:
             command=["create_subtasks", task_key, str(plan_dir)],
             returncode=0,
             stdout="Created subtasks:\n01    IOS-90001     Build data source\n",
+            stderr="",
+        )
+
+    def create_issue(
+        self,
+        project: str,
+        issue_type: str,
+        summary: str,
+        description_file: Path,
+    ) -> CommandResult:
+        del issue_type, description_file
+        self.created_issue_counter += 1
+        issue_key = f"{project}-{91000 + self.created_issue_counter}"
+        return CommandResult(
+            command=["create_issue", project, summary],
+            returncode=0,
+            stdout=f"{issue_key} https://jira.example.com/browse/{issue_key}\n",
             stderr="",
         )
 
@@ -3807,6 +3825,57 @@ class SessionCreationTests(unittest.TestCase):
                 payload={"summary": "The change is too small to justify a meaningful Boy Scout pass."},
             )
 
+    def test_boy_scout_findings_for_new_code_route_directly_to_implementer(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSAUTO",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSAUTO")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSAUTO" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "diff.md").write_text(
+            "# Diff Artifact: IOS-30021BSAUTO\n\n"
+            "## Changed Files\n\n"
+            "| Status | Path |\n|---|---|\n"
+            "| added | `FeatureBuilder.swift` |\n"
+            "| added | `FeatureMapper.swift` |\n\n"
+        )
+        (spec_dir / "findings.md").write_text(
+            "SCOUT_RESULT: findings_found\n\n"
+            "## Finding 1: Extract helper\n\n"
+            "**Files**: `FeatureBuilder.swift`, `FeatureMapper.swift`\n"
+            "**Principle**: DRY\n"
+            "**Problem**: Duplicate mapping logic exists.\n"
+            "**Suggestion**: Extract a shared helper.\n"
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={"result": "findings_found", "summary": "Found one improvement opportunity."},
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertEqual("boy_scout_completed", mapped_event.event_type)
+        self.assertIsNotNone(followup_event)
+        assert followup_event is not None
+        self.assertEqual("boy_scout_correction_requested", followup_event.event_type)
+        self.assertEqual("boy_scout_correction_requested", updated_session.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertTrue(any(item.artifact_type == "boy_scout_actionable_markdown" for item in artifacts))
+        self.assertIn('"issues_file_path"', sent_inputs[-1])
+        self.assertIn("boy-scout-actionable.md", sent_inputs[-1])
+
     def test_boy_scout_findings_can_be_skipped_into_verification(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021BS2",
@@ -3853,6 +3922,76 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "boy_scout_deferred_markdown" for item in artifacts))
         self.assertTrue(deferred_path.is_file())
         self.assertIn("Extract helper", deferred_path.read_text())
+
+    def test_resolve_boy_scout_findings_creates_tech_debt_and_routes_remaining_findings(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSMIX",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSMIX")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSMIX" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "diff.md").write_text(
+            "# Diff Artifact: IOS-30021BSMIX\n\n"
+            "## Changed Files\n\n"
+            "| Status | Path |\n|---|---|\n"
+            "| added | `NewBuilder.swift` |\n"
+            "| modified | `LegacyPresenter.swift` |\n\n"
+        )
+        (spec_dir / "findings.md").write_text(
+            "SCOUT_RESULT: findings_found\n\n"
+            "## Finding 1: Extract builder helper\n\n"
+            "**Files**: `NewBuilder.swift`\n"
+            "**Principle**: DRY\n"
+            "**Problem**: Duplicate helper logic exists.\n"
+            "**Suggestion**: Extract a shared helper.\n\n"
+            "---\n\n"
+            "## Finding 2: Split legacy presenter\n\n"
+            "**Files**: `LegacyPresenter.swift`\n"
+            "**Principle**: SRP\n"
+            "**Problem**: Presenter does too much.\n"
+            "**Suggestion**: Split responsibilities.\n"
+        )
+
+        updated_session, _, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={"result": "findings_found", "summary": "Found two improvement opportunities."},
+        )
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+
+        updated_session, event, correction_event = self.coordinator.resolve_boy_scout_findings(
+            session_id=session.id,
+            resolution="create_tech_debt",
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+        deferred_path = Path(self.temp_dir.name) / "IOS-30021BSMIX" / "spec" / "scout-deferred.md"
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertEqual("boy_scout_tech_debt_created", event.event_type)
+        self.assertEqual("boy_scout_correction_requested", correction_event.event_type)
+        self.assertEqual("boy_scout_correction_requested", updated_session.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertTrue(any(item.artifact_type == "boy_scout_actionable_markdown" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "boy_scout_deferred_markdown" for item in artifacts))
+        self.assertTrue(deferred_path.is_file())
+        self.assertIn("Split legacy presenter", deferred_path.read_text())
+        self.assertIn('"issues_file_path"', sent_inputs[-1])
+        actionable_path = spec_dir / "boy-scout-actionable.md"
+        self.assertTrue(actionable_path.is_file())
+        actionable_text = actionable_path.read_text()
+        self.assertIn("Extract builder helper", actionable_text)
+        self.assertNotIn("Split legacy presenter", actionable_text)
 
     def test_boy_scout_manual_skip_is_rejected_when_policy_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

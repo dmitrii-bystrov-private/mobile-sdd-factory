@@ -46,5 +46,28 @@ class JiraAdapter:
             cwd=self.repo_root,
         )
 
+    def create_issue(
+        self,
+        project: str,
+        issue_type: str,
+        summary: str,
+        description_file: Path,
+    ) -> CommandResult:
+        return self.runner.run(
+            [
+                "bash",
+                "scripts/create-issue.sh",
+                "--project",
+                project,
+                "--type",
+                issue_type,
+                "--summary",
+                summary,
+                "--description-file",
+                str(description_file),
+            ],
+            cwd=self.repo_root,
+        )
+
     def send_to_test(self, task_key: str) -> CommandResult:
         return self.runner.run(["bash", "scripts/commit-and-resolve.sh", task_key], cwd=self.repo_root)

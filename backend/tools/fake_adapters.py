@@ -11,6 +11,7 @@ class FakeJiraAdapter:
     def __init__(self, repo_root: Path) -> None:
         self.repo_root = repo_root
         self.status_by_task: dict[str, str] = {}
+        self.created_issue_counter = 0
 
     def resolve_parent(self, task_key: str) -> CommandResult:
         return CommandResult(
@@ -46,6 +47,23 @@ class FakeJiraAdapter:
                 "01    IOS-90001     Build data source\n"
                 "02    IOS-90002     Wire presentation layer\n"
             ),
+            stderr="",
+        )
+
+    def create_issue(
+        self,
+        project: str,
+        issue_type: str,
+        summary: str,
+        description_file: Path,
+    ) -> CommandResult:
+        del issue_type, description_file
+        self.created_issue_counter += 1
+        issue_key = f"{project}-{95000 + self.created_issue_counter}"
+        return CommandResult(
+            command=["fake_create_issue", project, summary],
+            returncode=0,
+            stdout=f"{issue_key} https://jira.example.com/browse/{issue_key}\n",
             stderr="",
         )
 

@@ -38,6 +38,7 @@ try:
     from backend.api.routes_operator import redirect_session
     from backend.api.routes_operator import complete_doc_harvest
     from backend.api.routes_operator import skip_boy_scout
+    from backend.api.routes_operator import resolve_boy_scout_findings
     from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
     from backend.api.routes_operator import create_knowledge, create_subtasks_from_plan
@@ -65,6 +66,7 @@ try:
         CreateMrRequest,
         CreateSubtasksFromPlanRequest,
         SkipBoyScoutRequest,
+        ResolveBoyScoutFindingsRequest,
         IngestMrCommentsRequest,
         PollSessionOutputRequest,
         PauseSessionRequest,
@@ -144,6 +146,7 @@ def decomposition_payload(summary: str, task_breakdown: str | None = None) -> di
 class FakeJiraAdapter:
     def __init__(self) -> None:
         self.status_by_task: dict[str, str] = {}
+        self.created_issue_counter = 0
 
     def resolve_parent(self, task_key: str) -> "CommandResult":
         return CommandResult(["resolve_parent", task_key], 0, f"{task_key}\n", "")
@@ -165,6 +168,23 @@ class FakeJiraAdapter:
             ["create_subtasks", task_key, str(plan_dir)],
             0,
             "Created subtasks:\n01    IOS-90001     Build data source\n",
+            "",
+        )
+
+    def create_issue(
+        self,
+        project: str,
+        issue_type: str,
+        summary: str,
+        description_file: Path,
+    ) -> "CommandResult":
+        del issue_type, description_file
+        self.created_issue_counter += 1
+        issue_key = f"{project}-{92000 + self.created_issue_counter}"
+        return CommandResult(
+            ["create_issue", project, summary],
+            0,
+            f"{issue_key} https://jira.example.com/browse/{issue_key}\n",
             "",
         )
 
@@ -2401,6 +2421,91 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "boy_scout_deferred_markdown" for item in artifacts_response.items))
         self.assertTrue(deferred_path.is_file())
         self.assertIn("Extract helper", deferred_path.read_text())
+
+    def test_resolve_boy_scout_findings_route_creates_tech_debt_and_routes_remaining_work(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40013BSRESOLVE",
+                workflow_profile="oneshot",
+                policy={"boy_scout_policy": "enabled"},
+            ),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013BSRESOLVE"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        scout_role = self.dependencies.role_repository.get_by_name(
+            create_response.session.id,
+            "code-scout",
+        )
+        spec_dir = Path(self.temp_dir.name) / "IOS-40013BSRESOLVE" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "diff.md").write_text(
+            "# Diff Artifact: IOS-40013BSRESOLVE\n\n"
+            "## Changed Files\n\n"
+            "| Status | Path |\n|---|---|\n"
+            "| added | `NewBuilder.swift` |\n"
+            "| modified | `LegacyPresenter.swift` |\n\n"
+        )
+        (spec_dir / "findings.md").write_text(
+            "SCOUT_RESULT: findings_found\n\n"
+            "## Finding 1: Extract builder helper\n\n"
+            "**Files**: `NewBuilder.swift`\n"
+            "**Principle**: DRY\n"
+            "**Problem**: Duplicate helper logic exists.\n"
+            "**Suggestion**: Extract a shared helper.\n\n"
+            "---\n\n"
+            "## Finding 2: Split legacy presenter\n\n"
+            "**Files**: `LegacyPresenter.swift`\n"
+            "**Principle**: SRP\n"
+            "**Problem**: Presenter does too much.\n"
+            "**Suggestion**: Split responsibilities.\n"
+        )
+        self.dependencies.session_backend.simulate_output(
+            scout_role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"result":"findings_found","summary":"Found two improvement opportunities."}}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=create_response.session.id,
+                role_name="code-scout",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = resolve_boy_scout_findings(
+            ResolveBoyScoutFindingsRequest(
+                session_id=create_response.session.id,
+                resolution="create_tech_debt",
+            ),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=create_response.session.id,
+            dependencies=self.dependencies,
+        )
+        deferred_path = Path(self.temp_dir.name) / "IOS-40013BSRESOLVE" / "spec" / "scout-deferred.md"
+        actionable_path = Path(self.temp_dir.name) / "IOS-40013BSRESOLVE" / "spec" / "boy-scout-actionable.md"
+
+        self.assertTrue(response.resolved)
+        self.assertEqual("boy_scout_tech_debt_created", response.event_type)
+        self.assertEqual("boy_scout_correction_requested", response.followup_event_type)
+        self.assertEqual("boy_scout_correction_requested", response.session.current_stage)
+        self.assertTrue(any(item.artifact_type == "boy_scout_deferred_markdown" for item in artifacts_response.items))
+        self.assertTrue(any(item.artifact_type == "boy_scout_actionable_markdown" for item in artifacts_response.items))
+        self.assertTrue(deferred_path.is_file())
+        self.assertTrue(actionable_path.is_file())
+        self.assertIn("Split legacy presenter", deferred_path.read_text())
+        self.assertIn("Extract builder helper", actionable_path.read_text())
 
     def test_get_environment_doctor_route_returns_report(self) -> None:
         fake_report = {

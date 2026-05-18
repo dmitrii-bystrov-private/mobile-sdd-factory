@@ -44,6 +44,9 @@ const STREAM_EVENT_TYPES = [
   "boy_scout_requested",
   "boy_scout_completed",
   "boy_scout_skipped_by_operator",
+  "boy_scout_implement_now_selected",
+  "boy_scout_tech_debt_created",
+  "boy_scout_correction_requested",
   "self_review_correction_requested",
   "doc_harvest_requested",
   "doc_harvest_completed",
@@ -517,6 +520,24 @@ export const apiClient = {
       body: JSON.stringify({
         session_id: sessionId,
         reason,
+      }),
+    });
+  },
+
+  resolveBoyScoutFindings(
+    sessionId: number,
+    resolution: "implement_now" | "create_tech_debt",
+  ): Promise<{
+    resolved: boolean;
+    event_type: string;
+    followup_event_type: string | null;
+    session: Session;
+  }> {
+    return request("/operator/resolve-boy-scout-findings", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        resolution,
       }),
     });
   },
