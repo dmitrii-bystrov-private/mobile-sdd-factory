@@ -8,12 +8,14 @@ from pathlib import Path
 from backend.api.routes_artifacts import list_artifacts
 from backend.api.routes_events import inject_event
 from backend.api.routes_operator import create_subtasks_from_plan
+from backend.api.routes_operator import resume_session
 from backend.api.routes_sessions import create_session, prepare_session
 from backend.api.schemas import (
     CreateSessionRequest,
-    InjectEventRequest,
     CreateSubtasksFromPlanRequest,
+    InjectEventRequest,
     PrepareSessionRequest,
+    ResumeSessionRequest,
 )
 from run_roots import managed_run_root
 
@@ -106,8 +108,16 @@ def main() -> None:
         )
         assert response.created
         assert response.event_type == "jira_subtasks_created"
-        assert response.followup_event_type == "subtask_implementation_requested"
-        assert response.session.current_stage == "subtask_implementation_requested"
+        assert response.followup_event_type is None
+        assert response.session.current_stage == "subtask_creation_requested"
+
+        resume_response = resume_session(
+            ResumeSessionRequest(session_id=session_id),
+            dependencies=deps,
+        )
+        assert resume_response.event_type == "session_resumed_by_operator"
+        assert resume_response.followup_event_type == "subtask_implementation_requested"
+        assert resume_response.session.current_stage == "subtask_implementation_requested"
 
         artifacts_response = list_artifacts(session_id=session_id, dependencies=deps)
         artifact_types = [item.artifact_type for item in artifacts_response.items]

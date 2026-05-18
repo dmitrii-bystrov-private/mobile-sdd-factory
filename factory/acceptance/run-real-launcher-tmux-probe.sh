@@ -5,4 +5,4 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 cd "$REPO_ROOT"
-./.venv/bin/python factory/acceptance/run-real-launcher-tmux-probe.py
+PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" ./.venv/bin/python factory/acceptance/run-real-launcher-tmux-probe.py

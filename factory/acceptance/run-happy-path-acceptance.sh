@@ -59,7 +59,7 @@ if ! curl -fsS "${BASE_URL}/sessions" >/dev/null 2>&1; then
   cat "${SERVER_LOG}" >&2 || true
   wait "${SERVER_PID}" 2>/dev/null || true
   SERVER_PID=""
-  exec "${REPO_ROOT}/.venv/bin/python" factory/acceptance/run-happy-path-acceptance.py
+  exec env PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" "${REPO_ROOT}/.venv/bin/python" factory/acceptance/run-happy-path-acceptance.py
 fi
 
 CREATE_PAYLOAD='{"task_key":"IOS-ACCEPT-001","workflow_profile":"oneshot","policy":{"self_review_policy":"required","boy_scout_policy":"disabled","doc_harvest_policy":"disabled"}}'
