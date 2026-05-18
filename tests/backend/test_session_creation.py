@@ -2758,6 +2758,13 @@ class SessionCreationTests(unittest.TestCase):
             ],
             [item.event_type for item in events],
         )
+        spec_root = Path(self.temp_dir.name) / "IOS-30006STORY" / "spec"
+        self.assertTrue((spec_root / "proposal.md").is_file())
+        self.assertTrue((spec_root / "requirements.md").is_file())
+        self.assertTrue((spec_root / "acceptance_criteria.md").is_file())
+        self.assertTrue((spec_root / "constraints.md").is_file())
+        self.assertTrue((spec_root / "spec_verification.md").is_file())
+        self.assertTrue((spec_root / "story_spec.md").is_file())
 
     def test_collect_role_output_records_runtime_output_artifact(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30007")

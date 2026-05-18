@@ -2498,6 +2498,17 @@ class CoordinatorService:
         active_item = proposal_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, PROPOSAL_CONTEXT_WORKER_ROLE)
+        self._materialize_story_spec_file(
+            session=session,
+            filename="proposal.md",
+            artifact_type="proposal_markdown",
+            title="Proposal",
+            explicit_markdown=str(source_event.payload.get("proposal_markdown") or "").strip(),
+            sections=[
+                ("Summary", str(source_event.payload.get("summary") or "").strip()),
+                ("Key Context Findings", str(source_event.payload.get("context_findings") or "").strip()),
+            ],
+        )
 
         summary = str(source_event.payload.get("summary") or "").strip()
         context_findings = str(source_event.payload.get("context_findings") or "").strip()
@@ -2571,6 +2582,17 @@ class CoordinatorService:
         active_item = requirements_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, REQUIREMENTS_CLARIFIER_WORKER_ROLE)
+        self._materialize_story_spec_file(
+            session=session,
+            filename="requirements.md",
+            artifact_type="requirements_markdown",
+            title="Requirements",
+            explicit_markdown=str(source_event.payload.get("requirements_markdown") or "").strip(),
+            sections=[
+                ("Summary", str(source_event.payload.get("summary") or "").strip()),
+                ("Assumptions", str(source_event.payload.get("assumptions") or "").strip()),
+            ],
+        )
 
         summary = str(source_event.payload.get("summary") or "").strip()
         assumptions = str(source_event.payload.get("assumptions") or "").strip()
@@ -2605,6 +2627,17 @@ class CoordinatorService:
         active_item = acceptance_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, ACCEPTANCE_CRITERIA_WORKER_ROLE)
+        self._materialize_story_spec_file(
+            session=session,
+            filename="acceptance_criteria.md",
+            artifact_type="acceptance_criteria_markdown",
+            title="Acceptance Criteria",
+            explicit_markdown=str(source_event.payload.get("acceptance_criteria_markdown") or "").strip(),
+            sections=[
+                ("Summary", str(source_event.payload.get("summary") or "").strip()),
+                ("Highlighted Cases", str(source_event.payload.get("highlighted_cases") or "").strip()),
+            ],
+        )
 
         summary = str(source_event.payload.get("summary") or "").strip()
         highlighted_cases = str(source_event.payload.get("highlighted_cases") or "").strip()
@@ -2639,6 +2672,17 @@ class CoordinatorService:
         active_item = constraint_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, CONSTRAINTS_WORKER_ROLE)
+        self._materialize_story_spec_file(
+            session=session,
+            filename="constraints.md",
+            artifact_type="constraints_markdown",
+            title="Constraints",
+            explicit_markdown=str(source_event.payload.get("constraints_markdown") or "").strip(),
+            sections=[
+                ("Summary", str(source_event.payload.get("summary") or "").strip()),
+                ("Key Constraints", str(source_event.payload.get("key_constraints") or "").strip()),
+            ],
+        )
 
         summary = str(source_event.payload.get("summary") or "").strip()
         key_constraints = str(source_event.payload.get("key_constraints") or "").strip()
@@ -2673,6 +2717,17 @@ class CoordinatorService:
         active_item = verification_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, SPEC_VERIFIER_WORKER_ROLE)
+        self._materialize_story_spec_file(
+            session=session,
+            filename="spec_verification.md",
+            artifact_type="spec_verification_markdown",
+            title="Spec Verification",
+            explicit_markdown=str(source_event.payload.get("spec_verification_markdown") or "").strip(),
+            sections=[
+                ("Summary", str(source_event.payload.get("summary") or "").strip()),
+                ("Verified Focus", str(source_event.payload.get("verified_focus") or "").strip()),
+            ],
+        )
 
         summary = str(source_event.payload.get("summary") or "").strip()
         verified_focus = str(source_event.payload.get("verified_focus") or "").strip()
@@ -2707,6 +2762,17 @@ class CoordinatorService:
         active_item = spec_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, STORY_SPEC_WORKER_ROLE)
+        self._materialize_story_spec_file(
+            session=session,
+            filename="story_spec.md",
+            artifact_type="story_spec_markdown",
+            title="Story Spec",
+            explicit_markdown=str(source_event.payload.get("story_spec_markdown") or "").strip(),
+            sections=[
+                ("Summary", str(source_event.payload.get("summary") or "").strip()),
+                ("Key Constraints", str(source_event.payload.get("constraints") or "").strip()),
+            ],
+        )
 
         summary = str(source_event.payload.get("summary") or "").strip()
         constraints = str(source_event.payload.get("constraints") or "").strip()
@@ -5096,6 +5162,52 @@ class CoordinatorService:
         if task_breakdown:
             lines.extend(["## Task Breakdown", "", task_breakdown, ""])
         return "\n".join(lines).rstrip() + "\n"
+
+    def _materialize_story_spec_file(
+        self,
+        *,
+        session: Session,
+        filename: str,
+        artifact_type: str,
+        title: str,
+        explicit_markdown: str,
+        sections: list[tuple[str, str]],
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / filename
+        if explicit_markdown:
+            content = explicit_markdown.rstrip() + "\n"
+        else:
+            lines = [f"# {title}", ""]
+            for heading, body in sections:
+                normalized = body.strip()
+                if not normalized:
+                    continue
+                lines.extend([f"## {heading}", "", normalized, ""])
+            content = "\n".join(lines).rstrip() + "\n"
+        target_path.write_text(content)
+
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "planning",
+            filename,
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="planning",
+            artifact_type=artifact_type,
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+            },
+        )
 
     def _write_task_decomposition_plan_package(
         self,

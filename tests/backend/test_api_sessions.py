@@ -974,6 +974,12 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertEqual("story_spec_requested", response.followup_event_type)
         self.assertEqual("story_spec_requested", response.session.current_stage)
+        spec_root = Path(self.temp_dir.name) / "IOS-40003VERIFY" / "spec"
+        self.assertTrue((spec_root / "proposal.md").is_file())
+        self.assertTrue((spec_root / "requirements.md").is_file())
+        self.assertTrue((spec_root / "acceptance_criteria.md").is_file())
+        self.assertTrue((spec_root / "constraints.md").is_file())
+        self.assertTrue((spec_root / "spec_verification.md").is_file())
 
     def test_spec_verification_failed_output_route_escalates_to_operator(self) -> None:
         prepare_response = create_session(
