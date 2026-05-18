@@ -322,6 +322,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
     if role_name == "implementer":
         return [
             "- Read all routed spec inputs before writing code.",
+            "- For implementation work, read the task snapshot inputs (`description.md`, `comments.md`, and `spec/diff.md`) when they exist before concluding that no concrete work was routed.",
             "- Use RAG tools first for code exploration; fall back to filesystem search only for structural queries.",
             "- If the routed input is a narrow correction pass, keep scope limited to the listed issues unless a tiny directly related change is required.",
             "- Do not run workflow-level `run-build.sh`, `run-test.sh`, or `run-lint.sh` unless the routed work explicitly requires a narrow task-specific check.",
@@ -331,6 +332,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Preserve bug-specific context across analysis, fix, and follow-up rounds.",
             "- Support the routed bug modes inside one runtime identity: `analysis-only` before code changes, then `fix-only` for implementation, correction, and follow-up rounds.",
+            "- In implementation and fix-only rounds, read `description.md`, `comments.md`, and `spec/diff.md` when they exist before deciding there is no concrete bug-fix work to perform.",
             "- In `analysis-only` mode, read task description/comments first, investigate the code path, write or update `spec/bug-analysis.md`, and stop before product-code changes when confidence is low or when the coordinator routed an analysis-only pass.",
             "- In `fix-only` mode, read the saved `spec/bug-analysis.md` first and treat it as the durable bug context unless a routed issues file or follow-up comments narrow the scope further.",
             "- If an `Issues file:` path is routed, treat it as the primary narrow-scope input for this round and keep the fix limited to those listed issues unless a tiny directly-related adjustment is required.",
@@ -480,9 +482,9 @@ def build_role_agents_md(
             "- Re-read this file after context compaction or if role boundaries become unclear.",
             "- Use coordinator hydration and routed work instructions as the current task payload.",
             "- Treat this file as durable role context; treat routed handoff prompts as per-work instructions.",
-            "- For terminal outcomes, prefer writing `RESULT.json` in the current directory with a JSON object shaped like `{\\\"output_type\\\":\\\"completed\\\",\\\"payload\\\":{...}}`.",
+            "- For terminal outcomes, write `RESULT.json` in the current directory with a JSON object shaped like `{\\\"output_type\\\":\\\"completed\\\",\\\"payload\\\":{...}}` before you finish the turn.",
             "- You may emit `SDD_PROGRESS` for intermediate updates and `SDD_ERROR` when operator visibility is required.",
-            "- If you emit terminal completion text directly, use the exact `SDD_OUTPUT: {...}` format described by the coordinator.",
+            "- If you also emit terminal completion text directly, use the exact `SDD_OUTPUT: {...}` format described by the coordinator.",
             "",
             "## Operating Rules",
             "",

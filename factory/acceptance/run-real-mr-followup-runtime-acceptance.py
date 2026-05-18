@@ -21,6 +21,7 @@ from backend.roles.contracts import (
     MR_COMMENTS_ANALYST_ROLE,
     VERIFICATION_COORDINATOR_ROLE,
 )
+from runtime_config import acceptance_role_config
 from run_roots import managed_run_root
 
 
@@ -70,6 +71,9 @@ def main() -> None:
                     "boy_scout_policy": "disabled",
                     "doc_harvest_policy": "disabled",
                 },
+                role_config=acceptance_role_config(
+                    [IMPLEMENTER_ROLE, VERIFICATION_COORDINATOR_ROLE]
+                ),
             ),
             dependencies=deps,
         )

@@ -26,6 +26,7 @@ from backend.api.schemas import (
     StopRuntimeSessionRequest,
 )
 from backend.roles.contracts import IMPLEMENTER_ROLE
+from runtime_config import acceptance_role_config
 from run_roots import managed_run_root, shutdown_dependencies
 
 
@@ -180,20 +181,13 @@ def _runner_name() -> str:
 
 def _create_prepared_session(*, task_key: str, dependencies) -> int:
     runner = _runner_name()
-    role_config = None
-    if runner != "claude":
-        role_config = {
-            "implementer": {
-                "runner": runner,
-                "model": "gpt-5.5",
-                "effort": "medium",
-            },
-            "verification-coordinator": {
-                "runner": runner,
-                "model": "gpt-5.5",
-                "effort": "medium",
-            },
-        }
+    role_config = acceptance_role_config(
+        ["implementer", "verification-coordinator"],
+        runner_overrides={
+            "implementer": runner,
+            "verification-coordinator": runner,
+        },
+    )
     create_response = create_session(
         CreateSessionRequest(
             task_key=task_key,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 from backend.tools.command_runner import CommandResult
 
@@ -81,6 +82,40 @@ class FakeSnapshotAdapter:
         self.repo_root = repo_root
         self.workdir_root = workdir_root
 
+    def _ensure_clean_task_git_repo(self, task_dir: Path) -> None:
+        git_dir = task_dir / ".git"
+        gitignore_path = task_dir / ".gitignore"
+        gitignore_path.write_text(
+            "\n".join(
+                [
+                    "runtime/",
+                    "tmp/",
+                    "spec/",
+                    "plan/",
+                    "statuses.md",
+                    "description.md",
+                    "comments.md",
+                    "",
+                ]
+            )
+        )
+        if git_dir.exists():
+            return
+        subprocess.run(["git", "init", "-q", str(task_dir)], check=True)
+        subprocess.run(["git", "-C", str(task_dir), "config", "user.name", "Acceptance Runner"], check=True)
+        subprocess.run(
+            ["git", "-C", str(task_dir), "config", "user.email", "acceptance@example.invalid"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(task_dir), "add", ".gitignore", "repo"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(task_dir), "commit", "-q", "-m", "Initialize acceptance task snapshot"],
+            check=True,
+        )
+
     def run(self, task_key: str) -> CommandResult:
         task_dir = self.workdir_root / task_key
         repo_dir = task_dir / "repo"
@@ -88,6 +123,7 @@ class FakeSnapshotAdapter:
         repo_claude_dir = repo_dir / ".claude"
         knowledge_dir = repo_dir / "knowledge"
         spec_dir = task_dir / "spec"
+        placeholder_change_path = repo_dir / "placeholder_change.txt"
         task_dir.mkdir(parents=True, exist_ok=True)
         repo_dir.mkdir(parents=True, exist_ok=True)
         repo_claude_dir.mkdir(parents=True, exist_ok=True)
@@ -107,21 +143,51 @@ class FakeSnapshotAdapter:
                 "Project-local knowledge base for fake acceptance snapshots.\n"
             )
 
+        if not placeholder_change_path.exists():
+            placeholder_change_path.write_text(
+                "STATUS=todo\n"
+                "DETAIL=placeholder acceptance change is still pending\n"
+            )
+
         statuses_path = task_dir / "statuses.md"
         if not statuses_path.exists():
             statuses_path.write_text("- [ ] Subtask 1\n- [x] Subtask 2\n")
+
+        description_path = task_dir / "description.md"
+        if not description_path.exists():
+            description_path.write_text(
+                "# Task Description\n\n"
+                "Apply the acceptance placeholder change by editing `repo/placeholder_change.txt`.\n"
+                "Replace `STATUS=todo` with `STATUS=done` and update the detail line to mention the acceptance change was applied.\n"
+            )
+
+        comments_path = task_dir / "comments.md"
+        if not comments_path.exists():
+            comments_path.write_text(
+                "# Comments\n\n"
+                "- Keep the change narrow and limited to `repo/placeholder_change.txt`.\n"
+                "- Do not modify unrelated files during this acceptance task.\n"
+            )
 
         diff_path = spec_dir / "diff.md"
         if not diff_path.exists():
             diff_path.write_text(
                 "# Structured Diff\n\n"
                 "## Summary\n\n"
-                "- Placeholder acceptance diff for live operator validation.\n\n"
+                "- Apply the placeholder acceptance change in `repo/placeholder_change.txt`.\n\n"
                 "## Raw Diff\n\n"
                 "```diff\n"
-                "+ placeholder change\n"
+                "--- repo/placeholder_change.txt\n"
+                "+++ repo/placeholder_change.txt\n"
+                "@@\n"
+                "-STATUS=todo\n"
+                "-DETAIL=placeholder acceptance change is still pending\n"
+                "+STATUS=done\n"
+                "+DETAIL=placeholder acceptance change applied in acceptance validation\n"
                 "```\n"
             )
+
+        self._ensure_clean_task_git_repo(task_dir)
 
         return CommandResult(
             command=["fake_snapshot", task_key],

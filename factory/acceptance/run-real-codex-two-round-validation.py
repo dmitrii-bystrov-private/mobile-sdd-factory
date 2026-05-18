@@ -8,10 +8,18 @@ import time
 from pathlib import Path
 
 from backend.api.routes_events import inject_event, list_events
+from backend.api.routes_operator import poll_session_output
 from backend.api.routes_roles import collect_role_output
 from backend.api.routes_sessions import create_session, prepare_session
-from backend.api.schemas import CollectRoleOutputRequest, CreateSessionRequest, InjectEventRequest, PrepareSessionRequest
+from backend.api.schemas import (
+    CollectRoleOutputRequest,
+    CreateSessionRequest,
+    InjectEventRequest,
+    PollSessionOutputRequest,
+    PrepareSessionRequest,
+)
 from backend.roles.contracts import IMPLEMENTER_ROLE
+from runtime_config import acceptance_role_config
 from run_roots import managed_run_root, shutdown_dependencies
 
 
@@ -65,6 +73,51 @@ def wait_for_stage(
     return last_response, output_text
 
 
+def wait_for_session_stage(
+    session_id: int,
+    role_name: str,
+    *,
+    dependencies,
+    target_stage: str,
+    timeout_seconds: float = 240.0,
+) -> tuple[object, str]:
+    deadline = time.time() + timeout_seconds
+    last_response = None
+    output_text = ""
+    role = dependencies.role_repository.get_by_name(session_id, role_name)
+    role_id = role.id if role is not None else None
+    while time.time() < deadline:
+        dependencies.loop_runner.run_once()
+        for worker_role_name in ("implementer", "verification-coordinator"):
+            collect_role_output(
+                CollectRoleOutputRequest(
+                    session_id=session_id,
+                    role_name=worker_role_name,
+                ),
+                dependencies=dependencies,
+            )
+        response = poll_session_output(
+            PollSessionOutputRequest(session_id=session_id),
+            dependencies=dependencies,
+        )
+        last_response = response
+        artifacts = dependencies.artifact_repository.list_for_session(session_id)
+        runtime_outputs = [
+            item
+            for item in artifacts
+            if item.artifact_type == "runtime_output" and item.role_id == role_id
+        ]
+        if runtime_outputs:
+            output_path = Path(runtime_outputs[-1].path)
+            if output_path.is_file():
+                output_text = output_path.read_text()
+        if response.session.current_stage == target_stage:
+            return response, output_text
+        time.sleep(1.0)
+    assert last_response is not None
+    return last_response, output_text
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     build_acceptance_dependencies = _load_build_acceptance_dependencies(repo_root)
@@ -82,18 +135,13 @@ def main() -> None:
                     "boy_scout_policy": "disabled",
                     "doc_harvest_policy": "disabled",
                 },
-                role_config={
-                    "implementer": {
-                        "runner": "codex",
-                        "model": "gpt-5.5",
-                        "effort": "medium",
+                role_config=acceptance_role_config(
+                    ["implementer", "verification-coordinator"],
+                    runner_overrides={
+                        "implementer": "codex",
+                        "verification-coordinator": "codex",
                     },
-                    "verification-coordinator": {
-                        "runner": "codex",
-                        "model": "gpt-5.5",
-                        "effort": "medium",
-                    },
-                },
+                ),
             ),
             dependencies=deps,
         )
@@ -105,7 +153,7 @@ def main() -> None:
         )
         assert prepare_response.followup_event_type == "implementation_requested"
 
-        first_response, first_output = wait_for_stage(
+        first_response, first_output = wait_for_session_stage(
             session_id=session_id,
             role_name=IMPLEMENTER_ROLE,
             dependencies=deps,
@@ -123,7 +171,7 @@ def main() -> None:
             dependencies=deps,
         )
 
-        second_response, second_output = wait_for_stage(
+        second_response, second_output = wait_for_session_stage(
             session_id=session_id,
             role_name=IMPLEMENTER_ROLE,
             dependencies=deps,

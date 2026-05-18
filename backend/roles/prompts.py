@@ -193,13 +193,13 @@ def role_handoff_prompt(
         'SDD_PROGRESS: {"status":"in_progress","message":"short progress update","progress":25}\n'
         "If you hit a runtime/tooling problem and need operator visibility, emit:\n"
         'SDD_ERROR: {"summary":"short error summary","details":"optional detail"}\n\n'
-        "Preferred terminal outcome path:\n"
-        "- Write `RESULT.json` in the current directory using the same JSON object you would place after `SDD_OUTPUT:`.\n"
+        "Required terminal outcome path:\n"
+        "- Write `RESULT.json` in the current directory using the same JSON object you would place after `SDD_OUTPUT:` before you finish the turn.\n"
         "- For example: `{\"output_type\":\"completed\",\"payload\":{\"summary\":\"short result\"}}`\n"
         "- Use `failed` plus `failures` when verification/correction output must report failures.\n\n"
-        "When you reach a terminal outcome for this routed work, emit one line in this exact form:\n"
+        "If you also echo the terminal outcome in the transcript, emit one line in this exact form:\n"
         'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"short result"}}\n'
-        "For verification failures, emit:\n"
+        "For verification failures, the optional transcript echo is:\n"
         'SDD_OUTPUT: {"output_type":"failed","payload":{"summary":"short result","failures":["..."]}}\n\n'
         "Hydration payload:\n"
         f"{json.dumps(hydration_payload, indent=2, sort_keys=True)}\n"

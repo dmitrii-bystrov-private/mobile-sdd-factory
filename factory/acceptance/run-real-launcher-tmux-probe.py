@@ -24,6 +24,7 @@ from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.fake_adapters import FakeGitLabAdapter, FakeJiraAdapter, FakeSnapshotAdapter
+from runtime_config import acceptance_role_config
 from run_roots import managed_run_root, run_tmux_socket_root, shutdown_dependencies
 
 
@@ -138,6 +139,9 @@ def main() -> None:
                     "boy_scout_policy": "disabled",
                     "doc_harvest_policy": "disabled",
                 },
+                role_config=acceptance_role_config(
+                    ["implementer", "verification-coordinator"]
+                ),
             ),
             dependencies=deps,
         )

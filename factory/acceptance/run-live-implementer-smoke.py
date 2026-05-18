@@ -10,6 +10,7 @@ import subprocess
 from backend.api.routes_sessions import create_session, prepare_session
 from backend.api.schemas import CreateSessionRequest, PrepareSessionRequest
 from backend.roles.contracts import IMPLEMENTER_ROLE
+from runtime_config import acceptance_role_config
 from run_roots import managed_run_root
 
 
@@ -38,6 +39,9 @@ def main() -> None:
                     "boy_scout_policy": "disabled",
                     "doc_harvest_policy": "disabled",
                 },
+                role_config=acceptance_role_config(
+                    ["implementer", "verification-coordinator"]
+                ),
             ),
             dependencies=deps,
         )

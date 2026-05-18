@@ -1907,14 +1907,12 @@ class CoordinatorService:
         if (
             role_name == VERIFICATION_COORDINATOR_ROLE
             and output_type in {"passed", "completed", "failed", "blocked_verification_cycle"}
-            and session.current_stage == "verification_correction_requested"
             and session.current_owner != VERIFICATION_COORDINATOR_ROLE
         ):
             return True
         if (
             role_name == CODE_REVIEWER_ROLE
             and output_type in {"passed", "completed", "failed", "blocked_review_cycle"}
-            and session.current_stage == "self_review_correction_requested"
             and session.current_owner != CODE_REVIEWER_ROLE
         ):
             return True
@@ -4638,25 +4636,47 @@ class CoordinatorService:
 
     def _extract_output_markers(self, text: str) -> list[tuple[str, dict]]:
         results: list[tuple[str, dict]] = []
-        for line in text.splitlines():
+        lines = text.splitlines()
+        index = 0
+        while index < len(lines):
+            line = lines[index]
             marker_type = self._line_marker_type(line)
             if marker_type is None:
+                index += 1
                 continue
-            raw_payload = line.split(":", 1)[1].strip()
-            try:
-                parsed = json.loads(raw_payload)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(parsed, dict):
-                results.append((marker_type, parsed))
+            payload_lines = [line.split(":", 1)[1].strip()]
+            cursor = index + 1
+            parsed_payload: dict | None = None
+            while True:
+                raw_payload = "".join(
+                    part if position == 0 else part.lstrip()
+                    for position, part in enumerate(payload_lines)
+                )
+                try:
+                    parsed = json.loads(raw_payload)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    parsed_payload = parsed
+                    break
+                if cursor >= len(lines) or self._line_marker_type(lines[cursor]) is not None:
+                    break
+                payload_lines.append(lines[cursor])
+                cursor += 1
+            if parsed_payload is not None:
+                results.append((marker_type, parsed_payload))
+            index = cursor
         return results
 
     def _line_marker_type(self, line: str) -> str | None:
-        if line.startswith("SDD_OUTPUT:"):
+        normalized = line.lstrip()
+        if normalized.startswith("• "):
+            normalized = normalized[2:].lstrip()
+        if normalized.startswith("SDD_OUTPUT:"):
             return "output"
-        if line.startswith("SDD_PROGRESS:"):
+        if normalized.startswith("SDD_PROGRESS:"):
             return "progress"
-        if line.startswith("SDD_ERROR:"):
+        if normalized.startswith("SDD_ERROR:"):
             return "error"
         return None
 
@@ -5183,7 +5203,10 @@ class CoordinatorService:
                 "Finish the currently assigned subtask before moving to the next one."
             )
         if stage_name == "implementation_requested":
-            return f"Start implementation work for {task_key}."
+            return (
+                f"Start implementation work for {task_key}. "
+                "Read task snapshot inputs such as `description.md`, `comments.md`, and `spec/diff.md` when they exist before deciding that no concrete implementation work is present."
+            )
         if stage_name == "boy_scout_correction_requested":
             return f"Apply Boy Scout improvements for {task_key} from the routed findings file as a narrow correction pass."
         if stage_name == "verification_requested":

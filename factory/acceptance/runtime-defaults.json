@@ -1,0 +1,13 @@
+{
+  "default_runner": "claude",
+  "runner_defaults": {
+    "claude": {
+      "model": "sonnet",
+      "effort": "medium"
+    },
+    "codex": {
+      "model": "gpt-5.3-codex-spark",
+      "effort": "medium"
+    }
+  }
+}
