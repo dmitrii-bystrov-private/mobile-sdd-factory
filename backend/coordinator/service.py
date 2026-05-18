@@ -3461,13 +3461,20 @@ class CoordinatorService:
         if doc_harvest_policy == "required":
             session, event = self._enqueue_doc_harvest(session=session, source_event=source_event)
             return session, event
+        return self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
+
+    def _complete_session_and_attempt_delivery(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage="completed",
             current_owner=None,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
-        event = self._append_event(
+        completed_event = self._append_event(
             session_id=session.id,
             event_type="task_completed",
             producer_type="coordinator",
@@ -3478,7 +3485,13 @@ class CoordinatorService:
                 "status": session.status.value,
             },
         )
-        return session, event
+        if self.gitlab_adapter is None or self.jira_adapter is None:
+            return session, completed_event
+        session, mr_event, _mr_url = self.create_mr_handoff(session.id)
+        if mr_event.event_type != "mr_handoff_completed":
+            return session, mr_event
+        session, send_event = self.send_to_test_handoff(session.id)
+        return session, send_event
 
     def _handle_boy_scout_completed(
         self,
@@ -3802,7 +3815,8 @@ class CoordinatorService:
             producer_id=DOC_HARVEST_ROLE,
             emit_event=False,
         )
-        return session, None
+        session, event = self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
+        return session, event
 
     def _finalize_doc_harvest(
         self,

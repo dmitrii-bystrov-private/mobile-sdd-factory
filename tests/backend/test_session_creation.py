@@ -9,6 +9,7 @@ from backend.api.sse import SessionEventBus
 from backend import session_policy as session_policy_module
 from backend.coordinator.intake import IntakeError
 from backend.coordinator.service import CoordinatorService
+from backend.models.enums import SessionStatus
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
     BUG_FIXER_ROLE,
@@ -2677,10 +2678,10 @@ class SessionCreationTests(unittest.TestCase):
         events = self.event_repository.list_for_session(session.id)
         verification_report = Path(self.temp_dir.name) / "IOS-30005" / "spec" / "final-verification.md"
 
-        self.assertEqual("completed", updated_session.current_stage)
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
         self.assertIsNone(updated_session.current_owner)
         self.assertEqual("completed", updated_session.status.value)
-        self.assertEqual("task_completed", followup_event.event_type)
+        self.assertEqual("send_to_test_completed", followup_event.event_type)
         self.assertTrue(verification_report.exists())
         self.assertIn("PASS", verification_report.read_text())
         self.assertEqual(
@@ -2703,6 +2704,8 @@ class SessionCreationTests(unittest.TestCase):
                 "verification_requested",
                 "verification_passed",
                 "task_completed",
+                "mr_handoff_completed",
+                "send_to_test_completed",
             ],
             [item.event_type for item in events],
         )
@@ -3382,16 +3385,12 @@ class SessionCreationTests(unittest.TestCase):
 
     def test_create_mr_handoff_marks_completed_session_as_handed_off(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021A")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="completed",
+            current_owner=None,
         )
-        completed_session, _ = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="verification_passed",
-            payload={"summary": "all green"},
-        )
+        completed_session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
 
         updated_session, event, mr_url = self.coordinator.create_mr_handoff(
             session_id=completed_session.id
@@ -3418,17 +3417,12 @@ class SessionCreationTests(unittest.TestCase):
 
     def test_send_to_test_handoff_marks_mr_handed_off_session_as_ready(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021C")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="mr_handoff_completed",
+            current_owner=None,
         )
-        completed_session, _ = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="verification_passed",
-            payload={"summary": "all green"},
-        )
-        self.coordinator.create_mr_handoff(session_id=completed_session.id)
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
 
         updated_session, event = self.coordinator.send_to_test_handoff(session_id=session.id)
         artifacts = self.artifact_repository.list_for_session(session.id)
@@ -3443,16 +3437,12 @@ class SessionCreationTests(unittest.TestCase):
 
     def test_send_to_test_handoff_requires_mr_handoff_stage(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021D")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
+        completed_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="completed",
+            current_owner=None,
         )
-        completed_session, _ = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="verification_passed",
-            payload={"summary": "all green"},
-        )
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
 
         with self.assertRaisesRegex(IntakeError, "must complete MR handoff"):
             self.coordinator.send_to_test_handoff(session_id=completed_session.id)
@@ -3700,9 +3690,11 @@ class SessionCreationTests(unittest.TestCase):
         artifacts = self.artifact_repository.list_for_session(session.id)
 
         self.assertEqual("doc_harvest_completed", mapped_event.event_type)
-        self.assertIsNone(followup_event)
+        self.assertIsNotNone(followup_event)
+        assert followup_event is not None
+        self.assertEqual("send_to_test_completed", followup_event.event_type)
         self.assertEqual("completed", updated_session.status.value)
-        self.assertEqual("doc_harvest_completed", updated_session.current_stage)
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
 
     def test_followup_implementation_completed_reenters_verification_loop(self) -> None:

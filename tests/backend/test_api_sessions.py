@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 try:
+    from backend.models.enums import SessionStatus
     from backend import session_policy as session_policy_module
     from backend.api.sse import SessionEventBus
     from backend.api.routes_sessions import (
@@ -1692,10 +1693,10 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        self.assertEqual("task_completed", response.followup_event_type)
-        self.assertEqual("completed", response.session.current_stage)
+        self.assertEqual("send_to_test_completed", response.followup_event_type)
+        self.assertEqual("send_to_test_completed", response.session.current_stage)
         self.assertEqual("completed", response.session.status)
-        self.assertEqual(9, len(events_response.items))
+        self.assertEqual(11, len(events_response.items))
         verification_report = Path(self.temp_dir.name) / "IOS-40005" / "spec" / "final-verification.md"
         self.assertTrue(verification_report.exists())
         self.assertIn("PASS", verification_report.read_text())
@@ -2583,21 +2584,14 @@ class SessionApiTests(unittest.TestCase):
             PrepareSessionRequest(task_key="IOS-40014MR"),
             dependencies=self.dependencies,
         )
-        inject_event(
-            InjectEventRequest(
-                session_id=prepare_response.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "done"},
-            ),
-            dependencies=self.dependencies,
+        self.dependencies.session_repository.update_stage_and_owner(
+            prepare_response.session.id,
+            current_stage="completed",
+            current_owner=None,
         )
-        inject_event(
-            InjectEventRequest(
-                session_id=prepare_response.session.id,
-                event_type="verification_passed",
-                payload={"summary": "all green"},
-            ),
-            dependencies=self.dependencies,
+        self.dependencies.session_repository.update_status(
+            prepare_response.session.id,
+            SessionStatus.COMPLETED,
         )
 
         response = create_mr(
@@ -2624,25 +2618,14 @@ class SessionApiTests(unittest.TestCase):
             PrepareSessionRequest(task_key="IOS-40014ST"),
             dependencies=self.dependencies,
         )
-        inject_event(
-            InjectEventRequest(
-                session_id=prepare_response.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "done"},
-            ),
-            dependencies=self.dependencies,
+        self.dependencies.session_repository.update_stage_and_owner(
+            prepare_response.session.id,
+            current_stage="mr_handoff_completed",
+            current_owner=None,
         )
-        inject_event(
-            InjectEventRequest(
-                session_id=prepare_response.session.id,
-                event_type="verification_passed",
-                payload={"summary": "all green"},
-            ),
-            dependencies=self.dependencies,
-        )
-        create_mr(
-            CreateMrRequest(session_id=prepare_response.session.id),
-            dependencies=self.dependencies,
+        self.dependencies.session_repository.update_status(
+            prepare_response.session.id,
+            SessionStatus.COMPLETED,
         )
 
         response = send_to_test(
