@@ -48,6 +48,7 @@ const STREAM_EVENT_TYPES = [
   "doc_harvest_requested",
   "doc_harvest_completed",
   "spec_verification_blocked",
+  "subtask_creation_requested",
   "verification_requested",
   "verification_failed",
   "verification_correction_requested",

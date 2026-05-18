@@ -1162,7 +1162,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("task_decomposition_requested", response.session.current_stage)
         self.assertEqual(7, len(work_items_response.items))
 
-    def test_task_decomposition_completed_event_returns_implementation_handoff(self) -> None:
+    def test_task_decomposition_completed_event_returns_subtask_creation_checkpoint(self) -> None:
         prepare_response = create_session(
             CreateSessionRequest(
                 task_key="IOS-40003DECOMP",
@@ -1243,8 +1243,9 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        self.assertEqual("implementation_requested", response.followup_event_type)
-        self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertEqual("subtask_creation_requested", response.followup_event_type)
+        self.assertEqual("subtask_creation_requested", response.session.current_stage)
+        self.assertEqual("waiting_for_operator", response.session.status)
 
     def test_start_subtask_graph_route_converts_story_session(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -1537,7 +1538,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "jira_subtasks_summary" for item in artifacts_response.items))
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stdout" for item in artifacts_response.items))
 
-    def test_create_subtasks_from_plan_route_can_auto_start_subtask_lane(self) -> None:
+    def test_create_subtasks_from_plan_route_keeps_session_waiting_for_resume_checkpoint(self) -> None:
         from backend.api.routes_sessions import create_session, prepare_session
 
         create_response = create_session(
@@ -1604,8 +1605,9 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertTrue(response.created)
         self.assertEqual("jira_subtasks_created", response.event_type)
-        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
-        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+        self.assertIsNone(response.followup_event_type)
+        self.assertEqual("subtask_creation_requested", response.session.current_stage)
+        self.assertEqual("waiting_for_operator", response.session.status)
 
     def test_list_knowledge_route_returns_repo_visible_items(self) -> None:
         from backend.api.routes_sessions import prepare_session

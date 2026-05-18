@@ -1168,10 +1168,16 @@ class CoordinatorService:
             },
         )
 
-        if not unresolved or session.current_stage != "implementation_requested":
+        if not unresolved or session.current_stage not in {"implementation_requested", "subtask_creation_requested"}:
             return session, event, None
 
-        active_item = self._find_active_primary_coding_work_item(session)
+        active_item: WorkItem | None
+        if session.current_stage == "subtask_creation_requested":
+            active_item = self._find_operator_pending_work_item(session.id)
+            if active_item is not None:
+                self.work_item_repository.update_status(active_item.id, WorkItemStatus.ASSIGNED)
+        else:
+            active_item = self._find_active_primary_coding_work_item(session)
         decomposition_artifact = self._latest_artifact_for_session_type(
             session.id,
             "task_decomposition_markdown",
@@ -1399,17 +1405,19 @@ class CoordinatorService:
             raise IntakeError(
                 f"Session {session_id} is {session.workflow_profile}, but subtask graph is only supported for story_full"
             )
-        if session.status != SessionStatus.ACTIVE:
+        active_item: WorkItem | None = None
+        if session.current_stage == "implementation_requested" and session.status == SessionStatus.ACTIVE:
+            active_item = self._find_active_primary_coding_work_item(session)
+        elif session.current_stage == "subtask_creation_requested" and session.status == SessionStatus.WAITING_FOR_OPERATOR:
+            active_item = self._find_operator_pending_work_item(session.id)
+            if active_item is not None:
+                self.work_item_repository.update_status(active_item.id, WorkItemStatus.ASSIGNED)
+        else:
             raise IntakeError(
-                f"Session {session_id} must be active before starting subtask graph"
+                f"Session {session_id} must be at implementation_requested or subtask_creation_requested before starting subtask graph"
             )
-        if session.current_stage != "implementation_requested":
-            raise IntakeError(
-                f"Session {session_id} must be at implementation_requested before starting subtask graph"
-            )
-        active_item = self._find_active_primary_coding_work_item(session)
         if active_item is None or active_item.work_type != "implementation":
-            raise IntakeError("No active implementation work item found for subtask graph start")
+            raise IntakeError("No implementation work item found for subtask graph start")
         decomposition_item = next(
             (
                 item
@@ -1831,6 +1839,8 @@ class CoordinatorService:
         runtime_blocker = self._latest_runtime_blocker_event(session.id)
         if runtime_blocker is not None and runtime_blocker.payload.get("resume_strategy") == "reactivate_only":
             return session, resumed_event, None
+        if session.current_stage == "subtask_creation_requested":
+            return self._resume_after_subtask_creation(session, role, work_item, resumed_event)
         instruction = self._stage_instruction(
             session.current_stage,
             session.task_key,
@@ -1848,6 +1858,58 @@ class CoordinatorService:
             instruction=instruction,
         )
         return session, resumed_event, dispatch_event
+
+    def _resume_after_subtask_creation(
+        self,
+        session: Session,
+        role: Role,
+        work_item: WorkItem,
+        resumed_event: Event,
+    ) -> tuple[Session, Event, Event | None]:
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="implementation_requested",
+            current_owner=role.role_name,
+        )
+        subtasks = self._read_snapshot_subtasks(session.task_key)
+        decomposition_artifact = self._latest_artifact_for_session_type(
+            session.id,
+            "task_decomposition_markdown",
+        )
+        if (
+            work_item.work_type == "implementation"
+            and decomposition_artifact is not None
+            and subtasks is not None
+            and unresolved_subtasks(subtasks)
+        ):
+            followup_event = self._start_subtask_graph_flow(
+                session=session,
+                producer_type="operator",
+                subtasks=subtasks,
+                initial_work_item=work_item,
+                decomposition_artifact=decomposition_artifact,
+            )
+            refreshed = self._get_session_or_raise(session.id)
+            return refreshed, resumed_event, followup_event
+
+        instruction = self._stage_instruction(
+            "implementation_requested",
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(f"Session {session.id} cannot start implementation after subtask creation")
+        dispatch_event = self._dispatch_role_work(
+            session=session,
+            role=role,
+            work_item=work_item,
+            stage_name="implementation_requested",
+            instruction=instruction,
+        )
+        refreshed = self._get_session_or_raise(session.id)
+        return refreshed, resumed_event, dispatch_event
 
     def _latest_runtime_blocker_event(self, session_id: int) -> Event | None:
         for event in reversed(self.event_repository.list_for_session(session_id)):
@@ -2145,6 +2207,59 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
             },
         )
+
+    def _enqueue_subtask_creation_checkpoint(
+        self,
+        session: Session,
+        source_event: Event,
+        additional_context: str | None = None,
+    ) -> Event:
+        coding_role = self._primary_coding_role_for_work_type(session, "implementation")
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title=f"Initial implementation for {session.task_key}",
+            owner_role_id=coding_role.id,
+            source_event_id=source_event.id,
+            priority=100,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_creation_requested",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="subtask_creation_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": coding_role.role_name,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        details = (
+            "Create Jira subtasks from the decomposition plan, refresh the snapshot if Jira metadata changed, "
+            "then resume the session to start execution."
+        )
+        if additional_context:
+            details = f"{details}\n\n{additional_context}"
+        self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "subtask_creation_checkpoint",
+                "summary": "story plan is ready for Jira subtask creation before implementation starts",
+                "details": details,
+                "current_stage": session.current_stage,
+            },
+        )
+        return event
 
     def _enqueue_bug_analysis(
         self,
@@ -2935,28 +3050,12 @@ class CoordinatorService:
                 plan_index_markdown=plan_index_markdown,
                 raw_plan_task_files=raw_plan_task_files,
             )
-
-        event = self._enqueue_initial_implementation(
+        event = self._enqueue_subtask_creation_checkpoint(
             session=session,
-            resolved_task_key=session.task_key,
             source_event=source_event,
             additional_context=additional_context,
         )
         session = self._get_session_or_raise(session.id)
-        if decomposition_artifact is not None:
-            subtasks = self._read_snapshot_subtasks(session.task_key)
-            if subtasks is not None and unresolved_subtasks(subtasks):
-                active_item = self._find_active_primary_coding_work_item(session)
-                if active_item is not None and active_item.work_type == "implementation":
-                    _graph_event, followup_event = self._start_subtask_graph_flow(
-                        session=session,
-                        producer_type="coordinator",
-                        subtasks=subtasks,
-                        initial_work_item=active_item,
-                        decomposition_artifact=decomposition_artifact,
-                    )
-                    session = self._get_session_or_raise(session.id)
-                    return session, followup_event
         return session, event
 
     def _enqueue_subtask_graph(

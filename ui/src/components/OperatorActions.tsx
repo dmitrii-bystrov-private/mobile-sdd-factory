@@ -161,16 +161,18 @@ export function OperatorActions({
     (session.current_stage === "doc_harvest_requested" && session.status === "active") ||
     (session.current_stage === "completed" && session.status === "completed");
   const canStartSubtaskGraph =
-    session.status === "active" &&
     session.workflow_profile === "story_full" &&
-    session.current_stage === "implementation_requested";
+    (
+      (session.status === "active" && session.current_stage === "implementation_requested") ||
+      (session.status === "waiting_for_operator" && session.current_stage === "subtask_creation_requested")
+    );
   const canRefreshSubtaskState =
     session.status === "active" &&
     session.workflow_profile === "story_full" &&
     ["implementation_requested", "subtask_implementation_requested"].includes(session.current_stage);
   const canCreateSubtasksFromPlan =
     session.workflow_profile === "story_full" &&
-    ["implementation_requested", "subtask_implementation_requested", "verification_requested"].includes(
+    ["subtask_creation_requested", "implementation_requested", "subtask_implementation_requested", "verification_requested"].includes(
       session.current_stage,
     );
   const canCreateMr = session.status === "completed" && session.current_stage !== "mr_handoff_completed";

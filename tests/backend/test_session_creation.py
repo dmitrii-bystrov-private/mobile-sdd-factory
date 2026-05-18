@@ -1814,7 +1814,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Always produce a durable `plan/index.md` plus self-contained `plan/NN-*.md` task package", sent_inputs[0])
         self.assertIn("Story spec summary: Need a new screen plus navigation wiring", sent_inputs[0])
 
-    def test_task_decomposition_completed_moves_session_to_implementation(self) -> None:
+    def test_task_decomposition_completed_moves_session_to_subtask_creation_checkpoint(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003DECOMP",
             workflow_profile="story_full",
@@ -1877,15 +1877,16 @@ class SessionCreationTests(unittest.TestCase):
         implementer_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
         decomposer_role = self.role_repository.get_by_name(session.id, TASK_DECOMPOSER_WORKER_ROLE)
 
-        self.assertEqual("implementation_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
-        self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_creation_requested", updated_session.current_stage)
+        self.assertIsNone(updated_session.current_owner)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("subtask_creation_requested", followup_event.event_type)
         self.assertEqual("stopped", decomposer_role.status.value)
         self.assertEqual(
             [
                 ("acceptance_criteria", "completed"),
                 ("constraints", "completed"),
-                ("implementation", "assigned"),
+                ("implementation", "waiting_for_operator"),
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
                 ("spec_verification", "completed"),
@@ -1920,14 +1921,12 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "task_decomposition_requested",
                 "task_decomposition_completed",
-                "role_input_dispatched",
-                "implementation_requested",
+                "subtask_creation_requested",
+                "session_escalated_to_operator",
             ],
             [item.event_type for item in events],
         )
-        self.assertEqual(1, len(implementer_inputs))
-        self.assertIn("Start implementation work for IOS-30003DECOMP.", implementer_inputs[0])
-        self.assertIn("Task decomposition summary: Split into execution chunks", implementer_inputs[0])
+        self.assertEqual([], implementer_inputs)
 
     def test_task_decomposition_completed_writes_legacy_plan_package_when_provided(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -1994,8 +1993,9 @@ class SessionCreationTests(unittest.TestCase):
         artifacts = self.artifact_repository.list_for_session(session.id)
         plan_dir = Path(self.temp_dir.name) / "IOS-30003PLAN" / "plan"
 
-        self.assertEqual("implementation_requested", followup_event.event_type)
-        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual("subtask_creation_requested", followup_event.event_type)
+        self.assertEqual("subtask_creation_requested", updated_session.current_stage)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
         self.assertTrue((plan_dir / "index.md").is_file())
         self.assertTrue((plan_dir / "01-build-data-source.md").is_file())
         self.assertTrue(
@@ -2080,7 +2080,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stderr" for item in artifacts))
         self.assertEqual(0, event.payload["snapshot_refresh_exit_code"])
 
-    def test_create_subtasks_from_plan_can_auto_start_subtask_lane(self) -> None:
+    def test_create_subtasks_from_plan_keeps_session_waiting_for_resume_checkpoint(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003SUBAUTO",
             workflow_profile="story_full",
@@ -2146,9 +2146,9 @@ class SessionCreationTests(unittest.TestCase):
         updated_session, event, followup_event = self.coordinator.create_subtasks_from_plan(session.id)
 
         self.assertEqual("jira_subtasks_created", event.event_type)
-        self.assertIsNotNone(followup_event)
-        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
-        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertIsNone(followup_event)
+        self.assertEqual("subtask_creation_requested", updated_session.current_stage)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
 
     def test_knowledge_is_repo_visible_markdown(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003KNOW")
@@ -2854,8 +2854,9 @@ class SessionCreationTests(unittest.TestCase):
         events = self.event_repository.list_for_session(session.id)
 
         self.assertEqual("task_decomposition_completed", mapped_event.event_type)
-        self.assertEqual("implementation_requested", followup_event.event_type)
-        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual("subtask_creation_requested", followup_event.event_type)
+        self.assertEqual("subtask_creation_requested", updated_session.current_stage)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
         self.assertEqual(
             [
                 "task_started",
@@ -2882,8 +2883,8 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "task_decomposition_requested",
                 "task_decomposition_completed",
-                "role_input_dispatched",
-                "implementation_requested",
+                "subtask_creation_requested",
+                "session_escalated_to_operator",
             ],
             [item.event_type for item in events],
         )
