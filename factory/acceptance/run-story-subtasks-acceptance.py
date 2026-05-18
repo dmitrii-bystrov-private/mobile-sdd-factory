@@ -208,24 +208,8 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert decomposition_response.followup_event_type == "subtask_creation_requested"
-        assert decomposition_response.session.current_stage == "subtask_creation_requested"
-
-        subtask_creation_response = create_subtasks_from_plan(
-            CreateSubtasksFromPlanRequest(session_id=session_id),
-            dependencies=deps,
-        )
-        assert subtask_creation_response.event_type == "jira_subtasks_created"
-        assert subtask_creation_response.followup_event_type is None
-        assert subtask_creation_response.session.current_stage == "subtask_creation_requested"
-
-        resume_response = resume_session(
-            ResumeSessionRequest(session_id=session_id),
-            dependencies=deps,
-        )
-        assert resume_response.event_type == "session_resumed_by_operator"
-        assert resume_response.followup_event_type == "subtask_implementation_requested"
-        assert resume_response.session.current_stage == "subtask_implementation_requested"
+        assert decomposition_response.followup_event_type == "subtask_implementation_requested"
+        assert decomposition_response.session.current_stage == "subtask_implementation_requested"
 
         subtask_response = inject_event(
             InjectEventRequest(
@@ -276,10 +260,9 @@ def main() -> None:
             "role_input_dispatched",
             "task_decomposition_requested",
             "task_decomposition_completed",
-            "subtask_creation_requested",
-            "session_escalated_to_operator",
+            "role_input_dispatched",
+            "implementation_requested",
             "jira_subtasks_created",
-            "session_resumed_by_operator",
             "subtask_graph_requested",
             "role_input_dispatched",
             "subtask_implementation_requested",

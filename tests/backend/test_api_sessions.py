@@ -717,14 +717,6 @@ class SessionApiTests(unittest.TestCase):
                 ),
                 dependencies=self.dependencies,
             )
-        inject_event(
-            InjectEventRequest(
-                session_id=create_response.session.id,
-                event_type="task_decomposition_completed",
-                payload=decomposition_payload("Decomposition prepared"),
-            ),
-            dependencies=self.dependencies,
-        )
         self.write_statuses_file(
             "IOS-40005SNAPREOPEN",
             "\n".join(
@@ -736,12 +728,12 @@ class SessionApiTests(unittest.TestCase):
                 ]
             ),
         )
-        create_subtasks_from_plan(
-            CreateSubtasksFromPlanRequest(session_id=create_response.session.id),
-            dependencies=self.dependencies,
-        )
-        resume_session(
-            ResumeSessionRequest(session_id=create_response.session.id),
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload=decomposition_payload("Decomposition prepared"),
+            ),
             dependencies=self.dependencies,
         )
         inject_event(
@@ -1361,9 +1353,9 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        self.assertEqual("subtask_creation_requested", response.followup_event_type)
-        self.assertEqual("subtask_creation_requested", response.session.current_stage)
-        self.assertEqual("waiting_for_operator", response.session.status)
+        self.assertEqual("implementation_requested", response.followup_event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
 
     def test_start_subtask_graph_route_converts_story_session(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -1656,7 +1648,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "jira_subtasks_summary" for item in artifacts_response.items))
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stdout" for item in artifacts_response.items))
 
-    def test_create_subtasks_from_plan_route_keeps_session_waiting_for_resume_checkpoint(self) -> None:
+    def test_create_subtasks_from_plan_route_can_auto_start_subtask_graph(self) -> None:
         from backend.api.routes_sessions import create_session, prepare_session
 
         create_response = create_session(
@@ -1687,7 +1679,19 @@ class SessionApiTests(unittest.TestCase):
                 ),
                 dependencies=self.dependencies,
             )
-        inject_event(
+        self.write_statuses_file(
+            "IOS-40005SUBAUTO",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40005SUBAUTO | Story | Parent story | In Progress |
+| IOS-40120 | Sub-task | Build data source | To Do |
+| IOS-40121 | Sub-task | Finish docs | Ready for test |
+""",
+        )
+
+        response = inject_event(
             InjectEventRequest(
                 session_id=create_response.session.id,
                 event_type="task_decomposition_completed",
@@ -1704,28 +1708,9 @@ class SessionApiTests(unittest.TestCase):
             ),
             dependencies=self.dependencies,
         )
-        self.write_statuses_file(
-            "IOS-40005SUBAUTO",
-            """# Statuses
-
-| Key | Type | Title | Status |
-| --- | --- | --- | --- |
-| IOS-40005SUBAUTO | Story | Parent story | In Progress |
-| IOS-40120 | Sub-task | Build data source | To Do |
-| IOS-40121 | Sub-task | Finish docs | Ready for test |
-""",
-        )
-
-        response = create_subtasks_from_plan(
-            CreateSubtasksFromPlanRequest(session_id=create_response.session.id),
-            dependencies=self.dependencies,
-        )
-
-        self.assertTrue(response.created)
-        self.assertEqual("jira_subtasks_created", response.event_type)
-        self.assertIsNone(response.followup_event_type)
-        self.assertEqual("subtask_creation_requested", response.session.current_stage)
-        self.assertEqual("waiting_for_operator", response.session.status)
+        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
 
     def test_list_knowledge_route_returns_repo_visible_items(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -2173,7 +2158,7 @@ class SessionApiTests(unittest.TestCase):
                 ),
                 dependencies=self.dependencies,
             )
-        inject_event(
+        response = inject_event(
             InjectEventRequest(
                 session_id=create_response.session.id,
                 event_type="task_decomposition_completed",
@@ -2181,15 +2166,8 @@ class SessionApiTests(unittest.TestCase):
             ),
             dependencies=self.dependencies,
         )
-
-        response = resume_session(
-            ResumeSessionRequest(session_id=create_response.session.id),
-            dependencies=self.dependencies,
-        )
-
-        self.assertTrue(response.resumed)
-        self.assertEqual("session_resumed_by_operator", response.event_type)
-        self.assertEqual("role_input_dispatched", response.followup_event_type)
+        self.assertEqual("task_decomposition_completed", response.event_type)
+        self.assertEqual("implementation_requested", response.followup_event_type)
         self.assertEqual("implementation_requested", response.session.current_stage)
         self.assertEqual("active", response.session.status)
 

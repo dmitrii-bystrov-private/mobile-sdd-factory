@@ -2005,16 +2005,16 @@ class SessionCreationTests(unittest.TestCase):
         implementer_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
         decomposer_role = self.role_repository.get_by_name(session.id, TASK_DECOMPOSER_WORKER_ROLE)
 
-        self.assertEqual("subtask_creation_requested", updated_session.current_stage)
-        self.assertIsNone(updated_session.current_owner)
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
-        self.assertEqual("subtask_creation_requested", followup_event.event_type)
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("implementation_requested", followup_event.event_type)
         self.assertEqual("stopped", decomposer_role.status.value)
         self.assertEqual(
             [
                 ("acceptance_criteria", "completed"),
                 ("constraints", "completed"),
-                ("implementation", "waiting_for_operator"),
+                ("implementation", "assigned"),
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
                 ("spec_verification", "completed"),
@@ -2049,12 +2049,13 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "task_decomposition_requested",
                 "task_decomposition_completed",
-                "subtask_creation_requested",
-                "session_escalated_to_operator",
+                "role_input_dispatched",
+                "implementation_requested",
+                "jira_subtasks_created",
             ],
             [item.event_type for item in events],
         )
-        self.assertEqual([], implementer_inputs)
+        self.assertTrue(implementer_inputs)
 
     def test_task_decomposition_completed_writes_legacy_plan_package_when_provided(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -2104,6 +2105,18 @@ class SessionCreationTests(unittest.TestCase):
 """,
         )
 
+        self.write_statuses_file(
+            "IOS-30003SUBAUTO",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30003SUBAUTO | Story | Parent story | In Progress |
+| IOS-30040 | Sub-task | Build data source | To Do |
+| IOS-30041 | Sub-task | Finish docs | Ready for test |
+""",
+        )
+
         updated_session, followup_event = self.coordinator.handle_operator_event(
             session_id=session.id,
             event_type="task_decomposition_completed",
@@ -2121,9 +2134,9 @@ class SessionCreationTests(unittest.TestCase):
         artifacts = self.artifact_repository.list_for_session(session.id)
         plan_dir = Path(self.temp_dir.name) / "IOS-30003PLAN" / "plan"
 
-        self.assertEqual("subtask_creation_requested", followup_event.event_type)
-        self.assertEqual("subtask_creation_requested", updated_session.current_stage)
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual("active", updated_session.status.value)
         self.assertTrue((plan_dir / "index.md").is_file())
         self.assertTrue((plan_dir / "01-build-data-source.md").is_file())
         self.assertTrue(
@@ -2208,7 +2221,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stderr" for item in artifacts))
         self.assertEqual(0, event.payload["snapshot_refresh_exit_code"])
 
-    def test_create_subtasks_from_plan_keeps_session_waiting_for_resume_checkpoint(self) -> None:
+    def test_create_subtasks_from_plan_auto_starts_subtask_graph_from_active_implementation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003SUBAUTO",
             workflow_profile="story_full",
@@ -2245,7 +2258,18 @@ class SessionCreationTests(unittest.TestCase):
             event_type="story_spec_completed",
             payload={"summary": "Need explicit decomposition package"},
         )
-        self.coordinator.handle_operator_event(
+        self.write_statuses_file(
+            "IOS-30003SUBAUTO",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30003SUBAUTO | Story | Parent story | In Progress |
+| IOS-30040 | Sub-task | Build data source | To Do |
+| IOS-30041 | Sub-task | Finish docs | Ready for test |
+""",
+        )
+        updated_session, followup_event = self.coordinator.handle_operator_event(
             session_id=session.id,
             event_type="task_decomposition_completed",
             payload={
@@ -2259,24 +2283,9 @@ class SessionCreationTests(unittest.TestCase):
                 ],
             },
         )
-        self.write_statuses_file(
-            "IOS-30003SUBAUTO",
-            """# Statuses
-
-| Key | Type | Title | Status |
-| --- | --- | --- | --- |
-| IOS-30003SUBAUTO | Story | Parent story | In Progress |
-| IOS-30040 | Sub-task | Build data source | To Do |
-| IOS-30041 | Sub-task | Finish docs | Ready for test |
-""",
-        )
-
-        updated_session, event, followup_event = self.coordinator.create_subtasks_from_plan(session.id)
-
-        self.assertEqual("jira_subtasks_created", event.event_type)
-        self.assertIsNone(followup_event)
-        self.assertEqual("subtask_creation_requested", updated_session.current_stage)
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual("active", updated_session.status.value)
 
     def test_knowledge_is_repo_visible_markdown(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003KNOW")
@@ -2679,11 +2688,6 @@ class SessionCreationTests(unittest.TestCase):
                 event_type=event_type,
                 payload={"summary": "prepared"},
             )
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="task_decomposition_completed",
-            payload=decomposition_payload("Execution chunks prepared"),
-        )
         self.write_statuses_file(
             "IOS-30004REOPEN",
             """# Statuses
@@ -2695,8 +2699,11 @@ class SessionCreationTests(unittest.TestCase):
 | IOS-30061 | Sub-task | Wire view state | To Do |
 """,
         )
-        self.coordinator.create_subtasks_from_plan(session.id)
-        self.coordinator.resume_session(session.id)
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload=decomposition_payload("Execution chunks prepared"),
+        )
         self.coordinator.handle_operator_event(
             session_id=session.id,
             event_type="subtask_completed",
@@ -3205,9 +3212,9 @@ class SessionCreationTests(unittest.TestCase):
         events = self.event_repository.list_for_session(session.id)
 
         self.assertEqual("task_decomposition_completed", mapped_event.event_type)
-        self.assertEqual("subtask_creation_requested", followup_event.event_type)
-        self.assertEqual("subtask_creation_requested", updated_session.current_stage)
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual("active", updated_session.status.value)
         self.assertEqual(
             [
                 "task_started",
@@ -3234,8 +3241,9 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "task_decomposition_requested",
                 "task_decomposition_completed",
-                "subtask_creation_requested",
-                "session_escalated_to_operator",
+                "role_input_dispatched",
+                "implementation_requested",
+                "jira_subtasks_created",
             ],
             [item.event_type for item in events],
         )
@@ -4780,22 +4788,17 @@ class SessionCreationTests(unittest.TestCase):
                 event_type=event_type,
                 payload={"summary": "prepared"},
             )
-        checkpoint_session, _ = self.coordinator.handle_operator_event(
+        active_session, followup_event = self.coordinator.handle_operator_event(
             session_id=session.id,
             event_type="task_decomposition_completed",
             payload=decomposition_payload("Decomposition prepared"),
         )
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
-
-        resumed_session, resumed_event, followup_event = self.coordinator.resume_session(session.id)
         sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
 
-        self.assertEqual("subtask_creation_requested", checkpoint_session.current_stage)
-        self.assertEqual("waiting_for_operator", checkpoint_session.status.value)
-        self.assertEqual("session_resumed_by_operator", resumed_event.event_type)
-        self.assertEqual("role_input_dispatched", followup_event.event_type)
-        self.assertEqual("implementation_requested", resumed_session.current_stage)
-        self.assertEqual("active", resumed_session.status.value)
+        self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual("implementation_requested", active_session.current_stage)
+        self.assertEqual("active", active_session.status.value)
         self.assertIn("Start implementation work for IOS-30021EXEC.", sent_inputs[-1])
 
     def test_resume_session_from_subtask_creation_checkpoint_can_start_subtask_lane(self) -> None:
@@ -4818,11 +4821,6 @@ class SessionCreationTests(unittest.TestCase):
                 event_type=event_type,
                 payload={"summary": "prepared"},
             )
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="task_decomposition_completed",
-            payload=decomposition_payload("Decomposition prepared"),
-        )
         self.write_statuses_file(
             "IOS-30021SUBGRAPH",
             """# Statuses
@@ -4833,14 +4831,13 @@ class SessionCreationTests(unittest.TestCase):
 | IOS-30121 | Sub-task | Build data source | To Do |
 """,
         )
-        self.coordinator.create_subtasks_from_plan(session.id)
-
-        resumed_session, resumed_event, followup_event = self.coordinator.resume_session(session.id)
-
-        self.assertEqual("session_resumed_by_operator", resumed_event.event_type)
-        self.assertIsNotNone(followup_event)
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload=decomposition_payload("Decomposition prepared"),
+        )
         self.assertEqual("subtask_implementation_requested", followup_event.event_type)
-        self.assertEqual("subtask_implementation_requested", resumed_session.current_stage)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
 
     def test_retry_session_creates_new_work_item_for_escalated_session(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022")

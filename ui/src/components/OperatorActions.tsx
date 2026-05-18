@@ -180,19 +180,16 @@ export function OperatorActions({
     );
   const canStartSubtaskGraph =
     session.workflow_profile === "story_full" &&
-    (
-      (session.status === "active" && session.current_stage === "implementation_requested") ||
-      (session.status === "waiting_for_operator" && session.current_stage === "subtask_creation_requested")
-    );
+    session.status === "waiting_for_operator" &&
+    session.current_stage === "subtask_creation_requested";
   const canRefreshSubtaskState =
     session.status === "active" &&
     session.workflow_profile === "story_full" &&
     ["implementation_requested", "subtask_implementation_requested"].includes(session.current_stage);
   const canCreateSubtasksFromPlan =
     session.workflow_profile === "story_full" &&
-    ["subtask_creation_requested", "implementation_requested", "subtask_implementation_requested", "verification_requested"].includes(
-      session.current_stage,
-    );
+    session.status === "waiting_for_operator" &&
+    session.current_stage === "subtask_creation_requested";
   const canCreateMr = session.current_stage === "mr_handoff_failed";
   const canSendToTest = session.current_stage === "send_to_test_failed";
 
@@ -211,7 +208,7 @@ export function OperatorActions({
     },
     {
       label: "Create Jira Subtasks",
-      description: "Materialize Jira subtasks from the current story plan when the session is ready for decomposition output.",
+      description: "Retry Jira subtask materialization after the automatic story setup failed before execution could start.",
       disabled: busy || !canCreateSubtasksFromPlan,
       onClick: () => run(() => apiClient.createSubtasksFromPlan(session.id)),
     },
@@ -220,7 +217,7 @@ export function OperatorActions({
   const advancedActions: ActionDefinition[] = [
     {
       label: "Start Subtask Graph",
-      description: "Explicitly start story subtask execution when the session is ready to branch into subtask work.",
+      description: "Force story subtask execution from a recovery checkpoint when Jira subtasks already exist and only graph dispatch remains.",
       disabled: busy || !canStartSubtaskGraph,
       strong: true,
       onClick: () => run(() => apiClient.startSubtaskGraph(session.id)),

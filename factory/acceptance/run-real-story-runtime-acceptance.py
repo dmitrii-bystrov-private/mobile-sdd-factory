@@ -124,7 +124,18 @@ def main() -> None:
             )
 
         assert_role_launch_script(temp_root / "workdir", task_key, TASK_DECOMPOSER_WORKER_ROLE, "one-shot")
-        inject_event(
+        statuses_path.write_text(
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-ACCEPT-REAL-STORY-001 | Story | Parent story | In Progress |
+| IOS-91001 | Sub-task | Build data source | To Do |
+| IOS-91002 | Sub-task | Wire presentation layer | To Do |
+"""
+        )
+
+        decomposition_response = inject_event(
             InjectEventRequest(
                 session_id=session_id,
                 event_type="task_decomposition_completed",
@@ -152,33 +163,8 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-
-        statuses_path.write_text(
-            """# Statuses
-
-| Key | Type | Title | Status |
-| --- | --- | --- | --- |
-| IOS-ACCEPT-REAL-STORY-001 | Story | Parent story | In Progress |
-| IOS-91001 | Sub-task | Build data source | To Do |
-| IOS-91002 | Sub-task | Wire presentation layer | To Do |
-"""
-        )
-
-        create_subtasks_response = create_subtasks_from_plan(
-            CreateSubtasksFromPlanRequest(session_id=session_id),
-            dependencies=deps,
-        )
-        assert create_subtasks_response.created
-        assert create_subtasks_response.followup_event_type is None
-        assert create_subtasks_response.session.current_stage == "subtask_creation_requested"
-
-        resume_response = resume_session(
-            ResumeSessionRequest(session_id=session_id),
-            dependencies=deps,
-        )
-        assert resume_response.event_type == "session_resumed_by_operator"
-        assert resume_response.followup_event_type == "subtask_implementation_requested"
-        assert resume_response.session.current_stage == "subtask_implementation_requested"
+        assert decomposition_response.followup_event_type == "subtask_implementation_requested"
+        assert decomposition_response.session.current_stage == "subtask_implementation_requested"
 
         snapshot_adapter = deps.snapshot_adapter
         original_run = snapshot_adapter.run

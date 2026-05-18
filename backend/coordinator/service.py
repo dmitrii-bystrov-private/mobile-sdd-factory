@@ -1207,6 +1207,13 @@ class CoordinatorService:
             )
 
         event_type = "jira_subtasks_created" if result.ok else "jira_subtasks_creation_failed"
+        if not result.ok:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="subtask_creation_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
         event = self._append_event(
             session_id=session.id,
             event_type=event_type,
@@ -1221,7 +1228,7 @@ class CoordinatorService:
             },
         )
         followup_event: Event | None = None
-        if result.ok and session.current_stage == "implementation_requested":
+        if result.ok and session.current_stage in {"implementation_requested", "subtask_creation_requested"}:
             active_item = self._find_active_primary_coding_work_item(session)
             decomposition_artifact = self._latest_artifact_for_session_type(
                 session.id,
@@ -1235,6 +1242,8 @@ class CoordinatorService:
                 and subtasks is not None
                 and unresolved_subtasks(subtasks)
             ):
+                if active_item.status == WorkItemStatus.WAITING_FOR_OPERATOR:
+                    self.work_item_repository.update_status(active_item.id, WorkItemStatus.ASSIGNED)
                 _graph_event, followup_event = self._start_subtask_graph_flow(
                     session=session,
                     producer_type="coordinator",
@@ -1243,6 +1252,18 @@ class CoordinatorService:
                     decomposition_artifact=decomposition_artifact,
                 )
                 session = self._get_session_or_raise(session.id)
+        if not result.ok:
+            self._append_event(
+                session_id=session.id,
+                event_type="session_escalated_to_operator",
+                producer_type="coordinator",
+                payload={
+                    "reason": "subtask_creation_failed",
+                    "summary": "jira subtask creation failed",
+                    "details": "Fix Jira subtask creation or snapshot issues, then retry subtask materialization.",
+                    "current_stage": session.current_stage,
+                },
+            )
         return session, event, followup_event
 
     def refresh_subtask_state(
@@ -2390,59 +2411,6 @@ class CoordinatorService:
             },
         )
 
-    def _enqueue_subtask_creation_checkpoint(
-        self,
-        session: Session,
-        source_event: Event,
-        additional_context: str | None = None,
-    ) -> Event:
-        coding_role = self._primary_coding_role_for_work_type(session, "implementation")
-        work_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="implementation",
-            title=f"Initial implementation for {session.task_key}",
-            owner_role_id=coding_role.id,
-            source_event_id=source_event.id,
-            priority=100,
-            status=WorkItemStatus.WAITING_FOR_OPERATOR,
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="subtask_creation_requested",
-            current_owner=None,
-        )
-        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
-        event = self._append_event(
-            session_id=session.id,
-            event_type="subtask_creation_requested",
-            producer_type="coordinator",
-            payload={
-                "task_key": session.task_key,
-                "role_name": coding_role.role_name,
-                "work_item_id": work_item.id,
-                "current_stage": session.current_stage,
-                "status": session.status.value,
-            },
-        )
-        details = (
-            "Create Jira subtasks from the decomposition plan, refresh the snapshot if Jira metadata changed, "
-            "then resume the session to start execution."
-        )
-        if additional_context:
-            details = f"{details}\n\n{additional_context}"
-        self._append_event(
-            session_id=session.id,
-            event_type="session_escalated_to_operator",
-            producer_type="coordinator",
-            payload={
-                "reason": "subtask_creation_checkpoint",
-                "summary": "story plan is ready for Jira subtask creation before implementation starts",
-                "details": details,
-                "current_stage": session.current_stage,
-            },
-        )
-        return event
-
     def _enqueue_bug_analysis(
         self,
         session: Session,
@@ -3270,13 +3238,19 @@ class CoordinatorService:
                 plan_index_markdown=plan_index_markdown,
                 raw_plan_task_files=raw_plan_task_files,
             )
-        event = self._enqueue_subtask_creation_checkpoint(
+        implementation_event = self._enqueue_initial_implementation(
             session=session,
+            resolved_task_key=session.task_key,
             source_event=source_event,
             additional_context=additional_context,
         )
         session = self._get_session_or_raise(session.id)
-        return session, event
+        batch_session, batch_event, followup_event = self.create_subtasks_from_plan(session.id)
+        if followup_event is not None:
+            return batch_session, followup_event
+        if batch_event.event_type == "jira_subtasks_creation_failed":
+            return batch_session, batch_event
+        return batch_session, implementation_event
 
     def _enqueue_subtask_graph(
         self,
