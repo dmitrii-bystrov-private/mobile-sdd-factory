@@ -7,8 +7,15 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 from backend.api.routes_events import inject_event
+from backend.api.routes_operator import create_subtasks_from_plan, resume_session
 from backend.api.routes_sessions import create_session, get_subtask_graph, get_subtask_progress, prepare_session
-from backend.api.schemas import CreateSessionRequest, InjectEventRequest, PrepareSessionRequest
+from backend.api.schemas import (
+    CreateSessionRequest,
+    CreateSubtasksFromPlanRequest,
+    InjectEventRequest,
+    PrepareSessionRequest,
+    ResumeSessionRequest,
+)
 from backend.tools.command_runner import CommandResult
 from run_roots import managed_run_root
 
@@ -79,12 +86,47 @@ def main() -> None:
             InjectEventRequest(
                 session_id=session_id,
                 event_type="task_decomposition_completed",
-                payload={"summary": "Decomposition prepared"},
+                payload={
+                    "summary": "Decomposition prepared",
+                    "task_breakdown": "Data source first, then presentation wiring",
+                    "plan_index_markdown": (
+                        "# Execution Task List\n\n"
+                        "| # | Task | Depends on | Status |\n"
+                        "|---|------|------------|--------|\n"
+                        "| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
+                    ),
+                    "plan_task_files": [
+                        {
+                            "filename": "01-build-data-source.md",
+                            "content": (
+                                "# Build data source\n\n"
+                                "## What to implement\n"
+                                "Finish the data source work for the story.\n"
+                            ),
+                        }
+                    ],
+                },
             ),
             dependencies=deps,
         )
-        assert decomposition_response.followup_event_type == "subtask_implementation_requested"
-        assert decomposition_response.session.current_stage == "subtask_implementation_requested"
+        assert decomposition_response.followup_event_type == "subtask_creation_requested"
+        assert decomposition_response.session.current_stage == "subtask_creation_requested"
+
+        subtask_creation_response = create_subtasks_from_plan(
+            CreateSubtasksFromPlanRequest(session_id=session_id),
+            dependencies=deps,
+        )
+        assert subtask_creation_response.event_type == "jira_subtasks_created"
+        assert subtask_creation_response.followup_event_type is None
+        assert subtask_creation_response.session.current_stage == "subtask_creation_requested"
+
+        resume_response = resume_session(
+            ResumeSessionRequest(session_id=session_id),
+            dependencies=deps,
+        )
+        assert resume_response.event_type == "session_resumed_by_operator"
+        assert resume_response.followup_event_type == "subtask_implementation_requested"
+        assert resume_response.session.current_stage == "subtask_implementation_requested"
 
         snapshot_adapter = deps.snapshot_adapter
         original_run = snapshot_adapter.run
