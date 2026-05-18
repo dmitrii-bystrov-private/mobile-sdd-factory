@@ -1378,7 +1378,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Produce the proposal and context package for story IOS-30002STORY before requirements and final story spec.", sent_inputs[0])
         self.assertIn("Read `description.md` and `comments.md`", sent_inputs[0])
         self.assertIn("comments take precedence over description when they conflict", sent_inputs[0])
-        self.assertIn("stop instead of writing a partial proposal when a required fetch fails", sent_inputs[0])
+        self.assertIn("use Notion MCP for `notion.so` links", sent_inputs[0])
+        self.assertIn("treat non-Notion external links as operator-provided context references", sent_inputs[0])
         self.assertIn("Role-specific rules:", sent_inputs[0])
         launch_script = (
             Path(self.temp_dir.name)
@@ -1405,8 +1406,36 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("bounded one-shot worker", proposal_agents)
         self.assertIn("comments.md` as the fresher source", proposal_agents)
         self.assertIn("Notion MCP for `notion.so` content", proposal_agents)
+        self.assertIn("non-Notion external links as operator-provided context references", proposal_agents)
         self.assertIn("SDD_FACTORY_ROLE_LIFECYCLE=one-shot", launch_script_text)
         self.assertIn("lifecycle=%s", launch_script_text)
+
+    def test_proposal_context_link_warning_emits_event_and_artifact_for_non_notion_links(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30002LINKS",
+            workflow_profile="story_full",
+        )
+        task_root = Path(self.temp_dir.name) / session.task_key
+        task_root.mkdir(parents=True, exist_ok=True)
+        (task_root / "description.md").write_text(
+            "Reference spec: https://example.com/spec\nAnd Notion: https://workspace.notion.so/page\n"
+        )
+        (task_root / "comments.md").write_text(
+            "Fresh comment with same external ref https://example.com/spec and local note.\n"
+        )
+
+        self.coordinator._emit_proposal_context_link_warning(session)
+
+        events = self.event_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+        self.assertEqual("proposal_external_links_detected", events[-1].event_type)
+        self.assertEqual(1, events[-1].payload["link_count"])
+        warning_artifact = next(
+            artifact for artifact in artifacts if artifact.artifact_type == "proposal_external_links_warning"
+        )
+        warning_text = Path(warning_artifact.path).read_text()
+        self.assertIn("https://example.com/spec", warning_text)
+        self.assertNotIn("notion.so/page", warning_text)
 
     def test_proposal_context_completed_moves_story_session_to_requirements(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

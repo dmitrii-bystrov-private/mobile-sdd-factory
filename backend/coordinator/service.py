@@ -58,6 +58,7 @@ from backend.tools.snapshot_adapter import SnapshotAdapter
 
 _CLOSED_JIRA_STATUSES = {"resolved", "done", "closed", "cancelled"}
 _TASK_KEY_PATTERN = re.compile(r"^[A-Z]+-\d+$")
+_EXPLICIT_URL_PATTERN = re.compile(r"https?://[^\s)>\]]+")
 
 
 @dataclass
@@ -2287,6 +2288,7 @@ class CoordinatorService:
             stage_name="proposal_context_requested",
             instruction=instruction,
         )
+        self._emit_proposal_context_link_warning(session)
         return self._append_event(
             session_id=session.id,
             event_type="proposal_context_requested",
@@ -4502,7 +4504,8 @@ class CoordinatorService:
             return (
                 f"Collect proposal and context foundations for story {task_key}. "
                 "Read `description.md` and `comments.md`, treat comments as the fresher source when they conflict, "
-                "resolve explicit links and file references from the snapshot, stop instead of writing a partial proposal when a required fetch fails, "
+                "resolve explicit local file references from the snapshot, use Notion MCP for `notion.so` links when needed, "
+                "treat other external links as operator-provided context references, "
                 "and extract the compact problem statement, key clarifications, and the smallest useful project/context findings for the later story-spec step."
             )
         if stage_name == "requirements_requested":
@@ -5473,6 +5476,72 @@ class CoordinatorService:
             if stripped.startswith(marker):
                 return stripped.removeprefix(marker).strip() or None
         return None
+
+    def _extract_snapshot_explicit_links(self, task_key: str) -> list[str]:
+        if self.workdir_root is None:
+            return []
+        task_root = self.workdir_root / task_key
+        links: list[str] = []
+        seen: set[str] = set()
+        for relative_path in ("description.md", "comments.md"):
+            candidate = task_root / relative_path
+            if not candidate.is_file():
+                continue
+            for match in _EXPLICIT_URL_PATTERN.findall(candidate.read_text(encoding="utf-8")):
+                if match in seen:
+                    continue
+                seen.add(match)
+                links.append(match)
+        return links
+
+    def _emit_proposal_context_link_warning(self, session: Session) -> None:
+        if self.artifacts_root is None:
+            return
+        explicit_links = self._extract_snapshot_explicit_links(session.task_key)
+        non_notion_links = [link for link in explicit_links if "notion.so" not in link]
+        if not non_notion_links:
+            return
+
+        artifact_body = "\n".join(
+            [
+                "# Proposal Context External Links Warning",
+                "",
+                "The snapshot includes external links whose contents are not automatically fetched into `spec/proposal.md`.",
+                "Treat them as operator-provided references unless they are manually incorporated later.",
+                "",
+                "## Links",
+                "",
+                *[f"- {link}" for link in non_notion_links],
+                "",
+            ]
+        )
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "story-planning",
+            "proposal-external-links-warning.md",
+            artifact_body,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="story-planning",
+            artifact_type="proposal_external_links_warning",
+            path=str(artifact_path),
+            metadata={"link_count": len(non_notion_links)},
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="proposal_external_links_detected",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "link_count": len(non_notion_links),
+                "summary": (
+                    "External links were found in the snapshot; their contents are not automatically included "
+                    "in the proposal unless they are Notion pages handled through MCP."
+                ),
+            },
+        )
 
     def _platform_for_task_key(self, task_key: str) -> str:
         if task_key.startswith("IOS-"):

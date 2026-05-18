@@ -77,7 +77,7 @@ class RolePromptTests(unittest.TestCase):
 
         self.assertIn("Read `description.md` and `comments.md` first; comments take precedence", text)
         self.assertIn("use Notion MCP for `notion.so` links", text)
-        self.assertIn("stop instead of writing a partial proposal when a required fetch fails", text)
+        self.assertIn("treat non-Notion external links as operator-provided context references", text)
 
     def test_full_prompt_restores_acceptance_criteria_format_contract(self) -> None:
         text = role_handoff_prompt(

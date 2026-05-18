@@ -57,6 +57,7 @@ const STREAM_EVENT_TYPES = [
   "mr_comments_received",
   "mr_comments_analysis_requested",
   "mr_comments_analysis_completed",
+  "proposal_external_links_detected",
   "mr_followup_requested",
   "mr_handoff_completed",
   "mr_handoff_failed",
