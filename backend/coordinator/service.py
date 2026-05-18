@@ -3372,6 +3372,8 @@ class CoordinatorService:
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         if active_item.work_type == "boy_scout_correction":
             return self._enqueue_verification(session=session, source_event=source_event)
+        if active_item.work_type == "self_review_correction":
+            return self._enqueue_self_review(session=session, source_event=source_event)
 
         return self._advance_after_coding_completion(
             session=session,

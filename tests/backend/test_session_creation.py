@@ -4083,7 +4083,7 @@ class SessionCreationTests(unittest.TestCase):
                 summary="operator shortcut",
             )
 
-    def test_self_review_correction_completed_reenters_verification_loop(self) -> None:
+    def test_self_review_correction_completed_reenters_self_review_loop(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021SR4",
             workflow_profile="oneshot",
@@ -4106,10 +4106,15 @@ class SessionCreationTests(unittest.TestCase):
             event_type="implementation_completed",
             payload={"summary": "self review fixes done"},
         )
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
 
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertEqual("verification-coordinator", updated_session.current_owner)
-        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual("self_review_requested", updated_session.current_stage)
+        self.assertEqual(CODE_REVIEWER_ROLE, updated_session.current_owner)
+        self.assertEqual("self_review_requested", followup_event.event_type)
+        self.assertIn("previous_review_report_paths", sent_inputs[-1])
+        self.assertIn("pass-01.md", sent_inputs[-1])
+        self.assertIn("pass-02.md", sent_inputs[-1])
 
     def test_complete_doc_harvest_marks_lane_completed(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
