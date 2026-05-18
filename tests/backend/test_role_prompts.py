@@ -64,6 +64,38 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("use Notion MCP for `notion.so` links", text)
         self.assertIn("stop instead of writing a partial proposal when a required fetch fails", text)
 
+    def test_full_prompt_restores_acceptance_criteria_format_contract(self) -> None:
+        text = role_handoff_prompt(
+            role_name="acceptance-criteria-worker",
+            instruction="Prepare explicit acceptance criteria for story IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "acceptance_criteria_requested",
+                "work_item_id": 4,
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("WHEN-THEN-SHALL form", text)
+        self.assertIn("independently testable", text)
+        self.assertIn("happy paths, edge cases, and error scenarios", text)
+
+    def test_full_prompt_restores_constraints_ground_truth_contract(self) -> None:
+        text = role_handoff_prompt(
+            role_name="constraints-worker",
+            instruction="Prepare grounded implementation constraints for story IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "constraints_requested",
+                "work_item_id": 5,
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("`spec/context/project.md` as the architectural ground truth", text)
+        self.assertIn("MUST, MUST NOT, and SHOULD", text)
+        self.assertIn("task-specific and grounded", text)
+
 
 if __name__ == "__main__":
     unittest.main()

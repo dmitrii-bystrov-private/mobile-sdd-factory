@@ -2286,8 +2286,9 @@ class CoordinatorService:
             current_owner=ACCEPTANCE_CRITERIA_WORKER_ROLE,
         )
         instruction = (
-            f"Prepare compact acceptance criteria for story {session.task_key}. "
-            "Cover happy paths, edge cases, and error scenarios from the clarified requirements before the final story-spec step."
+            f"Prepare explicit acceptance criteria for story {session.task_key}. "
+            "Use independently testable WHEN-THEN-SHALL criteria, cover happy paths, edge cases, and error scenarios from the clarified requirements, "
+            "and ensure every meaningful clarified requirement decision is covered before the final story-spec step."
         )
         if additional_context:
             instruction = f"{instruction}\n\n{additional_context}"
@@ -2332,8 +2333,9 @@ class CoordinatorService:
             current_owner=CONSTRAINTS_WORKER_ROLE,
         )
         instruction = (
-            f"Prepare compact implementation constraints for story {session.task_key}. "
-            "Surface architecture, convention, dependency, and integration constraints that should guide the final story-spec step."
+            f"Prepare grounded implementation constraints for story {session.task_key}. "
+            "Use `spec/context/project.md` as architectural ground truth, cite it instead of restating generic conventions, "
+            "and surface task-specific MUST, MUST NOT, and SHOULD constraints that should guide the final story-spec step."
         )
         if additional_context:
             instruction = f"{instruction}\n\n{additional_context}"
@@ -4431,13 +4433,15 @@ class CoordinatorService:
             )
         if stage_name == "acceptance_criteria_requested":
             return (
-                f"Prepare compact acceptance criteria for story {task_key}. "
-                "Cover happy paths, edge cases, and error scenarios from the clarified requirements before the final story-spec step."
+                f"Prepare explicit acceptance criteria for story {task_key}. "
+                "Use independently testable WHEN-THEN-SHALL criteria, cover happy paths, edge cases, and error scenarios from the clarified requirements, "
+                "and ensure every meaningful clarified requirement decision is covered before the final story-spec step."
             )
         if stage_name == "constraints_requested":
             return (
-                f"Prepare compact implementation constraints for story {task_key}. "
-                "Surface architecture, convention, dependency, and integration constraints before the final story-spec step."
+                f"Prepare grounded implementation constraints for story {task_key}. "
+                "Use `spec/context/project.md` as architectural ground truth, cite it instead of restating generic conventions, "
+                "and surface task-specific MUST, MUST NOT, and SHOULD constraints before the final story-spec step."
             )
         if stage_name == "spec_verification_requested":
             return (

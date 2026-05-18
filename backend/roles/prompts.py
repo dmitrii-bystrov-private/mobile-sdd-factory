@@ -93,7 +93,18 @@ def role_runtime_rules(role_name: str) -> str:
             "Role-specific rules:\n"
             "- Treat this role as a bounded one-shot worker: prepare acceptance criteria, write the routed result, and exit.\n"
             "- Start from `spec/proposal.md`, clarified requirements, and `spec/context/feature-overview.md`; read other `spec/context/*` files only when they help clarify behavior coverage.\n"
+            "- Write criteria in explicit WHEN-THEN-SHALL form, keep each criterion independently testable, and cover happy paths, edge cases, and error scenarios from the clarified requirements.\n"
+            "- Ensure every meaningful decision in the clarified requirements is covered by at least one acceptance criterion before you finish.\n"
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than behavioral coverage gaps.\n\n"
+        )
+    if role_name == "constraints-worker":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded one-shot worker: prepare implementation constraints, write the routed result, and exit.\n"
+            "- Start from the proposal, clarified requirements, acceptance criteria, and `spec/context/feature-overview.md`; use `implementation-patterns.md`, `documentation.md`, and `preconditions.md` when they materially shape constraints.\n"
+            "- Treat `spec/context/project.md` as the architectural ground truth, cite it instead of restating generic conventions, and keep constraints task-specific and grounded.\n"
+            "- Express constraints as imperative MUST, MUST NOT, and SHOULD statements across architectural, performance, security, and platform-specific categories when they are applicable.\n"
+            "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than rediscovering constraints.\n\n"
         )
     if role_name == "spec-verifier-worker":
         return (

@@ -394,12 +394,16 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Treat this role as a bounded one-shot worker: prepare acceptance criteria, write the routed result, and exit.",
             "- Start from `spec/proposal.md`, clarified requirements, and `spec/context/feature-overview.md`; read other context files only when they materially affect behavior coverage.",
+            "- Write independently testable criteria in WHEN-THEN-SHALL form and cover happy paths, edge cases, and error scenarios from the clarified requirements.",
+            "- Ensure each meaningful decision from the clarified requirements is covered by at least one criterion before finishing.",
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than behavioral coverage gaps.",
         ]
     if role_name == "constraints-worker":
         return [
             "- Treat this role as a bounded one-shot worker: prepare implementation constraints, write the routed result, and exit.",
             "- Start from the proposal, clarified requirements, acceptance criteria, and `spec/context/feature-overview.md`; use `implementation-patterns.md`, `documentation.md`, and `preconditions.md` when they materially shape constraints.",
+            "- Treat `spec/context/project.md` as architectural ground truth, cite it instead of restating generic conventions, and keep constraints task-specific and grounded.",
+            "- Express constraints as imperative MUST, MUST NOT, and SHOULD statements across only the applicable categories.",
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than rediscovering constraints.",
         ]
     if role_name == "spec-verifier-worker":

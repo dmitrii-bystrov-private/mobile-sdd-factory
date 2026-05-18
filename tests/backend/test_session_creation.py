@@ -1454,7 +1454,8 @@ class SessionCreationTests(unittest.TestCase):
             sorted((item.work_type, item.status.value) for item in work_items),
         )
         self.assertEqual(1, len(sent_inputs))
-        self.assertIn("Prepare compact acceptance criteria for story IOS-30003REQ.", sent_inputs[0])
+        self.assertIn("Prepare explicit acceptance criteria for story IOS-30003REQ.", sent_inputs[0])
+        self.assertIn("WHEN-THEN-SHALL criteria", sent_inputs[0])
         self.assertIn("Requirements summary: Requirements clarified", sent_inputs[0])
         self.assertIn("Explicit assumptions: Reuse existing screen state", sent_inputs[0])
 
@@ -1498,7 +1499,8 @@ class SessionCreationTests(unittest.TestCase):
             sorted((item.work_type, item.status.value) for item in work_items),
         )
         self.assertEqual(1, len(sent_inputs))
-        self.assertIn("Prepare compact implementation constraints for story IOS-30003ACC.", sent_inputs[0])
+        self.assertIn("Prepare grounded implementation constraints for story IOS-30003ACC.", sent_inputs[0])
+        self.assertIn("`spec/context/project.md` as architectural ground truth", sent_inputs[0])
         self.assertIn("Acceptance criteria summary: Acceptance prepared", sent_inputs[0])
         self.assertIn("Highlighted cases: Retry + empty state", sent_inputs[0])
 
