@@ -154,12 +154,19 @@ export function OperatorActions({
     session.status !== "completed" ||
     ["mr_handoff_completed", "send_to_test_completed", "qa_reopen_requested"].includes(session.current_stage);
   const canSkipBoyScout =
-    session.current_stage === "boy_scout_requested" && session.status === "waiting_for_operator";
+    session.current_stage === "boy_scout_requested" &&
+    session.status === "waiting_for_operator" &&
+    session.policy["boy_scout_policy"] === "enabled";
   const canCompleteSelfReview =
-    session.current_stage === "self_review_requested" && session.status === "active";
+    session.current_stage === "self_review_requested" &&
+    session.status === "active" &&
+    session.policy["self_review_policy"] === "enabled";
   const canCompleteDocHarvest =
-    (session.current_stage === "doc_harvest_requested" && session.status === "active") ||
-    (session.current_stage === "completed" && session.status === "completed");
+    session.policy["doc_harvest_policy"] === "enabled" &&
+    (
+      (session.current_stage === "doc_harvest_requested" && session.status === "active") ||
+      (session.current_stage === "completed" && session.status === "completed")
+    );
   const canStartSubtaskGraph =
     session.workflow_profile === "story_full" &&
     (

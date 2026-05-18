@@ -757,8 +757,11 @@ class CoordinatorService:
             raise IntakeError(
                 f"Session {session_id} is not in a doc-harvest-capable stage"
             )
-        if (session.policy or {}).get("doc_harvest_policy") == "disabled":
+        policy_mode = self._optional_lane_policy_mode(session.policy, "doc_harvest_policy")
+        if policy_mode == "disabled":
             raise IntakeError(f"Session {session_id} has doc harvest disabled by policy")
+        if policy_mode != "enabled":
+            raise IntakeError("Manual doc harvest completion is only allowed when doc_harvest_policy is enabled")
         if session.current_stage == "doc_harvest_requested":
             doc_items = [
                 item
@@ -788,6 +791,8 @@ class CoordinatorService:
             raise IntakeError(f"Session {session_id} is not waiting on Boy Scout")
         if session.status != SessionStatus.WAITING_FOR_OPERATOR:
             raise IntakeError(f"Session {session_id} does not have skippable Boy Scout findings")
+        if self._optional_lane_policy_mode(session.policy, "boy_scout_policy") != "enabled":
+            raise IntakeError("Manual Boy Scout skip is only allowed when boy_scout_policy is enabled")
 
         pending_items = [
             item
@@ -835,8 +840,11 @@ class CoordinatorService:
             raise IntakeError("Self review outcome must be 'passed' or 'issues_found'")
         if session.current_stage != "self_review_requested":
             raise IntakeError(f"Session {session_id} is not waiting for self review")
-        if (session.policy or {}).get("self_review_policy") == "disabled":
+        policy_mode = self._optional_lane_policy_mode(session.policy, "self_review_policy")
+        if policy_mode == "disabled":
             raise IntakeError(f"Session {session_id} has self review disabled by policy")
+        if policy_mode != "enabled":
+            raise IntakeError("Manual self review completion is only allowed when self_review_policy is enabled")
 
         review_output_type = "passed" if outcome == "passed" else "failed"
         self._materialize_self_review_report(

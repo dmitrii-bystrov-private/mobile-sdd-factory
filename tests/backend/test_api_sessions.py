@@ -2879,7 +2879,7 @@ class SessionApiTests(unittest.TestCase):
             CreateSessionRequest(
                 task_key="IOS-40014SR2",
                 workflow_profile="oneshot",
-                policy={"self_review_policy": "required"},
+                policy={"self_review_policy": "enabled"},
             ),
             dependencies=self.dependencies,
         )
@@ -2920,7 +2920,7 @@ class SessionApiTests(unittest.TestCase):
             CreateSessionRequest(
                 task_key="IOS-40014SR3",
                 workflow_profile="oneshot",
-                policy={"self_review_policy": "required"},
+                policy={"self_review_policy": "enabled"},
             ),
             dependencies=self.dependencies,
         )
@@ -2957,7 +2957,7 @@ class SessionApiTests(unittest.TestCase):
             CreateSessionRequest(
                 task_key="IOS-40014DH2",
                 workflow_profile="oneshot",
-                policy={"doc_harvest_policy": "required"},
+                policy={"doc_harvest_policy": "enabled"},
             ),
             dependencies=self.dependencies,
         )

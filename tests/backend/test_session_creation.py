@@ -3659,7 +3659,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021SR2",
             workflow_profile="oneshot",
-            policy={"self_review_policy": "required"},
+            policy={"self_review_policy": "enabled"},
         )
         self.coordinator.prepare_task_session("IOS-30021SR2")
         self.coordinator.handle_operator_event(
@@ -3854,11 +3854,46 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(deferred_path.is_file())
         self.assertIn("Extract helper", deferred_path.read_text())
 
+    def test_boy_scout_manual_skip_is_rejected_when_policy_required(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BS2R",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "required", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BS2R")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BS2R" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={
+                "result": "findings_found",
+                "summary": "Found one maintainability improvement opportunity.",
+            },
+        )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Manual Boy Scout skip is only allowed when boy_scout_policy is enabled",
+        ):
+            self.coordinator.skip_boy_scout(
+                session_id=session.id,
+                reason="operator shortcut",
+            )
+
     def test_complete_self_review_with_issues_routes_to_implementer_correction(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021SR3",
             workflow_profile="oneshot",
-            policy={"self_review_policy": "required"},
+            policy={"self_review_policy": "enabled"},
         )
         self.coordinator.prepare_task_session("IOS-30021SR3")
         self.coordinator.handle_operator_event(
@@ -3886,11 +3921,34 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn('"issues_file_path"', sent_inputs[-1])
         self.assertIn("pass-01.md", sent_inputs[-1])
 
+    def test_complete_self_review_is_rejected_when_policy_required(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021SR3R",
+            workflow_profile="oneshot",
+            policy={"self_review_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021SR3R")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Manual self review completion is only allowed when self_review_policy is enabled",
+        ):
+            self.coordinator.complete_self_review(
+                session_id=session.id,
+                outcome="passed",
+                summary="operator shortcut",
+            )
+
     def test_self_review_correction_completed_reenters_verification_loop(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021SR4",
             workflow_profile="oneshot",
-            policy={"self_review_policy": "required"},
+            policy={"self_review_policy": "enabled"},
         )
         self.coordinator.prepare_task_session("IOS-30021SR4")
         self.coordinator.handle_operator_event(
@@ -3918,7 +3976,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021F",
             workflow_profile="oneshot",
-            policy={"doc_harvest_policy": "required"},
+            policy={"doc_harvest_policy": "enabled"},
         )
         self.coordinator.prepare_task_session("IOS-30021F")
         self.coordinator.handle_operator_event(
@@ -3942,6 +4000,33 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("doc_harvest_completed", updated_session.current_stage)
         self.assertEqual("doc_harvest_completed", event.event_type)
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
+
+    def test_complete_doc_harvest_is_rejected_when_policy_required(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021FR",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021FR")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Manual doc harvest completion is only allowed when doc_harvest_policy is enabled",
+        ):
+            self.coordinator.complete_doc_harvest(
+                session_id=session.id,
+                summary="operator shortcut",
+            )
 
     def test_doc_harvest_role_output_marks_lane_completed(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
