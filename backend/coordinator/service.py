@@ -661,7 +661,11 @@ class CoordinatorService:
             raise IntakeError("Coordinator is missing GitLab adapter or artifact root")
 
         session = self._get_session_or_raise(session_id)
-        if session.status != SessionStatus.COMPLETED:
+        allowed_retry = (
+            session.status == SessionStatus.WAITING_FOR_OPERATOR
+            and session.current_stage == "mr_handoff_failed"
+        )
+        if session.status != SessionStatus.COMPLETED and not allowed_retry:
             raise IntakeError(
                 f"Session {session_id} must be completed before MR handoff can run"
             )
@@ -709,6 +713,12 @@ class CoordinatorService:
         )
 
         if not result.ok:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="mr_handoff_failed",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
             event = self._append_event(
                 session_id=session.id,
                 event_type="mr_handoff_failed",
@@ -726,6 +736,7 @@ class CoordinatorService:
             current_stage="mr_handoff_completed",
             current_owner=None,
         )
+        session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
         event = self._append_event(
             session_id=session.id,
             event_type="mr_handoff_completed",
@@ -982,11 +993,15 @@ class CoordinatorService:
             raise IntakeError("Coordinator is missing Jira adapter or artifact root")
 
         session = self._get_session_or_raise(session_id)
-        if session.status != SessionStatus.COMPLETED:
+        allowed_retry = (
+            session.status == SessionStatus.WAITING_FOR_OPERATOR
+            and session.current_stage == "send_to_test_failed"
+        )
+        if session.status != SessionStatus.COMPLETED and not allowed_retry:
             raise IntakeError(
                 f"Session {session_id} must be completed before send-to-test handoff can run"
             )
-        if session.current_stage != "mr_handoff_completed":
+        if session.current_stage not in {"mr_handoff_completed", "send_to_test_failed"}:
             raise IntakeError(
                 f"Session {session_id} must complete MR handoff before send-to-test handoff"
             )
@@ -1030,6 +1045,12 @@ class CoordinatorService:
         )
 
         if not result.ok:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="send_to_test_failed",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
             event = self._append_event(
                 session_id=session.id,
                 event_type="send_to_test_failed",
@@ -1048,6 +1069,7 @@ class CoordinatorService:
             current_stage="send_to_test_completed",
             current_owner=None,
         )
+        session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
         event = self._append_event(
             session_id=session.id,
             event_type="send_to_test_completed",

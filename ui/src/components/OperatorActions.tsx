@@ -193,10 +193,8 @@ export function OperatorActions({
     ["subtask_creation_requested", "implementation_requested", "subtask_implementation_requested", "verification_requested"].includes(
       session.current_stage,
     );
-  const canCreateMr =
-    session.status === "completed" && session.current_stage === "task_completed";
-  const canSendToTest =
-    session.status === "completed" && session.current_stage === "mr_handoff_completed";
+  const canCreateMr = session.current_stage === "mr_handoff_failed";
+  const canSendToTest = session.current_stage === "send_to_test_failed";
 
   const dailyActions: ActionDefinition[] = [
     {

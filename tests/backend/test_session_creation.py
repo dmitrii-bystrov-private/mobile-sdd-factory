@@ -254,6 +254,7 @@ class SessionCreationTests(unittest.TestCase):
         self.event_bus = SessionEventBus()
         self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
         self.jira_adapter = FakeJiraAdapter()
+        self.gitlab_adapter = FakeGitLabAdapter()
         self.coordinator = CoordinatorService(
             session_repository=self.session_repository,
             role_repository=self.role_repository,
@@ -264,7 +265,7 @@ class SessionCreationTests(unittest.TestCase):
             default_roles=DEFAULT_SESSION_ROLES,
             jira_adapter=self.jira_adapter,
             snapshot_adapter=self.snapshot_adapter,
-            gitlab_adapter=FakeGitLabAdapter(),
+            gitlab_adapter=self.gitlab_adapter,
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
             workdir_root=Path(self.temp_dir.name),
             event_bus=self.event_bus,
@@ -3881,6 +3882,40 @@ class SessionCreationTests(unittest.TestCase):
         with self.assertRaisesRegex(IntakeError, "must be completed before MR handoff"):
             self.coordinator.create_mr_handoff(session_id=session.id)
 
+    def test_create_mr_handoff_failure_escalates_for_operator_retry(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021B1")
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="completed",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+
+        original_create_mr = self.gitlab_adapter.create_mr
+        self.gitlab_adapter.create_mr = lambda task_key: CommandResult(
+            command=["create_mr", task_key],
+            returncode=1,
+            stdout="",
+            stderr="push failed\n",
+        )
+        failed_session, failed_event, mr_url = self.coordinator.create_mr_handoff(session_id=session.id)
+
+        self.assertEqual("waiting_for_operator", failed_session.status.value)
+        self.assertEqual("mr_handoff_failed", failed_session.current_stage)
+        self.assertEqual("mr_handoff_failed", failed_event.event_type)
+        self.assertIsNone(mr_url)
+
+        self.gitlab_adapter.create_mr = original_create_mr
+        retried_session, retried_event, retried_url = self.coordinator.create_mr_handoff(session_id=session.id)
+
+        self.assertEqual("completed", retried_session.status.value)
+        self.assertEqual("mr_handoff_completed", retried_session.current_stage)
+        self.assertEqual("mr_handoff_completed", retried_event.event_type)
+        self.assertEqual(
+            "https://gitlab.example.com/mobile/IOS-30021B1/-/merge_requests/42",
+            retried_url,
+        )
+
     def test_send_to_test_handoff_marks_mr_handed_off_session_as_ready(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021C")
         self.session_repository.update_stage_and_owner(
@@ -3912,6 +3947,35 @@ class SessionCreationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(IntakeError, "must complete MR handoff"):
             self.coordinator.send_to_test_handoff(session_id=completed_session.id)
+
+    def test_send_to_test_handoff_failure_escalates_for_operator_retry(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021D1")
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="mr_handoff_completed",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+
+        original_send_to_test = self.jira_adapter.send_to_test
+        self.jira_adapter.send_to_test = lambda task_key: CommandResult(
+            command=["send_to_test", task_key],
+            returncode=1,
+            stdout="",
+            stderr="transition failed\n",
+        )
+        failed_session, failed_event = self.coordinator.send_to_test_handoff(session_id=session.id)
+
+        self.assertEqual("waiting_for_operator", failed_session.status.value)
+        self.assertEqual("send_to_test_failed", failed_session.current_stage)
+        self.assertEqual("send_to_test_failed", failed_event.event_type)
+
+        self.jira_adapter.send_to_test = original_send_to_test
+        retried_session, retried_event = self.coordinator.send_to_test_handoff(session_id=session.id)
+
+        self.assertEqual("completed", retried_session.status.value)
+        self.assertEqual("send_to_test_completed", retried_session.current_stage)
+        self.assertEqual("send_to_test_completed", retried_event.event_type)
 
     def test_verification_passed_routes_to_doc_harvest_when_policy_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
