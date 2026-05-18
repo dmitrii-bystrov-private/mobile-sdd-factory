@@ -88,7 +88,7 @@ curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json'
 FINAL_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"role_name\":\"verification-coordinator\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"verification passed\"}}")"
 jq -e '.mapped_event_type == "verification_passed"' <<<"${FINAL_RESPONSE}" >/dev/null
-jq -e '.followup_event_type == "task_completed"' <<<"${FINAL_RESPONSE}" >/dev/null
+jq -e '.followup_event_type == "send_to_test_completed"' <<<"${FINAL_RESPONSE}" >/dev/null
 jq -e '.session.status == "completed"' <<<"${FINAL_RESPONSE}" >/dev/null
 
 EVENTS_RESPONSE="$(curl -fsS "${BASE_URL}/events?session_id=${SESSION_ID}")"
@@ -112,7 +112,9 @@ jq -e '
     "role_input_dispatched",
     "verification_requested",
     "verification_passed",
-    "task_completed"
+    "task_completed",
+    "mr_handoff_completed",
+    "send_to_test_completed"
   ]
 ' <<<"${EVENTS_RESPONSE}" >/dev/null
 

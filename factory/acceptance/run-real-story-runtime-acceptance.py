@@ -7,17 +7,16 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 from backend.api.routes_events import inject_event, list_events
-from backend.api.routes_operator import create_mr, create_subtasks_from_plan, send_to_test
+from backend.api.routes_operator import create_subtasks_from_plan, resume_session
 from backend.api.routes_roles import submit_role_output
 from backend.api.routes_sessions import create_session, prepare_session
 from backend.api.schemas import (
-    CreateMrRequest,
     CreateSessionRequest,
     CreateSubtasksFromPlanRequest,
     InjectEventRequest,
     PrepareSessionRequest,
+    ResumeSessionRequest,
     RoleOutputRequest,
-    SendToTestRequest,
 )
 from backend.roles.contracts import (
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
@@ -170,8 +169,16 @@ def main() -> None:
             dependencies=deps,
         )
         assert create_subtasks_response.created
-        assert create_subtasks_response.followup_event_type == "subtask_implementation_requested"
-        assert create_subtasks_response.session.current_stage == "subtask_implementation_requested"
+        assert create_subtasks_response.followup_event_type is None
+        assert create_subtasks_response.session.current_stage == "subtask_creation_requested"
+
+        resume_response = resume_session(
+            ResumeSessionRequest(session_id=session_id),
+            dependencies=deps,
+        )
+        assert resume_response.event_type == "session_resumed_by_operator"
+        assert resume_response.followup_event_type == "subtask_implementation_requested"
+        assert resume_response.session.current_stage == "subtask_implementation_requested"
 
         snapshot_adapter = deps.snapshot_adapter
         original_run = snapshot_adapter.run
@@ -212,23 +219,9 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert verification_response.followup_event_type == "task_completed"
+        assert verification_response.followup_event_type == "send_to_test_completed"
         assert verification_response.session.status == "completed"
-
-        mr_response = create_mr(
-            CreateMrRequest(session_id=session_id),
-            dependencies=deps,
-        )
-        assert mr_response.event_type == "mr_handoff_completed"
-        assert mr_response.session.current_stage == "mr_handoff_completed"
-
-        send_to_test_response = send_to_test(
-            SendToTestRequest(session_id=session_id),
-            dependencies=deps,
-        )
-        assert send_to_test_response.event_type == "send_to_test_completed"
-        assert send_to_test_response.session.current_stage == "send_to_test_completed"
-        assert send_to_test_response.session.status == "completed"
+        assert verification_response.session.current_stage == "send_to_test_completed"
 
         events_response = list_events(session_id=session_id, dependencies=deps)
         event_types = [item.event_type for item in events_response.items]

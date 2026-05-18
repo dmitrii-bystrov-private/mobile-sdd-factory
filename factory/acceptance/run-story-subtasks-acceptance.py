@@ -6,12 +6,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from backend.api.routes_events import inject_event, list_events
+from backend.api.routes_operator import create_subtasks_from_plan
+from backend.api.routes_operator import resume_session
 from backend.api.routes_roles import submit_role_output
 from backend.api.routes_sessions import create_session, prepare_session
 from backend.api.schemas import (
+    CreateSubtasksFromPlanRequest,
     CreateSessionRequest,
     InjectEventRequest,
     PrepareSessionRequest,
+    ResumeSessionRequest,
     RoleOutputRequest,
 )
 from backend.api.sse import SessionEventBus
@@ -184,12 +188,44 @@ def main() -> None:
                 payload={
                     "summary": "Execution chunks prepared",
                     "task_breakdown": "Data layer first, then UI polish",
+                    "plan_index_markdown": (
+                        "# Execution Task List\n\n"
+                        "| # | Task | Depends on | Status |\n"
+                        "|---|------|------------|--------|\n"
+                        "| 01 | [Build data layer](./01-build-data-layer.md) | — | ☐ |\n"
+                    ),
+                    "plan_task_files": [
+                        {
+                            "filename": "01-build-data-layer.md",
+                            "content": (
+                                "# Build data layer\n\n"
+                                "## What to implement\n"
+                                "Finish the data layer work for the story.\n"
+                            ),
+                        }
+                    ],
                 },
             ),
             dependencies=deps,
         )
-        assert decomposition_response.followup_event_type == "subtask_implementation_requested"
-        assert decomposition_response.session.current_stage == "subtask_implementation_requested"
+        assert decomposition_response.followup_event_type == "subtask_creation_requested"
+        assert decomposition_response.session.current_stage == "subtask_creation_requested"
+
+        subtask_creation_response = create_subtasks_from_plan(
+            CreateSubtasksFromPlanRequest(session_id=session_id),
+            dependencies=deps,
+        )
+        assert subtask_creation_response.event_type == "jira_subtasks_created"
+        assert subtask_creation_response.followup_event_type is None
+        assert subtask_creation_response.session.current_stage == "subtask_creation_requested"
+
+        resume_response = resume_session(
+            ResumeSessionRequest(session_id=session_id),
+            dependencies=deps,
+        )
+        assert resume_response.event_type == "session_resumed_by_operator"
+        assert resume_response.followup_event_type == "subtask_implementation_requested"
+        assert resume_response.session.current_stage == "subtask_implementation_requested"
 
         subtask_response = inject_event(
             InjectEventRequest(
@@ -211,7 +247,7 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert verification_response.followup_event_type == "task_completed"
+        assert verification_response.followup_event_type == "send_to_test_completed"
         assert verification_response.session.status == "completed"
 
         events_response = list_events(session_id=session_id, dependencies=deps)
@@ -240,8 +276,10 @@ def main() -> None:
             "role_input_dispatched",
             "task_decomposition_requested",
             "task_decomposition_completed",
-            "role_input_dispatched",
-            "implementation_requested",
+            "subtask_creation_requested",
+            "session_escalated_to_operator",
+            "jira_subtasks_created",
+            "session_resumed_by_operator",
             "subtask_graph_requested",
             "role_input_dispatched",
             "subtask_implementation_requested",
@@ -251,6 +289,8 @@ def main() -> None:
             "verification_requested",
             "verification_passed",
             "task_completed",
+            "mr_handoff_completed",
+            "send_to_test_completed",
         ]
 
         print(f"Story subtask operator acceptance passed for session {session_id}.")

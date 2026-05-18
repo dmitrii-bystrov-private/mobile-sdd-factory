@@ -7,15 +7,12 @@ from pathlib import Path
 
 from backend.api.routes_artifacts import list_artifacts
 from backend.api.routes_events import list_events
-from backend.api.routes_operator import create_mr, send_to_test
 from backend.api.routes_roles import submit_role_output
 from backend.api.routes_sessions import create_session, prepare_session
 from backend.api.schemas import (
-    CreateMrRequest,
     CreateSessionRequest,
     PrepareSessionRequest,
     RoleOutputRequest,
-    SendToTestRequest,
 )
 from backend.api.sse import SessionEventBus
 from backend.coordinator.loop_runner import CoordinatorLoopRunner
@@ -151,24 +148,9 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert verification_passed_response.followup_event_type == "task_completed"
+        assert verification_passed_response.followup_event_type == "send_to_test_completed"
         assert verification_passed_response.session.status == "completed"
-
-        mr_response = create_mr(
-            CreateMrRequest(session_id=session_id),
-            dependencies=deps,
-        )
-        assert mr_response.event_type == "mr_handoff_completed"
-        assert mr_response.session.current_stage == "mr_handoff_completed"
-        assert mr_response.mr_url == "https://gitlab.example.com/mobile/IOS-ACCEPT-DELIVERY-001/-/merge_requests/42"
-
-        send_to_test_response = send_to_test(
-            SendToTestRequest(session_id=session_id),
-            dependencies=deps,
-        )
-        assert send_to_test_response.event_type == "send_to_test_completed"
-        assert send_to_test_response.session.current_stage == "send_to_test_completed"
-        assert send_to_test_response.session.status == "completed"
+        assert verification_passed_response.session.current_stage == "send_to_test_completed"
 
         events_response = list_events(session_id=session_id, dependencies=deps)
         assert [item.event_type for item in events_response.items] == [

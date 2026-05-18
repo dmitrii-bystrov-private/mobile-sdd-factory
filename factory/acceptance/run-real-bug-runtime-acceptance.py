@@ -7,17 +7,15 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
 from backend.api.routes_events import inject_event, list_events
-from backend.api.routes_operator import create_mr, reopen_from_qa, send_to_test
+from backend.api.routes_operator import reopen_from_qa
 from backend.api.routes_roles import submit_role_output
 from backend.api.routes_sessions import create_session, prepare_session
 from backend.api.schemas import (
-    CreateMrRequest,
     CreateSessionRequest,
     InjectEventRequest,
     PrepareSessionRequest,
     ReopenFromQaRequest,
     RoleOutputRequest,
-    SendToTestRequest,
 )
 from backend.roles.contracts import BUG_FIXER_ROLE, VERIFICATION_COORDINATOR_ROLE
 from backend.tools.command_runner import CommandResult
@@ -138,9 +136,9 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert verification_response.followup_event_type == "task_completed"
+        assert verification_response.followup_event_type == "send_to_test_completed"
         assert verification_response.session.status == "completed"
-        assert verification_response.session.current_stage == "completed"
+        assert verification_response.session.current_stage == "send_to_test_completed"
 
         qa_reopen_response = reopen_from_qa(
             ReopenFromQaRequest(
@@ -176,23 +174,8 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert final_verification_response.followup_event_type == "task_completed"
+        assert final_verification_response.followup_event_type == "send_to_test_completed"
         assert final_verification_response.session.status == "completed"
-
-        mr_response = create_mr(
-            CreateMrRequest(session_id=session_id),
-            dependencies=deps,
-        )
-        assert mr_response.event_type == "mr_handoff_completed"
-        assert mr_response.session.current_stage == "mr_handoff_completed"
-
-        send_to_test_response = send_to_test(
-            SendToTestRequest(session_id=session_id),
-            dependencies=deps,
-        )
-        assert send_to_test_response.event_type == "send_to_test_completed"
-        assert send_to_test_response.session.current_stage == "send_to_test_completed"
-        assert send_to_test_response.session.status == "completed"
 
         events_response = list_events(session_id=session_id, dependencies=deps)
         event_types = [item.event_type for item in events_response.items]

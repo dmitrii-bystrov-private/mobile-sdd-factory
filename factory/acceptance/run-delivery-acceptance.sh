@@ -79,17 +79,7 @@ curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json'
 
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"role_name\":\"verification-coordinator\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"verification passed\"}}" \
-  | jq -e '.followup_event_type == "task_completed"' >/dev/null
-
-curl -fsS -X POST "${BASE_URL}/operator/create-mr" -H 'content-type: application/json' \
-  -d "{\"session_id\":${SESSION_ID}}" \
-  | jq -e '.event_type == "mr_handoff_completed"' >/dev/null
-
-FINAL_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/operator/send-to-test" -H 'content-type: application/json' \
-  -d "{\"session_id\":${SESSION_ID}}")"
-jq -e '.event_type == "send_to_test_completed"' <<<"${FINAL_RESPONSE}" >/dev/null
-jq -e '.session.current_stage == "send_to_test_completed"' <<<"${FINAL_RESPONSE}" >/dev/null
-jq -e '.session.status == "completed"' <<<"${FINAL_RESPONSE}" >/dev/null
+  | jq -e '.followup_event_type == "send_to_test_completed"' >/dev/null
 
 ARTIFACTS_RESPONSE="$(curl -fsS "${BASE_URL}/artifacts?session_id=${SESSION_ID}")"
 jq -e '([.items[].artifact_type] | index("mr_handoff_stdout")) != null' <<<"${ARTIFACTS_RESPONSE}" >/dev/null

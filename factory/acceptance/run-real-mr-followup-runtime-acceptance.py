@@ -112,7 +112,7 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert verification_response.followup_event_type == "task_completed"
+        assert verification_response.followup_event_type == "send_to_test_completed"
         assert verification_response.session.status == "completed"
 
         mr_followup_response = ingest_mr_comments(
@@ -136,6 +136,27 @@ def main() -> None:
         assert len(analyst_inputs) == 1
         assert "Analyze unresolved MR comments for IOS-ACCEPT-REAL-MR-001" in analyst_inputs[-1]
         assert '"work_item_type": "mr_comments_analysis"' in analyst_inputs[-1]
+        plan_dir = temp_root / "workdir" / task_key / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n"
+            "| # | Task | Depends on | Status |\n"
+            "|---|------|------------|--------|\n"
+            "| 01 | [Address MR feedback](./01-address-mr-feedback.md) | — | ☐ |\n"
+        )
+        (plan_dir / "01-address-mr-feedback.md").write_text(
+            "# Address MR feedback\n\n"
+            "## What to implement\n"
+            "Apply the grouped MR follow-up changes.\n"
+        )
+        (temp_root / "workdir" / task_key / "statuses.md").write_text(
+            "# Statuses\n\n"
+            "| Key | Type | Title | Status |\n"
+            "| --- | --- | --- | --- |\n"
+            f"| {task_key} | Story | Parent story | Ready for test |\n"
+            "| IOS-90001 | Sub-task | Address MR feedback | To Do |\n"
+            "| IOS-90002 | Sub-task | Cleanup review leftovers | Ready for test |\n"
+        )
 
         analysis_response = submit_role_output(
             RoleOutputRequest(
@@ -146,15 +167,15 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert analysis_response.followup_event_type == "mr_followup_requested"
-        assert analysis_response.session.current_stage == "mr_followup_requested"
+        assert analysis_response.followup_event_type == "subtask_implementation_requested"
+        assert analysis_response.session.current_stage == "subtask_implementation_requested"
         assert analysis_response.session.current_owner == IMPLEMENTER_ROLE
 
         implementer_inputs = deps.session_backend.get_sent_inputs(implementation_role.runtime_handle)
         assert len(implementer_inputs) == 2
         assert "Continue from your existing implementer role context" in implementer_inputs[-1]
-        assert "Apply MR follow-up changes for IOS-ACCEPT-REAL-MR-001." in implementer_inputs[-1]
-        assert '"work_item_type": "followup_implementation"' in implementer_inputs[-1]
+        assert "Implement subtask IOS-90001" in implementer_inputs[-1]
+        assert '"work_item_type": "subtask_implementation"' in implementer_inputs[-1]
 
         followup_response = submit_role_output(
             RoleOutputRequest(
@@ -182,7 +203,7 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert final_verification_response.followup_event_type == "task_completed"
+        assert final_verification_response.followup_event_type == "send_to_test_completed"
         assert final_verification_response.session.status == "completed"
 
         events_response = list_events(session_id=session_id, dependencies=deps)
@@ -190,10 +211,14 @@ def main() -> None:
         assert "mr_comments_received" in event_types
         assert "mr_comments_analysis_requested" in event_types
         assert "mr_comments_analysis_completed" in event_types
-        assert "mr_followup_requested" in event_types
+        assert "jira_subtasks_created" in event_types
+        assert "subtask_graph_requested" in event_types
+        assert "subtask_implementation_requested" in event_types
+        assert "subtask_completed" in event_types
         assert event_types.count("verification_requested") == 2
         assert event_types.count("verification_passed") == 2
         assert event_types.count("task_completed") == 2
+        assert event_types.count("send_to_test_completed") == 2
 
         print(f"Real MR follow-up runtime acceptance passed for session {session_id}.")
 
