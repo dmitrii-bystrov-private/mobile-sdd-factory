@@ -3426,6 +3426,48 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "implementation_completed" for item in events))
         self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
 
+    def test_collect_role_output_ignores_stale_verifier_result_during_verification_correction(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009C")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_failed",
+            payload={"summary": "verification failed", "failures": ["lint"]},
+        )
+        verifier_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            "verification-coordinator",
+        )
+        result_path = verifier_workspace / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {"summary": "late stale verifier result"},
+                }
+            )
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="verification-coordinator",
+        )
+        events = self.event_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("verification_correction_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
+        self.assertFalse(any(item.event_type == "verification_passed" for item in events))
+        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
+
     def test_collect_role_output_records_progress_marker_without_stage_transition(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30010")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")

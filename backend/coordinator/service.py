@@ -1742,12 +1742,14 @@ class CoordinatorService:
             self._record_runtime_output_artifacts(session, role, chunks)
         if file_result is not None:
             output_type, output_payload = file_result
-            session, _, _ = self.handle_role_output(
-                session_id=session.id,
-                role_name=role.role_name,
+            handled_session = self._handle_collected_role_output(
+                session=session,
+                role=role,
                 output_type=output_type,
-                payload=output_payload,
+                output_payload=output_payload,
             )
+            if handled_session is not None:
+                session = handled_session
         elif chunks:
             session = self._apply_runtime_output_markers(session, role, chunks)
         event = self._append_event(
@@ -1786,12 +1788,14 @@ class CoordinatorService:
                 self._record_runtime_output_artifacts(session, role, chunks)
             if file_result is not None:
                 output_type, output_payload = file_result
-                session, _, _ = self.handle_role_output(
-                    session_id=session.id,
-                    role_name=role.role_name,
+                handled_session = self._handle_collected_role_output(
+                    session=session,
+                    role=role,
                     output_type=output_type,
-                    payload=output_payload,
+                    output_payload=output_payload,
                 )
+                if handled_session is not None:
+                    session = handled_session
             elif chunks:
                 session = self._apply_runtime_output_markers(session, role, chunks)
             total_chunks += len(chunks) + (1 if file_result is not None else 0)
@@ -1852,6 +1856,56 @@ class CoordinatorService:
         )
         result_path.unlink(missing_ok=True)
         return output_type, output_payload
+
+    def _handle_collected_role_output(
+        self,
+        session: Session,
+        role: Role,
+        output_type: str,
+        output_payload: dict,
+    ) -> Session | None:
+        if self._should_ignore_stale_role_output(
+            session=session,
+            role_name=role.role_name,
+            output_type=output_type,
+        ):
+            self._append_event(
+                session_id=session.id,
+                event_type="stale_role_output_ignored",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "output_type": output_type,
+                    "current_stage": session.current_stage,
+                    "current_owner": session.current_owner,
+                },
+            )
+            return None
+        updated_session, _, _ = self.handle_role_output(
+            session_id=session.id,
+            role_name=role.role_name,
+            output_type=output_type,
+            payload=output_payload,
+        )
+        return updated_session
+
+    def _should_ignore_stale_role_output(
+        self,
+        session: Session,
+        role_name: str,
+        output_type: str,
+    ) -> bool:
+        # A live verifier can finish its previous round slightly after the coordinator has
+        # already routed the implementer into verification corrections. Treat that late
+        # result as stale instead of failing the whole session intake path.
+        if (
+            role_name == VERIFICATION_COORDINATOR_ROLE
+            and output_type in {"passed", "completed", "failed", "blocked_verification_cycle"}
+            and session.current_stage == "verification_correction_requested"
+            and session.current_owner != VERIFICATION_COORDINATOR_ROLE
+        ):
+            return True
+        return False
 
     def run_loop_once(self) -> tuple[Event | None, int, int]:
         active_sessions = self.session_repository.list_by_status(SessionStatus.ACTIVE)
