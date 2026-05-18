@@ -797,6 +797,7 @@ class CoordinatorService:
         if not pending_items:
             raise IntakeError(f"Session {session_id} has no pending Boy Scout review decision")
         self.work_item_repository.update_status(pending_items[0].id, WorkItemStatus.COMPLETED)
+        self._materialize_boy_scout_deferred(session=session, reason=normalized_reason)
 
         event = self._append_event(
             session_id=session.id,
@@ -5811,6 +5812,81 @@ class CoordinatorService:
                 ),
             },
         )
+
+    def _materialize_boy_scout_deferred(self, *, session: Session, reason: str) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        findings_path = spec_root / "findings.md"
+        if not findings_path.is_file():
+            return
+
+        deferred_path = spec_root / "scout-deferred.md"
+        deferred_titles = self._read_boy_scout_deferred_titles(deferred_path)
+        for title in self._extract_boy_scout_finding_titles(findings_path.read_text()):
+            if title not in deferred_titles:
+                deferred_titles.append(title)
+        if not deferred_titles:
+            return
+
+        lines = [
+            "# Deferred Boy Scout Findings",
+            "",
+            f"Deferred after operator decision: {reason}",
+            "",
+            "## Deferred Titles",
+            "",
+        ]
+        lines.extend(f"- {title}" for title in deferred_titles)
+        content = "\n".join(lines).rstrip() + "\n"
+        deferred_path.parent.mkdir(parents=True, exist_ok=True)
+        deferred_path.write_text(content)
+
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "boy-scout",
+            "scout-deferred.md",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="boy-scout",
+            artifact_type="boy_scout_deferred_markdown",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(deferred_path),
+                "deferred_count": len(deferred_titles),
+            },
+        )
+
+    def _extract_boy_scout_finding_titles(self, markdown: str) -> list[str]:
+        titles: list[str] = []
+        for line in markdown.splitlines():
+            normalized = line.strip()
+            if not normalized.startswith("## Finding"):
+                continue
+            if ":" not in normalized:
+                continue
+            title = normalized.split(":", 1)[1].strip()
+            if title and title not in titles:
+                titles.append(title)
+        return titles
+
+    def _read_boy_scout_deferred_titles(self, deferred_path: Path) -> list[str]:
+        if not deferred_path.is_file():
+            return []
+        titles: list[str] = []
+        for line in deferred_path.read_text().splitlines():
+            normalized = line.strip()
+            if not normalized.startswith("- "):
+                continue
+            title = normalized[2:].strip()
+            if title and title not in titles:
+                titles.append(title)
+        return titles
 
     def _platform_for_task_key(self, task_key: str) -> str:
         if task_key.startswith("IOS-"):

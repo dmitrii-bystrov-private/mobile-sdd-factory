@@ -2382,11 +2382,19 @@ class SessionApiTests(unittest.TestCase):
             ),
             dependencies=self.dependencies,
         )
+        artifacts_response = list_artifacts(
+            session_id=create_response.session.id,
+            dependencies=self.dependencies,
+        )
+        deferred_path = Path(self.temp_dir.name) / "IOS-40013BSKIP" / "spec" / "scout-deferred.md"
 
         self.assertTrue(response.skipped)
         self.assertEqual("boy_scout_skipped_by_operator", response.event_type)
         self.assertEqual("verification_requested", response.followup_event_type)
         self.assertEqual("verification_requested", response.session.current_stage)
+        self.assertTrue(any(item.artifact_type == "boy_scout_deferred_markdown" for item in artifacts_response.items))
+        self.assertTrue(deferred_path.is_file())
+        self.assertIn("Extract helper", deferred_path.read_text())
 
     def test_get_environment_doctor_route_returns_report(self) -> None:
         fake_report = {

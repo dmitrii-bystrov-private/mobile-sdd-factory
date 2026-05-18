@@ -3667,12 +3667,16 @@ class SessionCreationTests(unittest.TestCase):
             reason="Track the refactor separately; continue to final verification.",
         )
         artifacts = self.artifact_repository.list_for_session(session.id)
+        deferred_path = Path(self.temp_dir.name) / "IOS-30021BS2" / "spec" / "scout-deferred.md"
 
         self.assertEqual("boy_scout_skipped_by_operator", event.event_type)
         self.assertEqual("verification_requested", verification_event.event_type)
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
         self.assertTrue(any(item.artifact_type == "boy_scout_findings" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "boy_scout_deferred_markdown" for item in artifacts))
+        self.assertTrue(deferred_path.is_file())
+        self.assertIn("Extract helper", deferred_path.read_text())
 
     def test_complete_self_review_with_issues_routes_to_implementer_correction(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
