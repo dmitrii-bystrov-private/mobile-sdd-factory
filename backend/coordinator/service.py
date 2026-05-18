@@ -1631,6 +1631,8 @@ class CoordinatorService:
             session, followup_event = self._handle_verification_failed(session, accepted_event)
         elif mapped_event_type == "verification_passed":
             session, followup_event = self._handle_verification_passed(session, accepted_event)
+        elif mapped_event_type == "verification_blocked":
+            session, followup_event = self._handle_verification_blocked(session, accepted_event)
         elif mapped_event_type == "self_review_passed":
             session, followup_event = self._handle_self_review_passed(session, accepted_event)
         elif mapped_event_type == "self_review_issues_found":
@@ -3574,6 +3576,56 @@ class CoordinatorService:
         )
         return session, event
 
+    def _handle_verification_blocked(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        verification_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "verification" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not verification_items:
+            raise IntakeError("No active verification work item found for the session")
+
+        active_item = verification_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._materialize_final_verification_file(session=session, source_event=source_event)
+        verification_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        if verification_role is None:
+            raise IntakeError("Verification coordinator role is missing for the session")
+        self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification_cycle_review",
+            title=f"Verification cycle resolution for {session.task_key}",
+            owner_role_id=verification_role.id,
+            source_event_id=source_event.id,
+            priority=96,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_requested",
+            current_owner=VERIFICATION_COORDINATOR_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        report_path = self._latest_artifact_path(session.id, "final_verification_markdown")
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "verification_cycle",
+                "summary": str(source_event.payload.get("summary") or "").strip() or "verification cycle blocked",
+                "details": str(source_event.payload.get("details") or "").strip()
+                or "The verifier reported a non-converging verification cycle and stopped automatic retries.",
+                "verification_report_path": report_path,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
     def _handle_verification_passed(
         self,
         session: Session,
@@ -4267,6 +4319,8 @@ class CoordinatorService:
                 return "verification_passed"
             if output_type == "failed" and session.current_stage == "verification_requested":
                 return "verification_failed"
+            if output_type == "blocked_verification_cycle" and session.current_stage == "verification_requested":
+                return "verification_blocked"
         if role_name == CODE_REVIEWER_ROLE and session.current_stage == "self_review_requested":
             if output_type in {"passed", "completed"}:
                 return "self_review_passed"
@@ -4997,7 +5051,11 @@ class CoordinatorService:
         if stage_name == "boy_scout_correction_requested":
             return f"Apply Boy Scout improvements for {task_key} from the routed findings file as a narrow correction pass."
         if stage_name == "verification_requested":
-            return f"Run deterministic verification for {task_key}."
+            return (
+                f"Run deterministic verification for {task_key}. "
+                "Emit passed when the gate is clean, failed when concrete corrections are needed, "
+                "or blocked_verification_cycle when the same verification loop is no longer converging and needs operator intervention."
+            )
         if stage_name == "verification_correction_requested":
             return f"Apply verification corrections for {task_key}."
         if stage_name == "self_review_requested":

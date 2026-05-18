@@ -56,6 +56,7 @@ const STREAM_EVENT_TYPES = [
   "verification_requested",
   "verification_failed",
   "verification_correction_requested",
+  "verification_blocked",
   "verification_passed",
   "task_completed",
   "mr_comments_empty",

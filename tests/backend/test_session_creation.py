@@ -2870,6 +2870,70 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
 
+    def test_verifier_can_block_non_converging_verification_cycle(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VBLOCK")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="verification-coordinator",
+            output_type="blocked_verification_cycle",
+            payload={
+                "summary": "The same failing verification loop remains unresolved.",
+                "details": "Two verification rounds produced the same correction guidance and the loop no longer converges.",
+                "failures": ["test"],
+                "check_outputs": {
+                    "run-test.sh": "Tests still fail: presenter state mismatch",
+                },
+            },
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("verification_blocked", mapped_event.event_type)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+        self.assertEqual("verification_cycle", str(followup_event.payload.get("reason") or ""))
+        self.assertTrue(any(item.artifact_type == "final_verification_markdown" for item in artifacts))
+
+    def test_resume_session_retries_verifier_after_blocked_verification_cycle(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VBLOCKRESUME")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="verification-coordinator",
+            output_type="blocked_verification_cycle",
+            payload={
+                "summary": "The same failing verification loop remains unresolved.",
+                "details": "The verifier asked for operator intervention.",
+                "failures": ["test"],
+                "check_outputs": {
+                    "run-test.sh": "Tests still fail: presenter state mismatch",
+                },
+            },
+        )
+
+        resumed_session, resumed_event, dispatch_event = self.coordinator.resume_session(session.id)
+        verifier_role = self.role_repository.get_by_name(session.id, "verification-coordinator")
+        sent_inputs = self.session_backend.get_sent_inputs(verifier_role.runtime_handle)
+
+        self.assertEqual("active", resumed_session.status.value)
+        self.assertEqual("verification-coordinator", resumed_session.current_owner)
+        self.assertEqual("session_resumed_by_operator", resumed_event.event_type)
+        self.assertIsNotNone(dispatch_event)
+        assert dispatch_event is not None
+        self.assertEqual("role_input_dispatched", dispatch_event.event_type)
+        self.assertIn("blocked_verification_cycle", sent_inputs[-1])
+
     def test_verification_correction_reenters_verification_without_reopening_optional_quality_lanes(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004V2QUAL",

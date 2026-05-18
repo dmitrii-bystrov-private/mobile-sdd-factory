@@ -140,6 +140,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Use `run-test.sh` and `run-lint.sh`; do not run `run-build.sh` here.\n"
             "- Treat every verification round as a fresh gate and refresh the verification evidence.\n"
             "- Always write or refresh `spec/final-verification.md` for the current round; on failure include the failed checks and their relevant command output.\n"
+            "- If the verification loop is no longer converging and you would otherwise repeat the same correction guidance again, emit `blocked_verification_cycle` instead of another normal failed pass.\n"
             "- Do not modify code, tests, docs, or prompts; summarize failures and stop without attempting fixes.\n\n"
         )
     return ""
