@@ -1899,6 +1899,12 @@ class CoordinatorService:
         # already routed the implementer into verification corrections. Treat that late
         # result as stale instead of failing the whole session intake path.
         if (
+            role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE}
+            and output_type == "completed"
+            and session.current_owner != role_name
+        ):
+            return True
+        if (
             role_name == VERIFICATION_COORDINATOR_ROLE
             and output_type in {"passed", "completed", "failed", "blocked_verification_cycle"}
             and session.current_stage == "verification_correction_requested"
