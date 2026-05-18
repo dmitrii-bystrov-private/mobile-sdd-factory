@@ -137,7 +137,8 @@ def role_runtime_rules(role_name: str) -> str:
             "- Run only the workflow-level deterministic verification gate for the current task.\n"
             "- Use `run-test.sh` and `run-lint.sh`; do not run `run-build.sh` here.\n"
             "- Treat every verification round as a fresh gate and refresh the verification evidence.\n"
-            "- Do not modify code, tests, docs, or prompts; summarize failures and stop.\n\n"
+            "- Always write or refresh `spec/final-verification.md` for the current round; on failure include the failed checks and their relevant command output.\n"
+            "- Do not modify code, tests, docs, or prompts; summarize failures and stop without attempting fixes.\n\n"
         )
     return ""
 

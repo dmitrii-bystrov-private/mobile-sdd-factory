@@ -343,6 +343,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Run only deterministic verification work for the routed task session.",
             "- Treat `run-test.sh` and `run-lint.sh` as the workflow-level verification gate; do not run `run-build.sh` here.",
             "- Always treat each verification round as a fresh deterministic gate and refresh the verification evidence.",
+            "- Always write or refresh `spec/final-verification.md` for the current round; on failure include the failed checks and their relevant command output.",
             "- Keep the role evidence-first: summarize failures, but do not attempt fixes.",
             "- Do not modify product code.",
         ]

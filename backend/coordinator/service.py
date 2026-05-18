@@ -5325,6 +5325,14 @@ class CoordinatorService:
             failure_list: list[str] = []
             if isinstance(failures, list):
                 failure_list = [str(item).strip() for item in failures if str(item).strip()]
+            check_outputs = source_event.payload.get("check_outputs")
+            rendered_outputs: list[tuple[str, str]] = []
+            if isinstance(check_outputs, dict):
+                for name, value in check_outputs.items():
+                    rendered_name = str(name).strip()
+                    rendered_value = str(value).strip()
+                    if rendered_name and rendered_value:
+                        rendered_outputs.append((rendered_name, rendered_value))
             passed = source_event.event_type == "verification_passed"
             lines = [f"# Final Verification: {session.task_key}", ""]
             if passed:
@@ -5347,6 +5355,17 @@ class CoordinatorService:
                     lines.extend(f"- {item}" for item in failure_list)
                 if summary:
                     lines.extend(["", "## Summary", "", summary])
+                for check_name, output_text in rendered_outputs:
+                    lines.extend(
+                        [
+                            "",
+                            f"## Output: {check_name}",
+                            "",
+                            "```text",
+                            output_text,
+                            "```",
+                        ]
+                    )
             content = "\n".join(lines).rstrip() + "\n"
 
         spec_root = self.workdir_root / session.task_key / "spec"

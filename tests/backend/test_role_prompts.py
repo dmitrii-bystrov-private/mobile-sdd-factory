@@ -48,6 +48,21 @@ class RolePromptTests(unittest.TestCase):
         self.assertNotIn("Preferred terminal outcome path:", text)
         self.assertNotIn('"current_stage": "verification_requested"', text)
 
+    def test_full_prompt_restores_final_verification_report_contract(self) -> None:
+        text = role_handoff_prompt(
+            role_name="verification-coordinator",
+            instruction="Run deterministic verification for IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "verification_requested",
+                "work_item_id": 8,
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("Always write or refresh `spec/final-verification.md`", text)
+        self.assertIn("failed checks and their relevant command output", text)
+
     def test_full_prompt_restores_proposal_context_fetch_and_conflict_rules(self) -> None:
         text = role_handoff_prompt(
             role_name="proposal-context-worker",

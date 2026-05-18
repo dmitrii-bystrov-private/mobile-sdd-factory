@@ -2513,7 +2513,13 @@ class SessionCreationTests(unittest.TestCase):
         updated_session, followup_event = self.coordinator.handle_operator_event(
             session_id=session.id,
             event_type="verification_failed",
-            payload={"failures": ["test", "lint"]},
+            payload={
+                "failures": ["test", "lint"],
+                "check_outputs": {
+                    "run-test.sh": "Tests failed: presenter state mismatch",
+                    "run-lint.sh": "Lint failed: unused import",
+                },
+            },
         )
         work_items = self.work_item_repository.list_for_session(session.id)
         events = self.event_repository.list_for_session(session.id)
@@ -2558,6 +2564,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(verification_report.exists())
         self.assertIn("## Result", verification_report.read_text())
         self.assertIn("FAIL", verification_report.read_text())
+        self.assertIn("## Output: run-test.sh", verification_report.read_text())
+        self.assertIn("presenter state mismatch", verification_report.read_text())
 
     def test_bug_full_verification_failed_routes_back_to_bug_fixer_with_fix_only_mode(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
