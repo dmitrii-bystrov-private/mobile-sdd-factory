@@ -1456,6 +1456,37 @@ class CoordinatorService:
             producer_type="coordinator",
             payload={"comment_length": len(normalized_comment)},
         )
+        if session.workflow_profile == "story_full":
+            decomposition_artifact = self._latest_artifact_for_session_type(
+                session.id,
+                "task_decomposition_markdown",
+            )
+            subtasks: list | None
+            refresh_ok = False
+            if decomposition_artifact is not None and self.snapshot_adapter is not None and self.workdir_root is not None:
+                subtasks, refresh_ok = self._refresh_subtask_snapshot(session)
+            else:
+                subtasks = self._read_snapshot_subtasks(session.task_key)
+            unresolved = unresolved_subtasks(subtasks) if subtasks is not None else []
+            if unresolved and subtasks is not None and decomposition_artifact is not None:
+                coding_role = self._primary_coding_role_for_work_type(session, "followup_implementation")
+                work_item = self.work_item_repository.create(
+                    session_id=session.id,
+                    work_type="followup_implementation",
+                    title=f"QA reopen execution for {session.task_key}",
+                    owner_role_id=coding_role.id,
+                    source_event_id=event.id,
+                    priority=115,
+                )
+                _graph_event, followup_event = self._start_subtask_graph_flow(
+                    session=session,
+                    producer_type="coordinator" if refresh_ok else "coordinator",
+                    subtasks=subtasks,
+                    initial_work_item=work_item,
+                    decomposition_artifact=decomposition_artifact,
+                )
+                refreshed = self._get_session_or_raise(session.id)
+                return refreshed, event, followup_event
         followup_event = self._enqueue_qa_followup(
             session=session,
             source_event=event,

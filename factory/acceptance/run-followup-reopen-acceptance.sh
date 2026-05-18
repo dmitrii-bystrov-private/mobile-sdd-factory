@@ -79,7 +79,7 @@ curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json'
 
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"role_name\":\"verification-coordinator\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"verification passed\"}}" \
-  | jq -e '.followup_event_type == "task_completed"' >/dev/null
+  | jq -e '.followup_event_type == "send_to_test_completed"' >/dev/null
 
 curl -fsS -X POST "${BASE_URL}/operator/reopen-from-qa" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"comment_text\":\"QA: still failing on edge case\"}" \
@@ -91,7 +91,7 @@ curl -fsS -X POST "${BASE_URL}/events" -H 'content-type: application/json' \
 
 FINAL_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"role_name\":\"verification-coordinator\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"verification passed after qa reopen\"}}")"
-jq -e '.followup_event_type == "task_completed"' <<<"${FINAL_RESPONSE}" >/dev/null
+jq -e '.followup_event_type == "send_to_test_completed"' <<<"${FINAL_RESPONSE}" >/dev/null
 jq -e '.session.status == "completed"' <<<"${FINAL_RESPONSE}" >/dev/null
 
 ARTIFACTS_RESPONSE="$(curl -fsS "${BASE_URL}/artifacts?session_id=${SESSION_ID}")"

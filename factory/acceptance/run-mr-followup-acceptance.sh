@@ -79,26 +79,56 @@ curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json'
 
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"role_name\":\"verification-coordinator\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"verification passed\"}}" \
-  | jq -e '.followup_event_type == "task_completed"' >/dev/null
+  | jq -e '.followup_event_type == "send_to_test_completed"' >/dev/null
 
 curl -fsS -X POST "${BASE_URL}/operator/ingest-mr-comments" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"platform\":\"ios\",\"mr_id\":\"2942\"}" \
   | jq -e '.followup_event_type == "mr_comments_analysis_requested"' >/dev/null
 
+PLAN_DIR="${WORKDIR_ROOT}/${TASK_KEY}/plan"
+mkdir -p "${PLAN_DIR}"
+cat >"${PLAN_DIR}/index.md" <<'EOF'
+# Execution Task List
+
+| # | Task | Depends on | Status |
+|---|------|------------|--------|
+| 01 | [Address MR feedback](./01-address-mr-feedback.md) | — | ☐ |
+EOF
+cat >"${PLAN_DIR}/01-address-mr-feedback.md" <<'EOF'
+# Address MR feedback
+
+## What to implement
+Apply the grouped MR follow-up changes.
+EOF
+cat >"${WORKDIR_ROOT}/${TASK_KEY}/statuses.md" <<'EOF'
+# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-ACCEPT-MR-001 | Story | Parent story | Ready for test |
+| IOS-90001 | Sub-task | Address MR feedback | To Do |
+| IOS-90002 | Sub-task | Cleanup review leftovers | Ready for test |
+EOF
+
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"role_name\":\"mr-comments-analyst-worker\",\"output_type\":\"completed\",\"payload\":{\"summary\":\"grouped MR comments into actionable follow-up themes\"}}" \
-  | jq -e '.followup_event_type == "mr_followup_requested"' >/dev/null
+  | jq -e '.followup_event_type == "subtask_implementation_requested"' >/dev/null
 
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"role_name\":\"implementer\",\"output_type\":\"completed\",\"payload\":{\"summary\":\"mr follow-up done\"}}" \
+  | jq -e '.followup_event_type == "self_review_requested"' >/dev/null
+
+curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
+  -d "{\"session_id\":${SESSION_ID},\"role_name\":\"code-reviewer\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"clean review after mr follow-up\"}}" \
   | jq -e '.followup_event_type == "verification_requested"' >/dev/null
 
 FINAL_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"role_name\":\"verification-coordinator\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"verification passed after mr follow-up\"}}")"
-jq -e '.followup_event_type == "task_completed"' <<<"${FINAL_RESPONSE}" >/dev/null
+jq -e '.followup_event_type == "send_to_test_completed"' <<<"${FINAL_RESPONSE}" >/dev/null
 jq -e '.session.status == "completed"' <<<"${FINAL_RESPONSE}" >/dev/null
 
 ARTIFACTS_RESPONSE="$(curl -fsS "${BASE_URL}/artifacts?session_id=${SESSION_ID}")"
 jq -e '([.items[].artifact_type] | index("mr_comments_markdown")) != null' <<<"${ARTIFACTS_RESPONSE}" >/dev/null
+jq -e '([.items[].artifact_type] | index("jira_subtasks_summary")) != null' <<<"${ARTIFACTS_RESPONSE}" >/dev/null
 
 echo "MR follow-up operator acceptance passed for session ${SESSION_ID}."

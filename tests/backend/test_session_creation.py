@@ -3758,6 +3758,56 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "qa_reopened" for item in events))
         self.assertTrue(any(item.event_type == "qa_reopen_requested" for item in events))
 
+    def test_story_reopen_from_qa_routes_into_subtask_graph_when_snapshot_has_unresolved_subtasks(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021QASUB",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="completed",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        artifact_path = Path(self.temp_dir.name) / "artifacts" / "IOS-30021QASUB" / "planning" / "task_decomposition.md"
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text("# Task decomposition\n")
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="planning",
+            artifact_type="task_decomposition_markdown",
+            path=str(artifact_path),
+            metadata={"task_key": "IOS-30021QASUB"},
+        )
+        self.write_statuses_file(
+            "IOS-30021QASUB",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30021QASUB | Story | Parent story | Ready for test |
+| IOS-30121 | Sub-task | Build data source | To Do |
+| IOS-30122 | Sub-task | Cleanup edge case | Ready for test |
+""",
+        )
+
+        updated_session, event, followup_event = self.coordinator.reopen_from_qa(
+            session_id=session.id,
+            comment_text="QA: still broken on edge case",
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("qa_reopened", event.event_type)
+        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertTrue(any(item.work_type == "subtask_implementation" for item in work_items))
+        self.assertTrue(any(item.event_type == "subtask_snapshot_refreshed" for item in events))
+        self.assertTrue(any(item.event_type == "subtask_graph_requested" for item in events))
+        self.assertTrue(any(item.event_type == "subtask_implementation_requested" for item in events))
+
     def test_bug_full_qa_reopen_uses_bug_fixer_fix_only_followup(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021BUG",

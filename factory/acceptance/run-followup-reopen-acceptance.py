@@ -151,7 +151,7 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert verification_passed_response.followup_event_type == "task_completed"
+        assert verification_passed_response.followup_event_type == "send_to_test_completed"
         assert verification_passed_response.session.status == "completed"
 
         reopen_response = reopen_from_qa(
@@ -185,7 +185,7 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert final_verification_response.followup_event_type == "task_completed"
+        assert final_verification_response.followup_event_type == "send_to_test_completed"
         assert final_verification_response.session.status == "completed"
 
         events_response = list_events(session_id=session_id, dependencies=deps)
@@ -203,6 +203,8 @@ def main() -> None:
             "verification_requested",
             "verification_passed",
             "task_completed",
+            "mr_handoff_completed",
+            "send_to_test_completed",
             "qa_reopened",
             "role_input_dispatched",
             "qa_reopen_requested",
@@ -211,6 +213,8 @@ def main() -> None:
             "verification_requested",
             "verification_passed",
             "task_completed",
+            "mr_handoff_completed",
+            "send_to_test_completed",
         ]
 
         artifacts_response = list_artifacts(session_id=session_id, dependencies=deps)
