@@ -1882,7 +1882,7 @@ class CoordinatorService:
             and subtasks is not None
             and unresolved_subtasks(subtasks)
         ):
-            followup_event = self._start_subtask_graph_flow(
+            _graph_event, followup_event = self._start_subtask_graph_flow(
                 session=session,
                 producer_type="operator",
                 subtasks=subtasks,

@@ -3806,6 +3806,88 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("role_input_dispatched", dispatch_event.event_type)
         self.assertEqual(2, len(sent_inputs))
 
+    def test_resume_session_from_subtask_creation_checkpoint_starts_implementation(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021EXEC",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30021EXEC")
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            self.coordinator.handle_operator_event(
+                session_id=session.id,
+                event_type=event_type,
+                payload={"summary": "prepared"},
+            )
+        checkpoint_session, _ = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload=decomposition_payload("Decomposition prepared"),
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+
+        resumed_session, resumed_event, followup_event = self.coordinator.resume_session(session.id)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertEqual("subtask_creation_requested", checkpoint_session.current_stage)
+        self.assertEqual("waiting_for_operator", checkpoint_session.status.value)
+        self.assertEqual("session_resumed_by_operator", resumed_event.event_type)
+        self.assertEqual("role_input_dispatched", followup_event.event_type)
+        self.assertEqual("implementation_requested", resumed_session.current_stage)
+        self.assertEqual("active", resumed_session.status.value)
+        self.assertIn("Start implementation work for IOS-30021EXEC.", sent_inputs[-1])
+
+    def test_resume_session_from_subtask_creation_checkpoint_can_start_subtask_lane(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021SUBGRAPH",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30021SUBGRAPH")
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            self.coordinator.handle_operator_event(
+                session_id=session.id,
+                event_type=event_type,
+                payload={"summary": "prepared"},
+            )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload=decomposition_payload("Decomposition prepared"),
+        )
+        self.write_statuses_file(
+            "IOS-30021SUBGRAPH",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30021SUBGRAPH | Story | Parent story | In Progress |
+| IOS-30121 | Sub-task | Build data source | To Do |
+""",
+        )
+        self.coordinator.create_subtasks_from_plan(session.id)
+
+        resumed_session, resumed_event, followup_event = self.coordinator.resume_session(session.id)
+
+        self.assertEqual("session_resumed_by_operator", resumed_event.event_type)
+        self.assertIsNotNone(followup_event)
+        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_implementation_requested", resumed_session.current_stage)
+
     def test_retry_session_creates_new_work_item_for_escalated_session(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")

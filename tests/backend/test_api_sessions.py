@@ -2027,6 +2027,54 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("active", response.session.status)
         self.assertEqual("implementer", response.session.current_owner)
 
+    def test_resume_session_route_from_subtask_creation_checkpoint_starts_implementation(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40013EXEC",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013EXEC"),
+            dependencies=self.dependencies,
+        )
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": "prepared"},
+                ),
+                dependencies=self.dependencies,
+            )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload=decomposition_payload("Decomposition prepared"),
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = resume_session(
+            ResumeSessionRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.resumed)
+        self.assertEqual("session_resumed_by_operator", response.event_type)
+        self.assertEqual("role_input_dispatched", response.followup_event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
+
     def test_send_runtime_input_route_continues_waiting_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40013A"),
