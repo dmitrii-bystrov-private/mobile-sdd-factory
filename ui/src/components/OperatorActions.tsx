@@ -227,15 +227,6 @@ export function OperatorActions({
     });
   }
 
-  const advancedActions: ActionDefinition[] = [
-    {
-      label: "Run Loop Once",
-      description: "Manually tick the coordinator loop once when you want to force a fresh reconciliation cycle.",
-      disabled: busy,
-      onClick: () => run(() => apiClient.runLoopOnce()),
-    },
-  ];
-
   const recoveryActions: ActionDefinition[] = [];
   if (session.status === "active") {
     recoveryActions.push({
@@ -347,13 +338,6 @@ export function OperatorActions({
         "Daily",
         "These are the operator actions that belong to normal day-to-day task handling.",
         dailyActions,
-      )}
-
-      {renderActionGroup(
-        "Advanced Flow",
-        "Advanced",
-        "These actions are valid workflow controls, but they are used only in narrower lifecycle branches.",
-        advancedActions,
       )}
 
       {renderActionGroup(

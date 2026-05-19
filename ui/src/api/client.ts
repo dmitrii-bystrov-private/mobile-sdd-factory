@@ -637,11 +637,6 @@ export const apiClient = {
     });
   },
 
-  runLoopOnce(): Promise<{ event_type?: string | null; session_count: number; chunk_count: number }> {
-    return request("/operator/run-loop-once", {
-      method: "POST",
-    });
-  },
 };
 
 export function openSessionEventStream(
