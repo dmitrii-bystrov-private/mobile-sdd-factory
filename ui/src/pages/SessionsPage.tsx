@@ -765,7 +765,7 @@ export function SessionsPage(): JSX.Element {
           </section>
         ) : (
           <section className="detail-layout">
-            <div className="panel workspace-panel">
+            <div className="surface-heading">
               <p className="eyebrow">Workspace</p>
               <h2>
                 {surfaceView === "runs"
@@ -776,38 +776,40 @@ export function SessionsPage(): JSX.Element {
               </h2>
               <p className="path-label">
                 {surfaceView === "runs"
-                  ? "Start sessions, inspect the selected run, and handle operator actions."
+                  ? "Switch runs, inspect the selected session, and handle operator actions."
                   : surfaceView === "settings"
                     ? "Manage project defaults without mixing them into run execution."
                     : "Check doctor, setup, and runtime readiness before debugging workflow logic."}
               </p>
             </div>
-            <section className="panel overview-strip">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Overview</p>
-                  <h2>Factory State</h2>
+            {surfaceView === "runs" ? (
+              <section className="panel overview-strip">
+                <div className="panel-header">
+                  <div>
+                    <p className="eyebrow">Overview</p>
+                    <h2>Factory State</h2>
+                  </div>
                 </div>
-              </div>
-              <div className="factory-state-grid">
-                <div className="metric-card">
-                  <span>Active</span>
-                  <strong>{activeSessionCount}</strong>
+                <div className="factory-state-grid">
+                  <div className="metric-card">
+                    <span>Active</span>
+                    <strong>{activeSessionCount}</strong>
+                  </div>
+                  <div className="metric-card">
+                    <span>Blocked</span>
+                    <strong>{blockedSessionCount}</strong>
+                  </div>
+                  <div className="metric-card">
+                    <span>Completed</span>
+                    <strong>{completedSessionCount}</strong>
+                  </div>
+                  <div className="metric-card">
+                    <span>Selected</span>
+                    <strong>{selectedSession?.task_key ?? "none"}</strong>
+                  </div>
                 </div>
-                <div className="metric-card">
-                  <span>Blocked</span>
-                  <strong>{blockedSessionCount}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>Completed</span>
-                  <strong>{completedSessionCount}</strong>
-                </div>
-                <div className="metric-card">
-                  <span>Selected</span>
-                  <strong>{selectedSession?.task_key ?? "none"}</strong>
-                </div>
-              </div>
-            </section>
+              </section>
+            ) : null}
             {surfaceView === "runs" ? (
               <SessionDetail
                 bundle={bundle}

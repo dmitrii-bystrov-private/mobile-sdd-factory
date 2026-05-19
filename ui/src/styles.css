@@ -103,6 +103,22 @@ input {
   gap: 24px;
 }
 
+.surface-heading {
+  display: grid;
+  gap: 6px;
+}
+
+.surface-heading h2 {
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+  letter-spacing: -0.03em;
+}
+
+.surface-heading .path-label {
+  margin: 0;
+  max-width: 44rem;
+}
+
 .sidebar-stack {
   display: grid;
   gap: 16px;
@@ -970,6 +986,10 @@ input {
   max-height: 320px;
   overflow: auto;
   padding-right: 4px;
+}
+
+.queue-list {
+  max-height: 52vh;
 }
 
 .error-banner {

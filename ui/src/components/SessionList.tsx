@@ -23,7 +23,7 @@ export function SessionList({
         </div>
         <span className="badge badge-muted">{sessions.length}</span>
       </div>
-      <div className="session-list">
+      <div className="session-list limited-list queue-list">
         {sessions.map((session) => {
           const isSelected = session.id === selectedSessionId;
           return (
