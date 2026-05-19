@@ -41,6 +41,7 @@ const STREAM_EVENT_TYPES = [
   "subtask_snapshot_refreshed",
   "subtask_snapshot_refresh_failed",
   "jira_subtasks_created",
+  "jira_subtasks_creation_failed",
   "subtask_graph_requested",
   "subtask_creation_requested",
   "subtask_implementation_requested",
