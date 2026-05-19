@@ -324,6 +324,21 @@ input {
   margin: 8px 0 0;
 }
 
+.clamp-2,
+.clamp-3 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.clamp-2 {
+  -webkit-line-clamp: 2;
+}
+
+.clamp-3 {
+  -webkit-line-clamp: 3;
+}
+
 .planning-summary-list {
   max-height: 420px;
 }

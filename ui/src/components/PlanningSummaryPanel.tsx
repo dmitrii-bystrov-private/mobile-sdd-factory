@@ -5,6 +5,16 @@ type PlanningSummaryPanelProps = {
   workflowProfile: string;
 };
 
+function stepStatusLabel(status: string): string {
+  if (status === "completed") {
+    return "Done";
+  }
+  if (status === "active") {
+    return "Active";
+  }
+  return "Pending";
+}
+
 function summarizeContent(content: string | null | undefined): string {
   if (content === null || content === undefined) {
     return "Artifact captured, detail preview unavailable.";
@@ -63,18 +73,15 @@ export function PlanningSummaryPanel({
             <div className="planning-step-head">
               <div>
                 <strong>{step.label}</strong>
-                <p>{step.stageName}</p>
+                <p>{step.artifactType ?? "Artifact pending"}</p>
               </div>
               <span className={`status-pill status-${step.status}`}>
-                {step.status}
+                {stepStatusLabel(step.status)}
               </span>
             </div>
-            <p className="planning-step-snippet">
+            <p className="planning-step-snippet clamp-3">
               {summarizeContent(step.artifactDetail?.content)}
             </p>
-            <small className="path-label">
-              {step.artifactType ?? "artifact pending"}
-            </small>
           </div>
         ))}
       </div>

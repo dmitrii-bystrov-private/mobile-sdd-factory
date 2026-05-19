@@ -44,7 +44,7 @@ export function JiraSubtasksPanel({
               <div className="table-row" key={item.key}>
                 <div>
                   <strong>{item.key}</strong>
-                  <p>{graphRow?.title ?? item.title ?? item.key}</p>
+                  <p className="clamp-2">{graphRow?.title ?? item.title ?? item.key}</p>
                 </div>
                 <div className="subtask-graph-meta">
                   {progressItem !== undefined || item.queuePosition !== null ? (

@@ -26,13 +26,13 @@ export function SubtaskProgressPanel({
       <div className="grid-two">
         <article className="subpanel">
           <div className="subpanel-head">
-            <strong>Current</strong>
+            <strong>Current Subtask</strong>
             <span className="badge badge-muted">{subtaskProgressSummary.remainingCount} remaining</span>
           </div>
           {subtaskProgressSummary.currentSubtaskKey !== null ? (
             <div className="stack-tight">
               <strong>{subtaskProgressSummary.currentSubtaskKey}</strong>
-              <p>{subtaskProgressSummary.currentSubtaskTitle}</p>
+              <p className="clamp-3">{subtaskProgressSummary.currentSubtaskTitle}</p>
             </div>
           ) : (
             <p>No active subtask is currently assigned.</p>
@@ -49,7 +49,7 @@ export function SubtaskProgressPanel({
               <div className="table-row" key={item.workItemId}>
                 <div>
                   <strong>{item.key ?? `Work Item ${item.workItemId}`}</strong>
-                  <p>{item.title}</p>
+                  <p className="clamp-2">{item.title}</p>
                 </div>
                 <div className="subtask-graph-meta">
                   <small>#{item.queuePosition}</small>

@@ -318,9 +318,6 @@ export function RuntimeDefaultsPanel({
           <strong>Project Baseline</strong>
           <span>{runtimeDefaults?.knownRoles.length ?? 0} known roles</span>
         </div>
-        <p className="form-help">
-          New sessions inherit this runner unless a lane has a specific override below.
-        </p>
         <label className="form-field">
           <span>Default Runner</span>
           <select
@@ -356,7 +353,6 @@ export function RuntimeDefaultsPanel({
             <div className="runtime-default-card">
               <div className="inline-summary-header">
                 <strong>{workflowProfileDisplayName("oneshot")}</strong>
-                <span>direct execution</span>
               </div>
             <div className="followup-form-grid">
               <label className="form-field">
@@ -421,7 +417,6 @@ export function RuntimeDefaultsPanel({
             <div className="runtime-default-card">
               <div className="inline-summary-header">
                 <strong>{workflowProfileDisplayName("bug_full")}</strong>
-                <span>bug recovery</span>
               </div>
             <div className="followup-form-grid">
               <label className="form-field">
@@ -506,7 +501,6 @@ export function RuntimeDefaultsPanel({
             <div className="runtime-default-card">
               <div className="inline-summary-header">
                 <strong>{workflowProfileDisplayName("story_full")}</strong>
-                <span>planning + execution</span>
               </div>
             <div className="followup-form-grid">
               <label className="form-field">
@@ -624,10 +618,6 @@ export function RuntimeDefaultsPanel({
                     <strong>{roleDisplayName(roleName)}</strong>
                     <span>{draft?.runner ?? "runner?"}</span>
                   </div>
-                  <p className="form-help">
-                    Use this only when one lane should consistently diverge from the project baseline for new sessions.
-                  </p>
-                  <p className="path-label">Lane id: {roleName}</p>
                   <div className="followup-form-grid">
                     <label className="form-field">
                       <span>Runner</span>

@@ -315,14 +315,16 @@ export function SessionDetail({
         </section>
         <section className="subpanel">
           <div className="subpanel-head">
-            <strong>Session Policy</strong>
+            <strong>Run Defaults</strong>
           </div>
-          <div className="table-list">
+          <p className="path-label">
+            This run is currently following the policy mix below.
+          </p>
+          <div className="inline-pill-row">
             {Object.entries(session.policy).map(([key, value]) => (
-              <div className="table-row" key={key}>
-                <span>{sessionPolicyLabel(key)}</span>
-                <strong>{sessionPolicyValueLabel(value)}</strong>
-              </div>
+              <span className="inline-pill" key={key}>
+                {sessionPolicyLabel(key)}: {sessionPolicyValueLabel(value)}
+              </span>
             ))}
           </div>
         </section>
