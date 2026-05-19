@@ -608,7 +608,7 @@ export function SessionsPage(): JSX.Element {
           <p className="eyebrow">SDD Factory</p>
           <h1>Operator Console</h1>
           <p className="topbar-summary">
-            Create and monitor workflow runs, tune project defaults, and check runtime health from one operator workspace.
+            Run the factory, inspect sessions, and manage project defaults from one operator workspace.
           </p>
         </div>
         <div className="topbar-actions">
@@ -658,7 +658,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Settings</strong>
-                <p>Manage project defaults, role baselines, and shared knowledge.</p>
+                <p>Manage project defaults and shared knowledge.</p>
               </button>
               <button
                 className={`surface-nav-card ${surfaceView === "health" ? "selected" : ""}`}
@@ -666,7 +666,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Health</strong>
-                <p>Check doctor status, local setup, and runtime readiness.</p>
+                <p>Check setup, doctor status, and runtime readiness.</p>
               </button>
             </div>
           </section>

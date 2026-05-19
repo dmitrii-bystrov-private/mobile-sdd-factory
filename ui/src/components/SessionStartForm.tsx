@@ -342,7 +342,7 @@ export function SessionStartForm({
       </div>
 
       <p className="path-label">
-        Start a task run first. Tune policies or lane overrides only when this session should diverge from the defaults.
+        Start a task run here. Change policies or lane overrides only when this run should differ from the defaults.
       </p>
 
       <form className="session-start-form" onSubmit={(event) => void handleSubmit(event)}>
@@ -372,18 +372,18 @@ export function SessionStartForm({
         <div className="inline-summary-card">
           <div className="inline-summary-header">
             <strong>{workflowProfileDisplayName(workflowProfile)}</strong>
-            <span>{effectiveRoleNames.length} active lanes</span>
+            <span>{effectiveRoleNames.length} workers</span>
           </div>
           <p className="form-help">
             {WORKFLOW_PROFILE_DESCRIPTIONS[workflowProfile]}
           </p>
           <div className="inline-pill-row">
-            <span className="inline-pill">self-review: {policy.self_review_policy}</span>
-            <span className="inline-pill">boy-scout: {policy.boy_scout_policy}</span>
-            <span className="inline-pill">doc-harvest: {policy.doc_harvest_policy}</span>
-            {showTestPolicy ? <span className="inline-pill">tests: {policy.test_policy}</span> : null}
+            <span className="inline-pill">Self-review {policy.self_review_policy}</span>
+            <span className="inline-pill">Boy Scout {policy.boy_scout_policy}</span>
+            <span className="inline-pill">Doc Harvest {policy.doc_harvest_policy}</span>
+            {showTestPolicy ? <span className="inline-pill">Tests {policy.test_policy}</span> : null}
             {showRequirementsClarificationMode ? (
-              <span className="inline-pill">clarification: {policy.requirements_clarification_mode}</span>
+              <span className="inline-pill">Clarification {policy.requirements_clarification_mode}</span>
             ) : null}
           </div>
         </div>
@@ -397,7 +397,7 @@ export function SessionStartForm({
           >
             <div>
               <strong>Tune This Run</strong>
-              <p>Adjust workflow behavior only when this run should diverge from the defaults.</p>
+              <p>Adjust workflow behavior only when this run should differ from the defaults.</p>
             </div>
             <span className={`chevron${showPolicyTuning ? " expanded" : ""}`} aria-hidden="true" />
           </button>
