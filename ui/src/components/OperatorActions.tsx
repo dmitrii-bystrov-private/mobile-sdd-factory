@@ -29,10 +29,7 @@ export function OperatorActions({
   );
   const [mrId, setMrId] = useState("");
   const [qaComment, setQaComment] = useState("");
-  const [docHarvestSummary, setDocHarvestSummary] = useState("");
   const [boyScoutSkipReason, setBoyScoutSkipReason] = useState("");
-  const [selfReviewOutcome, setSelfReviewOutcome] = useState<"passed" | "issues_found">("passed");
-  const [selfReviewSummary, setSelfReviewSummary] = useState("");
   const [knowledgeTitle, setKnowledgeTitle] = useState("");
   const [knowledgeScope, setKnowledgeScope] = useState("");
   const [knowledgeGuidance, setKnowledgeGuidance] = useState("");
@@ -119,19 +116,6 @@ export function OperatorActions({
     });
   }
 
-  async function handleDocHarvest(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const normalizedSummary = docHarvestSummary.trim();
-    if (normalizedSummary.length === 0) {
-      setError("Doc harvest summary is required");
-      return;
-    }
-    await run(async () => {
-      await apiClient.completeDocHarvest(session.id, normalizedSummary);
-      setDocHarvestSummary("");
-    });
-  }
-
   async function handleBoyScoutSkip(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const normalizedReason = boyScoutSkipReason.trim();
@@ -150,20 +134,6 @@ export function OperatorActions({
   ): Promise<void> {
     await run(async () => {
       await apiClient.resolveBoyScoutFindings(session.id, resolution);
-    });
-  }
-
-  async function handleSelfReview(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const normalizedSummary = selfReviewSummary.trim();
-    if (normalizedSummary.length === 0) {
-      setError("Self review summary is required");
-      return;
-    }
-    await run(async () => {
-      await apiClient.completeSelfReview(session.id, selfReviewOutcome, normalizedSummary);
-      setSelfReviewSummary("");
-      setSelfReviewOutcome("passed");
     });
   }
 
@@ -223,16 +193,6 @@ export function OperatorActions({
   const canResolveBoyScoutFindings =
     session.current_stage === "boy_scout_requested" &&
     session.status === "waiting_for_operator";
-  const canCompleteSelfReview =
-    session.current_stage === "self_review_requested" &&
-    session.status === "active" &&
-    session.policy["self_review_policy"] === "enabled";
-  const canCompleteDocHarvest =
-    session.policy["doc_harvest_policy"] === "enabled" &&
-    (
-      (session.current_stage === "doc_harvest_requested" && session.status === "active") ||
-      (session.current_stage === "completed" && session.status === "completed")
-    );
   const canStartSubtaskGraph =
     session.workflow_profile === "story_full" &&
     session.status === "waiting_for_operator" &&
@@ -541,88 +501,6 @@ export function OperatorActions({
               </button>
             </form>
           ) : null}
-        </div>
-      ) : null}
-
-      {canCompleteSelfReview ? (
-        <div className="operator-followup-stack">
-          <div className="operator-followup-copy">
-            <p className="eyebrow">Optional Lane</p>
-            <h4>Self Review</h4>
-            <p className="path-label">
-              Record the explicit self-review outcome before final verification or route findings back into correction.
-            </p>
-          </div>
-
-          <form className="followup-form" onSubmit={(event) => void handleSelfReview(event)}>
-            <div className="followup-form-grid">
-              <label className="form-field">
-                <span>Outcome</span>
-                <select
-                  className="select-input"
-                  disabled={busy || !canCompleteSelfReview}
-                  onChange={(event) => setSelfReviewOutcome(event.target.value as "passed" | "issues_found")}
-                  value={selfReviewOutcome}
-                >
-                  <option value="passed">passed</option>
-                  <option value="issues_found">issues_found</option>
-                </select>
-              </label>
-            </div>
-            <label className="form-field">
-              <span>Self Review Summary</span>
-              <textarea
-                className="text-area-input"
-                disabled={busy || !canCompleteSelfReview}
-                onChange={(event) => setSelfReviewSummary(event.target.value)}
-                placeholder="Reviewed implementation; either no blocking issues were found or the main findings are listed here."
-                rows={4}
-                value={selfReviewSummary}
-              />
-            </label>
-            <button
-              className="action-button"
-              disabled={busy || !canCompleteSelfReview}
-              title="Record the manual self-review outcome for this optional lane and route the session accordingly."
-              type="submit"
-            >
-              Complete Self Review
-            </button>
-          </form>
-        </div>
-      ) : null}
-
-      {canCompleteDocHarvest ? (
-        <div className="operator-followup-stack">
-          <div className="operator-followup-copy">
-            <p className="eyebrow">Optional Lane</p>
-            <h4>Doc Harvest</h4>
-            <p className="path-label">
-              Record documentation harvest output as an explicit session stage before downstream handoff.
-            </p>
-          </div>
-
-          <form className="followup-form" onSubmit={(event) => void handleDocHarvest(event)}>
-            <label className="form-field">
-              <span>Doc Harvest Summary</span>
-              <textarea
-                className="text-area-input"
-                disabled={busy || !canCompleteDocHarvest}
-                onChange={(event) => setDocHarvestSummary(event.target.value)}
-                placeholder="README updated for the feature area and the current behavior is documented."
-                rows={4}
-                value={docHarvestSummary}
-              />
-            </label>
-            <button
-              className="action-button"
-              disabled={busy || !canCompleteDocHarvest}
-              title="Record the documentation harvest result for this optional lane and let the workflow continue."
-              type="submit"
-            >
-              Complete Doc Harvest
-            </button>
-          </form>
         </div>
       ) : null}
 
