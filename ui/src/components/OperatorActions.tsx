@@ -160,7 +160,7 @@ export function OperatorActions({
   if (canRefreshSnapshot) {
     dailyActions.push({
       label: "Process Updates",
-      description: "Refresh the task snapshot and let the coordinator decide whether to continue active work or reopen the flow from new subtasks and other external changes.",
+      description: "Refresh the task snapshot while the session is active, or reopen a completed story flow when new subtasks appear after delivery.",
       disabled: busy,
       onClick: () => run(() => apiClient.refreshSnapshot(session.id)),
     });
@@ -168,7 +168,7 @@ export function OperatorActions({
   if (canRefreshSubtaskState) {
     dailyActions.push({
       label: "Refresh Subtask State",
-      description: "Pull the latest subtask progress after new Jira subtasks or follow-up work appears.",
+      description: "Refresh Jira subtask state and reconcile the remaining story execution queue around the currently active subtask.",
       disabled: busy,
       onClick: () => run(() => apiClient.refreshSubtaskState(session.id)),
     });

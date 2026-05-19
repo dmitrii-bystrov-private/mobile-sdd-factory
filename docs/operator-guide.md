@@ -41,7 +41,7 @@ The main daily actions are:
 - `Process Updates`
   Refreshes the task snapshot while a session is active, or reopens a completed `story_full` session when new subtasks appear after delivery.
 - `Refresh Subtask State`
-  Pulls the latest Jira subtask state while story execution is active.
+  Pulls the latest Jira subtask state while story execution is active and reconciles the remaining subtask queue around the currently active subtask.
 - `Create Knowledge Entry`
   Records a reusable project convention, hidden constraint, or non-obvious implementation finding in the shared knowledge base for future sessions.
 
