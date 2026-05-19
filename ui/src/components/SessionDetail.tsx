@@ -9,6 +9,7 @@ import { RoleStatusPanel } from "./RoleStatusPanel";
 import { RuntimeSessionPanel } from "./RuntimeSessionPanel";
 import { SubtaskGraphPanel } from "./SubtaskGraphPanel";
 import { SubtaskProgressPanel } from "./SubtaskProgressPanel";
+import { roleDisplayName } from "../roleDisplay";
 import type { Session, SessionBundle } from "../types";
 
 type SessionDetailProps = {
@@ -44,7 +45,7 @@ export function SessionDetail({
             Stage: <strong>{session.current_stage}</strong>
           </p>
           <p className="hero-meta">
-            Owner: <strong>{session.current_owner ?? "unowned"}</strong>
+            Owner: <strong>{session.current_owner ? roleDisplayName(session.current_owner) : "unowned"}</strong>
           </p>
         </div>
         <div className="hero-stats">

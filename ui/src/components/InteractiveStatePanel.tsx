@@ -1,3 +1,4 @@
+import { roleDisplayName } from "../roleDisplay";
 import type { InteractiveStateSummary } from "../types";
 
 type InteractiveStatePanelProps = {
@@ -23,7 +24,7 @@ export function InteractiveStatePanel({
       <div className="table-list">
         <div className="table-row">
           <span>Role</span>
-          <strong>{interactiveStateSummary.roleName ?? "unknown"}</strong>
+          <strong>{roleDisplayName(interactiveStateSummary.roleName)}</strong>
         </div>
         <div className="table-row">
           <span>Stage</span>

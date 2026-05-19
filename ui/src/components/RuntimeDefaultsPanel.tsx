@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { apiClient } from "../api/client";
+import { roleDisplayName } from "../roleDisplay";
 import type {
   RequirementsClarificationMode,
   RuntimeCapabilitiesSummary,
@@ -520,9 +521,9 @@ export function RuntimeDefaultsPanel({
           const efforts = modelCapability?.supportedEfforts ?? [];
           return (
             <div key={roleName} className="runtime-default-card">
-              <strong>{roleName}</strong>
+              <strong>{roleDisplayName(roleName)}</strong>
               <p className="form-help">
-                These values prefill new sessions for this role unless the session creator overrides them explicitly.
+                Internal id: {roleName}. These values prefill new sessions for this role unless the session creator overrides them explicitly.
               </p>
               <div className="followup-form-grid">
                 <label className="form-field">

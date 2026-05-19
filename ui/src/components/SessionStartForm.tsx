@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { apiClient } from "../api/client";
+import { roleDisplayName } from "../roleDisplay";
 import type {
   RequirementsClarificationMode,
   RuntimeCapabilitiesSummary,
@@ -462,10 +463,10 @@ export function SessionStartForm({
                 <article className="artifact-card" key={roleName}>
                   <div className="artifact-meta">
                     <span>{roleName}</span>
-                    <strong>{current.runner || "unconfigured"}</strong>
+                    <strong>{roleDisplayName(roleName)} · {current.runner || "unconfigured"}</strong>
                   </div>
                   <p className="form-help">
-                    Set the runner, model, and effort for the {roleName} lane in this session only.
+                    Set the runner, model, and effort for the {roleDisplayName(roleName)} lane in this session only.
                   </p>
 
                   <label className="form-field">

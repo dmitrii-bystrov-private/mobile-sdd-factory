@@ -1,3 +1,4 @@
+import { roleDisplayName } from "../roleDisplay";
 import type { Role, WorkItem } from "../types";
 
 type RoleStatusPanelProps = {
@@ -23,7 +24,7 @@ export function RoleStatusPanel({
           {roles.map((role) => (
             <article className="subpanel" key={role.id}>
               <div className="subpanel-head">
-                <strong>{role.role_name}</strong>
+                <strong>{roleDisplayName(role.role_name)}</strong>
                 <span className={`status-pill status-${role.status}`}>
                   {role.status}
                 </span>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { apiClient } from "../api/client";
+import { roleDisplayName } from "../roleDisplay";
 import type { RuntimeSessionStateSummary, Session } from "../types";
 
 type RuntimeSessionPanelProps = {
@@ -72,7 +73,7 @@ export function RuntimeSessionPanel({
             <div className="artifact-card">
               <div className="artifact-meta">
                 <span>auto recovery</span>
-                <strong>{runtimeStateSummary.lastAutoRecovery.roleName ?? "unknown role"}</strong>
+                <strong>{roleDisplayName(runtimeStateSummary.lastAutoRecovery.roleName)}</strong>
               </div>
               <p className="artifact-path">
                 recovered at stage {runtimeStateSummary.lastAutoRecovery.currentStage ?? "unknown"} ·
@@ -120,7 +121,7 @@ export function RuntimeSessionPanel({
               <article className="artifact-card" key={role.roleName}>
                 <div className="artifact-meta">
                   <span>{role.status}</span>
-                  <strong>{role.roleName}</strong>
+                  <strong>{roleDisplayName(role.roleName)}</strong>
                 </div>
                 <p className="artifact-path">
                   {role.runtimeBackend} · {role.runtimeHandle ?? "no handle"}
@@ -135,7 +136,7 @@ export function RuntimeSessionPanel({
                   className="action-button"
                   disabled={busy || role.runtimeHandle === null || role.status === "stopped"}
                   onClick={() => run(() => apiClient.stopRuntimeRole(session.id, role.roleName))}
-                  title={`Stop the live runtime for ${role.roleName} without stopping the whole session.`}
+                  title={`Stop the live runtime for ${roleDisplayName(role.roleName)} without stopping the whole session.`}
                   type="button"
                 >
                   Stop Role Runtime
@@ -144,7 +145,7 @@ export function RuntimeSessionPanel({
                   className="action-button"
                   disabled={busy || role.status !== "stopped"}
                   onClick={() => run(() => apiClient.restartRuntimeRole(session.id, role.roleName))}
-                  title={`Restart the stopped runtime for ${role.roleName} inside this session.`}
+                  title={`Restart the stopped runtime for ${roleDisplayName(role.roleName)} inside this session.`}
                   type="button"
                 >
                   Restart Role Runtime
