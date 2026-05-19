@@ -3259,6 +3259,7 @@ class SessionApiTests(unittest.TestCase):
             "/operator/redirect-session",
             "/operator/complete-doc-harvest",
             "/operator/complete-self-review",
+            "/operator/poll-session-output",
             "/operator/run-loop-once",
             "/operator/loop-status",
             "/operator/start-loop",

@@ -641,7 +641,11 @@ def reopen_from_qa(
     )
 
 
-@router.post("/poll-session-output", response_model=PollSessionOutputResponse)
+@router.post(
+    "/poll-session-output",
+    response_model=PollSessionOutputResponse,
+    include_in_schema=False,
+)
 def poll_session_output(
     payload: PollSessionOutputRequest,
     dependencies: AppDependencies = Depends(get_dependencies),
