@@ -3701,6 +3701,7 @@ class CoordinatorService:
                 "work_item_id": active_item.id,
                 "summary": summary,
                 "details": details or "Resolve planning blockers with the verifier, then continue in the same live session.",
+                "needs_operator_input": True,
                 "current_stage": session.current_stage,
             },
         )

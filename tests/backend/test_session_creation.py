@@ -2037,7 +2037,45 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("waiting_for_operator", updated_session.status.value)
         self.assertEqual("spec_verification_requested", updated_session.current_stage)
         self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, updated_session.current_owner)
+        self.assertTrue(bool(followup_event.payload.get("needs_operator_input")))
         self.assertTrue(any(item.work_type == "spec_verification" and item.status.value == "waiting_for_operator" for item in work_items))
+
+    def test_spec_verification_blockers_require_runtime_input_in_interactive_summary(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003SVINPUT",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003SVINPUT")
+        for event_type, summary in [
+            ("proposal_context_completed", "Scope clarified"),
+            ("requirements_completed", "Requirements clarified"),
+            ("acceptance_criteria_completed", "Acceptance prepared"),
+            ("constraints_completed", "Constraints prepared"),
+        ]:
+            self.coordinator.handle_operator_event(
+                session_id=session.id,
+                event_type=event_type,
+                payload={"summary": summary},
+            )
+
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=SPEC_VERIFIER_WORKER_ROLE,
+            output_type="failed",
+            payload={
+                "summary": "Planning blockers require operator decisions.",
+                "details": "Two contradictory scope choices remain unresolved.",
+                "blocker_questions": ["Choose notification model"],
+            },
+        )
+
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertTrue(summary["available"])
+        self.assertEqual("spec_verification_blockers", summary["source_reason"])
+        self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, summary["role_name"])
+        self.assertTrue(summary["needs_operator_input"])
 
     def test_story_spec_completed_moves_session_to_task_decomposition(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
