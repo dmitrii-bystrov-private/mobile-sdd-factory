@@ -351,6 +351,28 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("implementation_requested", response.followup_event_type)
         self.assertEqual("implementation_requested", response.session.current_stage)
 
+    def test_create_session_prepare_uses_resolved_parent_without_raw_session_leak(self) -> None:
+        with patch.object(
+            self.jira_adapter,
+            "resolve_parent",
+            return_value=CommandResult(["resolve_parent", "IOS-40000SUB"], 0, "IOS-40000PARENT\n", ""),
+        ):
+            response = create_session(
+                CreateSessionRequest(
+                    task_key="IOS-40000SUB",
+                    workflow_profile="oneshot",
+                    prepare=True,
+                ),
+                dependencies=self.dependencies,
+            )
+
+        sessions_response = list_sessions(dependencies=self.dependencies)
+
+        self.assertTrue(response.created)
+        self.assertEqual("IOS-40000PARENT", response.session.task_key)
+        self.assertEqual("IOS-40000PARENT", response.resolved_task_key)
+        self.assertEqual(["IOS-40000PARENT"], [item.task_key for item in sessions_response.items])
+
     def test_cleanup_task_route_soft_keeps_session_and_removes_runtime_residue(self) -> None:
         create_response = create_session(
             CreateSessionRequest(task_key="IOS-40100", workflow_profile="oneshot"),
