@@ -4926,6 +4926,36 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Extract builder helper", actionable_text)
         self.assertNotIn("Split legacy presenter", actionable_text)
 
+    def test_get_interactive_state_summary_exposes_boy_scout_reason(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSREASON",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSREASON")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSREASON" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={"result": "findings_found", "summary": "Found one improvement opportunity."},
+        )
+
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertTrue(summary["available"])
+        self.assertEqual("boy_scout_findings", summary["source_reason"])
+        self.assertEqual("boy_scout_requested", summary["current_stage"])
+        self.assertFalse(summary["needs_operator_input"])
+
     def test_boy_scout_manual_skip_is_rejected_when_policy_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021BS2R",

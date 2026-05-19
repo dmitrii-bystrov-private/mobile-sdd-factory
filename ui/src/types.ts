@@ -109,6 +109,7 @@ export type InteractiveStateSummary = {
   summary: string | null;
   details: string | null;
   sourceEventType: string | null;
+  sourceReason: string | null;
   needsOperatorInput: boolean;
 };
 

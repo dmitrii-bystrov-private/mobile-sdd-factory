@@ -209,6 +209,7 @@ export const apiClient = {
     summary: string | null;
     details: string | null;
     source_event_type: string | null;
+    source_reason: string | null;
     needs_operator_input: boolean;
   }> {
     return request(`/sessions/${sessionId}/interactive-state`);

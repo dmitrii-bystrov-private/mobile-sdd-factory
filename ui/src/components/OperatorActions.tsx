@@ -138,10 +138,12 @@ export function OperatorActions({
   const canSkipBoyScout =
     session.current_stage === "boy_scout_requested" &&
     session.status === "waiting_for_operator" &&
+    interactiveStateSummary?.sourceReason === "boy_scout_findings" &&
     session.policy["boy_scout_policy"] === "enabled";
   const canResolveBoyScoutFindings =
     session.current_stage === "boy_scout_requested" &&
-    session.status === "waiting_for_operator";
+    session.status === "waiting_for_operator" &&
+    interactiveStateSummary?.sourceReason === "boy_scout_findings";
   const canStartSubtaskGraph =
     session.workflow_profile === "story_full" &&
     session.status === "waiting_for_operator" &&

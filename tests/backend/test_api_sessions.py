@@ -2370,6 +2370,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("interactive selection required", response.summary)
         self.assertEqual("operator choice needed", response.details)
         self.assertEqual("session_escalated_to_operator", response.source_event_type)
+        self.assertEqual("runtime_error", response.source_reason)
         self.assertTrue(response.needs_operator_input)
 
     def test_get_interactive_state_route_clears_after_operator_runtime_input(self) -> None:
@@ -2436,6 +2437,7 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertTrue(response.available)
         self.assertEqual("tool failed", response.summary)
+        self.assertEqual("runtime_error", response.source_reason)
         self.assertFalse(response.needs_operator_input)
 
     def test_requirements_clarifier_runtime_input_can_continue_story_flow(self) -> None:

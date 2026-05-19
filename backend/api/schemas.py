@@ -122,6 +122,7 @@ class InteractiveStateSummaryResponse(BaseModel):
     summary: str | None = None
     details: str | None = None
     source_event_type: str | None = None
+    source_reason: str | None = None
     needs_operator_input: bool = False
 
 

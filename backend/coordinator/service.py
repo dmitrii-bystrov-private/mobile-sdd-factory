@@ -475,6 +475,7 @@ class CoordinatorService:
                 "summary": None,
                 "details": None,
                 "source_event_type": None,
+                "source_reason": None,
                 "needs_operator_input": False,
             }
 
@@ -485,6 +486,7 @@ class CoordinatorService:
             "summary": source_event.payload.get("summary") or source_event.payload.get("reason"),
             "details": source_event.payload.get("details"),
             "source_event_type": source_event.event_type,
+            "source_reason": source_event.payload.get("reason"),
             "needs_operator_input": bool(source_event.payload.get("needs_operator_input") is True),
         }
 
