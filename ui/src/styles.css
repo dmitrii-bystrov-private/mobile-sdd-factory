@@ -435,12 +435,8 @@ input {
 
 .hero-task-card {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   margin-top: 10px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.04);
 }
 
 .hero-title {
@@ -542,6 +538,14 @@ input {
   background: var(--surface-muted);
 }
 
+.hero-stats .metric-card {
+  padding: 12px 14px;
+}
+
+.hero-stats .metric-card strong {
+  font-size: 1.05rem;
+}
+
 .compact-grid .metric-card strong {
   font-size: 1.05rem;
 }
@@ -576,15 +580,19 @@ input {
   margin-top: 18px;
 }
 
+.operator-action-inline-heading {
+  margin-bottom: -2px;
+}
+
 .operator-actions-grid {
   gap: 12px;
 }
 
 .operator-action-card {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   align-content: start;
-  padding: 12px;
+  padding: 10px;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--surface-muted);
@@ -990,6 +998,10 @@ input {
 
 .queue-list {
   max-height: 52vh;
+}
+
+.progress-placeholder {
+  align-content: start;
 }
 
 .error-banner {

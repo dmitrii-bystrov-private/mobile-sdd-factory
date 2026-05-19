@@ -121,7 +121,7 @@ playwright-cli snapshot >"${RUNS_SNAPSHOT}"
 playwright-cli console >"${CONSOLE_LOG}"
 
 grep -q 'heading "Operator Console"' "${RUNS_SNAPSHOT}"
-grep -q 'heading "New Workflow Run"' "${RUNS_SNAPSHOT}"
+grep -q 'heading "New Workflow"' "${RUNS_SNAPSHOT}"
 grep -q 'heading "Factory Queue"' "${RUNS_SNAPSHOT}"
 if grep -q 'Failed to fetch' "${CONSOLE_LOG}"; then
   echo "UI surface smoke saw a failed fetch in browser console." >&2
@@ -134,7 +134,7 @@ wait_snapshot_contains "${SETTINGS_SNAPSHOT}" 'heading "Project Settings"'
 grep -q 'heading "Runtime Defaults"' "${SETTINGS_SNAPSHOT}"
 
 playwright-cli goto "${UI_URL}" >/dev/null
-wait_snapshot_contains "${RUNS_SNAPSHOT}" 'heading "New Workflow Run"'
+wait_snapshot_contains "${RUNS_SNAPSHOT}" 'heading "New Workflow"'
 HEALTH_REF="$(extract_ref_by_text "${RUNS_SNAPSHOT}" 'button "Health ')"
 playwright-cli click "${HEALTH_REF}" >/dev/null
 wait_snapshot_contains "${HEALTH_SNAPSHOT}" 'heading "Environment Health"'

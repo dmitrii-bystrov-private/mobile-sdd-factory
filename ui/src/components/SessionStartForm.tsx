@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { apiClient } from "../api/client";
-import { roleDisplayName } from "../roleDisplay";
 import { workflowProfileDisplayName } from "../sessionDisplay";
 import type {
   RequirementsClarificationMode,
@@ -38,25 +37,6 @@ const WORKFLOW_PROFILE_DESCRIPTIONS: Record<WorkflowProfile, string> = {
   oneshot: "Direct execution without story planning or bug-only recovery lanes.",
   bug_full: "Bug flow with dedicated fix and test handling.",
   story_full: "Full story flow with planning, clarification, and subtask execution.",
-};
-
-const POLICY_DESCRIPTIONS: Record<
-  "test_policy" | "self_review_policy" | "boy_scout_policy" | "doc_harvest_policy",
-  string
-> = {
-  test_policy: "Controls whether the bug flow treats testing as optional, agent-decided, or mandatory.",
-  self_review_policy:
-    "Controls whether the self-review lane is disabled, auto-started with agent skip semantics, or required.",
-  boy_scout_policy:
-    "Controls whether the code-scout lane is disabled, auto-started with agent skip semantics, or required.",
-  doc_harvest_policy:
-    "Controls whether documentation follow-up is disabled, auto-started with agent skip semantics, or required.",
-};
-
-const CLARIFICATION_MODE_DESCRIPTIONS: Record<RequirementsClarificationMode, string> = {
-  "ask-a-lot": "Bias toward interactive clarification whenever the spec is incomplete or ambiguous.",
-  "ask-selectively": "Ask only when ambiguity is likely to change implementation or planning decisions.",
-  autonomous: "Prefer carrying the task forward without operator clarification unless the flow hard-blocks.",
 };
 
 type DraftPolicy = {
@@ -113,11 +93,6 @@ export function SessionStartForm({
   const showTestPolicy = workflowProfile === "bug_full";
   const showRequirementsClarificationMode = workflowProfile === "story_full";
   const normalizedTaskKey = taskKey.trim().toUpperCase();
-  const enabledOptionalLaneCount = [
-    policy.self_review_policy,
-    policy.boy_scout_policy,
-    policy.doc_harvest_policy,
-  ].filter((value) => value !== "disabled").length;
 
   const payload = useMemo(() => {
     const basePolicy = {
@@ -337,13 +312,9 @@ export function SessionStartForm({
       <div className="panel-header">
         <div>
           <p className="eyebrow">Start Session</p>
-          <h2>New Workflow Run</h2>
+          <h2>New Workflow</h2>
         </div>
       </div>
-
-      <p className="path-label">
-        Start a task run here. Adjust policies or lane overrides only when needed.
-      </p>
 
       <form className="session-start-form" onSubmit={(event) => void handleSubmit(event)}>
         <label className="form-field">
@@ -413,7 +384,6 @@ export function SessionStartForm({
                     <select
                       className="select-input"
                       onChange={(event) => updatePolicy("test_policy", event.target.value as SessionPolicyValue)}
-                      title={POLICY_DESCRIPTIONS.test_policy}
                       value={policy.test_policy}
                     >
                       {POLICY_OPTIONS.map((value) => (
@@ -429,12 +399,11 @@ export function SessionStartForm({
               <div className="followup-form-grid">
                 <label className="form-field">
                   <span>Self Review</span>
-                  <select
-                    className="select-input"
-                    onChange={(event) => updatePolicy("self_review_policy", event.target.value as SessionPolicyValue)}
-                    title={POLICY_DESCRIPTIONS.self_review_policy}
-                    value={policy.self_review_policy}
-                  >
+                    <select
+                      className="select-input"
+                      onChange={(event) => updatePolicy("self_review_policy", event.target.value as SessionPolicyValue)}
+                      value={policy.self_review_policy}
+                    >
                     {POLICY_OPTIONS.map((value) => (
                       <option key={value} value={value}>
                         {POLICY_OPTION_LABELS[value]}
@@ -445,12 +414,11 @@ export function SessionStartForm({
 
                 <label className="form-field">
                   <span>Boy Scout</span>
-                  <select
-                    className="select-input"
-                    onChange={(event) => updatePolicy("boy_scout_policy", event.target.value as SessionPolicyValue)}
-                    title={POLICY_DESCRIPTIONS.boy_scout_policy}
-                    value={policy.boy_scout_policy}
-                  >
+                    <select
+                      className="select-input"
+                      onChange={(event) => updatePolicy("boy_scout_policy", event.target.value as SessionPolicyValue)}
+                      value={policy.boy_scout_policy}
+                    >
                     {POLICY_OPTIONS.map((value) => (
                       <option key={value} value={value}>
                         {POLICY_OPTION_LABELS[value]}
@@ -466,7 +434,6 @@ export function SessionStartForm({
                   <select
                     className="select-input"
                     onChange={(event) => updatePolicy("doc_harvest_policy", event.target.value as SessionPolicyValue)}
-                    title={POLICY_DESCRIPTIONS.doc_harvest_policy}
                     value={policy.doc_harvest_policy}
                   >
                     {POLICY_OPTIONS.map((value) => (
@@ -490,7 +457,6 @@ export function SessionStartForm({
                           event.target.value as RequirementsClarificationMode,
                         )
                       }
-                      title={CLARIFICATION_MODE_DESCRIPTIONS[policy.requirements_clarification_mode]}
                       value={policy.requirements_clarification_mode}
                     >
                       {REQUIREMENTS_CLARIFICATION_OPTIONS.map((value) => (
@@ -518,16 +484,10 @@ export function SessionStartForm({
                 <strong>Advanced Runtime Overrides</strong>
                 <p>Change lane runner, model, or effort for this session only.</p>
               </div>
-              <div className="advanced-disclosure-meta">
-                <small>{effectiveRoleNames.length} lanes · {enabledOptionalLaneCount} optional enabled</small>
-                <span className={`chevron${showAdvancedRoleConfig ? " expanded" : ""}`} aria-hidden="true" />
-              </div>
+              <span className={`chevron${showAdvancedRoleConfig ? " expanded" : ""}`} aria-hidden="true" />
             </button>
             {showAdvancedRoleConfig ? (
               <div className="advanced-disclosure-body artifact-stack">
-                <p className="path-label">
-                  These values start from the project defaults. Change them only when this session needs a specific lane override.
-                </p>
                 {effectiveRoleNames.map((roleName) => {
                   const current = roleConfig[roleName] ?? { runner: "", model: "", effort: "" };
                   const runnerCapability = runtimeCapabilities.runners.find(
@@ -539,8 +499,8 @@ export function SessionStartForm({
                   return (
                     <article className="artifact-card" key={roleName}>
                       <div className="artifact-meta">
-                        <span>{roleName}</span>
-                        <strong>{roleDisplayName(roleName)} · {current.runner || "unconfigured"}</strong>
+                        <strong>{roleName}</strong>
+                        <span>{current.runner || "unconfigured"}</span>
                       </div>
 
                       <label className="form-field">

@@ -13,8 +13,6 @@ import { SubtaskGraphPanel } from "./SubtaskGraphPanel";
 import { SubtaskProgressPanel } from "./SubtaskProgressPanel";
 import { roleDisplayName } from "../roleDisplay";
 import {
-  sessionPolicyLabel,
-  sessionPolicyValueLabel,
   sessionStatusDisplayName,
   workflowProfileDisplayName,
 } from "../sessionDisplay";
@@ -209,7 +207,6 @@ export function SessionDetail({
           : session.status === "completed"
             ? "The main flow has completed. Use follow-up actions only if new MR, QA, or snapshot updates arrive."
             : `Current stage: ${currentStage}.`;
-  const roleCount = bundle.roles.length;
   const showRoleStatusPanel =
     bundle.workItems.length > 0 ||
     visibleRoles.some((role) => role.status !== "running");
@@ -219,7 +216,6 @@ export function SessionDetail({
   const blockedRoleCount = waitingRoles.length;
   const recentEvents = [...bundle.events].slice(-4).reverse();
   const workflowDetailCount = [
-    showRoleStatusPanel,
     bundle.subtaskProgressSummary !== null && bundle.subtaskProgressSummary.available,
     bundle.jiraSubtasksSummary !== null,
     showFollowupContextPanel,
@@ -311,36 +307,20 @@ export function SessionDetail({
             <div className="inline-pill-row">
               <span className="inline-pill">stage: {currentStage}</span>
               <span className="inline-pill">owner: {currentOwner}</span>
-              <span className="inline-pill">active lanes: {runningRoleCount}</span>
-              {standbyRoleCount > 0 ? (
-                <span className="inline-pill">standing by: {standbyRoleCount}</span>
-              ) : null}
-              {blockedRoleCount > 0 ? (
-                <span className="inline-pill">waiting: {blockedRoleCount}</span>
-              ) : null}
-              <span className="inline-pill">roles in run: {roleCount}</span>
             </div>
           </div>
         </section>
-        <section className="subpanel">
-          <div className="subpanel-head">
-            <strong>Run Defaults</strong>
+        {session.workflow_profile === "story_full" ? (
+          <PlanningSummaryPanel
+            planningSummary={bundle.planningSummary}
+            workflowProfile={session.workflow_profile}
+          />
+        ) : (
+          <div className="subpanel progress-placeholder">
+            <strong>Workflow Summary</strong>
+            <p>This run is following the direct one-shot workflow without story planning.</p>
           </div>
-          <p className="path-label">
-            This run is currently following the policy mix below.
-          </p>
-          <div className="inline-pill-row">
-            {Object.entries(session.policy).map(([key, value]) => (
-              <span className="inline-pill" key={key}>
-                {sessionPolicyLabel(key)}: {sessionPolicyValueLabel(value)}
-              </span>
-            ))}
-          </div>
-        </section>
-        <PlanningSummaryPanel
-          planningSummary={bundle.planningSummary}
-          workflowProfile={session.workflow_profile}
-        />
+        )}
       </div>
 
       <section className="panel">
@@ -403,12 +383,12 @@ export function SessionDetail({
             )}
           </div>
 
-          <div className="subpanel">
-            <div className="subpanel-head">
-              <strong>Waiting</strong>
-              <span className="badge badge-muted">{waitingRoles.length}</span>
-            </div>
-            {waitingRoles.length > 0 ? (
+          {waitingRoles.length > 0 ? (
+            <div className="subpanel">
+              <div className="subpanel-head">
+                <strong>Waiting</strong>
+                <span className="badge badge-muted">{waitingRoles.length}</span>
+              </div>
               <div className="progress-card-stack">
                 {waitingRoles.map((role) => {
                   const summary = laneSummary(role, bundle.workItems, session);
@@ -424,10 +404,8 @@ export function SessionDetail({
                   );
                 })}
               </div>
-            ) : (
-              <p className="path-label">No lanes are currently waiting on a handoff.</p>
-            )}
-          </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="subpanel session-updates-panel">
@@ -479,9 +457,6 @@ export function SessionDetail({
           </button>
           {showWorkflowDetails ? (
             <div className="advanced-disclosure-body runtime-surface-stack">
-              {showRoleStatusPanel ? (
-                <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
-              ) : null}
               <SubtaskProgressPanel subtaskProgressSummary={bundle.subtaskProgressSummary} />
               <JiraSubtasksPanel
                 jiraSubtasksSummary={bundle.jiraSubtasksSummary}
@@ -497,6 +472,9 @@ export function SessionDetail({
                 planningSummary={bundle.planningSummary}
                 workflowProfile={session.workflow_profile}
               />
+              {showRoleStatusPanel ? (
+                <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
+              ) : null}
             </div>
           ) : null}
         </div>

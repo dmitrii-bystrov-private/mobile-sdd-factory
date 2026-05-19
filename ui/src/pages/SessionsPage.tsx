@@ -375,9 +375,6 @@ export function SessionsPage(): JSX.Element {
 
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? null;
-  const activeSessionCount = sessions.filter((session) => session.status === "active").length;
-  const blockedSessionCount = sessions.filter((session) => session.status === "waiting_for_operator").length;
-  const completedSessionCount = sessions.filter((session) => session.status === "completed").length;
 
   async function loadSessions(): Promise<number | null> {
     setLoading(true);
@@ -782,34 +779,6 @@ export function SessionsPage(): JSX.Element {
                     : "Check doctor, setup, and runtime readiness before debugging workflow logic."}
               </p>
             </div>
-            {surfaceView === "runs" && sessions.length > 0 ? (
-              <section className="panel overview-strip">
-                <div className="panel-header">
-                  <div>
-                    <p className="eyebrow">Overview</p>
-                    <h2>Factory State</h2>
-                  </div>
-                </div>
-                <div className="factory-state-grid">
-                  <div className="metric-card">
-                    <span>Active</span>
-                    <strong>{activeSessionCount}</strong>
-                  </div>
-                  <div className="metric-card">
-                    <span>Blocked</span>
-                    <strong>{blockedSessionCount}</strong>
-                  </div>
-                  <div className="metric-card">
-                    <span>Completed</span>
-                    <strong>{completedSessionCount}</strong>
-                  </div>
-                  <div className="metric-card">
-                    <span>Selected</span>
-                    <strong>{selectedSession?.task_key ?? "No selection"}</strong>
-                  </div>
-                </div>
-              </section>
-            ) : null}
             {surfaceView === "runs" ? (
               <SessionDetail
                 bundle={bundle}

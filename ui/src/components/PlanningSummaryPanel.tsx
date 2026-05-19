@@ -36,16 +36,9 @@ function summarizeContent(content: string | null | undefined): string {
 export function PlanningSummaryPanel({
   planningSummary,
   workflowProfile,
-}: PlanningSummaryPanelProps): JSX.Element {
+}: PlanningSummaryPanelProps): JSX.Element | null {
   if (workflowProfile !== "story_full") {
-    return (
-      <section className="subpanel">
-        <div className="subpanel-head">
-          <strong>Planning Chain</strong>
-        </div>
-        <p>This workflow profile does not use the extended story-planning chain.</p>
-      </section>
-    );
+    return null;
   }
 
   if (planningSummary === null) {

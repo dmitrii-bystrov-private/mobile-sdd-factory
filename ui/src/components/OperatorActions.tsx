@@ -243,11 +243,17 @@ export function OperatorActions({
     }
     return (
       <div className="operator-action-group">
-        <div className="operator-followup-copy">
-          <p className="eyebrow">{eyebrow}</p>
-          <h4>{title}</h4>
-          <p className="path-label">{summary}</p>
-        </div>
+        {actions.length > 2 ? (
+          <div className="operator-followup-copy">
+            <p className="eyebrow">{eyebrow}</p>
+            <h4>{title}</h4>
+            <p className="path-label">{summary}</p>
+          </div>
+        ) : (
+          <div className="operator-action-inline-heading">
+            <strong>{title}</strong>
+          </div>
+        )}
         <div className="actions-grid operator-actions-grid">
           {actions.map((action) => (
             <div key={action.label} className="operator-action-card">
@@ -296,9 +302,6 @@ export function OperatorActions({
           <div className="operator-followup-copy">
             <p className="eyebrow">Interactive Recovery</p>
             <h4>Runtime Input</h4>
-            <p className="path-label">
-              Send a direct reply into the live role session after an interactive blocker escalates the task to operator.
-            </p>
           </div>
 
           <form className="followup-form" onSubmit={(event) => void handleRuntimeInput(event)}>
@@ -330,9 +333,6 @@ export function OperatorActions({
           <div className="operator-followup-copy">
             <p className="eyebrow">Optional Lane</p>
             <h4>Boy Scout</h4>
-            <p className="path-label">
-              Resolve Boy Scout findings after the scout finishes. Use implement now when all findings should go back to the coder, create tech debt when only the old-code candidates should become separate stories, or skip the lane entirely when policy allows it.
-            </p>
           </div>
 
           {canResolveBoyScoutFindings ? (
@@ -399,9 +399,6 @@ export function OperatorActions({
           <div className="operator-followup-copy">
             <p className="eyebrow">Follow-up Intake</p>
             <h4>Reopen Completed Session</h4>
-            <p className="path-label">
-              Re-enter a completed session from merge request feedback or QA feedback.
-            </p>
           </div>
 
           <form className="followup-form" onSubmit={(event) => void handleMrIngest(event)}>
