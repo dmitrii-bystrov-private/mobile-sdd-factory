@@ -490,6 +490,17 @@ input {
   font-size: 0.78rem;
 }
 
+.inline-pill-button {
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.inline-pill-button.selected {
+  background: rgba(209, 76, 39, 0.18);
+  color: var(--ink-strong);
+  border-color: rgba(209, 76, 39, 0.35);
+}
+
 .session-start-form {
   display: grid;
   gap: 12px;

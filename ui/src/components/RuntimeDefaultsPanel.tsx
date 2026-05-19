@@ -89,6 +89,7 @@ export function RuntimeDefaultsPanel({
     bug_full: defaultPolicyDefaults(),
     story_full: defaultPolicyDefaults(),
   });
+  const [policyProfileView, setPolicyProfileView] = useState<WorkflowProfile>("oneshot");
   const [showRoleDefaults, setShowRoleDefaults] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -338,247 +339,266 @@ export function RuntimeDefaultsPanel({
       </div>
 
       <div className="runtime-defaults-list">
-        <div className="runtime-default-card">
-          <div className="inline-summary-header">
-            <strong>{workflowProfileDisplayName("oneshot")}</strong>
-            <span>direct execution</span>
-          </div>
-          <p className="form-help">
-            Baseline policy for direct implementation flows without story planning or bug-specific branches.
-          </p>
-          <div className="followup-form-grid">
-            <label className="form-field">
-              <span>Self Review</span>
-              <select
-                className="select-input"
-                disabled={busy}
-                onChange={(event) =>
-                  updatePolicyDefault("oneshot", "self_review_policy", event.target.value as SessionPolicyValue)
-                }
-                title={POLICY_DEFAULT_DESCRIPTIONS.self_review_policy}
-                value={policyDefaults.oneshot.self_review_policy}
-              >
-                {POLICY_OPTIONS.map((value) => (
-                  <option key={`oneshot-self-review-${value}`} value={value}>
-                    {POLICY_OPTION_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>Boy Scout</span>
-              <select
-                className="select-input"
-                disabled={busy}
-                onChange={(event) =>
-                  updatePolicyDefault("oneshot", "boy_scout_policy", event.target.value as SessionPolicyValue)
-                }
-                title={POLICY_DEFAULT_DESCRIPTIONS.boy_scout_policy}
-                value={policyDefaults.oneshot.boy_scout_policy}
-              >
-                {POLICY_OPTIONS.map((value) => (
-                  <option key={`oneshot-boy-scout-${value}`} value={value}>
-                    {POLICY_OPTION_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <label className="form-field">
-            <span>Doc Harvest</span>
-            <select
-              className="select-input"
-              disabled={busy}
-              onChange={(event) =>
-                updatePolicyDefault("oneshot", "doc_harvest_policy", event.target.value as SessionPolicyValue)
-              }
-              title={POLICY_DEFAULT_DESCRIPTIONS.doc_harvest_policy}
-              value={policyDefaults.oneshot.doc_harvest_policy}
+        <div className="inline-pill-row">
+          {(["oneshot", "bug_full", "story_full"] as const).map((profile) => (
+            <button
+              key={profile}
+              className={`inline-pill inline-pill-button ${policyProfileView === profile ? "selected" : ""}`}
+              onClick={() => setPolicyProfileView(profile)}
+              type="button"
             >
-              {POLICY_OPTIONS.map((value) => (
-                <option key={`oneshot-doc-harvest-${value}`} value={value}>
-                  {POLICY_OPTION_LABELS[value]}
-                </option>
-              ))}
-            </select>
-          </label>
+              {workflowProfileDisplayName(profile)}
+            </button>
+          ))}
         </div>
 
-        <div className="runtime-default-card">
-          <div className="inline-summary-header">
-            <strong>{workflowProfileDisplayName("bug_full")}</strong>
-            <span>bug recovery</span>
-          </div>
-          <p className="form-help">
-            Defaults for bug flows, including whether testing becomes an automatic, optional, or mandatory lane.
-          </p>
-          <div className="followup-form-grid">
-            <label className="form-field">
-              <span>Test Policy</span>
-              <select
-                className="select-input"
-                disabled={busy}
-                onChange={(event) =>
-                  updatePolicyDefault("bug_full", "test_policy", event.target.value as SessionPolicyValue)
-                }
-                title={POLICY_DEFAULT_DESCRIPTIONS.test_policy}
-                value={policyDefaults.bug_full.test_policy}
-              >
-                {POLICY_OPTIONS.map((value) => (
-                  <option key={`bug-test-${value}`} value={value}>
-                    {POLICY_OPTION_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>Self Review</span>
-              <select
-                className="select-input"
-                disabled={busy}
-                onChange={(event) =>
-                  updatePolicyDefault("bug_full", "self_review_policy", event.target.value as SessionPolicyValue)
-                }
-                title={POLICY_DEFAULT_DESCRIPTIONS.self_review_policy}
-                value={policyDefaults.bug_full.self_review_policy}
-              >
-                {POLICY_OPTIONS.map((value) => (
-                  <option key={`bug-self-review-${value}`} value={value}>
-                    {POLICY_OPTION_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="followup-form-grid">
-            <label className="form-field">
-              <span>Boy Scout</span>
-              <select
-                className="select-input"
-                disabled={busy}
-                onChange={(event) =>
-                  updatePolicyDefault("bug_full", "boy_scout_policy", event.target.value as SessionPolicyValue)
-                }
-                title={POLICY_DEFAULT_DESCRIPTIONS.boy_scout_policy}
-                value={policyDefaults.bug_full.boy_scout_policy}
-              >
-                {POLICY_OPTIONS.map((value) => (
-                  <option key={`bug-boy-scout-${value}`} value={value}>
-                    {POLICY_OPTION_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
+        {policyProfileView === "oneshot" ? (
+          <div className="runtime-default-card">
+            <div className="inline-summary-header">
+              <strong>{workflowProfileDisplayName("oneshot")}</strong>
+              <span>direct execution</span>
+            </div>
+            <p className="form-help">
+              Baseline policy for direct implementation flows without story planning or bug-specific branches.
+            </p>
+            <div className="followup-form-grid">
+              <label className="form-field">
+                <span>Self Review</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault("oneshot", "self_review_policy", event.target.value as SessionPolicyValue)
+                  }
+                  title={POLICY_DEFAULT_DESCRIPTIONS.self_review_policy}
+                  value={policyDefaults.oneshot.self_review_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={`oneshot-self-review-${value}`} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Boy Scout</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault("oneshot", "boy_scout_policy", event.target.value as SessionPolicyValue)
+                  }
+                  title={POLICY_DEFAULT_DESCRIPTIONS.boy_scout_policy}
+                  value={policyDefaults.oneshot.boy_scout_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={`oneshot-boy-scout-${value}`} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <label className="form-field">
               <span>Doc Harvest</span>
               <select
                 className="select-input"
                 disabled={busy}
                 onChange={(event) =>
-                  updatePolicyDefault("bug_full", "doc_harvest_policy", event.target.value as SessionPolicyValue)
+                  updatePolicyDefault("oneshot", "doc_harvest_policy", event.target.value as SessionPolicyValue)
                 }
                 title={POLICY_DEFAULT_DESCRIPTIONS.doc_harvest_policy}
-                value={policyDefaults.bug_full.doc_harvest_policy}
+                value={policyDefaults.oneshot.doc_harvest_policy}
               >
                 {POLICY_OPTIONS.map((value) => (
-                  <option key={`bug-doc-harvest-${value}`} value={value}>
+                  <option key={`oneshot-doc-harvest-${value}`} value={value}>
                     {POLICY_OPTION_LABELS[value]}
                   </option>
                 ))}
               </select>
             </label>
           </div>
-        </div>
+        ) : null}
 
-        <div className="runtime-default-card">
-          <div className="inline-summary-header">
-            <strong>{workflowProfileDisplayName("story_full")}</strong>
-            <span>planning + execution</span>
+        {policyProfileView === "bug_full" ? (
+          <div className="runtime-default-card">
+            <div className="inline-summary-header">
+              <strong>{workflowProfileDisplayName("bug_full")}</strong>
+              <span>bug recovery</span>
+            </div>
+            <p className="form-help">
+              Defaults for bug flows, including whether testing becomes an automatic, optional, or mandatory lane.
+            </p>
+            <div className="followup-form-grid">
+              <label className="form-field">
+                <span>Test Policy</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault("bug_full", "test_policy", event.target.value as SessionPolicyValue)
+                  }
+                  title={POLICY_DEFAULT_DESCRIPTIONS.test_policy}
+                  value={policyDefaults.bug_full.test_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={`bug-test-${value}`} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Self Review</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault("bug_full", "self_review_policy", event.target.value as SessionPolicyValue)
+                  }
+                  title={POLICY_DEFAULT_DESCRIPTIONS.self_review_policy}
+                  value={policyDefaults.bug_full.self_review_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={`bug-self-review-${value}`} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="followup-form-grid">
+              <label className="form-field">
+                <span>Boy Scout</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault("bug_full", "boy_scout_policy", event.target.value as SessionPolicyValue)
+                  }
+                  title={POLICY_DEFAULT_DESCRIPTIONS.boy_scout_policy}
+                  value={policyDefaults.bug_full.boy_scout_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={`bug-boy-scout-${value}`} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Doc Harvest</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault("bug_full", "doc_harvest_policy", event.target.value as SessionPolicyValue)
+                  }
+                  title={POLICY_DEFAULT_DESCRIPTIONS.doc_harvest_policy}
+                  value={policyDefaults.bug_full.doc_harvest_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={`bug-doc-harvest-${value}`} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
-          <p className="form-help">
-            Defaults for the full story planning pipeline, including clarification behavior before implementation begins.
-          </p>
-          <div className="followup-form-grid">
-            <label className="form-field">
-              <span>Self Review</span>
-              <select
-                className="select-input"
-                disabled={busy}
-                onChange={(event) =>
-                  updatePolicyDefault("story_full", "self_review_policy", event.target.value as SessionPolicyValue)
-                }
-                title={POLICY_DEFAULT_DESCRIPTIONS.self_review_policy}
-                value={policyDefaults.story_full.self_review_policy}
-              >
-                {POLICY_OPTIONS.map((value) => (
-                  <option key={`story-self-review-${value}`} value={value}>
-                    {POLICY_OPTION_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>Boy Scout</span>
-              <select
-                className="select-input"
-                disabled={busy}
-                onChange={(event) =>
-                  updatePolicyDefault("story_full", "boy_scout_policy", event.target.value as SessionPolicyValue)
-                }
-                title={POLICY_DEFAULT_DESCRIPTIONS.boy_scout_policy}
-                value={policyDefaults.story_full.boy_scout_policy}
-              >
-                {POLICY_OPTIONS.map((value) => (
-                  <option key={`story-boy-scout-${value}`} value={value}>
-                    {POLICY_OPTION_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
+        ) : null}
+
+        {policyProfileView === "story_full" ? (
+          <div className="runtime-default-card">
+            <div className="inline-summary-header">
+              <strong>{workflowProfileDisplayName("story_full")}</strong>
+              <span>planning + execution</span>
+            </div>
+            <p className="form-help">
+              Defaults for the full story planning pipeline, including clarification behavior before implementation begins.
+            </p>
+            <div className="followup-form-grid">
+              <label className="form-field">
+                <span>Self Review</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault("story_full", "self_review_policy", event.target.value as SessionPolicyValue)
+                  }
+                  title={POLICY_DEFAULT_DESCRIPTIONS.self_review_policy}
+                  value={policyDefaults.story_full.self_review_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={`story-self-review-${value}`} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Boy Scout</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault("story_full", "boy_scout_policy", event.target.value as SessionPolicyValue)
+                  }
+                  title={POLICY_DEFAULT_DESCRIPTIONS.boy_scout_policy}
+                  value={policyDefaults.story_full.boy_scout_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={`story-boy-scout-${value}`} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="followup-form-grid">
+              <label className="form-field">
+                <span>Doc Harvest</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault("story_full", "doc_harvest_policy", event.target.value as SessionPolicyValue)
+                  }
+                  title={POLICY_DEFAULT_DESCRIPTIONS.doc_harvest_policy}
+                  value={policyDefaults.story_full.doc_harvest_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={`story-doc-harvest-${value}`} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Clarification Mode</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault(
+                      "story_full",
+                      "requirements_clarification_mode",
+                      event.target.value as RequirementsClarificationMode,
+                    )
+                  }
+                  title={CLARIFICATION_MODE_DESCRIPTIONS[policyDefaults.story_full.requirements_clarification_mode]}
+                  value={policyDefaults.story_full.requirements_clarification_mode}
+                >
+                  {REQUIREMENTS_CLARIFICATION_OPTIONS.map((value) => (
+                    <option key={`story-clarification-${value}`} value={value}>
+                      {REQUIREMENTS_CLARIFICATION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
-          <div className="followup-form-grid">
-            <label className="form-field">
-              <span>Doc Harvest</span>
-              <select
-                className="select-input"
-                disabled={busy}
-                onChange={(event) =>
-                  updatePolicyDefault("story_full", "doc_harvest_policy", event.target.value as SessionPolicyValue)
-                }
-                title={POLICY_DEFAULT_DESCRIPTIONS.doc_harvest_policy}
-                value={policyDefaults.story_full.doc_harvest_policy}
-              >
-                {POLICY_OPTIONS.map((value) => (
-                  <option key={`story-doc-harvest-${value}`} value={value}>
-                    {POLICY_OPTION_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="form-field">
-              <span>Clarification Mode</span>
-              <select
-                className="select-input"
-                disabled={busy}
-                onChange={(event) =>
-                  updatePolicyDefault(
-                    "story_full",
-                    "requirements_clarification_mode",
-                    event.target.value as RequirementsClarificationMode,
-                  )
-                }
-                title={CLARIFICATION_MODE_DESCRIPTIONS[policyDefaults.story_full.requirements_clarification_mode]}
-                value={policyDefaults.story_full.requirements_clarification_mode}
-              >
-                {REQUIREMENTS_CLARIFICATION_OPTIONS.map((value) => (
-                  <option key={`story-clarification-${value}`} value={value}>
-                    {REQUIREMENTS_CLARIFICATION_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
+        ) : null}
       </div>
 
       <div className="advanced-disclosure">
