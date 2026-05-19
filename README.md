@@ -366,6 +366,7 @@ index.html        # local static presentation deck for the SDD workflow
 ## More Docs
 
 - [`scripts/README.md`](scripts/README.md) — direct CLI reference for every helper script
+- [`docs/setup.md`](docs/setup.md) — supported setup for the backend/UI/tmux runtime model
 - [`docs/operator-guide.md`](docs/operator-guide.md) — practical operator workflow for the supported backend/UI runtime model
 - [`docs/runtime-model.md`](docs/runtime-model.md) — supported session, role, quality-loop, recovery, and cleanup model
 - [`docs/deprecated-surface.md`](docs/deprecated-surface.md) — deprecated slash-command compatibility inventory and retirement criteria
