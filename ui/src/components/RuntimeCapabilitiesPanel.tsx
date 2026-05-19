@@ -94,13 +94,14 @@ export function RuntimeCapabilitiesPanel({
         <button
           className="advanced-disclosure-toggle"
           onClick={() => setShowModelCatalog((value) => !value)}
+          aria-expanded={showModelCatalog}
           type="button"
         >
           <div>
             <strong>Advanced Runner Catalog</strong>
             <p>Expand to inspect raw model catalogs and runner discovery sources.</p>
           </div>
-          <span>{showModelCatalog ? "hide" : "show"}</span>
+          <span className={`chevron${showModelCatalog ? " expanded" : ""}`} aria-hidden="true" />
         </button>
         {showModelCatalog ? (
           <div className="advanced-disclosure-body">
@@ -135,13 +136,14 @@ export function RuntimeCapabilitiesPanel({
         <button
           className="advanced-disclosure-toggle"
           onClick={() => setShowRoleBaselines((value) => !value)}
+          aria-expanded={showRoleBaselines}
           type="button"
         >
           <div>
             <strong>Advanced Role Baselines</strong>
             <p>Expand to inspect per-role model, effort, and MCP baseline settings.</p>
           </div>
-          <span>{showRoleBaselines ? "hide" : "show"}</span>
+          <span className={`chevron${showRoleBaselines ? " expanded" : ""}`} aria-hidden="true" />
         </button>
         {showRoleBaselines ? (
           <div className="advanced-disclosure-body">

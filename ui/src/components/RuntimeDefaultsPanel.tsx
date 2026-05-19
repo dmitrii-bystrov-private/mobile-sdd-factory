@@ -596,6 +596,7 @@ export function RuntimeDefaultsPanel({
         <button
           className="advanced-disclosure-toggle"
           onClick={() => setShowRoleDefaults((current) => !current)}
+          aria-expanded={showRoleDefaults}
           type="button"
         >
           <div>
@@ -604,7 +605,10 @@ export function RuntimeDefaultsPanel({
               Change runner/model/effort for specific lanes when the project-wide baseline is not enough.
             </p>
           </div>
-          <span>{runtimeDefaults?.knownRoles.length ?? 0} roles</span>
+          <div className="advanced-disclosure-meta">
+            <small>{runtimeDefaults?.knownRoles.length ?? 0} roles</small>
+            <span className={`chevron${showRoleDefaults ? " expanded" : ""}`} aria-hidden="true" />
+          </div>
         </button>
         {showRoleDefaults ? (
           <div className="advanced-disclosure-body runtime-defaults-list">

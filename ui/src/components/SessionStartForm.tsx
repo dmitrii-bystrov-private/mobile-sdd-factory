@@ -392,13 +392,14 @@ export function SessionStartForm({
           <button
             className="advanced-disclosure-toggle"
             onClick={() => setShowPolicyTuning((current) => !current)}
+            aria-expanded={showPolicyTuning}
             type="button"
           >
             <div>
               <strong>Tune This Run</strong>
               <p>Adjust workflow behavior only when this run should diverge from the defaults.</p>
             </div>
-            <span>{showPolicyTuning ? "hide" : "show"}</span>
+            <span className={`chevron${showPolicyTuning ? " expanded" : ""}`} aria-hidden="true" />
           </button>
           {showPolicyTuning ? (
             <div className="advanced-disclosure-body">
@@ -510,13 +511,17 @@ export function SessionStartForm({
             <button
               className="advanced-disclosure-toggle"
               onClick={() => setShowAdvancedRoleConfig((current) => !current)}
+              aria-expanded={showAdvancedRoleConfig}
               type="button"
             >
               <div>
                 <strong>Advanced Runtime Overrides</strong>
                 <p>Change lane runner, model, or effort for this session only.</p>
               </div>
-              <span>{effectiveRoleNames.length} lanes · {enabledOptionalLaneCount} optional lanes enabled</span>
+              <div className="advanced-disclosure-meta">
+                <small>{effectiveRoleNames.length} lanes · {enabledOptionalLaneCount} optional enabled</small>
+                <span className={`chevron${showAdvancedRoleConfig ? " expanded" : ""}`} aria-hidden="true" />
+              </div>
             </button>
             {showAdvancedRoleConfig ? (
               <div className="advanced-disclosure-body artifact-stack">

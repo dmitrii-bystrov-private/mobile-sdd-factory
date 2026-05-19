@@ -363,29 +363,65 @@ input {
 
 .session-card p,
 .session-card small,
-.hero-meta,
 .subpanel p,
 .path-label {
   margin: 4px 0 0;
   color: var(--ink-soft);
 }
 
+.hero-task-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
 .hero-title {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: 1.05rem;
   line-height: 1.45;
-  color: var(--ink-soft);
+  color: var(--ink-strong);
   max-width: 52rem;
 }
 
 .hero-link-row {
-  margin: 8px 0 0;
+  margin: 0;
 }
 
 .hero-link {
   color: var(--brand);
   text-decoration: none;
   border-bottom: 1px solid rgba(255, 131, 92, 0.35);
+}
+
+.hero-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.hero-status-item {
+  display: grid;
+  gap: 4px;
+  min-width: 160px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(10, 15, 24, 0.28);
+}
+
+.hero-status-item span {
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}
+
+.hero-status-item strong {
+  color: var(--ink-strong);
+  font-size: 0.95rem;
 }
 
 .hero-link:hover {
@@ -590,6 +626,10 @@ input {
   text-align: left;
 }
 
+.advanced-disclosure-toggle strong {
+  display: block;
+}
+
 .advanced-disclosure-toggle p {
   margin: 6px 0 0;
   color: var(--ink-soft);
@@ -597,11 +637,31 @@ input {
   line-height: 1.4;
 }
 
-.advanced-disclosure-toggle span {
+.advanced-disclosure-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.advanced-disclosure-meta small {
   color: var(--ink-soft);
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 0.8rem;
+}
+
+.chevron {
+  width: 10px;
+  height: 10px;
+  display: inline-block;
+  border-right: 2px solid var(--ink-soft);
+  border-bottom: 2px solid var(--ink-soft);
+  transform: rotate(45deg);
+  transition: transform 160ms ease, border-color 160ms ease;
+  margin-right: 4px;
+}
+
+.chevron.expanded {
+  transform: rotate(225deg);
 }
 
 .advanced-disclosure-body {
@@ -708,10 +768,20 @@ input {
 
 .select-input {
   flex: 1;
+  width: 100%;
+  appearance: none;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: rgba(10, 15, 24, 0.88);
-  padding: 12px 14px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--ink-soft) 50%),
+    linear-gradient(135deg, var(--ink-soft) 50%, transparent 50%);
+  background-position:
+    calc(100% - 22px) calc(50% - 2px),
+    calc(100% - 16px) calc(50% - 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding: 12px 42px 12px 14px;
   color: var(--ink-strong);
 }
 

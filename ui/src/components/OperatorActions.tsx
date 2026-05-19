@@ -30,9 +30,6 @@ export function OperatorActions({
   const [mrId, setMrId] = useState("");
   const [qaComment, setQaComment] = useState("");
   const [boyScoutSkipReason, setBoyScoutSkipReason] = useState("");
-  const [knowledgeTitle, setKnowledgeTitle] = useState("");
-  const [knowledgeScope, setKnowledgeScope] = useState("");
-  const [knowledgeGuidance, setKnowledgeGuidance] = useState("");
   const [runtimeInput, setRuntimeInput] = useState("");
 
   async function run(action: () => Promise<unknown>): Promise<void> {
@@ -92,27 +89,6 @@ export function OperatorActions({
   ): Promise<void> {
     await run(async () => {
       await apiClient.resolveBoyScoutFindings(session.id, resolution);
-    });
-  }
-
-  async function handleKnowledge(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const normalizedTitle = knowledgeTitle.trim();
-    const normalizedGuidance = knowledgeGuidance.trim();
-    if (normalizedTitle.length === 0 || normalizedGuidance.length === 0) {
-      setError("Knowledge title and guidance are required");
-      return;
-    }
-    await run(async () => {
-      await apiClient.createKnowledge(
-        session.id,
-        normalizedTitle,
-        normalizedGuidance,
-        knowledgeScope.trim(),
-      );
-      setKnowledgeTitle("");
-      setKnowledgeScope("");
-      setKnowledgeGuidance("");
     });
   }
 
@@ -486,61 +462,6 @@ export function OperatorActions({
           </form>
         </div>
       ) : null}
-
-      <details className="advanced-disclosure">
-        <summary>
-          <div>
-            <strong>Capture Project Knowledge</strong>
-            <p>Optional note capture for reusable conventions, constraints, or implementation findings.</p>
-          </div>
-          <span>optional</span>
-        </summary>
-        <div className="advanced-disclosure-body">
-          <form className="followup-form" onSubmit={(event) => void handleKnowledge(event)}>
-            <div className="followup-form-grid">
-              <label className="form-field">
-                <span>Entry Title</span>
-                <input
-                  className="text-input"
-                  disabled={busy}
-                  onChange={(event) => setKnowledgeTitle(event.target.value)}
-                  placeholder="Reuse existing formatter helper"
-                  value={knowledgeTitle}
-                />
-              </label>
-              <label className="form-field">
-                <span>Directory / Scope</span>
-                <input
-                  className="text-input"
-                  disabled={busy}
-                  onChange={(event) => setKnowledgeScope(event.target.value)}
-                  placeholder="shared-formatting"
-                  value={knowledgeScope}
-                />
-              </label>
-            </div>
-            <label className="form-field">
-              <span>Guidance</span>
-              <textarea
-                className="text-area-input"
-                disabled={busy}
-                onChange={(event) => setKnowledgeGuidance(event.target.value)}
-                placeholder="Do not introduce a new helper here; use the existing shared formatter already used in this module."
-                rows={4}
-                value={knowledgeGuidance}
-              />
-            </label>
-            <button
-              className="action-button"
-              disabled={busy}
-              title="Create a reusable knowledge entry from this task for future sessions."
-              type="submit"
-            >
-              Create Knowledge Entry
-            </button>
-          </form>
-        </div>
-      </details>
 
       {error ? <p className="error-banner">{error}</p> : null}
     </section>

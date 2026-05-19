@@ -649,27 +649,25 @@ export function SessionsPage(): JSX.Element {
               </button>
             </div>
           </section>
-          <section className="panel panel-sidebar">
-            {surfaceView === "runs" ? (
-              <>
-                <SessionList
-                  onSelect={(sessionId) => setSelectedSessionId(sessionId)}
-                  selectedSessionId={selectedSessionId}
-                  sessions={sessions}
-                />
-                <SessionStartForm
-                  onCreated={async (sessionId) => {
-                    await loadSessions();
-                    setSelectedSessionId(sessionId);
-                    setSurfaceView("runs");
-                    await loadBundle(sessionId);
-                  }}
-                  runtimeCapabilities={runtimeCapabilitiesSummary}
-                  runtimeDefaults={runtimeDefaultsSummary}
-                />
-              </>
-            ) : null}
-          </section>
+          {surfaceView === "runs" ? (
+            <>
+              <SessionList
+                onSelect={(sessionId) => setSelectedSessionId(sessionId)}
+                selectedSessionId={selectedSessionId}
+                sessions={sessions}
+              />
+              <SessionStartForm
+                onCreated={async (sessionId) => {
+                  await loadSessions();
+                  setSelectedSessionId(sessionId);
+                  setSurfaceView("runs");
+                  await loadBundle(sessionId);
+                }}
+                runtimeCapabilities={runtimeCapabilitiesSummary}
+                runtimeDefaults={runtimeDefaultsSummary}
+              />
+            </>
+          ) : null}
           {surfaceView === "settings" ? (
             <section className="panel panel-sidebar">
               <div className="panel-header">

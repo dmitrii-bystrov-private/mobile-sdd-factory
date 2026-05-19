@@ -266,13 +266,14 @@ export function RuntimeSessionPanel({
         <button
           className="advanced-disclosure-toggle"
           onClick={() => setShowCleanup((value) => !value)}
+          aria-expanded={showCleanup}
           type="button"
         >
           <div>
             <strong>Cleanup And Residue Removal</strong>
             <p>Use only when this task needs runtime cleanup or teardown beyond the normal flow.</p>
           </div>
-          <span>{showCleanup ? "hide" : "show"}</span>
+          <span className={`chevron${showCleanup ? " expanded" : ""}`} aria-hidden="true" />
         </button>
         {showCleanup ? (
           <div className="advanced-disclosure-body">

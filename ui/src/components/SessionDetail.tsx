@@ -224,23 +224,30 @@ export function SessionDetail({
         <div className="hero-copy">
           <p className="eyebrow">Current Session</p>
           <h1>{session.task_key}</h1>
-          {session.task_title ? <p className="hero-title">{session.task_title}</p> : null}
-          {session.jira_url ? (
-            <p className="hero-link-row">
-              <a className="hero-link" href={session.jira_url} rel="noreferrer" target="_blank">
-                Open in Jira
-              </a>
-            </p>
-          ) : null}
-          <p className="hero-meta">
-            Profile: <strong>{workflowProfileDisplayName(session.workflow_profile)}</strong>
-          </p>
-          <p className="hero-meta">
-            Stage: <strong>{stageDisplayName(session.current_stage)}</strong>
-          </p>
-          <p className="hero-meta">
-            Owner: <strong>{currentOwner}</strong>
-          </p>
+          <div className="hero-task-card">
+            {session.task_title ? <p className="hero-title">{session.task_title}</p> : null}
+            {session.jira_url ? (
+              <p className="hero-link-row">
+                <a className="hero-link" href={session.jira_url} rel="noreferrer" target="_blank">
+                  Open in Jira
+                </a>
+              </p>
+            ) : null}
+          </div>
+          <div className="hero-status-strip">
+            <div className="hero-status-item">
+              <span>Profile</span>
+              <strong>{workflowProfileDisplayName(session.workflow_profile)}</strong>
+            </div>
+            <div className="hero-status-item">
+              <span>Stage</span>
+              <strong>{stageDisplayName(session.current_stage)}</strong>
+            </div>
+            <div className="hero-status-item">
+              <span>Owner</span>
+              <strong>{currentOwner}</strong>
+            </div>
+          </div>
         </div>
         <div className="hero-stats">
             <div className="metric-card">
