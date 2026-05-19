@@ -79,10 +79,6 @@ export function RuntimeSessionPanel({
             const visibleRoles = runtimeStateSummary.roles.filter((role) => role.roleName !== "task-coordinator");
             return (
               <>
-          <p className="path-label">
-            Use runtime controls only when the live lane infrastructure itself needs intervention. Normal task handling should stay in the operator actions above.
-          </p>
-
           <div className="table-list">
             <div className="table-row">
               <span>Live lanes</span>
@@ -180,15 +176,11 @@ export function RuntimeSessionPanel({
                   <details className="advanced-disclosure">
                     <summary>
                       <div>
-                        <strong>Worker Console And Debug</strong>
-                        <p>Use this only when you need to inspect or attach to the live worker runtime.</p>
+                        <strong>Worker Console</strong>
                       </div>
-                      <span>debug</span>
+                      <span className="chevron" aria-hidden="true" />
                     </summary>
                     <div className="advanced-disclosure-body">
-                      <p className="artifact-path">
-                        Open or inspect the runtime only if the normal operator flow is not enough.
-                      </p>
                       <div className="actions-grid">
                         {role.tmuxAttachCommand ? (
                           <button
@@ -201,7 +193,7 @@ export function RuntimeSessionPanel({
                             }
                             type="button"
                           >
-                            Copy Attach Command
+                            Copy Console Command
                           </button>
                         ) : null}
                         {role.tmuxCaptureCommand ? (
@@ -215,7 +207,7 @@ export function RuntimeSessionPanel({
                             }
                             type="button"
                           >
-                            Copy Capture Command
+                            Copy Output Command
                           </button>
                         ) : null}
                       </div>
@@ -230,15 +222,11 @@ export function RuntimeSessionPanel({
             <details className="advanced-disclosure">
               <summary>
                 <div>
-                  <strong>Session Debug Tools</strong>
-                  <p>Use these commands only when you need session-wide runtime debugging.</p>
+                  <strong>Session Console</strong>
                 </div>
-                <span>debug</span>
+                <span className="chevron" aria-hidden="true" />
               </summary>
               <div className="advanced-disclosure-body">
-                <p className="artifact-path">
-                  Session-wide debug commands stay hidden from the normal operator path.
-                </p>
                 {runtimeStateSummary.tmuxAttachCommand ? (
                   <button
                     className="action-button"
@@ -250,7 +238,7 @@ export function RuntimeSessionPanel({
                     }
                     type="button"
                   >
-                    Copy Session Attach Command
+                    Copy Session Console Command
                   </button>
                 ) : null}
               </div>
@@ -271,17 +259,11 @@ export function RuntimeSessionPanel({
         >
           <div>
             <strong>Cleanup And Residue Removal</strong>
-            <p>Use only when this task needs runtime cleanup or teardown beyond the normal flow.</p>
           </div>
           <span className={`chevron${showCleanup ? " expanded" : ""}`} aria-hidden="true" />
         </button>
         {showCleanup ? (
           <div className="advanced-disclosure-body">
-            <p className="path-label">
-              Soft cleanup stops live runtime and removes task-local runtime residue while keeping the
-              task worktree. Full cleanup removes the whole task snapshot and worktree only when the task
-              is already closed.
-            </p>
             <div className="actions-grid">
               <button
                 className="action-button"

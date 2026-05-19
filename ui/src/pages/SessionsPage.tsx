@@ -370,7 +370,6 @@ export function SessionsPage(): JSX.Element {
     useState<RuntimeDefaultsSummary | null>(null);
   const [streamState, setStreamState] = useState<"idle" | "live" | "reconnecting">("idle");
   const [lastStreamEventType, setLastStreamEventType] = useState<string | null>(null);
-  const [lastStreamEventId, setLastStreamEventId] = useState<number | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedSession =
@@ -572,12 +571,9 @@ export function SessionsPage(): JSX.Element {
     const close = openSessionEventStream(
       selectedSessionId,
       latestKnownEventId,
-      (eventType, _payload, incomingEventId) => {
+      (eventType, _payload, _incomingEventId) => {
         setStreamState("live");
         setLastStreamEventType(eventType);
-        if (incomingEventId !== null) {
-          setLastStreamEventId(incomingEventId);
-        }
         scheduleLiveRefresh();
       },
       () => {
@@ -605,7 +601,7 @@ export function SessionsPage(): JSX.Element {
           <p className="eyebrow">SDD Factory</p>
           <h1>Operator Console</h1>
           <p className="topbar-summary">
-            Run the factory, inspect sessions, and manage project defaults from one operator workspace.
+            Run the factory, inspect sessions, and manage project defaults.
           </p>
         </div>
         <div className="topbar-actions">
@@ -614,7 +610,7 @@ export function SessionsPage(): JSX.Element {
             <strong>{streamStateLabel(streamState)}</strong>
             <small>
               {lastStreamEventType
-                ? `${streamEventLabel(lastStreamEventType)}${lastStreamEventId !== null ? ` #${lastStreamEventId}` : ""}`
+                ? streamEventLabel(lastStreamEventType)
                 : "Waiting for session activity"}
             </small>
           </div>

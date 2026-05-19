@@ -68,7 +68,7 @@ input {
 
 .topbar-summary {
   margin: 0;
-  max-width: 42rem;
+  max-width: 34rem;
   color: var(--ink-soft);
   line-height: 1.45;
 }
@@ -198,14 +198,14 @@ input {
   grid-template-columns: auto auto;
   column-gap: 10px;
   row-gap: 2px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px;
   padding: 10px 14px;
   min-width: 220px;
   max-width: 320px;
   background:
-    linear-gradient(135deg, rgba(255, 93, 45, 0.08), rgba(73, 214, 164, 0.04)),
-    var(--surface-muted);
+    linear-gradient(135deg, rgba(255, 93, 45, 0.06), rgba(73, 214, 164, 0.04)),
+    rgba(10, 15, 24, 0.78);
   color: var(--ink-strong);
 }
 
@@ -220,7 +220,7 @@ input {
 }
 
 .live-chip small {
-  color: var(--ink-soft);
+  color: rgba(232, 237, 243, 0.78);
   line-height: 1.25;
 }
 
@@ -993,6 +993,14 @@ input {
 }
 
 .advanced-inline-summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-disclosure summary {
+  list-style: none;
+}
+
+.advanced-disclosure summary::-webkit-details-marker {
   display: none;
 }
 
