@@ -116,12 +116,22 @@ export function RuntimeDefaultsPanel({
     const legacyKey = ROLE_DEFAULT_SOURCE_MAP[roleName] ?? null;
     const legacyDefault = legacyKey === null ? undefined : legacyIndex.get(legacyKey);
     const models = runnerCapability?.models ?? [];
-    const model = legacyDefault?.model ?? models[0]?.id ?? "";
+    const modelIds = models.map((item) => item.id);
+    const compatibleLegacyModel =
+      legacyDefault?.model && modelIds.includes(legacyDefault.model) ? legacyDefault.model : undefined;
+    const model = compatibleLegacyModel ?? models[0]?.id ?? "";
     const modelCapability = models.find((item) => item.id === model);
+    const supportedEfforts = modelCapability?.supportedEfforts ?? [];
+    const compatibleLegacyEffort =
+      compatibleLegacyModel === model &&
+      legacyDefault?.effort &&
+      (supportedEfforts.length === 0 || supportedEfforts.includes(legacyDefault.effort))
+        ? legacyDefault.effort
+        : undefined;
     const effort =
-      legacyDefault?.effort ??
+      compatibleLegacyEffort ??
       modelCapability?.defaultEffort ??
-      modelCapability?.supportedEfforts[0] ??
+      supportedEfforts[0] ??
       "";
     return {
       runner: resolvedDefaultRunner,

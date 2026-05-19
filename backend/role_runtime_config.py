@@ -69,6 +69,11 @@ def normalize_role_runtime_config(
         model_ids = [item["id"] for item in models]
         legacy_key = ROLE_DEFAULT_SOURCE_MAP.get(role_name)
         legacy_default = legacy_defaults.get(legacy_key) if legacy_key is not None else None
+        legacy_default_model = (
+            (legacy_default or {}).get("model")
+            if (legacy_default or {}).get("model") in model_ids
+            else None
+        )
 
         operator_default_model = (
             operator_role_default.get("model")
@@ -77,7 +82,7 @@ def normalize_role_runtime_config(
         )
         default_model = (
             operator_default_model
-            or (legacy_default or {}).get("model")
+            or legacy_default_model
             or ("sonnet" if runner == "claude" and "sonnet" in model_ids else None)
             or (model_ids[0] if model_ids else None)
         )
@@ -89,6 +94,15 @@ def normalize_role_runtime_config(
 
         model_capability = next(item for item in models if item["id"] == model)
         supported_efforts = list(model_capability.get("supported_efforts", []))
+        legacy_default_effort = (
+            (legacy_default or {}).get("effort")
+            if legacy_default_model == model
+            and (
+                not supported_efforts
+                or (legacy_default or {}).get("effort") in supported_efforts
+            )
+            else None
+        )
         effort = (
             override.get("effort")
             or (
@@ -96,7 +110,7 @@ def normalize_role_runtime_config(
                 and operator_role_default.get("model") in {None, "", model}
                 and operator_role_default.get("effort")
             )
-            or (legacy_default or {}).get("effort")
+            or legacy_default_effort
             or model_capability.get("default_effort")
             or ("medium" if "medium" in supported_efforts else (supported_efforts[0] if supported_efforts else None))
         )

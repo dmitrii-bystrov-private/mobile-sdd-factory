@@ -512,6 +512,71 @@ class SessionCreationTests(unittest.TestCase):
             normalized["implementer"],
         )
 
+    def test_normalize_role_runtime_config_skips_incompatible_legacy_model_for_runner(self) -> None:
+        repo_root = Path(self.temp_dir.name) / "repo-root"
+        settings_dir = repo_root / ".sdd-factory"
+        settings_dir.mkdir(parents=True, exist_ok=True)
+        (settings_dir / "settings.local.json").write_text(
+            json.dumps(
+                {
+                    "runtime_defaults": {
+                        "default_runner": "codex",
+                    }
+                }
+            )
+        )
+
+        with patch(
+            "backend.role_runtime_config.build_runtime_capabilities",
+            return_value={
+                "available_runners": ["claude", "codex"],
+                "default_runner": "claude",
+                "runners": [
+                    {
+                        "runner": "claude",
+                        "models": [
+                            {
+                                "id": "sonnet",
+                                "supported_efforts": ["medium", "high"],
+                                "default_effort": "medium",
+                            }
+                        ],
+                    },
+                    {
+                        "runner": "codex",
+                        "models": [
+                            {
+                                "id": "gpt-5.3-codex-spark",
+                                "supported_efforts": ["medium", "high"],
+                                "default_effort": "medium",
+                            }
+                        ],
+                    },
+                ],
+                "legacy_role_defaults": [
+                    {
+                        "role_name": "context-collector",
+                        "model": "sonnet",
+                        "effort": "high",
+                    }
+                ],
+            },
+        ):
+            normalized = normalize_role_runtime_config(
+                repo_root=repo_root,
+                role_names=["proposal-context-worker"],
+                provided=None,
+            )
+
+        self.assertEqual(
+            {
+                "runner": "codex",
+                "model": "gpt-5.3-codex-spark",
+                "effort": "medium",
+            },
+            normalized["proposal-context-worker"],
+        )
+
     def test_story_session_accepts_role_config_for_planning_and_optional_lanes(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30001",

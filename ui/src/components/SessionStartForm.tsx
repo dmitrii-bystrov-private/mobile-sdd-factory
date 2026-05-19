@@ -212,13 +212,23 @@ export function SessionStartForm({
       const legacyKey = ROLE_DEFAULT_SOURCE_MAP[roleName] ?? null;
       const legacyDefault = legacyKey === null ? undefined : legacyIndex.get(legacyKey);
       const models = runnerCapability?.models ?? [];
+      const modelIds = models.map((item) => item.id);
+      const compatibleLegacyModel =
+        legacyDefault?.model && modelIds.includes(legacyDefault.model) ? legacyDefault.model : undefined;
       const model =
         (storedRoleDefault?.runner === null || storedRoleDefault?.runner === runner ? storedRoleDefault?.model : null) ??
-        legacyDefault?.model ??
+        compatibleLegacyModel ??
         (runner === "claude" ? models.find((item) => item.id === "sonnet")?.id : undefined) ??
         models[0]?.id ??
         "";
       const modelCapability = models.find((item) => item.id === model);
+      const supportedEfforts = modelCapability?.supportedEfforts ?? [];
+      const compatibleLegacyEffort =
+        compatibleLegacyModel === model &&
+        legacyDefault?.effort &&
+        (supportedEfforts.length === 0 || supportedEfforts.includes(legacyDefault.effort))
+          ? legacyDefault.effort
+          : undefined;
       const effort =
         (
           (storedRoleDefault?.runner === null || storedRoleDefault?.runner === runner) &&
@@ -226,9 +236,9 @@ export function SessionStartForm({
             ? storedRoleDefault?.effort
             : null
         ) ??
-        legacyDefault?.effort ??
+        compatibleLegacyEffort ??
         modelCapability?.defaultEffort ??
-        modelCapability?.supportedEfforts[0] ??
+        supportedEfforts[0] ??
         "medium";
       return { runner, model, effort };
     }
