@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { apiClient } from "../api/client";
 import { roleDisplayName } from "../roleDisplay";
@@ -113,6 +113,7 @@ export function SessionStartForm({
   const [roleConfig, setRoleConfig] = useState<Record<string, { runner: string; model: string; effort: string }>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const previousPrefillRef = useRef<Record<string, { runner: string; model: string; effort: string }>>({});
 
   const showTestPolicy = workflowProfile === "bug_full";
   const showRequirementsClarificationMode = workflowProfile === "story_full";
@@ -243,13 +244,29 @@ export function SessionStartForm({
       return { runner, model, effort };
     }
 
+    const nextPrefill: Record<string, { runner: string; model: string; effort: string }> = {};
+    for (const roleName of effectiveRoleNames) {
+      nextPrefill[roleName] = defaultConfigForRole(roleName);
+    }
+    const previousPrefill = previousPrefillRef.current;
     setRoleConfig((current) => {
       const next: Record<string, { runner: string; model: string; effort: string }> = {};
       for (const roleName of effectiveRoleNames) {
-        next[roleName] = current[roleName] ?? defaultConfigForRole(roleName);
+        const currentValue = current[roleName];
+        const previousValue = previousPrefill[roleName];
+        const hasManualOverride =
+          currentValue !== undefined &&
+          previousValue !== undefined &&
+          (currentValue.runner !== previousValue.runner ||
+            currentValue.model !== previousValue.model ||
+            currentValue.effort !== previousValue.effort);
+        next[roleName] = hasManualOverride
+          ? currentValue
+          : nextPrefill[roleName];
       }
       return next;
     });
+    previousPrefillRef.current = nextPrefill;
   }, [effectiveRoleNames, runtimeCapabilities, runtimeDefaults]);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
@@ -274,6 +291,7 @@ export function SessionStartForm({
       setWorkflowProfile("oneshot");
       setPolicy(defaultDraftPolicy());
       setRoleConfig({});
+      previousPrefillRef.current = {};
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start session");
     } finally {
