@@ -1197,7 +1197,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(created)
         self.assertEqual(first_session.id, second_session.id)
         self.assertEqual("task_session_reused", event.event_type)
-        self.assertEqual(4, len(roles))
+        self.assertEqual(3, len(roles))
 
     def test_create_task_session_rejects_conflicting_existing_policy(self) -> None:
         self.coordinator.create_task_session(
@@ -3530,7 +3530,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertEqual("session_output_polled", event.event_type)
-        self.assertEqual(4, role_count)
+        self.assertEqual(3, role_count)
         self.assertEqual(2, chunk_count)
         self.assertEqual(
             2,
@@ -3560,7 +3560,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertEqual("session_output_polled", event.event_type)
-        self.assertEqual(4, role_count)
+        self.assertEqual(3, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertFalse(result_path.exists())
@@ -3922,7 +3922,7 @@ class SessionCreationTests(unittest.TestCase):
         artifacts = self.artifact_repository.list_for_session(session.id)
 
         self.assertEqual("session_output_polled", event.event_type)
-        self.assertEqual(5, role_count)
+        self.assertEqual(4, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("self_review_requested", updated_session.current_stage)
         self.assertEqual("code-reviewer", updated_session.current_owner)

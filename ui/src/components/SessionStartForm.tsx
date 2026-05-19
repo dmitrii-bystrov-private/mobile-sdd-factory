@@ -133,7 +133,6 @@ export function SessionStartForm({
 
   const effectiveRoleNames = useMemo(() => {
     const roleNames = [
-      "task-coordinator",
       "implementer",
       "verification-coordinator",
       "mr-comments-analyst-worker",

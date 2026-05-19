@@ -17,7 +17,6 @@ class RoleBaseline:
 _BASELINE_SOURCE = "backend.role_baselines"
 
 ROLE_BASELINES: tuple[RoleBaseline, ...] = (
-    RoleBaseline("task-coordinator", None, None, [], _BASELINE_SOURCE),
     RoleBaseline("implementer", "sonnet", "medium", ["ios-rag", "android-rag", "frontend-rag"], _BASELINE_SOURCE),
     RoleBaseline("verification-coordinator", "sonnet", "medium", [], _BASELINE_SOURCE),
     RoleBaseline("bug-fixer", "sonnet", "high", ["ios-rag", "android-rag", "frontend-rag"], _BASELINE_SOURCE),
