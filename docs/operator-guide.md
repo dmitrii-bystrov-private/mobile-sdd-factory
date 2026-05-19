@@ -84,6 +84,15 @@ Each session exposes runtime visibility in the UI:
 
 Use these only when the UI-level session state is not enough and you need direct runtime inspection.
 
+The same runtime panel also exposes supported runtime controls for:
+
+- stopping a single role runtime
+- restarting a single role runtime
+- stopping the whole runtime session
+- restarting the whole runtime session
+
+These are recovery tools, not part of the normal happy path.
+
 ## Runtime Defaults
 
 Project-local defaults are stored in:
