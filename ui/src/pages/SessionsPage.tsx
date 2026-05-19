@@ -782,7 +782,7 @@ export function SessionsPage(): JSX.Element {
                     : "Check doctor, setup, and runtime readiness before debugging workflow logic."}
               </p>
             </div>
-            {surfaceView === "runs" ? (
+            {surfaceView === "runs" && sessions.length > 0 ? (
               <section className="panel overview-strip">
                 <div className="panel-header">
                   <div>
@@ -805,7 +805,7 @@ export function SessionsPage(): JSX.Element {
                   </div>
                   <div className="metric-card">
                     <span>Selected</span>
-                    <strong>{selectedSession?.task_key ?? "none"}</strong>
+                    <strong>{selectedSession?.task_key ?? "No selection"}</strong>
                   </div>
                 </div>
               </section>

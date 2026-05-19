@@ -264,16 +264,16 @@ export function SessionDetail({
               <strong>{sessionStatusDisplayName(session.status)}</strong>
             </div>
           <div className="metric-card">
-            <span>Roles</span>
-            <strong>{bundle.roles.length}</strong>
+            <span>Active Workers</span>
+            <strong>{runningRoleCount}</strong>
           </div>
           <div className="metric-card">
-            <span>Artifacts</span>
-            <strong>{bundle.artifacts.length}</strong>
+            <span>Waiting</span>
+            <strong>{blockedRoleCount}</strong>
           </div>
           <div className="metric-card">
-            <span>Events</span>
-            <strong>{bundle.events.length}</strong>
+            <span>Standing By</span>
+            <strong>{standbyRoleCount}</strong>
           </div>
         </div>
       </div>
