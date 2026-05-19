@@ -247,6 +247,7 @@ export function OperatorActions({
     session.current_stage === "subtask_creation_requested";
   const canCreateMr = session.current_stage === "mr_handoff_failed";
   const canSendToTest = session.current_stage === "send_to_test_failed";
+  const canSendRuntimeInput = session.status === "waiting_for_operator";
 
   const dailyActions: ActionDefinition[] = [
     {
@@ -386,285 +387,297 @@ export function OperatorActions({
         recoveryActions,
       )}
 
-      <div className="operator-followup-stack">
-        <div className="operator-followup-copy">
-          <p className="eyebrow">Interactive Recovery</p>
-          <h4>Runtime Input</h4>
-          <p className="path-label">
-            Send a direct reply into the live role session after an interactive blocker escalates the task to operator.
-          </p>
-        </div>
+      {canSendRuntimeInput ? (
+        <div className="operator-followup-stack">
+          <div className="operator-followup-copy">
+            <p className="eyebrow">Interactive Recovery</p>
+            <h4>Runtime Input</h4>
+            <p className="path-label">
+              Send a direct reply into the live role session after an interactive blocker escalates the task to operator.
+            </p>
+          </div>
 
-        <form className="followup-form" onSubmit={(event) => void handleRuntimeInput(event)}>
-          <label className="form-field">
-            <span>Runtime Input</span>
-            <textarea
-              className="text-area-input"
-              disabled={busy || session.status !== "waiting_for_operator"}
-              onChange={(event) => setRuntimeInput(event.target.value)}
-              placeholder="Examples: 1 or another direct reply required by the live agent session."
-              rows={3}
-              value={runtimeInput}
-            />
-          </label>
-          <button
-            className="action-button"
-            disabled={busy || session.status !== "waiting_for_operator"}
-            title="Send a direct reply into the live runtime session after the agent asked the operator for input."
-            type="submit"
-          >
-            Send Runtime Input
-          </button>
-        </form>
-      </div>
-
-      <div className="operator-followup-stack">
-        <div className="operator-followup-copy">
-          <p className="eyebrow">Recovery Redirect</p>
-          <h4>Redirect Parked Work</h4>
-          <p className="path-label">
-            Reassign the current operator-blocked work item to another role that is valid for this same stage.
-          </p>
-        </div>
-
-        <form className="followup-form" onSubmit={(event) => void handleRedirectSession(event)}>
-          <label className="form-field">
-            <span>Target Role</span>
-            <select
-              className="select-input"
-              disabled={busy || !canRedirectSession}
-              onChange={(event) => setRedirectTargetRole(event.target.value)}
-              value={redirectTargetRole}
+          <form className="followup-form" onSubmit={(event) => void handleRuntimeInput(event)}>
+            <label className="form-field">
+              <span>Runtime Input</span>
+              <textarea
+                className="text-area-input"
+                disabled={busy || !canSendRuntimeInput}
+                onChange={(event) => setRuntimeInput(event.target.value)}
+                placeholder="Examples: 1 or another direct reply required by the live agent session."
+                rows={3}
+                value={runtimeInput}
+              />
+            </label>
+            <button
+              className="action-button"
+              disabled={busy || !canSendRuntimeInput}
+              title="Send a direct reply into the live runtime session after the agent asked the operator for input."
+              type="submit"
             >
-              {availableRedirectTargets.length === 0 ? (
-                <option value="">No redirect target available</option>
-              ) : (
-                availableRedirectTargets.map((roleName) => (
+              Send Runtime Input
+            </button>
+          </form>
+        </div>
+      ) : null}
+
+      {canRedirectSession ? (
+        <div className="operator-followup-stack">
+          <div className="operator-followup-copy">
+            <p className="eyebrow">Recovery Redirect</p>
+            <h4>Redirect Parked Work</h4>
+            <p className="path-label">
+              Reassign the current operator-blocked work item to another role that is valid for this same stage.
+            </p>
+          </div>
+
+          <form className="followup-form" onSubmit={(event) => void handleRedirectSession(event)}>
+            <label className="form-field">
+              <span>Target Role</span>
+              <select
+                className="select-input"
+                disabled={busy || !canRedirectSession}
+                onChange={(event) => setRedirectTargetRole(event.target.value)}
+                value={redirectTargetRole}
+              >
+                {availableRedirectTargets.map((roleName) => (
                   <option key={roleName} value={roleName}>
                     {roleName}
                   </option>
-                ))
-              )}
-            </select>
-          </label>
-          <button
-            className="action-button"
-            disabled={busy || !canRedirectSession || redirectTargetRole.length === 0}
-            title="Redirect the parked operator-blocked work item to another allowed role for the same stage."
-            type="submit"
-          >
-            Redirect Session
-          </button>
-        </form>
-      </div>
-
-      <div className="operator-followup-stack">
-        <div className="operator-followup-copy">
-          <p className="eyebrow">Optional Lane</p>
-          <h4>Boy Scout</h4>
-          <p className="path-label">
-            Resolve Boy Scout findings after the scout finishes. Use implement now when all findings should go back to the coder, create tech debt when only the old-code candidates should become separate stories, or skip the lane entirely when policy allows it.
-          </p>
-        </div>
-
-        <div className="actions-grid operator-actions-grid">
-          <div className="operator-action-card">
-            <button
-              className="action-button action-button-strong"
-              disabled={busy || !canResolveBoyScoutFindings}
-              onClick={() => void handleBoyScoutResolution("implement_now")}
-              title="Send every Boy Scout finding back to the coding lane immediately."
-              type="button"
-            >
-              Implement Boy Scout Findings
-            </button>
-            <p className="operator-action-description">
-              Route all current Boy Scout findings back into a narrow correction pass without creating separate tech-debt stories.
-            </p>
-          </div>
-          <div className="operator-action-card">
+                ))}
+              </select>
+            </label>
             <button
               className="action-button"
-              disabled={busy || !canResolveBoyScoutFindings}
-              onClick={() => void handleBoyScoutResolution("create_tech_debt")}
-              title="Create tech-debt stories for the old-code findings and route the remaining actionable findings back to the coder."
-              type="button"
+              disabled={busy || !canRedirectSession || redirectTargetRole.length === 0}
+              title="Redirect the parked operator-blocked work item to another allowed role for the same stage."
+              type="submit"
             >
-              Create Tech Debt And Continue
+              Redirect Session
             </button>
-            <p className="operator-action-description">
-              Materialize separate tech-debt stories for the old-code findings, then send the remaining implement-now findings back to the coding lane.
+          </form>
+        </div>
+      ) : null}
+
+      {canResolveBoyScoutFindings || canSkipBoyScout ? (
+        <div className="operator-followup-stack">
+          <div className="operator-followup-copy">
+            <p className="eyebrow">Optional Lane</p>
+            <h4>Boy Scout</h4>
+            <p className="path-label">
+              Resolve Boy Scout findings after the scout finishes. Use implement now when all findings should go back to the coder, create tech debt when only the old-code candidates should become separate stories, or skip the lane entirely when policy allows it.
             </p>
           </div>
-        </div>
 
-        <form className="followup-form" onSubmit={(event) => void handleBoyScoutSkip(event)}>
-          <label className="form-field">
-            <span>Skip Reason</span>
-            <textarea
-              className="text-area-input"
-              disabled={busy || !canSkipBoyScout}
-              onChange={(event) => setBoyScoutSkipReason(event.target.value)}
-              placeholder="Example: Findings acknowledged; continue with final verification and track refactors separately."
-              rows={3}
-              value={boyScoutSkipReason}
-            />
-          </label>
-          <button
-            className="action-button"
-            disabled={busy || !canSkipBoyScout}
-            title="Skip the optional Boy Scout lane for this session and continue with the downstream flow."
-            type="submit"
-          >
-            Skip Boy Scout
-          </button>
-        </form>
-      </div>
+          {canResolveBoyScoutFindings ? (
+            <div className="actions-grid operator-actions-grid">
+              <div className="operator-action-card">
+                <button
+                  className="action-button action-button-strong"
+                  disabled={busy || !canResolveBoyScoutFindings}
+                  onClick={() => void handleBoyScoutResolution("implement_now")}
+                  title="Send every Boy Scout finding back to the coding lane immediately."
+                  type="button"
+                >
+                  Implement Boy Scout Findings
+                </button>
+                <p className="operator-action-description">
+                  Route all current Boy Scout findings back into a narrow correction pass without creating separate tech-debt stories.
+                </p>
+              </div>
+              <div className="operator-action-card">
+                <button
+                  className="action-button"
+                  disabled={busy || !canResolveBoyScoutFindings}
+                  onClick={() => void handleBoyScoutResolution("create_tech_debt")}
+                  title="Create tech-debt stories for the old-code findings and route the remaining actionable findings back to the coder."
+                  type="button"
+                >
+                  Create Tech Debt And Continue
+                </button>
+                <p className="operator-action-description">
+                  Materialize separate tech-debt stories for the old-code findings, then send the remaining implement-now findings back to the coding lane.
+                </p>
+              </div>
+            </div>
+          ) : null}
 
-      <div className="operator-followup-stack">
-        <div className="operator-followup-copy">
-          <p className="eyebrow">Optional Lane</p>
-          <h4>Self Review</h4>
-          <p className="path-label">
-            Record the explicit self-review outcome before final verification or route findings back into correction.
-          </p>
-        </div>
-
-        <form className="followup-form" onSubmit={(event) => void handleSelfReview(event)}>
-          <div className="followup-form-grid">
-            <label className="form-field">
-              <span>Outcome</span>
-              <select
-                className="select-input"
-                disabled={busy || !canCompleteSelfReview}
-                onChange={(event) => setSelfReviewOutcome(event.target.value as "passed" | "issues_found")}
-                value={selfReviewOutcome}
+          {canSkipBoyScout ? (
+            <form className="followup-form" onSubmit={(event) => void handleBoyScoutSkip(event)}>
+              <label className="form-field">
+                <span>Skip Reason</span>
+                <textarea
+                  className="text-area-input"
+                  disabled={busy || !canSkipBoyScout}
+                  onChange={(event) => setBoyScoutSkipReason(event.target.value)}
+                  placeholder="Example: Findings acknowledged; continue with final verification and track refactors separately."
+                  rows={3}
+                  value={boyScoutSkipReason}
+                />
+              </label>
+              <button
+                className="action-button"
+                disabled={busy || !canSkipBoyScout}
+                title="Skip the optional Boy Scout lane for this session and continue with the downstream flow."
+                type="submit"
               >
-                <option value="passed">passed</option>
-                <option value="issues_found">issues_found</option>
-              </select>
-            </label>
+                Skip Boy Scout
+              </button>
+            </form>
+          ) : null}
+        </div>
+      ) : null}
+
+      {canCompleteSelfReview ? (
+        <div className="operator-followup-stack">
+          <div className="operator-followup-copy">
+            <p className="eyebrow">Optional Lane</p>
+            <h4>Self Review</h4>
+            <p className="path-label">
+              Record the explicit self-review outcome before final verification or route findings back into correction.
+            </p>
           </div>
-          <label className="form-field">
-            <span>Self Review Summary</span>
-            <textarea
-              className="text-area-input"
-              disabled={busy || !canCompleteSelfReview}
-              onChange={(event) => setSelfReviewSummary(event.target.value)}
-              placeholder="Reviewed implementation; either no blocking issues were found or the main findings are listed here."
-              rows={4}
-              value={selfReviewSummary}
-            />
-          </label>
-          <button
-            className="action-button"
-            disabled={busy || !canCompleteSelfReview}
-            title="Record the manual self-review outcome for this optional lane and route the session accordingly."
-            type="submit"
-          >
-            Complete Self Review
-          </button>
-        </form>
-      </div>
 
-      <div className="operator-followup-stack">
-        <div className="operator-followup-copy">
-          <p className="eyebrow">Optional Lane</p>
-          <h4>Doc Harvest</h4>
-          <p className="path-label">
-            Record documentation harvest output as an explicit session stage before downstream handoff.
-          </p>
-        </div>
-
-        <form className="followup-form" onSubmit={(event) => void handleDocHarvest(event)}>
-          <label className="form-field">
-            <span>Doc Harvest Summary</span>
-            <textarea
-              className="text-area-input"
-              disabled={busy || !canCompleteDocHarvest}
-              onChange={(event) => setDocHarvestSummary(event.target.value)}
-              placeholder="README updated for the feature area and the current behavior is documented."
-              rows={4}
-              value={docHarvestSummary}
-            />
-          </label>
-          <button
-            className="action-button"
-            disabled={busy || !canCompleteDocHarvest}
-            title="Record the documentation harvest result for this optional lane and let the workflow continue."
-            type="submit"
-          >
-            Complete Doc Harvest
-          </button>
-        </form>
-      </div>
-
-      <div className="operator-followup-stack">
-        <div className="operator-followup-copy">
-          <p className="eyebrow">Follow-up Intake</p>
-          <h4>Reopen Completed Session</h4>
-          <p className="path-label">
-            Re-enter a completed session from merge request feedback or QA feedback.
-          </p>
-        </div>
-
-        <form className="followup-form" onSubmit={(event) => void handleMrIngest(event)}>
-          <div className="followup-form-grid">
+          <form className="followup-form" onSubmit={(event) => void handleSelfReview(event)}>
+            <div className="followup-form-grid">
+              <label className="form-field">
+                <span>Outcome</span>
+                <select
+                  className="select-input"
+                  disabled={busy || !canCompleteSelfReview}
+                  onChange={(event) => setSelfReviewOutcome(event.target.value as "passed" | "issues_found")}
+                  value={selfReviewOutcome}
+                >
+                  <option value="passed">passed</option>
+                  <option value="issues_found">issues_found</option>
+                </select>
+              </label>
+            </div>
             <label className="form-field">
-              <span>MR Platform</span>
-              <select
-                className="select-input"
-                disabled={busy || !canOpenFollowup}
-                onChange={(event) => setMrPlatform(event.target.value as "ios" | "android")}
-                value={mrPlatform}
-              >
-                <option value="ios">ios</option>
-                <option value="android">android</option>
-              </select>
-            </label>
-            <label className="form-field">
-              <span>MR Id</span>
-              <input
-                className="text-input"
-                disabled={busy || !canOpenFollowup}
-                onChange={(event) => setMrId(event.target.value)}
-                placeholder="2942"
-                value={mrId}
+              <span>Self Review Summary</span>
+              <textarea
+                className="text-area-input"
+                disabled={busy || !canCompleteSelfReview}
+                onChange={(event) => setSelfReviewSummary(event.target.value)}
+                placeholder="Reviewed implementation; either no blocking issues were found or the main findings are listed here."
+                rows={4}
+                value={selfReviewSummary}
               />
             </label>
-          </div>
-          <button
-            className="action-button"
-            disabled={busy || !canOpenFollowup}
-            title="Pull unresolved merge request comments into the completed session and reopen the follow-up flow."
-            type="submit"
-          >
-            Ingest MR Comments
-          </button>
-        </form>
+            <button
+              className="action-button"
+              disabled={busy || !canCompleteSelfReview}
+              title="Record the manual self-review outcome for this optional lane and route the session accordingly."
+              type="submit"
+            >
+              Complete Self Review
+            </button>
+          </form>
+        </div>
+      ) : null}
 
-        <form className="followup-form" onSubmit={(event) => void handleQaReopen(event)}>
-          <label className="form-field">
-            <span>QA Follow-up Comment</span>
-            <textarea
-              className="text-area-input"
+      {canCompleteDocHarvest ? (
+        <div className="operator-followup-stack">
+          <div className="operator-followup-copy">
+            <p className="eyebrow">Optional Lane</p>
+            <h4>Doc Harvest</h4>
+            <p className="path-label">
+              Record documentation harvest output as an explicit session stage before downstream handoff.
+            </p>
+          </div>
+
+          <form className="followup-form" onSubmit={(event) => void handleDocHarvest(event)}>
+            <label className="form-field">
+              <span>Doc Harvest Summary</span>
+              <textarea
+                className="text-area-input"
+                disabled={busy || !canCompleteDocHarvest}
+                onChange={(event) => setDocHarvestSummary(event.target.value)}
+                placeholder="README updated for the feature area and the current behavior is documented."
+                rows={4}
+                value={docHarvestSummary}
+              />
+            </label>
+            <button
+              className="action-button"
+              disabled={busy || !canCompleteDocHarvest}
+              title="Record the documentation harvest result for this optional lane and let the workflow continue."
+              type="submit"
+            >
+              Complete Doc Harvest
+            </button>
+          </form>
+        </div>
+      ) : null}
+
+      {canOpenFollowup ? (
+        <div className="operator-followup-stack">
+          <div className="operator-followup-copy">
+            <p className="eyebrow">Follow-up Intake</p>
+            <h4>Reopen Completed Session</h4>
+            <p className="path-label">
+              Re-enter a completed session from merge request feedback or QA feedback.
+            </p>
+          </div>
+
+          <form className="followup-form" onSubmit={(event) => void handleMrIngest(event)}>
+            <div className="followup-form-grid">
+              <label className="form-field">
+                <span>MR Platform</span>
+                <select
+                  className="select-input"
+                  disabled={busy || !canOpenFollowup}
+                  onChange={(event) => setMrPlatform(event.target.value as "ios" | "android")}
+                  value={mrPlatform}
+                >
+                  <option value="ios">ios</option>
+                  <option value="android">android</option>
+                </select>
+              </label>
+              <label className="form-field">
+                <span>MR Id</span>
+                <input
+                  className="text-input"
+                  disabled={busy || !canOpenFollowup}
+                  onChange={(event) => setMrId(event.target.value)}
+                  placeholder="2942"
+                  value={mrId}
+                />
+              </label>
+            </div>
+            <button
+              className="action-button"
               disabled={busy || !canOpenFollowup}
-              onChange={(event) => setQaComment(event.target.value)}
-              placeholder="QA: still broken on edge case"
-              rows={4}
-              value={qaComment}
-            />
-          </label>
-          <button
-            className="action-button"
-            disabled={busy || !canOpenFollowup}
-            title="Reopen the completed session from a QA comment so the follow-up execution flow can resume."
-            type="submit"
-          >
-            Reopen From QA
-          </button>
-        </form>
-      </div>
+              title="Pull unresolved merge request comments into the completed session and reopen the follow-up flow."
+              type="submit"
+            >
+              Ingest MR Comments
+            </button>
+          </form>
+
+          <form className="followup-form" onSubmit={(event) => void handleQaReopen(event)}>
+            <label className="form-field">
+              <span>QA Follow-up Comment</span>
+              <textarea
+                className="text-area-input"
+                disabled={busy || !canOpenFollowup}
+                onChange={(event) => setQaComment(event.target.value)}
+                placeholder="QA: still broken on edge case"
+                rows={4}
+                value={qaComment}
+              />
+            </label>
+            <button
+              className="action-button"
+              disabled={busy || !canOpenFollowup}
+              title="Reopen the completed session from a QA comment so the follow-up execution flow can resume."
+              type="submit"
+            >
+              Reopen From QA
+            </button>
+          </form>
+        </div>
+      ) : null}
 
       <div className="operator-followup-stack">
         <div className="operator-followup-copy">
