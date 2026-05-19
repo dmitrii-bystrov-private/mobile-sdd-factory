@@ -5,7 +5,6 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from backend.api.routes_artifacts import router as artifacts_router
-from backend.api.routes_checkpoints import router as checkpoints_router
 from backend.api.routes_events import router as events_router
 from backend.api.routes_knowledge import router as knowledge_router
 from backend.api.routes_operator import router as operator_router
@@ -23,7 +22,6 @@ def create_app() -> FastAPI:
     app.include_router(roles_router)
     app.include_router(artifacts_router)
     app.include_router(knowledge_router)
-    app.include_router(checkpoints_router)
     app.include_router(work_items_router)
     app.include_router(operator_router)
     return app
