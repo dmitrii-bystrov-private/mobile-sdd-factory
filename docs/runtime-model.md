@@ -99,6 +99,8 @@ They define:
 
 These defaults are surfaced and edited through the UI.
 
+They are distinct from `.claude/settings.json` or `.claude/settings.local.json`, which remain Claude-specific launcher inputs for scoped permissions and MCP visibility rather than the supported runtime-defaults store.
+
 ## Policy Semantics
 
 Optional lanes follow this model:

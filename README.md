@@ -232,6 +232,9 @@ These defaults are editable from the UI `Settings → Runtime Defaults` panel an
 - per-role runner/model/effort defaults
 - per-workflow policy defaults
 
+Do not confuse these runtime defaults with `.claude/settings.json` or `.claude/settings.local.json`.
+Those Claude files are only launcher-side permission/MCP inputs for scoped Claude sessions, not the supported store for project runtime defaults.
+
 Example:
 
 ```json

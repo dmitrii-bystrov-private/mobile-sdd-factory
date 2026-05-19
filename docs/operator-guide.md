@@ -109,6 +109,9 @@ This is the supported place for:
 - per-role runner/model/effort defaults
 - per-workflow policy defaults
 
+This is not the same thing as `.claude/settings.json` or `.claude/settings.local.json`.
+Those Claude files are only used as Claude-specific permission/MCP source material for scoped launcher sessions.
+
 These defaults apply to future sessions.
 Per-session overrides in the session creation form only affect the session being created.
 
