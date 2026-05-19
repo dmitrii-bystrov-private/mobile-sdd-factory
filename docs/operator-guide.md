@@ -39,7 +39,7 @@ The normal happy path should require little or no operator input.
 The main daily actions are:
 
 - `Process Updates`
-  Refreshes the task snapshot and lets the coordinator decide whether to continue active work or reopen from new follow-up signals.
+  Refreshes the task snapshot while a session is active, or reopens a completed `story_full` session when new subtasks appear after delivery.
 - `Refresh Subtask State`
   Pulls the latest Jira subtask state while story execution is active.
 - `Create Knowledge Entry`

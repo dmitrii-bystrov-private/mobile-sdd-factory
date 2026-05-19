@@ -129,8 +129,10 @@ export function OperatorActions({
 
   const canOpenFollowup = session.status === "completed";
   const canRefreshSnapshot =
-    session.status !== "completed" ||
-    ["mr_handoff_completed", "send_to_test_completed", "qa_reopen_requested"].includes(session.current_stage);
+    session.status === "active" ||
+    (session.status === "completed" &&
+      session.workflow_profile === "story_full" &&
+      ["mr_handoff_completed", "send_to_test_completed"].includes(session.current_stage));
   const canSkipBoyScout =
     session.current_stage === "boy_scout_requested" &&
     session.status === "waiting_for_operator" &&
