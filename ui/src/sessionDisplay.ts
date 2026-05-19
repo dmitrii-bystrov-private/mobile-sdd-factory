@@ -11,6 +11,14 @@ const WORKFLOW_PROFILE_LABELS: Record<WorkflowProfile, string> = {
   story_full: "Story Flow",
 };
 
+const SESSION_STATUS_LABELS: Record<string, string> = {
+  created: "Created",
+  active: "In Progress",
+  waiting_for_operator: "Waiting For Operator",
+  paused: "Paused",
+  completed: "Completed",
+};
+
 const SESSION_POLICY_LABELS: Record<string, string> = {
   test_policy: "Test Policy",
   self_review_policy: "Self Review",
@@ -33,6 +41,13 @@ const CLARIFICATION_MODE_LABELS: Record<RequirementsClarificationMode, string> =
 
 export function workflowProfileDisplayName(workflowProfile: WorkflowProfile): string {
   return WORKFLOW_PROFILE_LABELS[workflowProfile] ?? workflowProfile;
+}
+
+export function sessionStatusDisplayName(status: string | null | undefined): string {
+  if (!status) {
+    return "Unknown";
+  }
+  return SESSION_STATUS_LABELS[status] ?? status;
 }
 
 export function sessionPolicyLabel(key: string): string {

@@ -1,5 +1,5 @@
 import { roleDisplayName } from "../roleDisplay";
-import { workflowProfileDisplayName } from "../sessionDisplay";
+import { sessionStatusDisplayName, workflowProfileDisplayName } from "../sessionDisplay";
 import { stageDisplayName } from "../stageDisplay";
 import type { Session } from "../types";
 
@@ -37,12 +37,12 @@ export function SessionList({
               <div className="session-card-top">
                 <strong>{session.task_key}</strong>
                 <span className={`status-pill status-${session.status}`}>
-                  {session.status}
+                  {sessionStatusDisplayName(session.status)}
                 </span>
               </div>
               <p>{workflowProfileDisplayName(session.workflow_profile)}</p>
-              <small>{stageDisplayName(session.current_stage)}</small>
-              <small>{session.current_owner ? roleDisplayName(session.current_owner) : "unowned"}</small>
+              <small>Stage: {stageDisplayName(session.current_stage)}</small>
+              <small>Owner: {session.current_owner ? roleDisplayName(session.current_owner) : "Not assigned yet"}</small>
             </button>
           );
         })}

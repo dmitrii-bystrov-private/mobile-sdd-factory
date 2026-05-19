@@ -21,40 +21,50 @@ export function BootstrapGuidancePanel({
     );
   }
 
+  const overallLabel =
+    guidanceSummary.requiredActionCount === 0 ? "Ready to launch" : "Setup work required";
+
   return (
     <section className="panel">
       <div className="panel-header">
         <div>
           <p className="eyebrow">Setup</p>
           <h3>Bootstrap Guidance</h3>
+          <p className="path-label">
+            Use this when the local stack is not ready yet or when a new machine needs initial setup.
+          </p>
         </div>
       </div>
 
-      <div className="table-list">
-        <div className="table-row">
+      <div className="grid-two compact-grid">
+        <div className="metric-card">
+          <span>Overall</span>
+          <strong>{overallLabel}</strong>
+        </div>
+        <div className="metric-card">
           <span>Next step</span>
           <strong>{guidanceSummary.nextStep}</strong>
         </div>
-        <div className="table-row">
+        <div className="metric-card">
           <span>Required actions</span>
           <strong>{guidanceSummary.requiredActionCount}</strong>
         </div>
-        <div className="table-row">
-          <span>Optional actions</span>
+        <div className="metric-card">
+          <span>Optional improvements</span>
           <strong>{guidanceSummary.optionalActionCount}</strong>
         </div>
       </div>
 
-      <div className="artifact-stack">
-        <article className="artifact-card">
-          <div className="artifact-meta">
-            <span>run</span>
-            <strong>Launch Stack</strong>
-          </div>
-          <p className="artifact-path">{guidanceSummary.launchCommand}</p>
-          <p className="path-label">Backend: {guidanceSummary.backendUrl}</p>
-          <p className="path-label">UI: {guidanceSummary.uiUrl}</p>
-        </article>
+      <div className="inline-summary-card">
+        <div className="inline-summary-header">
+          <strong>Launch the local stack</strong>
+          <span>{guidanceSummary.overallStatus}</span>
+        </div>
+        <p className="form-help">{guidanceSummary.launchCommand}</p>
+        <div className="inline-pill-row">
+          <span className="inline-pill">Backend: {guidanceSummary.backendUrl}</span>
+          <span className="inline-pill">UI: {guidanceSummary.uiUrl}</span>
+        </div>
       </div>
 
       {[
@@ -71,7 +81,7 @@ export function BootstrapGuidancePanel({
                     <strong>{item.label}</strong>
                   </div>
                   <p className="artifact-path">{item.details}</p>
-                  {item.hint ? <p className="path-label">Do: {item.hint}</p> : null}
+                  {item.hint ? <p className="path-label">Do next: {item.hint}</p> : null}
                 </article>
               ))
             ) : (

@@ -487,59 +487,60 @@ export function OperatorActions({
         </div>
       ) : null}
 
-      <div className="operator-followup-stack">
-        <div className="operator-followup-copy">
-          <p className="eyebrow">Knowledge</p>
-          <h4>Capture Project Knowledge</h4>
-          <p className="path-label">
-            Record a useful project convention, hidden constraint, or non-obvious implementation finding in the shared knowledge base.
-          </p>
-        </div>
-
-        <form className="followup-form" onSubmit={(event) => void handleKnowledge(event)}>
-          <div className="followup-form-grid">
-            <label className="form-field">
-              <span>Entry Title</span>
-              <input
-                className="text-input"
-                disabled={busy}
-                onChange={(event) => setKnowledgeTitle(event.target.value)}
-                placeholder="Reuse existing formatter helper"
-                value={knowledgeTitle}
-              />
-            </label>
-            <label className="form-field">
-              <span>Directory / Scope</span>
-              <input
-                className="text-input"
-                disabled={busy}
-                onChange={(event) => setKnowledgeScope(event.target.value)}
-                placeholder="shared-formatting"
-                value={knowledgeScope}
-              />
-            </label>
+      <details className="advanced-disclosure">
+        <summary>
+          <div>
+            <strong>Capture Project Knowledge</strong>
+            <p>Optional note capture for reusable conventions, constraints, or implementation findings.</p>
           </div>
-          <label className="form-field">
-            <span>Guidance</span>
-            <textarea
-              className="text-area-input"
+          <span>optional</span>
+        </summary>
+        <div className="advanced-disclosure-body">
+          <form className="followup-form" onSubmit={(event) => void handleKnowledge(event)}>
+            <div className="followup-form-grid">
+              <label className="form-field">
+                <span>Entry Title</span>
+                <input
+                  className="text-input"
+                  disabled={busy}
+                  onChange={(event) => setKnowledgeTitle(event.target.value)}
+                  placeholder="Reuse existing formatter helper"
+                  value={knowledgeTitle}
+                />
+              </label>
+              <label className="form-field">
+                <span>Directory / Scope</span>
+                <input
+                  className="text-input"
+                  disabled={busy}
+                  onChange={(event) => setKnowledgeScope(event.target.value)}
+                  placeholder="shared-formatting"
+                  value={knowledgeScope}
+                />
+              </label>
+            </div>
+            <label className="form-field">
+              <span>Guidance</span>
+              <textarea
+                className="text-area-input"
+                disabled={busy}
+                onChange={(event) => setKnowledgeGuidance(event.target.value)}
+                placeholder="Do not introduce a new helper here; use the existing shared formatter already used in this module."
+                rows={4}
+                value={knowledgeGuidance}
+              />
+            </label>
+            <button
+              className="action-button"
               disabled={busy}
-              onChange={(event) => setKnowledgeGuidance(event.target.value)}
-              placeholder="Do not introduce a new helper here; use the existing shared formatter already used in this module."
-              rows={4}
-              value={knowledgeGuidance}
-            />
-          </label>
-          <button
-            className="action-button"
-            disabled={busy}
-            title="Create a reusable knowledge entry from this task for future sessions."
-            type="submit"
-          >
-            Create Knowledge Entry
-          </button>
-        </form>
-      </div>
+              title="Create a reusable knowledge entry from this task for future sessions."
+              type="submit"
+            >
+              Create Knowledge Entry
+            </button>
+          </form>
+        </div>
+      </details>
 
       {error ? <p className="error-banner">{error}</p> : null}
     </section>

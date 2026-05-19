@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { apiClient } from "../api/client";
 import { roleDisplayName } from "../roleDisplay";
+import { workflowProfileDisplayName } from "../sessionDisplay";
 import type {
   RequirementsClarificationMode,
   RuntimeCapabilitiesSummary,
@@ -36,6 +37,16 @@ const REQUIREMENTS_CLARIFICATION_OPTIONS: RequirementsClarificationMode[] = [
   "ask-selectively",
   "autonomous",
 ];
+const POLICY_OPTION_LABELS: Record<SessionPolicyValue, string> = {
+  disabled: "Disabled",
+  enabled: "Agent decides",
+  required: "Required",
+};
+const REQUIREMENTS_CLARIFICATION_LABELS: Record<RequirementsClarificationMode, string> = {
+  "ask-a-lot": "Ask often",
+  "ask-selectively": "Ask selectively",
+  autonomous: "Stay autonomous",
+};
 
 const POLICY_DEFAULT_DESCRIPTIONS: Record<
   "test_policy" | "self_review_policy" | "boy_scout_policy" | "doc_harvest_policy",
@@ -303,11 +314,11 @@ export function RuntimeDefaultsPanel({
 
       <div className="runtime-default-card">
         <div className="inline-summary-header">
-          <strong>Default Runtime Baseline</strong>
+          <strong>Project Baseline</strong>
           <span>{runtimeDefaults?.knownRoles.length ?? 0} known roles</span>
         </div>
         <p className="form-help">
-          This runner becomes the inherited baseline for roles that do not carry an explicit override.
+          New sessions inherit this runner unless a lane has a specific override below.
         </p>
         <label className="form-field">
           <span>Default Runner</span>
@@ -328,7 +339,10 @@ export function RuntimeDefaultsPanel({
 
       <div className="runtime-defaults-list">
         <div className="runtime-default-card">
-          <strong>oneshot policy defaults</strong>
+          <div className="inline-summary-header">
+            <strong>{workflowProfileDisplayName("oneshot")}</strong>
+            <span>direct execution</span>
+          </div>
           <p className="form-help">
             Baseline policy for direct implementation flows without story planning or bug-specific branches.
           </p>
@@ -346,7 +360,7 @@ export function RuntimeDefaultsPanel({
               >
                 {POLICY_OPTIONS.map((value) => (
                   <option key={`oneshot-self-review-${value}`} value={value}>
-                    {value}
+                    {POLICY_OPTION_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -364,7 +378,7 @@ export function RuntimeDefaultsPanel({
               >
                 {POLICY_OPTIONS.map((value) => (
                   <option key={`oneshot-boy-scout-${value}`} value={value}>
-                    {value}
+                    {POLICY_OPTION_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -383,7 +397,7 @@ export function RuntimeDefaultsPanel({
             >
               {POLICY_OPTIONS.map((value) => (
                 <option key={`oneshot-doc-harvest-${value}`} value={value}>
-                  {value}
+                  {POLICY_OPTION_LABELS[value]}
                 </option>
               ))}
             </select>
@@ -391,7 +405,10 @@ export function RuntimeDefaultsPanel({
         </div>
 
         <div className="runtime-default-card">
-          <strong>bug_full policy defaults</strong>
+          <div className="inline-summary-header">
+            <strong>{workflowProfileDisplayName("bug_full")}</strong>
+            <span>bug recovery</span>
+          </div>
           <p className="form-help">
             Defaults for bug flows, including whether testing becomes an automatic, optional, or mandatory lane.
           </p>
@@ -409,7 +426,7 @@ export function RuntimeDefaultsPanel({
               >
                 {POLICY_OPTIONS.map((value) => (
                   <option key={`bug-test-${value}`} value={value}>
-                    {value}
+                    {POLICY_OPTION_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -427,7 +444,7 @@ export function RuntimeDefaultsPanel({
               >
                 {POLICY_OPTIONS.map((value) => (
                   <option key={`bug-self-review-${value}`} value={value}>
-                    {value}
+                    {POLICY_OPTION_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -447,7 +464,7 @@ export function RuntimeDefaultsPanel({
               >
                 {POLICY_OPTIONS.map((value) => (
                   <option key={`bug-boy-scout-${value}`} value={value}>
-                    {value}
+                    {POLICY_OPTION_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -465,7 +482,7 @@ export function RuntimeDefaultsPanel({
               >
                 {POLICY_OPTIONS.map((value) => (
                   <option key={`bug-doc-harvest-${value}`} value={value}>
-                    {value}
+                    {POLICY_OPTION_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -474,7 +491,10 @@ export function RuntimeDefaultsPanel({
         </div>
 
         <div className="runtime-default-card">
-          <strong>story_full policy defaults</strong>
+          <div className="inline-summary-header">
+            <strong>{workflowProfileDisplayName("story_full")}</strong>
+            <span>planning + execution</span>
+          </div>
           <p className="form-help">
             Defaults for the full story planning pipeline, including clarification behavior before implementation begins.
           </p>
@@ -492,7 +512,7 @@ export function RuntimeDefaultsPanel({
               >
                 {POLICY_OPTIONS.map((value) => (
                   <option key={`story-self-review-${value}`} value={value}>
-                    {value}
+                    {POLICY_OPTION_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -510,7 +530,7 @@ export function RuntimeDefaultsPanel({
               >
                 {POLICY_OPTIONS.map((value) => (
                   <option key={`story-boy-scout-${value}`} value={value}>
-                    {value}
+                    {POLICY_OPTION_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -530,7 +550,7 @@ export function RuntimeDefaultsPanel({
               >
                 {POLICY_OPTIONS.map((value) => (
                   <option key={`story-doc-harvest-${value}`} value={value}>
-                    {value}
+                    {POLICY_OPTION_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -552,7 +572,7 @@ export function RuntimeDefaultsPanel({
               >
                 {REQUIREMENTS_CLARIFICATION_OPTIONS.map((value) => (
                   <option key={`story-clarification-${value}`} value={value}>
-                    {value}
+                    {REQUIREMENTS_CLARIFICATION_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -561,12 +581,12 @@ export function RuntimeDefaultsPanel({
         </div>
       </div>
 
-      <details
-        className="advanced-disclosure"
-        open={showRoleDefaults}
-        onToggle={(event) => setShowRoleDefaults((event.currentTarget as HTMLDetailsElement).open)}
-      >
-        <summary>
+      <div className="advanced-disclosure">
+        <button
+          className="advanced-disclosure-toggle"
+          onClick={() => setShowRoleDefaults((current) => !current)}
+          type="button"
+        >
           <div>
             <strong>Advanced Role Overrides</strong>
             <p>
@@ -574,75 +594,78 @@ export function RuntimeDefaultsPanel({
             </p>
           </div>
           <span>{runtimeDefaults?.knownRoles.length ?? 0} roles</span>
-        </summary>
-        <div className="advanced-disclosure-body runtime-defaults-list">
-          {runtimeDefaults?.knownRoles.map((roleName) => {
-            const draft = roleDefaults[roleName];
-            const runnerCapability = runnerIndex.get(draft?.runner ?? "");
-            const models = runnerCapability?.models ?? [];
-            const modelCapability = models.find((item) => item.id === draft?.model);
-            const efforts = modelCapability?.supportedEfforts ?? [];
-            return (
-              <div key={roleName} className="runtime-default-card">
-                <div className="inline-summary-header">
-                  <strong>{roleDisplayName(roleName)}</strong>
-                  <span>{draft?.runner ?? "runner?"}</span>
-                </div>
-                <p className="form-help">
-                  Internal id: {roleName}. These values prefill new sessions only when a specific lane should diverge from the project baseline.
-                </p>
-                <div className="followup-form-grid">
+        </button>
+        {showRoleDefaults ? (
+          <div className="advanced-disclosure-body runtime-defaults-list">
+            {runtimeDefaults?.knownRoles.map((roleName) => {
+              const draft = roleDefaults[roleName];
+              const runnerCapability = runnerIndex.get(draft?.runner ?? "");
+              const models = runnerCapability?.models ?? [];
+              const modelCapability = models.find((item) => item.id === draft?.model);
+              const efforts = modelCapability?.supportedEfforts ?? [];
+              return (
+                <div key={roleName} className="runtime-default-card">
+                  <div className="inline-summary-header">
+                    <strong>{roleDisplayName(roleName)}</strong>
+                    <span>{draft?.runner ?? "runner?"}</span>
+                  </div>
+                  <p className="form-help">
+                    Use this only when one lane should consistently diverge from the project baseline for new sessions.
+                  </p>
+                  <p className="path-label">Lane id: {roleName}</p>
+                  <div className="followup-form-grid">
+                    <label className="form-field">
+                      <span>Runner</span>
+                      <select
+                        className="select-input"
+                        disabled={busy || runtimeCapabilities === null}
+                        onChange={(event) => updateRoleDefault(roleName, { runner: event.target.value })}
+                        value={draft?.runner ?? ""}
+                      >
+                        {(runtimeCapabilities?.availableRunners ?? []).map((runner) => (
+                          <option key={runner} value={runner}>
+                            {runner}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="form-field">
+                      <span>Model</span>
+                      <select
+                        className="select-input"
+                        disabled={busy}
+                        onChange={(event) => updateRoleDefault(roleName, { model: event.target.value })}
+                        value={draft?.model ?? ""}
+                      >
+                        {models.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                   <label className="form-field">
-                    <span>Runner</span>
-                    <select
-                      className="select-input"
-                      disabled={busy || runtimeCapabilities === null}
-                      onChange={(event) => updateRoleDefault(roleName, { runner: event.target.value })}
-                      value={draft?.runner ?? ""}
-                    >
-                      {(runtimeCapabilities?.availableRunners ?? []).map((runner) => (
-                        <option key={runner} value={runner}>
-                          {runner}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    <span>Model</span>
+                    <span>Effort</span>
                     <select
                       className="select-input"
                       disabled={busy}
-                      onChange={(event) => updateRoleDefault(roleName, { model: event.target.value })}
-                      value={draft?.model ?? ""}
+                      onChange={(event) => updateRoleDefault(roleName, { effort: event.target.value })}
+                      value={draft?.effort ?? ""}
                     >
-                      {models.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.label}
+                      {efforts.map((effort) => (
+                        <option key={effort} value={effort}>
+                          {effort}
                         </option>
                       ))}
                     </select>
                   </label>
                 </div>
-                <label className="form-field">
-                  <span>Effort</span>
-                  <select
-                    className="select-input"
-                    disabled={busy}
-                    onChange={(event) => updateRoleDefault(roleName, { effort: event.target.value })}
-                    value={draft?.effort ?? ""}
-                  >
-                    {efforts.map((effort) => (
-                      <option key={effort} value={effort}>
-                        {effort}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            );
-          })}
-        </div>
-      </details>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
 
       <button
         className="action-button action-button-strong"
@@ -654,7 +677,7 @@ export function RuntimeDefaultsPanel({
         Save Runtime Defaults
       </button>
 
-      {runtimeDefaults ? <p className="path-label">Stored in: {runtimeDefaults.sourcePath}</p> : null}
+      {runtimeDefaults ? <p className="path-label">Stored in project config: {runtimeDefaults.sourcePath}</p> : null}
       {error ? <p className="error-banner">{error}</p> : null}
     </section>
   );

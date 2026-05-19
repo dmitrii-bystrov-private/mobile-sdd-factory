@@ -1,4 +1,26 @@
 import type { Artifact, EventItem } from "../types";
+import { stageDisplayName } from "../stageDisplay";
+
+function humanizeEventType(value: string): string {
+  return value
+    .split("_")
+    .filter((part) => part.length > 0)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function producerDisplayName(value: string): string {
+  if (value === "coordinator") {
+    return "Coordinator";
+  }
+  if (value === "role") {
+    return "Role Runtime";
+  }
+  if (value === "operator") {
+    return "Operator";
+  }
+  return humanizeEventType(value);
+}
 
 type ArtifactPanelProps = {
   artifacts: Artifact[];
@@ -28,8 +50,8 @@ export function ArtifactPanel({
             {artifacts.map((artifact) => (
               <div className="table-row" key={artifact.id}>
                 <div>
-                  <strong>{artifact.artifact_type}</strong>
-                  <p>{artifact.stage_name}</p>
+                  <strong>{humanizeEventType(artifact.artifact_type)}</strong>
+                  <p>{stageDisplayName(artifact.stage_name)}</p>
                 </div>
                 <small className="path-label">{artifact.path}</small>
               </div>
@@ -46,8 +68,8 @@ export function ArtifactPanel({
             {events.map((event) => (
               <div className="table-row" key={event.id}>
                 <div>
-                  <strong>{event.event_type}</strong>
-                  <p>{event.producer_type}</p>
+                  <strong>{humanizeEventType(event.event_type)}</strong>
+                  <p>{producerDisplayName(event.producer_type)}</p>
                 </div>
                 <small>#{event.id}</small>
               </div>

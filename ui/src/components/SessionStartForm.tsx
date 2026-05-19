@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { apiClient } from "../api/client";
 import { roleDisplayName } from "../roleDisplay";
+import { workflowProfileDisplayName } from "../sessionDisplay";
 import type {
   RequirementsClarificationMode,
   RuntimeCapabilitiesSummary,
@@ -22,6 +23,16 @@ const REQUIREMENTS_CLARIFICATION_OPTIONS: RequirementsClarificationMode[] = [
   "ask-selectively",
   "autonomous",
 ];
+const POLICY_OPTION_LABELS: Record<SessionPolicyValue, string> = {
+  disabled: "Disabled",
+  enabled: "Agent decides",
+  required: "Required",
+};
+const REQUIREMENTS_CLARIFICATION_LABELS: Record<RequirementsClarificationMode, string> = {
+  "ask-a-lot": "Ask often",
+  "ask-selectively": "Ask selectively",
+  autonomous: "Stay autonomous",
+};
 
 const WORKFLOW_PROFILE_DESCRIPTIONS: Record<WorkflowProfile, string> = {
   oneshot: "Single-task flow without story decomposition or bug-only recovery lanes.",
@@ -352,16 +363,16 @@ export function SessionStartForm({
             onChange={(event) => setWorkflowProfile(event.target.value as WorkflowProfile)}
             value={workflowProfile}
           >
-            <option value="oneshot">oneshot</option>
-            <option value="bug_full">bug_full</option>
-            <option value="story_full">story_full</option>
+            <option value="oneshot">{workflowProfileDisplayName("oneshot")}</option>
+            <option value="bug_full">{workflowProfileDisplayName("bug_full")}</option>
+            <option value="story_full">{workflowProfileDisplayName("story_full")}</option>
           </select>
         </label>
         <p className="form-help">{WORKFLOW_PROFILE_DESCRIPTIONS[workflowProfile]}</p>
 
         <div className="inline-summary-card">
           <div className="inline-summary-header">
-            <strong>{workflowProfile}</strong>
+            <strong>{workflowProfileDisplayName(workflowProfile)}</strong>
             <span>{effectiveRoleNames.length} active lanes</span>
           </div>
           <p className="form-help">
@@ -394,7 +405,7 @@ export function SessionStartForm({
               >
                 {POLICY_OPTIONS.map((value) => (
                   <option key={value} value={value}>
-                    {value}
+                    {POLICY_OPTION_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -413,7 +424,7 @@ export function SessionStartForm({
           >
             {POLICY_OPTIONS.map((value) => (
               <option key={value} value={value}>
-                {value}
+                {POLICY_OPTION_LABELS[value]}
               </option>
             ))}
           </select>
@@ -430,7 +441,7 @@ export function SessionStartForm({
           >
             {POLICY_OPTIONS.map((value) => (
               <option key={value} value={value}>
-                {value}
+                {POLICY_OPTION_LABELS[value]}
               </option>
             ))}
           </select>
@@ -447,7 +458,7 @@ export function SessionStartForm({
           >
             {POLICY_OPTIONS.map((value) => (
               <option key={value} value={value}>
-                {value}
+                {POLICY_OPTION_LABELS[value]}
               </option>
             ))}
           </select>
@@ -471,7 +482,7 @@ export function SessionStartForm({
               >
                 {REQUIREMENTS_CLARIFICATION_OPTIONS.map((value) => (
                   <option key={value} value={value}>
-                    {value}
+                    {REQUIREMENTS_CLARIFICATION_LABELS[value]}
                   </option>
                 ))}
               </select>
@@ -483,14 +494,12 @@ export function SessionStartForm({
         ) : null}
 
         {runtimeCapabilities !== null ? (
-          <details
-            className="advanced-disclosure"
-            open={showAdvancedRoleConfig}
-            onToggle={(event) =>
-              setShowAdvancedRoleConfig((event.currentTarget as HTMLDetailsElement).open)
-            }
-          >
-            <summary>
+          <div className="advanced-disclosure">
+            <button
+              className="advanced-disclosure-toggle"
+              onClick={() => setShowAdvancedRoleConfig((current) => !current)}
+              type="button"
+            >
               <div>
                 <strong>Advanced Runtime Overrides</strong>
                 <p>
@@ -498,80 +507,82 @@ export function SessionStartForm({
                 </p>
               </div>
               <span>{effectiveRoleNames.length} lanes · {enabledOptionalLaneCount} optional lanes enabled</span>
-            </summary>
-            <div className="advanced-disclosure-body artifact-stack">
-              <p className="path-label">
-                These values are prefilled from Runtime Defaults. Change them only when this single session needs a different runner, model, or effort than the project baseline.
-              </p>
-              {effectiveRoleNames.map((roleName) => {
-                const current = roleConfig[roleName] ?? { runner: "", model: "", effort: "" };
-                const runnerCapability = runtimeCapabilities.runners.find(
-                  (item) => item.runner === current.runner,
-                );
-                const models = runnerCapability?.models ?? [];
-                const modelCapability = models.find((item) => item.id === current.model) ?? null;
+            </button>
+            {showAdvancedRoleConfig ? (
+              <div className="advanced-disclosure-body artifact-stack">
+                <p className="path-label">
+                  These values are prefilled from Runtime Defaults. Change them only when this single session needs a different runner, model, or effort than the project baseline.
+                </p>
+                {effectiveRoleNames.map((roleName) => {
+                  const current = roleConfig[roleName] ?? { runner: "", model: "", effort: "" };
+                  const runnerCapability = runtimeCapabilities.runners.find(
+                    (item) => item.runner === current.runner,
+                  );
+                  const models = runnerCapability?.models ?? [];
+                  const modelCapability = models.find((item) => item.id === current.model) ?? null;
 
-                return (
-                  <article className="artifact-card" key={roleName}>
-                    <div className="artifact-meta">
-                      <span>{roleName}</span>
-                      <strong>{roleDisplayName(roleName)} · {current.runner || "unconfigured"}</strong>
-                    </div>
-                    <p className="form-help">
-                      Session-only override for the {roleDisplayName(roleName)} lane.
-                    </p>
+                  return (
+                    <article className="artifact-card" key={roleName}>
+                      <div className="artifact-meta">
+                        <span>{roleName}</span>
+                        <strong>{roleDisplayName(roleName)} · {current.runner || "unconfigured"}</strong>
+                      </div>
+                      <p className="form-help">
+                        Session-only override for the {roleDisplayName(roleName)} lane.
+                      </p>
 
-                    <label className="form-field">
-                      <span>Runner</span>
-                      <select
-                        className="select-input"
-                        onChange={(event) =>
-                          updateRoleConfig(roleName, { runner: event.target.value, model: "", effort: "" })
-                        }
-                        value={current.runner}
-                      >
-                        {runtimeCapabilities.availableRunners.map((runnerName) => (
-                          <option key={`${roleName}-${runnerName}`} value={runnerName}>
-                            {runnerName}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <label className="form-field">
+                        <span>Runner</span>
+                        <select
+                          className="select-input"
+                          onChange={(event) =>
+                            updateRoleConfig(roleName, { runner: event.target.value, model: "", effort: "" })
+                          }
+                          value={current.runner}
+                        >
+                          {runtimeCapabilities.availableRunners.map((runnerName) => (
+                            <option key={`${roleName}-${runnerName}`} value={runnerName}>
+                              {runnerName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                    <label className="form-field">
-                      <span>Model</span>
-                      <select
-                        className="select-input"
-                        onChange={(event) => updateRoleConfig(roleName, { model: event.target.value, effort: "" })}
-                        value={current.model}
-                      >
-                        {models.map((model) => (
-                          <option key={`${roleName}-${model.id}`} value={model.id}>
-                            {model.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                      <label className="form-field">
+                        <span>Model</span>
+                        <select
+                          className="select-input"
+                          onChange={(event) => updateRoleConfig(roleName, { model: event.target.value, effort: "" })}
+                          value={current.model}
+                        >
+                          {models.map((model) => (
+                            <option key={`${roleName}-${model.id}`} value={model.id}>
+                              {model.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
 
-                    <label className="form-field">
-                      <span>Effort</span>
-                      <select
-                        className="select-input"
-                        onChange={(event) => updateRoleConfig(roleName, { effort: event.target.value })}
-                        value={current.effort}
-                      >
-                        {(modelCapability?.supportedEfforts ?? []).map((effort) => (
-                          <option key={`${roleName}-${current.model}-${effort}`} value={effort}>
-                            {effort}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </article>
-                );
-              })}
-            </div>
-          </details>
+                      <label className="form-field">
+                        <span>Effort</span>
+                        <select
+                          className="select-input"
+                          onChange={(event) => updateRoleConfig(roleName, { effort: event.target.value })}
+                          value={current.effort}
+                        >
+                          {(modelCapability?.supportedEfforts ?? []).map((effort) => (
+                            <option key={`${roleName}-${current.model}-${effort}`} value={effort}>
+                              {effort}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         <button

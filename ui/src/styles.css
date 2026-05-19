@@ -502,27 +502,28 @@ input {
   background: rgba(255, 255, 255, 0.03);
 }
 
-.advanced-disclosure summary {
-  list-style: none;
+.advanced-disclosure-toggle {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   cursor: pointer;
+  text-align: left;
 }
 
-.advanced-disclosure summary::-webkit-details-marker {
-  display: none;
-}
-
-.advanced-disclosure summary p {
+.advanced-disclosure-toggle p {
   margin: 6px 0 0;
   color: var(--ink-soft);
   font-size: 0.84rem;
   line-height: 1.4;
 }
 
-.advanced-disclosure summary span {
+.advanced-disclosure-toggle span {
   color: var(--ink-soft);
   font-size: 0.78rem;
   text-transform: uppercase;

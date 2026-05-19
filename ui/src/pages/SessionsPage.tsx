@@ -715,10 +715,12 @@ export function SessionsPage(): JSX.Element {
                 {runtimeDefaultsSummary ? (
                   <div className="inline-summary-card">
                     <div className="inline-summary-header">
-                      <strong>Defaults File</strong>
+                      <strong>Configured roles</strong>
                       <span>{runtimeDefaultsSummary.knownRoles.length} roles</span>
                     </div>
-                    <p className="form-help">{runtimeDefaultsSummary.sourcePath}</p>
+                    <p className="form-help">
+                      Project defaults are stored locally and applied to new sessions automatically.
+                    </p>
                   </div>
                 ) : null}
               </div>
@@ -745,10 +747,10 @@ export function SessionsPage(): JSX.Element {
                 {bootstrapGuidanceSummary ? (
                   <div className="inline-summary-card">
                     <div className="inline-summary-header">
-                      <strong>Launch Stack</strong>
+                      <strong>Next setup step</strong>
                       <span>{bootstrapGuidanceSummary.overallStatus}</span>
                     </div>
-                    <p className="form-help">{bootstrapGuidanceSummary.launchCommand}</p>
+                    <p className="form-help">{bootstrapGuidanceSummary.nextStep}</p>
                   </div>
                 ) : null}
               </div>

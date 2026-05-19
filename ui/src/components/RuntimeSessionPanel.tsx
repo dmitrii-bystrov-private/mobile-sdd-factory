@@ -11,6 +11,19 @@ type RuntimeSessionPanelProps = {
   onRefresh: () => Promise<void>;
 };
 
+function runtimeRoleStatusLabel(status: string): string {
+  switch (status) {
+    case "running":
+      return "Live";
+    case "stopped":
+      return "Stopped";
+    case "waiting":
+      return "Waiting";
+    default:
+      return status;
+  }
+}
+
 export function RuntimeSessionPanel({
   runtimeStateSummary,
   session,
@@ -18,6 +31,7 @@ export function RuntimeSessionPanel({
 }: RuntimeSessionPanelProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showCleanup, setShowCleanup] = useState(false);
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
@@ -45,30 +59,31 @@ export function RuntimeSessionPanel({
         <p className="path-label">Runtime session state is not available.</p>
       ) : (
         <>
+          {(() => {
+            const visibleRoles = runtimeStateSummary.roles.filter((role) => role.roleName !== "task-coordinator");
+            return (
+              <>
+          <p className="path-label">
+            Use runtime controls only when the live lane infrastructure itself needs intervention. Normal task handling should stay in the operator actions above.
+          </p>
+
           <div className="table-list">
             <div className="table-row">
-              <span>Runtime session</span>
-              <strong>{runtimeStateSummary.runtimeSessionId ?? "unknown"}</strong>
+              <span>Live lanes</span>
+              <strong>
+                {visibleRoles.filter((role) => role.status === "running").length}/
+                {visibleRoles.length}
+              </strong>
             </div>
             <div className="table-row">
-              <span>tmux socket</span>
-              <strong>{runtimeStateSummary.tmuxSocketPath ?? "n/a"}</strong>
+              <span>Stopped lanes</span>
+              <strong>{visibleRoles.filter((role) => role.status === "stopped").length}</strong>
             </div>
             <div className="table-row">
-              <span>Role count</span>
-              <strong>{runtimeStateSummary.roles.length}</strong>
+              <span>Session runtime</span>
+              <strong>{runtimeStateSummary.runtimeSessionId ? "Available" : "Unknown"}</strong>
             </div>
           </div>
-
-          {runtimeStateSummary.tmuxAttachCommand ? (
-            <div className="artifact-card">
-              <div className="artifact-meta">
-                <span>tmux</span>
-                <strong>Attach Session</strong>
-              </div>
-              <pre className="artifact-path">{runtimeStateSummary.tmuxAttachCommand}</pre>
-            </div>
-          ) : null}
 
           {runtimeStateSummary.lastAutoRecovery ? (
             <div className="artifact-card">
@@ -77,12 +92,8 @@ export function RuntimeSessionPanel({
                 <strong>{roleDisplayName(runtimeStateSummary.lastAutoRecovery.roleName)}</strong>
               </div>
               <p className="artifact-path">
-                recovered at stage {stageDisplayName(runtimeStateSummary.lastAutoRecovery.currentStage)} ·
-                event #{runtimeStateSummary.lastAutoRecovery.eventId}
-              </p>
-              <p className="artifact-path">
-                replaced {runtimeStateSummary.lastAutoRecovery.deadRuntimeHandle ?? "unknown handle"} with{" "}
-                {runtimeStateSummary.lastAutoRecovery.runtimeHandle ?? "unknown handle"}
+                Runtime recovery already happened at {stageDisplayName(runtimeStateSummary.lastAutoRecovery.currentStage)}.
+                Latest recovery event: #{runtimeStateSummary.lastAutoRecovery.eventId}.
               </p>
             </div>
           ) : null}
@@ -90,7 +101,7 @@ export function RuntimeSessionPanel({
           <div className="actions-grid">
             <button
               className="action-button"
-              disabled={busy || runtimeStateSummary.roles.every((role) => role.status === "stopped")}
+              disabled={busy || visibleRoles.every((role) => role.status === "stopped")}
               onClick={() => run(() => apiClient.stopRuntimeSession(session.id))}
               title="Stop every live role runtime in this session while keeping the task files intact."
               type="button"
@@ -99,7 +110,7 @@ export function RuntimeSessionPanel({
             </button>
             <button
               className="action-button"
-              disabled={busy || runtimeStateSummary.roles.some((role) => role.status !== "stopped")}
+              disabled={busy || visibleRoles.some((role) => role.status !== "stopped")}
               onClick={() => run(() => apiClient.restartRuntimeSession(session.id))}
               title="Start the stopped runtime session again and relaunch its role runtimes."
               type="button"
@@ -118,21 +129,19 @@ export function RuntimeSessionPanel({
           </div>
 
           <div className="artifact-stack">
-            {runtimeStateSummary.roles.map((role) => (
+            {visibleRoles.map((role) => (
               <article className="artifact-card" key={role.roleName}>
                 <div className="artifact-meta">
-                  <span>{role.status}</span>
+                  <span>{runtimeRoleStatusLabel(role.status)}</span>
                   <strong>{roleDisplayName(role.roleName)}</strong>
                 </div>
                 <p className="artifact-path">
-                  {role.runtimeBackend} · {role.runtimeHandle ?? "no handle"}
+                  {role.status === "running"
+                    ? "This lane currently has a live runtime."
+                    : role.status === "stopped"
+                      ? "This lane is currently stopped."
+                      : "This lane is waiting on runtime or orchestration state."}
                 </p>
-                {role.tmuxAttachCommand ? (
-                  <pre className="artifact-path">{role.tmuxAttachCommand}</pre>
-                ) : null}
-                {role.tmuxCaptureCommand ? (
-                  <pre className="artifact-path">{role.tmuxCaptureCommand}</pre>
-                ) : null}
                 <button
                   className="action-button"
                   disabled={busy || role.runtimeHandle === null || role.status === "stopped"}
@@ -151,42 +160,96 @@ export function RuntimeSessionPanel({
                 >
                   Restart Role Runtime
                 </button>
+                {(role.tmuxAttachCommand || role.tmuxCaptureCommand || role.runtimeHandle) ? (
+                  <details className="advanced-disclosure">
+                    <summary>
+                      <div>
+                        <strong>Advanced Runtime Details</strong>
+                        <p>Low-level runtime inspection for debugging only.</p>
+                      </div>
+                      <span>{role.runtimeBackend}</span>
+                    </summary>
+                    <div className="advanced-disclosure-body">
+                      <p className="artifact-path">Runtime inspection details for this lane.</p>
+                      {role.tmuxAttachCommand ? (
+                        <pre className="artifact-path">{role.tmuxAttachCommand}</pre>
+                      ) : null}
+                      {role.tmuxCaptureCommand ? (
+                        <pre className="artifact-path">{role.tmuxCaptureCommand}</pre>
+                      ) : null}
+                    </div>
+                  </details>
+                ) : null}
               </article>
             ))}
           </div>
+
+          {(runtimeStateSummary.tmuxAttachCommand || runtimeStateSummary.tmuxSocketPath) ? (
+            <details className="advanced-disclosure">
+              <summary>
+                <div>
+                  <strong>Advanced Session Runtime Details</strong>
+                  <p>Session-wide tmux/runtime plumbing for debugging only.</p>
+                </div>
+                <span>debug</span>
+              </summary>
+              <div className="advanced-disclosure-body">
+                {runtimeStateSummary.tmuxSocketPath ? (
+                  <p className="artifact-path">Socket path available for low-level debugging.</p>
+                ) : null}
+                {runtimeStateSummary.tmuxAttachCommand ? (
+                  <pre className="artifact-path">{runtimeStateSummary.tmuxAttachCommand}</pre>
+                ) : null}
+              </div>
+            </details>
+          ) : null}
+              </>
+            );
+          })()}
         </>
       )}
 
-      <div className="artifact-card">
-        <div className="artifact-meta">
-          <span>cleanup</span>
-          <strong>Task Cleanup</strong>
-        </div>
-        <p className="path-label">
-          Soft cleanup stops live runtime and removes task-local runtime residue while keeping the
-          task worktree. Full cleanup removes the whole task snapshot and worktree; force mode
-          skips the closed-status gate.
-        </p>
-        <div className="actions-grid">
-          <button
-            className="action-button"
-            disabled={busy}
-            onClick={() => run(() => apiClient.cleanupTask(session.id, "soft"))}
-            title="Stop runtime and remove task-local runtime residue while keeping the task worktree and snapshot."
-            type="button"
-          >
-            Clean Runtime Residue
-          </button>
-          <button
-            className="action-button"
-            disabled={busy}
-            onClick={() => run(() => apiClient.cleanupTask(session.id, "full"))}
-            title="Remove the full task snapshot and worktree only if the task status allows closed-task cleanup."
-            type="button"
-          >
-            Full Cleanup If Closed
-          </button>
-        </div>
+      <div className="advanced-disclosure">
+        <button
+          className="advanced-disclosure-toggle"
+          onClick={() => setShowCleanup((value) => !value)}
+          type="button"
+        >
+          <div>
+            <strong>Cleanup And Residue Removal</strong>
+            <p>Use only when this task needs runtime cleanup or teardown beyond the normal flow.</p>
+          </div>
+          <span>{showCleanup ? "hide" : "show"}</span>
+        </button>
+        {showCleanup ? (
+          <div className="advanced-disclosure-body">
+            <p className="path-label">
+              Soft cleanup stops live runtime and removes task-local runtime residue while keeping the
+              task worktree. Full cleanup removes the whole task snapshot and worktree only when the task
+              is already closed.
+            </p>
+            <div className="actions-grid">
+              <button
+                className="action-button"
+                disabled={busy}
+                onClick={() => run(() => apiClient.cleanupTask(session.id, "soft"))}
+                title="Stop runtime and remove task-local runtime residue while keeping the task worktree and snapshot."
+                type="button"
+              >
+                Clean Runtime Residue
+              </button>
+              <button
+                className="action-button"
+                disabled={busy}
+                onClick={() => run(() => apiClient.cleanupTask(session.id, "full"))}
+                title="Remove the full task snapshot and worktree only if the task status allows closed-task cleanup."
+                type="button"
+              >
+                Full Cleanup If Closed
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {error ? <p className="error-banner">{error}</p> : null}

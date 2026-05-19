@@ -13,6 +13,7 @@ import { roleDisplayName } from "../roleDisplay";
 import {
   sessionPolicyLabel,
   sessionPolicyValueLabel,
+  sessionStatusDisplayName,
   workflowProfileDisplayName,
 } from "../sessionDisplay";
 import { stageDisplayName } from "../stageDisplay";
@@ -38,6 +39,36 @@ export function SessionDetail({
     );
   }
 
+  const blockerSummary = bundle.interactiveStateSummary?.summary;
+  const currentOwner = session.current_owner ? roleDisplayName(session.current_owner) : "Not assigned yet";
+  const currentStage = stageDisplayName(session.current_stage);
+  const currentFocusTitle =
+    session.status === "waiting_for_operator"
+      ? "Operator attention needed"
+      : session.status === "active"
+        ? "Work is in progress"
+        : session.status === "paused"
+          ? "Session is paused"
+          : session.status === "completed"
+            ? "Session is complete"
+            : "Session state";
+  const currentFocusBody =
+    session.status === "waiting_for_operator"
+        ? blockerSummary ??
+        `The flow is blocked at ${currentStage}. Check the operator actions and blocker panel first.`
+      : session.status === "active"
+        ? session.current_owner
+          ? `The workflow is currently at ${currentStage} with ${currentOwner} owning the live lane.`
+          : `The workflow is currently at ${currentStage}. No single lane has taken ownership yet.`
+        : session.status === "paused"
+          ? `The workflow is paused at ${currentStage}. Resume it when the external blocker is cleared.`
+          : session.status === "completed"
+            ? "The main flow has completed. Use follow-up actions only if new MR, QA, or snapshot updates arrive."
+            : `Current stage: ${currentStage}.`;
+  const roleCount = bundle.roles.length;
+  const runningRoleCount = bundle.roles.filter((role) => role.status === "running").length;
+  const blockedRoleCount = bundle.roles.filter((role) => role.status === "waiting").length;
+
   return (
     <section className="detail-layout">
       <div className="panel hero-panel">
@@ -51,14 +82,14 @@ export function SessionDetail({
             Stage: <strong>{stageDisplayName(session.current_stage)}</strong>
           </p>
           <p className="hero-meta">
-            Owner: <strong>{session.current_owner ? roleDisplayName(session.current_owner) : "unowned"}</strong>
+            Owner: <strong>{currentOwner}</strong>
           </p>
         </div>
         <div className="hero-stats">
-          <div className="metric-card">
-            <span>Status</span>
-            <strong>{session.status}</strong>
-          </div>
+            <div className="metric-card">
+              <span>Status</span>
+              <strong>{sessionStatusDisplayName(session.status)}</strong>
+            </div>
           <div className="metric-card">
             <span>Roles</span>
             <strong>{bundle.roles.length}</strong>
@@ -75,6 +106,26 @@ export function SessionDetail({
       </div>
 
       <div className="grid-two">
+            <section className="subpanel">
+          <div className="subpanel-head">
+            <strong>Current Focus</strong>
+            <span className={`status-pill status-${session.status}`}>
+              {sessionStatusDisplayName(session.status)}
+            </span>
+          </div>
+          <div className="stack-tight">
+            <strong>{currentFocusTitle}</strong>
+            <p>{currentFocusBody}</p>
+            <div className="inline-pill-row">
+              <span className="inline-pill">stage: {currentStage}</span>
+              <span className="inline-pill">owner: {currentOwner}</span>
+              <span className="inline-pill">running lanes: {runningRoleCount}/{roleCount}</span>
+              {blockedRoleCount > 0 ? (
+                <span className="inline-pill">blocked lanes: {blockedRoleCount}</span>
+              ) : null}
+            </div>
+          </div>
+        </section>
         <section className="subpanel">
           <div className="subpanel-head">
             <strong>Session Policy</strong>
@@ -94,30 +145,32 @@ export function SessionDetail({
         />
       </div>
 
-      <FollowupContextPanel followupContext={bundle.followupContext} />
-      <InteractiveStatePanel interactiveStateSummary={bundle.interactiveStateSummary} />
-      <RuntimeSessionPanel
-        onRefresh={onRefresh}
-        runtimeStateSummary={bundle.runtimeStateSummary}
-        session={session}
-      />
-      <JiraSubtasksPanel
-        jiraSubtasksSummary={bundle.jiraSubtasksSummary}
-        subtaskGraphSummary={bundle.subtaskGraphSummary}
-        subtaskProgressSummary={bundle.subtaskProgressSummary}
-      />
-      <SubtaskProgressPanel subtaskProgressSummary={bundle.subtaskProgressSummary} />
-      <SubtaskGraphPanel subtaskGraphSummary={bundle.subtaskGraphSummary} />
-      <PlanningArtifactPanel
-        planningSummary={bundle.planningSummary}
-        workflowProfile={session.workflow_profile}
-      />
       <OperatorActions
         interactiveStateSummary={bundle.interactiveStateSummary}
         onRefresh={onRefresh}
         session={session}
       />
+
+      <InteractiveStatePanel interactiveStateSummary={bundle.interactiveStateSummary} />
       <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
+      <SubtaskProgressPanel subtaskProgressSummary={bundle.subtaskProgressSummary} />
+      <JiraSubtasksPanel
+        jiraSubtasksSummary={bundle.jiraSubtasksSummary}
+        subtaskGraphSummary={bundle.subtaskGraphSummary}
+        subtaskProgressSummary={bundle.subtaskProgressSummary}
+      />
+
+      <FollowupContextPanel followupContext={bundle.followupContext} />
+      <SubtaskGraphPanel subtaskGraphSummary={bundle.subtaskGraphSummary} />
+      <PlanningArtifactPanel
+        planningSummary={bundle.planningSummary}
+        workflowProfile={session.workflow_profile}
+      />
+      <RuntimeSessionPanel
+        onRefresh={onRefresh}
+        runtimeStateSummary={bundle.runtimeStateSummary}
+        session={session}
+      />
       <ArtifactPanel artifacts={bundle.artifacts} events={bundle.events} />
     </section>
   );
