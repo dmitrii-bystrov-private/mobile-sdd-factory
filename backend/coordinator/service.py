@@ -1316,7 +1316,11 @@ class CoordinatorService:
             },
         )
 
-        if not unresolved or session.current_stage not in {"implementation_requested", "subtask_creation_requested"}:
+        if not unresolved or session.current_stage not in {
+            "implementation_requested",
+            "subtask_creation_requested",
+            "subtask_implementation_requested",
+        }:
             return session, event, None
 
         active_item: WorkItem | None
@@ -1324,18 +1328,49 @@ class CoordinatorService:
             active_item = self._find_operator_pending_work_item(session.id)
             if active_item is not None:
                 self.work_item_repository.update_status(active_item.id, WorkItemStatus.ASSIGNED)
+        elif session.current_stage == "subtask_implementation_requested":
+            active_item = self._find_active_primary_coding_work_item(session)
         else:
             active_item = self._find_active_primary_coding_work_item(session)
         decomposition_artifact = self._latest_artifact_for_session_type(
             session.id,
             "task_decomposition_markdown",
         )
-        if (
-            active_item is None
-            or active_item.work_type != "implementation"
-            or decomposition_artifact is None
-            or subtasks is None
-        ):
+        if active_item is None or decomposition_artifact is None or subtasks is None:
+            return session, event, None
+
+        if session.current_stage == "subtask_implementation_requested":
+            if active_item.work_type != "subtask_implementation":
+                return session, event, None
+            completed_subtask_keys = {
+                parsed["key"]
+                for item in self.work_item_repository.list_for_session(session.id)
+                if item.work_type == "subtask_implementation"
+                and item.status == WorkItemStatus.COMPLETED
+                for parsed in [self._parse_subtask_work_item_title(item.title)]
+                if parsed["key"] is not None
+            }
+            active_subtask_key = self._parse_subtask_work_item_title(active_item.title)["key"]
+            queued_items = [
+                item
+                for item in self.work_item_repository.list_for_session(session.id)
+                if item.work_type == "subtask_implementation"
+                and item.status == WorkItemStatus.UNASSIGNED
+            ]
+            self._reconcile_subtask_queue_after_refresh(
+                session=session,
+                source_event=event,
+                queued_items=queued_items,
+                unresolved=[
+                    subtask
+                    for subtask in unresolved
+                    if subtask.key not in completed_subtask_keys and subtask.key != active_subtask_key
+                ],
+            )
+            session = self._get_session_or_raise(session.id)
+            return session, event, None
+
+        if active_item.work_type != "implementation":
             return session, event, None
 
         followup_event = self._enqueue_subtask_graph(

@@ -2749,6 +2749,87 @@ class SessionCreationTests(unittest.TestCase):
             )
         )
 
+    def test_refresh_subtask_state_reconciles_remaining_queue_during_active_subtask_execution(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004REFRESHQUEUE",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004REFRESHQUEUE")
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            self.coordinator.handle_operator_event(
+                session_id=session.id,
+                event_type=event_type,
+                payload={"summary": "prepared"},
+            )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload=decomposition_payload("Execution chunks prepared"),
+        )
+        self.write_statuses_file(
+            "IOS-30004REFRESHQUEUE",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004REFRESHQUEUE | Story | Parent story | In Progress |
+| IOS-30070 | Sub-task | Build data source | To Do |
+| IOS-30071 | Sub-task | Wire view state | To Do |
+""",
+        )
+        self.coordinator.refresh_subtask_state(session.id)
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-30004REFRESHQUEUE",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004REFRESHQUEUE | Story | Parent story | In Progress |
+| IOS-30070 | Sub-task | Build data source | To Do |
+| IOS-30072 | Sub-task | Cover edge cases | To Do |
+""",
+        )
+
+        updated_session, event, followup_event = self.coordinator.refresh_subtask_state(session.id)
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("subtask_state_refreshed_by_operator", event.event_type)
+        self.assertIsNone(followup_event)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertTrue(
+            any(
+                item.work_type == "subtask_implementation"
+                and item.status.value == "assigned"
+                and "IOS-30070" in item.title
+                for item in work_items
+            )
+        )
+        self.assertTrue(
+            any(
+                item.work_type == "subtask_implementation"
+                and item.status.value == "unassigned"
+                and "IOS-30072" in item.title
+                for item in work_items
+            )
+        )
+        self.assertFalse(
+            any(
+                item.work_type == "subtask_implementation"
+                and item.status.value == "unassigned"
+                and "IOS-30071" in item.title
+                for item in work_items
+            )
+        )
+
     def test_verification_failed_moves_session_back_to_implementer(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")
         self.coordinator.handle_operator_event(

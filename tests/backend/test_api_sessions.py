@@ -701,6 +701,95 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("subtask_implementation_requested", response.followup_event_type)
         self.assertEqual("subtask_implementation_requested", response.session.current_stage)
 
+    def test_refresh_subtask_state_route_reconciles_queue_during_active_subtask_execution(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005REFRESHQUEUE", workflow_profile="story_full"),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005REFRESHQUEUE"),
+            dependencies=self.dependencies,
+        )
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": "prepared"},
+                ),
+                dependencies=self.dependencies,
+            )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload=decomposition_payload("Decomposition prepared"),
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40005REFRESHQUEUE",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005REFRESHQUEUE | Story | Parent story | In Progress |",
+                    "| IOS-40140 | Sub-task | Build data source | To Do |",
+                    "| IOS-40141 | Sub-task | Wire presentation | To Do |",
+                ]
+            ),
+        )
+        refresh_subtask_state(
+            RefreshSubtaskStateRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-40005REFRESHQUEUE",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005REFRESHQUEUE | Story | Parent story | In Progress |",
+                    "| IOS-40140 | Sub-task | Build data source | To Do |",
+                    "| IOS-40142 | Sub-task | Cover edge cases | To Do |",
+                ]
+            ),
+        )
+
+        response = refresh_subtask_state(
+            RefreshSubtaskStateRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+        work_items = self.dependencies.work_item_repository.list_for_session(create_response.session.id)
+
+        self.assertTrue(response.refreshed)
+        self.assertEqual("subtask_state_refreshed_by_operator", response.event_type)
+        self.assertIsNone(response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+        self.assertTrue(
+            any(
+                item.work_type == "subtask_implementation"
+                and item.status.value == "unassigned"
+                and "IOS-40142" in item.title
+                for item in work_items
+            )
+        )
+        self.assertFalse(
+            any(
+                item.work_type == "subtask_implementation"
+                and item.status.value == "unassigned"
+                and "IOS-40141" in item.title
+                for item in work_items
+            )
+        )
+
     def test_refresh_snapshot_route_reruns_snapshot_and_ticks_loop(self) -> None:
         create_response = create_session(
             CreateSessionRequest(task_key="IOS-40005SNAP", workflow_profile="oneshot"),
