@@ -249,20 +249,23 @@ export function OperatorActions({
   const canSendToTest = session.current_stage === "send_to_test_failed";
   const canSendRuntimeInput = session.status === "waiting_for_operator";
 
-  const dailyActions: ActionDefinition[] = [
-    {
+  const dailyActions: ActionDefinition[] = [];
+  if (canRefreshSnapshot) {
+    dailyActions.push({
       label: "Process Updates",
       description: "Refresh the task snapshot and let the coordinator decide whether to continue active work or reopen the flow from new subtasks and other external changes.",
-      disabled: busy || !canRefreshSnapshot,
+      disabled: busy,
       onClick: () => run(() => apiClient.refreshSnapshot(session.id)),
-    },
-    {
+    });
+  }
+  if (canRefreshSubtaskState) {
+    dailyActions.push({
       label: "Refresh Subtask State",
       description: "Pull the latest subtask progress after new Jira subtasks or follow-up work appears.",
-      disabled: busy || !canRefreshSubtaskState,
+      disabled: busy,
       onClick: () => run(() => apiClient.refreshSubtaskState(session.id)),
-    },
-  ];
+    });
+  }
 
   const advancedActions: ActionDefinition[] = [
     {
@@ -273,53 +276,66 @@ export function OperatorActions({
     },
   ];
 
-  const recoveryActions: ActionDefinition[] = [
-    {
+  const recoveryActions: ActionDefinition[] = [];
+  if (session.status === "active") {
+    recoveryActions.push({
       label: "Pause Session",
       description: "Pause the current workflow so the coordinator stops advancing the session automatically.",
-      disabled: busy || session.status !== "active",
+      disabled: busy,
       onClick: () => run(() => apiClient.pauseSession(session.id)),
-    },
-    {
+    });
+  }
+  if (["paused", "waiting_for_operator"].includes(session.status)) {
+    recoveryActions.push({
       label: "Resume Session",
       description: "Resume a paused or operator-blocked session after the external blocker has been fixed.",
-      disabled: busy || !["paused", "waiting_for_operator"].includes(session.status),
+      disabled: busy,
       onClick: () => run(() => apiClient.resumeSession(session.id)),
-    },
-    {
+    });
+  }
+  if (session.status === "waiting_for_operator") {
+    recoveryActions.push({
       label: "Retry Current Stage",
       description: "Retry the current stage after a waiting-for-operator interruption without changing the routed work.",
-      disabled: busy || session.status !== "waiting_for_operator",
+      disabled: busy,
       onClick: () => run(() => apiClient.retrySession(session.id)),
-    },
-    {
+    });
+  }
+  if (canCreateSubtasksFromPlan) {
+    recoveryActions.push({
       label: "Create Jira Subtasks",
       description: "Retry Jira subtask materialization after the automatic story setup failed before execution could start.",
-      disabled: busy || !canCreateSubtasksFromPlan,
+      disabled: busy,
       onClick: () => run(() => apiClient.createSubtasksFromPlan(session.id)),
-    },
-    {
+    });
+  }
+  if (canStartSubtaskGraph) {
+    recoveryActions.push({
       label: "Start Subtask Graph",
       description: "Force story subtask execution from a recovery checkpoint when Jira subtasks already exist and only graph dispatch remains.",
-      disabled: busy || !canStartSubtaskGraph,
+      disabled: busy,
       strong: true,
       onClick: () => run(() => apiClient.startSubtaskGraph(session.id)),
-    },
-    {
+    });
+  }
+  if (canCreateMr) {
+    recoveryActions.push({
       label: "Retry MR Handoff",
       description: "Manually rerun MR handoff only after automatic delivery failed at the merge request creation step.",
-      disabled: busy || !canCreateMr,
+      disabled: busy,
       strong: true,
       onClick: () => run(() => apiClient.createMr(session.id)),
-    },
-    {
+    });
+  }
+  if (canSendToTest) {
+    recoveryActions.push({
       label: "Retry Send To Test",
       description: "Manually rerun send-to-test only after automatic delivery failed after MR handoff completed.",
-      disabled: busy || !canSendToTest,
+      disabled: busy,
       strong: true,
       onClick: () => run(() => apiClient.sendToTest(session.id)),
-    },
-  ];
+    });
+  }
 
   function renderActionGroup(
     title: string,
