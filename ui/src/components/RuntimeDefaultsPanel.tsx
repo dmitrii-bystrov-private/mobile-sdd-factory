@@ -108,6 +108,28 @@ export function RuntimeDefaultsPanel({
     [runtimeCapabilities],
   );
 
+  function inheritedRoleDefault(
+    roleName: string,
+    resolvedDefaultRunner: string,
+  ): DraftRoleDefault {
+    const runnerCapability = runnerIndex.get(resolvedDefaultRunner);
+    const legacyKey = ROLE_DEFAULT_SOURCE_MAP[roleName] ?? null;
+    const legacyDefault = legacyKey === null ? undefined : legacyIndex.get(legacyKey);
+    const models = runnerCapability?.models ?? [];
+    const model = legacyDefault?.model ?? models[0]?.id ?? "";
+    const modelCapability = models.find((item) => item.id === model);
+    const effort =
+      legacyDefault?.effort ??
+      modelCapability?.defaultEffort ??
+      modelCapability?.supportedEfforts[0] ??
+      "";
+    return {
+      runner: resolvedDefaultRunner,
+      model,
+      effort,
+    };
+  }
+
   useEffect(() => {
     if (runtimeCapabilities === null || runtimeDefaults === null) {
       return;
@@ -120,20 +142,16 @@ export function RuntimeDefaultsPanel({
     const nextRoleDefaults: Record<string, DraftRoleDefault> = {};
     for (const roleName of runtimeDefaults.knownRoles) {
       const stored = runtimeDefaults.roleDefaults[roleName];
-      const runner = stored?.runner ?? resolvedDefaultRunner;
-      const runnerCapability = runnerIndex.get(runner);
-      const legacyKey = ROLE_DEFAULT_SOURCE_MAP[roleName] ?? null;
-      const legacyDefault = legacyKey === null ? undefined : legacyIndex.get(legacyKey);
-      const models = runnerCapability?.models ?? [];
-      const model = stored?.model ?? legacyDefault?.model ?? models[0]?.id ?? "";
-      const modelCapability = models.find((item) => item.id === model);
-      const effort =
-        stored?.effort ??
-        legacyDefault?.effort ??
-        modelCapability?.defaultEffort ??
-        modelCapability?.supportedEfforts[0] ??
-        "";
-      nextRoleDefaults[roleName] = { runner, model, effort };
+      if (stored) {
+        const inherited = inheritedRoleDefault(roleName, stored.runner ?? resolvedDefaultRunner);
+        nextRoleDefaults[roleName] = {
+          runner: stored.runner ?? resolvedDefaultRunner,
+          model: stored.model ?? inherited.model,
+          effort: stored.effort ?? inherited.effort,
+        };
+        continue;
+      }
+      nextRoleDefaults[roleName] = inheritedRoleDefault(roleName, resolvedDefaultRunner);
     }
     setDefaultRunner(resolvedDefaultRunner);
     setRoleDefaults(nextRoleDefaults);
@@ -197,18 +215,30 @@ export function RuntimeDefaultsPanel({
     setBusy(true);
     setError(null);
     try {
-      const saved = await apiClient.updateRuntimeDefaults({
-        defaultRunner: defaultRunner || null,
-        roleDefaults: Object.fromEntries(
-          Object.entries(roleDefaults).map(([roleName, value]) => [
+      const normalizedDefaultRunner = defaultRunner || null;
+      const explicitRoleDefaults = Object.fromEntries(
+        Object.entries(roleDefaults).flatMap(([roleName, value]) => {
+          const inherited = inheritedRoleDefault(roleName, defaultRunner);
+          if (
+            value.runner === inherited.runner &&
+            value.model === inherited.model &&
+            value.effort === inherited.effort
+          ) {
+            return [];
+          }
+          return [[
             roleName,
             {
               runner: value.runner || null,
               model: value.model || null,
               effort: value.effort || null,
             },
-          ]),
-        ),
+          ]];
+        }),
+      );
+      const saved = await apiClient.updateRuntimeDefaults({
+        defaultRunner: normalizedDefaultRunner,
+        roleDefaults: explicitRoleDefaults,
         policyDefaults: {
           oneshot: {
             self_review_policy: policyDefaults.oneshot.self_review_policy,
