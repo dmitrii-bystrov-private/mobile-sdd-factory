@@ -47,6 +47,8 @@ High-signal live/runtime acceptance:
 
 Direct shell helpers that still matter:
 
+- `bash factory/run-local-stack.sh`
+- `bash factory/open-local-ui.sh`
 - `bash scripts/snapshot.sh <KEY>`
 - `bash scripts/run-test.sh <KEY>`
 - `bash scripts/run-lint.sh <KEY>`

@@ -60,6 +60,18 @@ UI build:
 cd ui && npm run build
 ```
 
+Local backend/UI stack:
+
+```bash
+bash factory/run-local-stack.sh
+```
+
+Local backend/UI stack plus auto-opened browser:
+
+```bash
+bash factory/open-local-ui.sh
+```
+
 Supported operator-flow acceptance:
 
 ```bash

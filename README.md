@@ -284,6 +284,12 @@ The current primary entrypoint is the operator UI:
 - adjust role/runtime config if needed
 - let the coordinator drive the flow
 
+To launch the local backend/UI stack and open the operator console in a browser:
+
+```bash
+bash factory/open-local-ui.sh
+```
+
 From there the UI exposes:
 
 - live session state

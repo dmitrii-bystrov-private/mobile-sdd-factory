@@ -121,7 +121,18 @@ These are the supported way to verify that:
 
 The normal supported workflow is:
 
-1. Start the backend/UI stack.
+1. Start the backend/UI stack:
+
+```bash
+bash factory/run-local-stack.sh
+```
+
+Or use the convenience wrapper that also opens the browser automatically:
+
+```bash
+bash factory/open-local-ui.sh
+```
+
 2. Open the operator UI.
 3. Check doctor and bootstrap guidance if this machine is not yet proven healthy.
 4. Review runtime defaults.
