@@ -31,6 +31,19 @@ import type {
 } from "../types";
 
 const FOLLOWUP_ARTIFACT_TYPES = new Set(["mr_comments_markdown", "qa_reopen_comments"]);
+const FOLLOWUP_STAGE_EVENT_TYPES: Record<"mr" | "qa", readonly string[]> = {
+  mr: [
+    "mr_comments_analysis_requested",
+    "subtask_graph_requested",
+    "subtask_implementation_requested",
+    "mr_followup_requested",
+  ],
+  qa: [
+    "subtask_graph_requested",
+    "subtask_implementation_requested",
+    "qa_reopen_requested",
+  ],
+};
 const PLANNING_STEP_DEFINITIONS = [
   {
     stageName: "proposal_context_requested",
@@ -276,10 +289,10 @@ function buildFollowupContext(
 
   const source =
     sourceEvent.event_type === "mr_comments_received" ? "mr" : "qa";
-  const expectedFollowupEventType =
-    source === "mr" ? "mr_followup_requested" : "qa_reopen_requested";
   const followupEvent = events.find(
-    (event) => event.id > sourceEvent.id && event.event_type === expectedFollowupEventType,
+    (event) =>
+      event.id > sourceEvent.id &&
+      FOLLOWUP_STAGE_EVENT_TYPES[source].includes(event.event_type),
   );
   const followupArtifact = [...artifacts]
     .reverse()

@@ -1,4 +1,5 @@
 import type { FollowupContext } from "../types";
+import { stageDisplayName } from "../stageDisplay";
 
 type FollowupContextPanelProps = {
   followupContext: FollowupContext | null;
@@ -48,7 +49,7 @@ export function FollowupContextPanel({
         </div>
         <div className="table-row">
           <span>Follow-up Stage</span>
-          <strong>{followupContext.stageName}</strong>
+          <strong>{stageDisplayName(followupContext.stageName)}</strong>
         </div>
         <div className="table-row">
           <span>Trace</span>
