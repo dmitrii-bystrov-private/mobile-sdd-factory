@@ -9,6 +9,8 @@ Run a Boy Scout pass for Jira task `$ARGUMENTS`.
 
 Parse `<KEY>` from `$ARGUMENTS`. If missing, ask for it.
 
+This skill defines the legacy slash-command Boy Scout surface. The current primary product flow runs Boy Scout through the backend session runtime and its own findings-resolution lane.
+
 ## Step 0 — Check feature flag
 
 ```bash
@@ -16,7 +18,7 @@ echo "${BOY_SCOUT_ENABLED:-false}"
 ```
 
 If the output is not `true` — stop immediately with no output. Do not proceed to Step 1.
-This skill is opt-in. Enable it by setting `BOY_SCOUT_ENABLED=true` in `.claude/settings.local.json` under the `env` key.
+This env flag gates the legacy slash-command surface only. The current platform normally configures Boy Scout policy through `.sdd-factory/settings.local.json` and the operator UI.
 
 ## Step 1 — Generate diff
 

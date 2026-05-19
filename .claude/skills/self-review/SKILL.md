@@ -10,6 +10,8 @@ Parse `<KEY>` from `$ARGUMENTS`.
 
 - `<KEY>` is required.
 
+This skill defines the legacy slash-command self-review surface. The current primary product flow runs self-review through the backend session runtime and persistent reviewer lane.
+
 ## Step 0 — Check feature flag
 
 ```bash
@@ -17,7 +19,7 @@ echo "${SELF_REVIEW_ENABLED:-false}"
 ```
 
 If the output is not `true` — stop immediately with no output. Do not proceed to Step 1.
-This skill is opt-in. Enable it by setting `SELF_REVIEW_ENABLED=true` in `.claude/settings.local.json` under the `env` key.
+This env flag gates the legacy slash-command surface only. The current platform normally configures self-review policy through `.sdd-factory/settings.local.json` and the operator UI.
 
 ## Step 1 — Generate diff
 

@@ -7,6 +7,8 @@ description: >
 
 Parse `<KEY>` from `$ARGUMENTS`. If missing, ask for it.
 
+This skill defines the legacy slash-command doc-harvest surface. The current primary product flow runs doc harvest through the backend session runtime and workflow policy.
+
 ## Step 0 — Check feature flag
 
 ```bash
@@ -14,7 +16,7 @@ echo "${DOC_HARVEST_ENABLED:-false}"
 ```
 
 If the output is not `true` — stop immediately with no output. Do not proceed.
-This skill is opt-in. Enable it by setting `DOC_HARVEST_ENABLED=true` in `.claude/settings.local.json` under the `env` key.
+This env flag gates the legacy slash-command surface only. The current platform normally configures doc-harvest policy through `.sdd-factory/settings.local.json` and the operator UI.
 
 ## Step 1 — Run harvest
 
