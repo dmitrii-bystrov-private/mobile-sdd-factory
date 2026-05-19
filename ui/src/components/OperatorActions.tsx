@@ -164,6 +164,10 @@ export function OperatorActions({
     session.status === "waiting_for_operator" &&
     interactiveStateSummary?.available === true &&
     interactiveStateSummary.needsOperatorInput;
+  const supportsGenericRecovery =
+    session.status === "waiting_for_operator" &&
+    !needsInteractiveReply &&
+    interactiveStateSummary?.sourceReason !== "boy_scout_findings";
   const canSendRuntimeInput =
     needsInteractiveReply;
 
@@ -194,7 +198,7 @@ export function OperatorActions({
       onClick: () => run(() => apiClient.pauseSession(session.id)),
     });
   }
-  if (session.status === "paused" || (session.status === "waiting_for_operator" && !needsInteractiveReply)) {
+  if (session.status === "paused" || supportsGenericRecovery) {
     recoveryActions.push({
       label: "Resume Session",
       description: "Resume a paused or operator-blocked session after the external blocker has been fixed.",
@@ -202,7 +206,7 @@ export function OperatorActions({
       onClick: () => run(() => apiClient.resumeSession(session.id)),
     });
   }
-  if (session.status === "waiting_for_operator" && !needsInteractiveReply) {
+  if (supportsGenericRecovery) {
     recoveryActions.push({
       label: "Retry Current Stage",
       description: "Retry the current stage after a waiting-for-operator interruption without changing the routed work.",
