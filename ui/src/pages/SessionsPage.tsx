@@ -658,7 +658,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Settings</strong>
-                <p>Manage project defaults and shared knowledge.</p>
+                <p>Manage project defaults.</p>
               </button>
               <button
                 className={`surface-nav-card ${surfaceView === "health" ? "selected" : ""}`}
@@ -826,7 +826,7 @@ export function SessionsPage(): JSX.Element {
                   runtimeCapabilities={runtimeCapabilitiesSummary}
                   runtimeDefaults={runtimeDefaultsSummary}
                 />
-                <KnowledgePanel items={knowledgeItems} />
+                {knowledgeItems.length > 0 ? <KnowledgePanel items={knowledgeItems} /> : null}
               </div>
             ) : null}
             {surfaceView === "health" ? (

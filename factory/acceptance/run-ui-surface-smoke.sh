@@ -132,7 +132,6 @@ SETTINGS_REF="$(extract_ref_by_text "${RUNS_SNAPSHOT}" 'button "Settings ')"
 playwright-cli click "${SETTINGS_REF}" >/dev/null
 wait_snapshot_contains "${SETTINGS_SNAPSHOT}" 'heading "Project Settings"'
 grep -q 'heading "Runtime Defaults"' "${SETTINGS_SNAPSHOT}"
-grep -q 'heading "Shared Knowledge"' "${SETTINGS_SNAPSHOT}"
 
 playwright-cli goto "${UI_URL}" >/dev/null
 wait_snapshot_contains "${RUNS_SNAPSHOT}" 'heading "New Workflow Run"'
