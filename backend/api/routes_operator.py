@@ -228,7 +228,11 @@ def retry_session(
     )
 
 
-@router.post("/redirect-session", response_model=RedirectSessionResponse)
+@router.post(
+    "/redirect-session",
+    response_model=RedirectSessionResponse,
+    include_in_schema=False,
+)
 def redirect_session(
     payload: RedirectSessionRequest,
     dependencies: AppDependencies = Depends(get_dependencies),
@@ -403,7 +407,11 @@ def create_mr(
     )
 
 
-@router.post("/complete-doc-harvest", response_model=CompleteDocHarvestResponse)
+@router.post(
+    "/complete-doc-harvest",
+    response_model=CompleteDocHarvestResponse,
+    include_in_schema=False,
+)
 def complete_doc_harvest(
     payload: CompleteDocHarvestRequest,
     dependencies: AppDependencies = Depends(get_dependencies),
@@ -465,7 +473,11 @@ def resolve_boy_scout_findings(
     )
 
 
-@router.post("/complete-self-review", response_model=CompleteSelfReviewResponse)
+@router.post(
+    "/complete-self-review",
+    response_model=CompleteSelfReviewResponse,
+    include_in_schema=False,
+)
 def complete_self_review(
     payload: CompleteSelfReviewRequest,
     dependencies: AppDependencies = Depends(get_dependencies),
@@ -650,7 +662,11 @@ def poll_session_output(
     )
 
 
-@router.post("/run-loop-once", response_model=RunLoopOnceResponse)
+@router.post(
+    "/run-loop-once",
+    response_model=RunLoopOnceResponse,
+    include_in_schema=False,
+)
 def run_loop_once(
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> RunLoopOnceResponse:
@@ -673,14 +689,22 @@ def to_loop_status_response(status) -> LoopRunnerStatusResponse:
     )
 
 
-@router.get("/loop-status", response_model=LoopRunnerStatusResponse)
+@router.get(
+    "/loop-status",
+    response_model=LoopRunnerStatusResponse,
+    include_in_schema=False,
+)
 def loop_status(
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> LoopRunnerStatusResponse:
     return to_loop_status_response(dependencies.loop_runner.status())
 
 
-@router.post("/start-loop", response_model=LoopRunnerControlResponse)
+@router.post(
+    "/start-loop",
+    response_model=LoopRunnerControlResponse,
+    include_in_schema=False,
+)
 def start_loop(
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> LoopRunnerControlResponse:
@@ -691,7 +715,11 @@ def start_loop(
     )
 
 
-@router.post("/stop-loop", response_model=LoopRunnerControlResponse)
+@router.post(
+    "/stop-loop",
+    response_model=LoopRunnerControlResponse,
+    include_in_schema=False,
+)
 def stop_loop(
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> LoopRunnerControlResponse:

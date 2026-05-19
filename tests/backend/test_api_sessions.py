@@ -3253,6 +3253,26 @@ class SessionApiTests(unittest.TestCase):
             )
         )
 
+    def test_internal_operator_routes_are_hidden_from_public_schema(self) -> None:
+        operator_router = __import__("backend.api.routes_operator", fromlist=["router"]).router
+        hidden_paths = {
+            "/operator/redirect-session",
+            "/operator/complete-doc-harvest",
+            "/operator/complete-self-review",
+            "/operator/run-loop-once",
+            "/operator/loop-status",
+            "/operator/start-loop",
+            "/operator/stop-loop",
+        }
+
+        hidden_route_paths = {
+            route.path
+            for route in operator_router.routes
+            if getattr(route, "include_in_schema", True) is False
+        }
+
+        self.assertTrue(hidden_paths.issubset(hidden_route_paths))
+
 
 if __name__ == "__main__":
     unittest.main()
