@@ -199,6 +199,7 @@ async function buildInteractiveStateSummary(
     sourceEventType: response.source_event_type,
     sourceReason: response.source_reason,
     needsOperatorInput: response.needs_operator_input,
+    resumeStrategy: response.resume_strategy,
   };
 }
 

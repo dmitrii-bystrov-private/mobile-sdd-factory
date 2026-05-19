@@ -165,11 +165,15 @@ export function OperatorActions({
     session.status === "waiting_for_operator" &&
     interactiveStateSummary?.available === true &&
     interactiveStateSummary.needsOperatorInput;
+  const requiresRuntimeReactivation =
+    session.status === "waiting_for_operator" &&
+    interactiveStateSummary?.resumeStrategy === "reactivate_only";
   const supportsGenericRecovery =
     session.status === "waiting_for_operator" &&
     !needsInteractiveReply &&
     interactiveStateSummary?.sourceReason !== "boy_scout_findings" &&
-    !hasStageSpecificDeliveryRetry;
+    !hasStageSpecificDeliveryRetry &&
+    !requiresRuntimeReactivation;
   const canSendRuntimeInput =
     needsInteractiveReply;
 

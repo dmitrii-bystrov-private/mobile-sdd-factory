@@ -477,6 +477,7 @@ class CoordinatorService:
                 "source_event_type": None,
                 "source_reason": None,
                 "needs_operator_input": False,
+                "resume_strategy": None,
             }
 
         return {
@@ -488,6 +489,7 @@ class CoordinatorService:
             "source_event_type": source_event.event_type,
             "source_reason": source_event.payload.get("reason"),
             "needs_operator_input": bool(source_event.payload.get("needs_operator_input") is True),
+            "resume_strategy": source_event.payload.get("resume_strategy"),
         }
 
     def handle_operator_event(

@@ -111,6 +111,7 @@ export type InteractiveStateSummary = {
   sourceEventType: string | null;
   sourceReason: string | null;
   needsOperatorInput: boolean;
+  resumeStrategy: string | null;
 };
 
 export type RuntimeRoleStateSummary = {

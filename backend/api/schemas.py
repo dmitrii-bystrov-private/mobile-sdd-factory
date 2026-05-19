@@ -124,6 +124,7 @@ class InteractiveStateSummaryResponse(BaseModel):
     source_event_type: str | None = None
     source_reason: str | None = None
     needs_operator_input: bool = False
+    resume_strategy: str | None = None
 
 
 class RuntimeRoleStateResponse(BaseModel):

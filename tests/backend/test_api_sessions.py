@@ -2372,6 +2372,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("session_escalated_to_operator", response.source_event_type)
         self.assertEqual("runtime_error", response.source_reason)
         self.assertTrue(response.needs_operator_input)
+        self.assertIsNone(response.resume_strategy)
 
     def test_get_interactive_state_route_clears_after_operator_runtime_input(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
@@ -2438,6 +2439,38 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(response.available)
         self.assertEqual("tool failed", response.summary)
         self.assertEqual("runtime_error", response.source_reason)
+        self.assertFalse(response.needs_operator_input)
+        self.assertIsNone(response.resume_strategy)
+
+    def test_get_interactive_state_route_returns_resume_strategy(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013MCP"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"required mcp access unavailable","details":"restore vpn","resume_strategy":"reactivate_only"}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = get_interactive_state(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.available)
+        self.assertEqual("required mcp access unavailable", response.summary)
+        self.assertEqual("reactivate_only", response.resume_strategy)
         self.assertFalse(response.needs_operator_input)
 
     def test_requirements_clarifier_runtime_input_can_continue_story_flow(self) -> None:

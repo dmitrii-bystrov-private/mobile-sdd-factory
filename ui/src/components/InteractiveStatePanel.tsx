@@ -54,6 +54,12 @@ export function InteractiveStatePanel({
           <span>Needs Operator Input</span>
           <strong>{interactiveStateSummary.needsOperatorInput ? "yes" : "no"}</strong>
         </div>
+        {interactiveStateSummary.resumeStrategy !== null ? (
+          <div className="table-row">
+            <span>Resume Strategy</span>
+            <strong>{interactiveStateSummary.resumeStrategy}</strong>
+          </div>
+        ) : null}
       </div>
 
       {interactiveStateSummary.summary !== null ? (
