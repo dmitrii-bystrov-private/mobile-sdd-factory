@@ -3288,6 +3288,26 @@ class SessionApiTests(unittest.TestCase):
         self.assertIn("/roles/output", hidden_route_paths)
         self.assertIn("/roles/collect-output", hidden_route_paths)
 
+    def test_openapi_schema_excludes_internal_routes(self) -> None:
+        from backend.api.app import create_app
+
+        with patch("backend.api.app.build_dependencies", return_value=object()):
+            app = create_app()
+
+        schema = app.openapi()
+        paths = schema.get("paths", {})
+
+        self.assertIn("/sessions", paths)
+        self.assertIn("/operator/runtime-defaults", paths)
+        self.assertIn("/events", paths)
+        self.assertIn("get", paths["/events"])
+        self.assertNotIn("post", paths["/events"])
+        self.assertNotIn("/roles/output", paths)
+        self.assertNotIn("/roles/collect-output", paths)
+        self.assertNotIn("/operator/redirect-session", paths)
+        self.assertNotIn("/operator/run-loop-once", paths)
+        self.assertNotIn("/operator/poll-session-output", paths)
+
 
 if __name__ == "__main__":
     unittest.main()
