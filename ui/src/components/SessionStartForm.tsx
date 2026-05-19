@@ -35,9 +35,9 @@ const REQUIREMENTS_CLARIFICATION_LABELS: Record<RequirementsClarificationMode, s
 };
 
 const WORKFLOW_PROFILE_DESCRIPTIONS: Record<WorkflowProfile, string> = {
-  oneshot: "Single-task flow without story decomposition or bug-only recovery lanes.",
-  bug_full: "Bug-oriented flow with dedicated bug-fix and test policy handling.",
-  story_full: "Full story planning and execution flow with clarification, spec, and subtask stages.",
+  oneshot: "Direct execution without story planning or bug-only recovery lanes.",
+  bug_full: "Bug flow with dedicated fix and test handling.",
+  story_full: "Full story flow with planning, clarification, and subtask execution.",
 };
 
 const POLICY_DESCRIPTIONS: Record<
@@ -342,7 +342,7 @@ export function SessionStartForm({
       </div>
 
       <p className="path-label">
-        Start a task run here. Change policies or lane overrides only when this run should differ from the defaults.
+        Start a task run here. Adjust policies or lane overrides only when needed.
       </p>
 
       <form className="session-start-form" onSubmit={(event) => void handleSubmit(event)}>
