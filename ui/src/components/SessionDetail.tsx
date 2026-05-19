@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { ArtifactPanel } from "./ArtifactPanel";
 import { FollowupContextPanel } from "./FollowupContextPanel";
 import { InteractiveStatePanel } from "./InteractiveStatePanel";
@@ -150,6 +152,8 @@ export function SessionDetail({
   bundle,
   onRefresh,
 }: SessionDetailProps): JSX.Element {
+  const [showAdvancedSurfaces, setShowAdvancedSurfaces] = useState(false);
+
   if (session === null || bundle === null) {
     return (
       <section className="panel panel-empty">
@@ -385,12 +389,41 @@ export function SessionDetail({
         planningSummary={bundle.planningSummary}
         workflowProfile={session.workflow_profile}
       />
-      <RuntimeSessionPanel
-        onRefresh={onRefresh}
-        runtimeStateSummary={bundle.runtimeStateSummary}
-        session={session}
-      />
-      <ArtifactPanel artifacts={bundle.artifacts} events={bundle.events} />
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Advanced</p>
+            <h3>Runtime And Trace</h3>
+            <p className="path-label">
+              Use these lower-level surfaces only when progress, blockers, and normal operator actions are not enough.
+            </p>
+          </div>
+        </div>
+        <div className="advanced-disclosure">
+          <button
+            className="advanced-disclosure-toggle"
+            onClick={() => setShowAdvancedSurfaces((current) => !current)}
+            type="button"
+          >
+            <div>
+              <strong>Show Runtime Controls And Full Trace</strong>
+              <p>Expand for runtime intervention, raw trace history, and deeper workflow debugging.</p>
+            </div>
+            <span>{showAdvancedSurfaces ? "hide" : "show"}</span>
+          </button>
+          {showAdvancedSurfaces ? (
+            <div className="advanced-disclosure-body">
+              <RuntimeSessionPanel
+                onRefresh={onRefresh}
+                runtimeStateSummary={bundle.runtimeStateSummary}
+                session={session}
+              />
+              <ArtifactPanel artifacts={bundle.artifacts} events={bundle.events} />
+            </div>
+          ) : null}
+        </div>
+      </section>
     </section>
   );
 }

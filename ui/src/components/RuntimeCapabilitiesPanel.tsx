@@ -82,7 +82,9 @@ export function RuntimeCapabilitiesPanel({
               <span className="inline-pill">
                 {runner.supportsCustomModel ? "custom models supported" : "catalog only"}
               </span>
-              {runner.path ? <span className="inline-pill">{runner.path}</span> : null}
+              <span className="inline-pill">
+                {runner.available ? "ready for new sessions" : "unavailable"}
+              </span>
             </div>
           </article>
         ))}
