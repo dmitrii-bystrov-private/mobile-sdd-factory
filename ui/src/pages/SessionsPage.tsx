@@ -587,7 +587,7 @@ export function SessionsPage(): JSX.Element {
           <p className="eyebrow">SDD Factory</p>
           <h1>Operator Console</h1>
           <p className="topbar-summary">
-            Run work, project defaults, and environment health from one operator workspace.
+            Create and monitor workflow runs, tune project defaults, and check runtime health from one operator workspace.
           </p>
         </div>
         <div className="topbar-actions">
@@ -629,7 +629,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Workflow Runs</strong>
-                <p>Start runs and handle operator work.</p>
+                <p>Create runs, switch sessions, and handle operator actions.</p>
               </button>
               <button
                 className={`surface-nav-card ${surfaceView === "settings" ? "selected" : ""}`}
@@ -637,7 +637,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Settings</strong>
-                <p>Project defaults and shared knowledge.</p>
+                <p>Manage project defaults, role baselines, and shared knowledge.</p>
               </button>
               <button
                 className={`surface-nav-card ${surfaceView === "health" ? "selected" : ""}`}
@@ -645,7 +645,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Health</strong>
-                <p>Doctor, setup, and runtime readiness.</p>
+                <p>Check doctor status, local setup, and runtime readiness.</p>
               </button>
             </div>
           </section>
@@ -656,7 +656,7 @@ export function SessionsPage(): JSX.Element {
                 <h2>Factory State</h2>
               </div>
             </div>
-            <div className="grid-two compact-grid">
+            <div className="factory-state-grid">
               <div className="metric-card">
                 <span>Active</span>
                 <strong>{activeSessionCount}</strong>
@@ -677,6 +677,11 @@ export function SessionsPage(): JSX.Element {
           </section>
           {surfaceView === "runs" ? (
             <>
+              <SessionList
+                onSelect={(sessionId) => setSelectedSessionId(sessionId)}
+                selectedSessionId={selectedSessionId}
+                sessions={sessions}
+              />
               <SessionStartForm
                 onCreated={async (sessionId) => {
                   await loadSessions();
@@ -686,11 +691,6 @@ export function SessionsPage(): JSX.Element {
                 }}
                 runtimeCapabilities={runtimeCapabilitiesSummary}
                 runtimeDefaults={runtimeDefaultsSummary}
-              />
-              <SessionList
-                onSelect={(sessionId) => setSelectedSessionId(sessionId)}
-                selectedSessionId={selectedSessionId}
-                sessions={sessions}
               />
             </>
           ) : null}

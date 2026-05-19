@@ -152,7 +152,7 @@ export function SessionDetail({
   bundle,
   onRefresh,
 }: SessionDetailProps): JSX.Element {
-  const [showAdvancedSurfaces, setShowAdvancedSurfaces] = useState(false);
+  const [detailSurface, setDetailSurface] = useState<"workflow" | "runtime">("workflow");
 
   if (session === null || bundle === null) {
     return (
@@ -254,6 +254,25 @@ export function SessionDetail({
         </div>
       </div>
 
+      <div className="session-detail-nav">
+        <button
+          className={`inline-pill inline-pill-button ${detailSurface === "workflow" ? "selected" : ""}`}
+          onClick={() => setDetailSurface("workflow")}
+          type="button"
+        >
+          Workflow
+        </button>
+        <button
+          className={`inline-pill inline-pill-button ${detailSurface === "runtime" ? "selected" : ""}`}
+          onClick={() => setDetailSurface("runtime")}
+          type="button"
+        >
+          Runtime & Trace
+        </button>
+      </div>
+
+      {detailSurface === "workflow" ? (
+        <>
       <div className="grid-two">
         <section className="subpanel">
           <div className="subpanel-head">
@@ -433,41 +452,30 @@ export function SessionDetail({
         planningSummary={bundle.planningSummary}
         workflowProfile={session.workflow_profile}
       />
+        </>
+      ) : null}
 
+      {detailSurface === "runtime" ? (
       <section className="panel">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">Advanced</p>
+            <p className="eyebrow">Runtime</p>
             <h3>Runtime And Trace</h3>
             <p className="path-label">
-              Use these lower-level surfaces only when progress, blockers, and normal operator actions are not enough.
+              Use this surface only when you need runtime intervention or deeper trace debugging.
             </p>
           </div>
         </div>
-        <div className="advanced-disclosure">
-          <button
-            className="advanced-disclosure-toggle"
-            onClick={() => setShowAdvancedSurfaces((current) => !current)}
-            type="button"
-          >
-            <div>
-              <strong>Show Runtime Controls And Full Trace</strong>
-              <p>Expand for runtime intervention, raw trace history, and deeper workflow debugging.</p>
-            </div>
-            <span>{showAdvancedSurfaces ? "hide" : "show"}</span>
-          </button>
-          {showAdvancedSurfaces ? (
-            <div className="advanced-disclosure-body">
-              <RuntimeSessionPanel
-                onRefresh={onRefresh}
-                runtimeStateSummary={bundle.runtimeStateSummary}
-                session={session}
-              />
-              <ArtifactPanel artifacts={bundle.artifacts} events={bundle.events} />
-            </div>
-          ) : null}
+        <div className="runtime-surface-stack">
+          <RuntimeSessionPanel
+            onRefresh={onRefresh}
+            runtimeStateSummary={bundle.runtimeStateSummary}
+            session={session}
+          />
+          <ArtifactPanel artifacts={bundle.artifacts} events={bundle.events} />
         </div>
       </section>
+      ) : null}
     </section>
   );
 }

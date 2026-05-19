@@ -156,6 +156,10 @@ input {
   margin: 0;
 }
 
+.panel-header {
+  margin-bottom: 14px;
+}
+
 .badge,
 .status-pill {
   display: inline-flex;
@@ -177,7 +181,9 @@ input {
   border-radius: 18px;
   padding: 10px 14px;
   min-width: 220px;
-  background: rgba(255, 255, 255, 0.64);
+  background:
+    linear-gradient(135deg, rgba(255, 93, 45, 0.08), rgba(73, 214, 164, 0.04)),
+    var(--surface-muted);
 }
 
 .live-chip strong,
@@ -187,6 +193,7 @@ input {
 
 .live-chip small {
   color: var(--ink-soft);
+  line-height: 1.25;
 }
 
 .live-dot {
@@ -243,6 +250,13 @@ input {
 .table-list {
   display: grid;
   gap: 12px;
+}
+
+.session-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 6px;
 }
 
 .form-section-compact {
@@ -402,6 +416,12 @@ input {
 
 .metric-card strong {
   font-size: 1.25rem;
+}
+
+.factory-state-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .actions-grid {
@@ -698,6 +718,8 @@ input {
   gap: 8px;
   text-align: left;
   padding: 16px;
+  min-height: 108px;
+  align-content: start;
   border-radius: 18px;
   border: 1px solid var(--line);
   background: var(--surface-muted);
@@ -713,6 +735,17 @@ input {
   margin: 0;
   color: var(--ink-soft);
   line-height: 1.45;
+}
+
+.session-detail-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.runtime-surface-stack {
+  display: grid;
+  gap: 16px;
 }
 
 .surface-nav-card:hover,
@@ -784,7 +817,8 @@ input {
   .hero-stats,
   .grid-two,
   .actions-grid,
-  .followup-form-grid {
+  .followup-form-grid,
+  .factory-state-grid {
     grid-template-columns: 1fr;
   }
 }
@@ -803,7 +837,8 @@ input {
   .actions-grid,
   .hero-stats,
   .grid-two,
-  .followup-form-grid {
+  .followup-form-grid,
+  .factory-state-grid {
     grid-template-columns: 1fr;
   }
 }
