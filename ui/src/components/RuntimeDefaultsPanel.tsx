@@ -218,6 +218,27 @@ export function RuntimeDefaultsPanel({
     }));
   }
 
+  function handleDefaultRunnerChange(nextRunner: string): void {
+    setRoleDefaults((current) => {
+      const nextRoleDefaults: Record<string, DraftRoleDefault> = {};
+      for (const roleName of runtimeDefaults?.knownRoles ?? []) {
+        const currentValue = current[roleName] ?? inheritedRoleDefault(roleName, defaultRunner);
+        const currentInherited = inheritedRoleDefault(roleName, defaultRunner);
+        if (
+          currentValue.runner === currentInherited.runner &&
+          currentValue.model === currentInherited.model &&
+          currentValue.effort === currentInherited.effort
+        ) {
+          nextRoleDefaults[roleName] = inheritedRoleDefault(roleName, nextRunner);
+          continue;
+        }
+        nextRoleDefaults[roleName] = currentValue;
+      }
+      return nextRoleDefaults;
+    });
+    setDefaultRunner(nextRunner);
+  }
+
   async function handleSave(): Promise<void> {
     if (runtimeDefaults === null) {
       return;
@@ -303,7 +324,7 @@ export function RuntimeDefaultsPanel({
         <select
           className="select-input"
           disabled={busy || runtimeCapabilities === null}
-          onChange={(event) => setDefaultRunner(event.target.value)}
+          onChange={(event) => handleDefaultRunnerChange(event.target.value)}
           value={defaultRunner}
         >
           {(runtimeCapabilities?.availableRunners ?? []).map((runner) => (
