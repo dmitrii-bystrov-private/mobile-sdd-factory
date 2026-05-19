@@ -160,6 +160,7 @@ export function OperatorActions({
     interactiveStateSummary?.sourceReason === "subtask_creation_failed";
   const canCreateMr = session.current_stage === "mr_handoff_failed";
   const canSendToTest = session.current_stage === "send_to_test_failed";
+  const hasStageSpecificDeliveryRetry = canCreateMr || canSendToTest;
   const needsInteractiveReply =
     session.status === "waiting_for_operator" &&
     interactiveStateSummary?.available === true &&
@@ -167,7 +168,8 @@ export function OperatorActions({
   const supportsGenericRecovery =
     session.status === "waiting_for_operator" &&
     !needsInteractiveReply &&
-    interactiveStateSummary?.sourceReason !== "boy_scout_findings";
+    interactiveStateSummary?.sourceReason !== "boy_scout_findings" &&
+    !hasStageSpecificDeliveryRetry;
   const canSendRuntimeInput =
     needsInteractiveReply;
 
