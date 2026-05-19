@@ -79,10 +79,26 @@ These defaults are managed from the UI and should be treated as the supported co
 
 Live acceptance harnesses use their own shared runtime defaults so test runs are consistent and isolated from ad-hoc local choices.
 
+Shared acceptance defaults live in:
+
+```text
+factory/acceptance/runtime-defaults.json
+```
+
 Current intended defaults:
 
 - Claude → `sonnet`
 - Codex → `gpt-5.3-codex-spark`
+
+They can be overridden when needed with environment variables:
+
+```bash
+SDD_FACTORY_ACCEPTANCE_DEFAULT_RUNNER=claude
+SDD_FACTORY_ACCEPTANCE_CLAUDE_MODEL=sonnet
+SDD_FACTORY_ACCEPTANCE_CLAUDE_EFFORT=medium
+SDD_FACTORY_ACCEPTANCE_CODEX_MODEL=gpt-5.3-codex-spark
+SDD_FACTORY_ACCEPTANCE_CODEX_EFFORT=medium
+```
 
 Acceptance runs should execute in isolated task-like environments rather than against dirty state in the main repository checkout.
 
