@@ -109,7 +109,6 @@ Recovery actions include:
 
 - `Resume Session`
 - `Retry Current Stage`
-- `Redirect Parked Work`
 - `Create Jira Subtasks`
 - `Start Subtask Graph`
 - `Retry MR Handoff`
