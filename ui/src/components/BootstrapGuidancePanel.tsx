@@ -26,7 +26,7 @@ export function BootstrapGuidancePanel({
 
   return (
     <section className="panel">
-      <div className="panel-header">
+        <div className="panel-header">
         <div>
           <p className="eyebrow">Setup</p>
           <h3>Bootstrap Guidance</h3>
@@ -58,9 +58,8 @@ export function BootstrapGuidancePanel({
       <div className="inline-summary-card">
         <div className="inline-summary-header">
           <strong>Launch the local stack</strong>
-          <span>{guidanceSummary.overallStatus}</span>
         </div>
-        <p className="form-help">{guidanceSummary.launchCommand}</p>
+        <p className="form-help bootstrap-command">{guidanceSummary.launchCommand}</p>
         <div className="inline-pill-row">
           <span className="inline-pill">Backend: {guidanceSummary.backendUrl}</span>
           <span className="inline-pill">UI: {guidanceSummary.uiUrl}</span>

@@ -37,12 +37,12 @@ export function EnvironmentDoctorPanel({
 
   return (
     <section className="panel">
-      <div className="panel-header">
+        <div className="panel-header">
         <div>
           <p className="eyebrow">Doctor</p>
           <h3>Environment Health</h3>
           <p className="path-label">
-            Check environment blockers here first.
+            Check environment blockers here first, before treating a broken run as workflow logic.
           </p>
         </div>
       </div>
@@ -72,7 +72,6 @@ export function EnvironmentDoctorPanel({
           <div className="inline-summary-card">
             <div className="inline-summary-header">
               <strong>Ready for normal operation</strong>
-              <span>all clear</span>
             </div>
           <p className="form-help">
             All required checks are green.
@@ -119,7 +118,7 @@ export function EnvironmentDoctorPanel({
           <div className="advanced-disclosure">
             <div className="inline-summary-header">
               <strong>Advanced Diagnostics</strong>
-              <span>{doctorSummary.repoRoot}</span>
+              <span>{nonOkChecks.length} non-green checks</span>
             </div>
             <div className="table-list compact">
               {nonOkChecks.map((check) => (

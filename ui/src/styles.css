@@ -186,6 +186,7 @@ input {
   border-radius: 18px;
   padding: 10px 14px;
   min-width: 220px;
+  max-width: 320px;
   background:
     linear-gradient(135deg, rgba(255, 93, 45, 0.08), rgba(73, 214, 164, 0.04)),
     var(--surface-muted);
@@ -290,6 +291,10 @@ input {
 .session-card-title {
   margin-top: 10px;
   line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .form-section-compact {
@@ -413,6 +418,10 @@ input {
   line-height: 1.45;
   color: var(--ink-strong);
   max-width: 52rem;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 
 .hero-link-row {
@@ -618,8 +627,7 @@ input {
 .inline-summary-header span {
   color: var(--ink-soft);
   font-size: 0.8rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.02em;
 }
 
 .inline-pill-row {
@@ -774,6 +782,11 @@ input {
   line-height: 1.45;
 }
 
+.bootstrap-command {
+  word-break: break-word;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
 .followup-snippet {
   margin-top: 16px;
   padding: 14px 16px;
@@ -910,6 +923,19 @@ input {
   background:
     linear-gradient(135deg, rgba(255, 93, 45, 0.12), rgba(73, 214, 164, 0.08)),
     var(--surface-muted);
+}
+
+.advanced-inline-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.advanced-inline-summary::-webkit-details-marker {
+  display: none;
 }
 
 .table-row {

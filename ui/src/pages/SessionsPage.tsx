@@ -701,7 +701,6 @@ export function SessionsPage(): JSX.Element {
                 <div className="inline-summary-card">
                   <div className="inline-summary-header">
                     <strong>Project-wide defaults</strong>
-                    <span>stable settings</span>
                   </div>
                   <p className="form-help">
                     Keep defaults and reusable knowledge here. Session-specific tweaks stay inside Workflow Runs.
@@ -730,20 +729,18 @@ export function SessionsPage(): JSX.Element {
                 </div>
               </div>
               <div className="sidebar-note-stack">
-                <div className="inline-summary-card">
-                  <div className="inline-summary-header">
-                    <strong>Doctor</strong>
-                    <span>{doctorSummary?.overallStatus ?? "unknown"}</span>
-                  </div>
-                  <p className="form-help">
-                    Check environment health before treating a run problem as workflow logic.
+                  <div className="inline-summary-card">
+                    <div className="inline-summary-header">
+                      <strong>Doctor</strong>
+                    </div>
+                    <p className="form-help">
+                      Check environment health before treating a run problem as workflow logic.
                   </p>
                 </div>
                 {bootstrapGuidanceSummary ? (
                   <div className="inline-summary-card">
                     <div className="inline-summary-header">
                       <strong>Setup</strong>
-                      <span>{bootstrapGuidanceSummary.overallStatus}</span>
                     </div>
                     <p className="form-help">{bootstrapGuidanceSummary.nextStep}</p>
                   </div>

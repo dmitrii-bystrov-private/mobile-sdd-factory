@@ -30,6 +30,9 @@ export function InteractiveStatePanel({
         <div>
           <p className="eyebrow">Interactive State</p>
           <h3>Live Agent Blocker</h3>
+          <p className="path-label">
+            This run needs operator attention before the active workflow can continue.
+          </p>
         </div>
       </div>
 
@@ -43,21 +46,19 @@ export function InteractiveStatePanel({
           <strong>{stageDisplayName(interactiveStateSummary.currentStage)}</strong>
         </div>
         <div className="table-row">
-          <span>Source Event</span>
-          <strong>{interactiveStateSummary.sourceEventType ?? "unknown"}</strong>
-        </div>
-        <div className="table-row">
           <span>Reason</span>
           <strong>{formatReason(interactiveStateSummary.sourceReason)}</strong>
         </div>
         <div className="table-row">
-          <span>Needs Operator Input</span>
-          <strong>{interactiveStateSummary.needsOperatorInput ? "yes" : "no"}</strong>
+          <span>Operator Action</span>
+          <strong>
+            {interactiveStateSummary.needsOperatorInput ? "Reply in runtime" : "Use recovery controls"}
+          </strong>
         </div>
-        {interactiveStateSummary.resumeStrategy !== null ? (
+        {interactiveStateSummary.resumeStrategy === "reactivate_only" ? (
           <div className="table-row">
-            <span>Resume Strategy</span>
-            <strong>{interactiveStateSummary.resumeStrategy}</strong>
+            <span>Recovery Mode</span>
+            <strong>Runtime reactivation needed</strong>
           </div>
         ) : null}
       </div>
@@ -74,6 +75,30 @@ export function InteractiveStatePanel({
           <p className="context-label">Details</p>
           <p>{interactiveStateSummary.details}</p>
         </div>
+      ) : null}
+
+      {(interactiveStateSummary.sourceEventType !== null ||
+        interactiveStateSummary.resumeStrategy !== null) ? (
+        <details className="advanced-disclosure">
+          <summary className="advanced-inline-summary">
+            <strong>Debug Details</strong>
+            <span className="chevron" aria-hidden="true" />
+          </summary>
+          <div className="advanced-disclosure-body">
+            {interactiveStateSummary.sourceEventType !== null ? (
+              <div className="table-row">
+                <span>Source Event</span>
+                <strong>{interactiveStateSummary.sourceEventType}</strong>
+              </div>
+            ) : null}
+            {interactiveStateSummary.resumeStrategy !== null ? (
+              <div className="table-row">
+                <span>Resume Strategy</span>
+                <strong>{interactiveStateSummary.resumeStrategy}</strong>
+              </div>
+            ) : null}
+          </div>
+        </details>
       ) : null}
     </section>
   );

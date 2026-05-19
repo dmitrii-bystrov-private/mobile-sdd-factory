@@ -17,10 +17,9 @@ export function KnowledgePanel({ items }: KnowledgePanelProps): JSX.Element {
         <div className="inline-summary-card">
           <div className="inline-summary-header">
             <strong>No captured knowledge yet</strong>
-            <span>empty</span>
           </div>
           <p className="form-help">
-            Reusable project conventions and findings will appear here after operators capture them from real sessions.
+            Reusable project conventions and findings will appear here after this feature is fully wired into real session flows.
           </p>
         </div>
       </section>
