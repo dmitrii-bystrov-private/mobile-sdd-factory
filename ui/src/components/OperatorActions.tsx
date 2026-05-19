@@ -156,10 +156,12 @@ export function OperatorActions({
     session.current_stage === "subtask_creation_requested";
   const canCreateMr = session.current_stage === "mr_handoff_failed";
   const canSendToTest = session.current_stage === "send_to_test_failed";
-  const canSendRuntimeInput =
+  const needsInteractiveReply =
     session.status === "waiting_for_operator" &&
     interactiveStateSummary?.available === true &&
     interactiveStateSummary.needsOperatorInput;
+  const canSendRuntimeInput =
+    needsInteractiveReply;
 
   const dailyActions: ActionDefinition[] = [];
   if (canRefreshSnapshot) {
@@ -188,7 +190,7 @@ export function OperatorActions({
       onClick: () => run(() => apiClient.pauseSession(session.id)),
     });
   }
-  if (["paused", "waiting_for_operator"].includes(session.status)) {
+  if (session.status === "paused" || (session.status === "waiting_for_operator" && !needsInteractiveReply)) {
     recoveryActions.push({
       label: "Resume Session",
       description: "Resume a paused or operator-blocked session after the external blocker has been fixed.",
@@ -196,7 +198,7 @@ export function OperatorActions({
       onClick: () => run(() => apiClient.resumeSession(session.id)),
     });
   }
-  if (session.status === "waiting_for_operator") {
+  if (session.status === "waiting_for_operator" && !needsInteractiveReply) {
     recoveryActions.push({
       label: "Retry Current Stage",
       description: "Retry the current stage after a waiting-for-operator interruption without changing the routed work.",

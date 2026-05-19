@@ -63,13 +63,14 @@ Operator input is expected only when the workflow genuinely cannot continue safe
 Typical cases:
 
 - requirements clarification
-- MCP/authentication/VPN blockers
 - Boy Scout findings that include old-code candidates and need a tech-debt decision
 - blocked review cycles
 - blocked verification cycles
-- manual cleanup decisions
 
 When this happens the session moves to `waiting_for_operator`.
+
+If the interactive state explicitly requires a direct reply in the same live role session, use `Send Runtime Input`.
+Use `Resume Session` or `Retry Current Stage` only for recovery-style blockers after the underlying problem has been fixed.
 
 ## Runtime Visibility
 
