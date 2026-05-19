@@ -9,7 +9,7 @@ import { RoleStatusPanel } from "./RoleStatusPanel";
 import { RuntimeSessionPanel } from "./RuntimeSessionPanel";
 import { SubtaskGraphPanel } from "./SubtaskGraphPanel";
 import { SubtaskProgressPanel } from "./SubtaskProgressPanel";
-import type { Session, SessionBundle } from "../types";
+import type { Role, Session, SessionBundle } from "../types";
 
 type SessionDetailProps = {
   session: Session | null;
@@ -105,7 +105,7 @@ export function SessionDetail({
         planningSummary={bundle.planningSummary}
         workflowProfile={session.workflow_profile}
       />
-      <OperatorActions onRefresh={onRefresh} session={session} />
+      <OperatorActions onRefresh={onRefresh} roles={bundle.roles as Role[]} session={session} />
       <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
       <ArtifactPanel artifacts={bundle.artifacts} events={bundle.events} />
     </section>

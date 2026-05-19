@@ -366,6 +366,16 @@ export const apiClient = {
     });
   },
 
+  redirectSession(
+    sessionId: number,
+    targetRoleName: string,
+  ): Promise<{ event_type: string; followup_event_type: string | null; session: Session }> {
+    return request("/operator/redirect-session", {
+      method: "POST",
+      body: JSON.stringify({ session_id: sessionId, target_role_name: targetRoleName }),
+    });
+  },
+
   stopRuntimeRole(
     sessionId: number,
     roleName: string,
