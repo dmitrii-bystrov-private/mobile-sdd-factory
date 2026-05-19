@@ -182,9 +182,9 @@ Supported cleanup actions:
 
 - runtime residue cleanup
 - full task cleanup when closed-task rules allow it
-- forced full cleanup for exceptional operator use
 
 Acceptance/test runtime cleanup is isolated separately under project-scoped runtime roots.
+Forced full cleanup remains an internal emergency seam rather than part of the normal supported operator model.
 
 ## Shared Knowledge
 

@@ -153,10 +153,9 @@ There are two supported cleanup levels in the UI:
   Stops runtime and removes task-local runtime residue while keeping the task snapshot and worktree.
 - `Full Cleanup`
   Removes the full task snapshot and worktree when the closed-task gate allows it.
-- `Force Full Cleanup`
-  Bypasses the closed-task gate and should be treated as an exceptional operator action.
 
 There is also project-level closed-task cleanup automation for definitely closed tasks.
+Forced full cleanup remains an internal emergency seam rather than a normal supported operator action.
 
 ## Deprecated Surface
 

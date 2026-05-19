@@ -186,15 +186,6 @@ export function RuntimeSessionPanel({
           >
             Full Cleanup If Closed
           </button>
-          <button
-            className="action-button"
-            disabled={busy}
-            onClick={() => run(() => apiClient.cleanupTask(session.id, "full", true))}
-            title="Force full task cleanup even if the closed-status gate would normally block it."
-            type="button"
-          >
-            Force Full Cleanup
-          </button>
         </div>
       </div>
 
