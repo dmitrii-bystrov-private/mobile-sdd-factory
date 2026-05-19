@@ -501,23 +501,6 @@ export const apiClient = {
     });
   },
 
-  completeDocHarvest(
-    sessionId: number,
-    summary: string,
-  ): Promise<{
-    completed: boolean;
-    event_type: string;
-    session: Session;
-  }> {
-    return request("/operator/complete-doc-harvest", {
-      method: "POST",
-      body: JSON.stringify({
-        session_id: sessionId,
-        summary,
-      }),
-    });
-  },
-
   skipBoyScout(
     sessionId: number,
     reason: string,
@@ -550,26 +533,6 @@ export const apiClient = {
       body: JSON.stringify({
         session_id: sessionId,
         resolution,
-      }),
-    });
-  },
-
-  completeSelfReview(
-    sessionId: number,
-    outcome: "passed" | "issues_found",
-    summary: string,
-  ): Promise<{
-    completed: boolean;
-    event_type: string;
-    followup_event_type: string | null;
-    session: Session;
-  }> {
-    return request("/operator/complete-self-review", {
-      method: "POST",
-      body: JSON.stringify({
-        session_id: sessionId,
-        outcome,
-        summary,
       }),
     });
   },
