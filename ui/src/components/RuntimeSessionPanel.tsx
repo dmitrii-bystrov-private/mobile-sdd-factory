@@ -90,6 +90,7 @@ export function RuntimeSessionPanel({
               className="action-button"
               disabled={busy || runtimeStateSummary.roles.every((role) => role.status === "stopped")}
               onClick={() => run(() => apiClient.stopRuntimeSession(session.id))}
+              title="Stop every live role runtime in this session while keeping the task files intact."
               type="button"
             >
               Stop Runtime Session
@@ -98,6 +99,7 @@ export function RuntimeSessionPanel({
               className="action-button"
               disabled={busy || runtimeStateSummary.roles.some((role) => role.status !== "stopped")}
               onClick={() => run(() => apiClient.restartRuntimeSession(session.id))}
+              title="Start the stopped runtime session again and relaunch its role runtimes."
               type="button"
             >
               Restart Runtime Session
@@ -106,6 +108,7 @@ export function RuntimeSessionPanel({
               className="action-button"
               disabled={busy}
               onClick={() => run(() => onRefresh())}
+              title="Refresh the runtime state surface without changing the workflow."
               type="button"
             >
               Refresh Runtime View
@@ -132,6 +135,7 @@ export function RuntimeSessionPanel({
                   className="action-button"
                   disabled={busy || role.runtimeHandle === null || role.status === "stopped"}
                   onClick={() => run(() => apiClient.stopRuntimeRole(session.id, role.roleName))}
+                  title={`Stop the live runtime for ${role.roleName} without stopping the whole session.`}
                   type="button"
                 >
                   Stop Role Runtime
@@ -140,6 +144,7 @@ export function RuntimeSessionPanel({
                   className="action-button"
                   disabled={busy || role.status !== "stopped"}
                   onClick={() => run(() => apiClient.restartRuntimeRole(session.id, role.roleName))}
+                  title={`Restart the stopped runtime for ${role.roleName} inside this session.`}
                   type="button"
                 >
                   Restart Role Runtime
@@ -165,6 +170,7 @@ export function RuntimeSessionPanel({
             className="action-button"
             disabled={busy}
             onClick={() => run(() => apiClient.cleanupTask(session.id, "soft"))}
+            title="Stop runtime and remove task-local runtime residue while keeping the task worktree and snapshot."
             type="button"
           >
             Clean Runtime Residue
@@ -173,6 +179,7 @@ export function RuntimeSessionPanel({
             className="action-button"
             disabled={busy}
             onClick={() => run(() => apiClient.cleanupTask(session.id, "full"))}
+            title="Remove the full task snapshot and worktree only if the task status allows closed-task cleanup."
             type="button"
           >
             Full Cleanup If Closed
@@ -181,6 +188,7 @@ export function RuntimeSessionPanel({
             className="action-button"
             disabled={busy}
             onClick={() => run(() => apiClient.cleanupTask(session.id, "full", true))}
+            title="Force full task cleanup even if the closed-status gate would normally block it."
             type="button"
           >
             Force Full Cleanup

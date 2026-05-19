@@ -477,6 +477,7 @@ export function SessionStartForm({
         <button
           className="action-button action-button-strong"
           disabled={busy || normalizedTaskKey.length === 0}
+          title="Create the task session, prepare the snapshot, and route the first workflow step automatically."
           type="submit"
         >
           {busy ? "Starting…" : "Create And Prepare"}

@@ -548,7 +548,13 @@ export function RuntimeDefaultsPanel({
         })}
       </div>
 
-      <button className="action-button action-button-strong" disabled={busy || runtimeDefaults === null} onClick={() => void handleSave()} type="button">
+      <button
+        className="action-button action-button-strong"
+        disabled={busy || runtimeDefaults === null}
+        onClick={() => void handleSave()}
+        title="Save these runtime and policy defaults for future sessions in this project."
+        type="button"
+      >
         Save Runtime Defaults
       </button>
 
