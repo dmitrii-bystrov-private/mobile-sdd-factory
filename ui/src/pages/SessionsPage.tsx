@@ -666,7 +666,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Health</strong>
-                <p>Check setup, doctor status, and runtime readiness.</p>
+                <p>Check setup and runtime readiness.</p>
               </button>
             </div>
           </section>

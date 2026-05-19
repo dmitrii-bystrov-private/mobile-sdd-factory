@@ -603,7 +603,7 @@ export function SessionStartForm({
           title="Create the task session, prepare the snapshot, and route the first workflow step automatically."
           type="submit"
         >
-          {busy ? "Starting…" : "Create And Prepare"}
+          {busy ? "Starting Run…" : "Start Run"}
         </button>
 
         {error ? <p className="error-banner">{error}</p> : null}
