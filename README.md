@@ -289,7 +289,7 @@ From there the UI exposes:
 
 - live session state
 - runtime visibility and tmux attach/capture commands
-- operator actions grouped into `Daily Flow`, `Advanced Flow`, and `Recovery And Debug`
+- operator actions grouped into `Daily Flow` and `Recovery And Debug`
 - runtime defaults
 - environment doctor, bootstrap guidance, and runtime capabilities
 - task cleanup controls
