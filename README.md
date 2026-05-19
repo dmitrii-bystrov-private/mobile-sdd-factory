@@ -108,7 +108,6 @@ The current pipeline is composed of specialized long-running or on-demand roles:
 
 | Role | Responsibility |
 |------|----------------|
-| `task-coordinator` | Owns session routing, stage transitions, follow-up dispatch, and recovery decisions. |
 | `proposal-context-worker` | Builds the proposal and grounded context package from Jira plus relevant code context. |
 | `requirements-clarifier-worker` | Clarifies requirements and can stop for live operator answers when ambiguity matters. |
 | `acceptance-criteria-worker` | Writes testable acceptance criteria. |
@@ -370,6 +369,7 @@ index.html        # local static presentation deck for the SDD workflow
 
 - [`scripts/README.md`](scripts/README.md) — direct CLI reference for every helper script
 - [`docs/setup.md`](docs/setup.md) — supported setup for the backend/UI/tmux runtime model
+- [`DEVELOPERS_GUIDE.md`](DEVELOPERS_GUIDE.md) — contributor-oriented guide for the supported platform, testing layers, defaults, and legacy boundaries
 - [`docs/operator-guide.md`](docs/operator-guide.md) — practical operator workflow for the supported backend/UI runtime model
 - [`docs/runtime-model.md`](docs/runtime-model.md) — supported session, role, quality-loop, recovery, and cleanup model
 - [`docs/deprecated-surface.md`](docs/deprecated-surface.md) — deprecated slash-command compatibility inventory and retirement criteria

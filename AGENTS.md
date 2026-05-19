@@ -1,38 +1,116 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-This repository is the orchestration layer for the mobile SDD workflow. Keep top-level changes focused and predictable:
+## Supported Platform First
+This repository is the current SDD Factory orchestration platform.
+The supported product model is:
 
-- `.claude/agents/` stores agent definitions.
-- `.claude/commands/` contains slash-command entry points such as Jira and MR flows.
-- `.claude/skills/` holds reusable workflow skills and prompts.
-- `.claude/hooks/` contains automation hooks executed by the assistant runtime.
-- `scripts/` contains Bash utilities used directly and by agents.
-- `scripts/tests/` contains shell-based regression tests for snapshot and formatter behavior.
+- `backend/` for API, coordinator, session lifecycle, runtime contracts, and state
+- `ui/` for the operator console
+- `factory/` for doctor, cleanup, acceptance harnesses, and local stack helpers
+- `scripts/` for direct shell helpers and compatibility automation
 
-Add new automation in `scripts/` unless it is purely prompt/agent logic, in which case it belongs under `.claude/`.
+Treat the backend/UI/tmux runtime model as the source of truth.
+The `.claude/commands/`, `.claude/skills/`, and `.claude/agents/` trees are a deprecated compatibility surface unless the task explicitly targets that layer.
 
-## Build, Test, and Development Commands
-Run commands from the repository root:
+## Project Structure
 
-- `bash scripts/snapshot.sh IOS-1234` prepares the Jira workspace and worktree.
-- `bash scripts/run-build.sh IOS-1234` runs the platform-aware build wrapper.
-- `bash scripts/run-test.sh IOS-1234` runs the platform-aware test wrapper.
-- `bash scripts/run-lint.sh IOS-1234` runs the platform-aware lint wrapper.
-- `bash scripts/tests/test_adf_to_md.sh` validates ADF-to-Markdown conversion.
-- `bash scripts/tests/test_snapshot_formatters.sh` checks golden-file output.
-- `bash scripts/tests/test_snapshot_errors.sh` covers snapshot failure paths.
+- `backend/` — FastAPI routes, coordinator, runtime plumbing, role prompts/workspaces, repositories
+- `ui/` — Vite/React operator console
+- `factory/` — doctor, runtime capabilities, cleanup, bootstrap, acceptance tooling
+- `tests/backend/` — backend regression suite
+- `scripts/` — direct CLI helpers, snapshot/build/test/lint wrappers, Jira/MR utilities
+- `scripts/tests/` — shell regression tests for script behavior
+- `docs/` — supported platform docs
+- `.claude/` — deprecated slash-command and legacy role reference surface
 
-Required tooling is documented in `README.md` and `scripts/README.md`; most flows expect `acli`, `glab`, `jq`, and the `SDD_WORKDIR` / `IOS_DIR` / `ANDROID_DIR` environment variables.
+Add new product behavior to `backend/`, `ui/`, or `factory/` as appropriate.
+Do not add new primary workflow logic to deprecated `.claude/` entrypoints.
 
-## Coding Style & Naming Conventions
-Use Bash with `#!/usr/bin/env bash` and `set -euo pipefail`. Follow the existing style: two-space indentation, uppercase constants (`SCRIPT_DIR`), lowercase function names (`need_cmd`), and clear fatal error messages. Keep scripts idempotent and fail fast. Name tests `test_*.sh`; name helper libraries by responsibility, such as `snapshot-formatters.sh`.
+## Key Commands
+Run commands from the repository root.
 
-## Testing Guidelines
-Add or update focused shell tests when behavior changes in `scripts/`. Prefer golden-file checks for formatted output and isolated assertions for helpers. Run the narrowest affected test first, then the broader wrapper (`run-test.sh`) if the change touches task execution.
+Supported platform checks:
 
-## Commit & Pull Request Guidelines
-Recent history uses concise conventional commits such as `fix:` and `chore:`. Follow that style for repository changes; task-worktree commits created by automation use `<KEY>: <TASK-TITLE>`. For merge requests, include the Jira key, describe the workflow impact, list validation performed, and attach screenshots only when user-visible Slack or generated Markdown output changes.
+- `./.venv/bin/python -m unittest discover -s tests/backend -p 'test_*.py'`
+- `cd ui && npm run build`
+- `bash factory/acceptance/run-happy-path-acceptance.sh`
+- `bash factory/acceptance/run-followup-reopen-acceptance.sh`
+- `bash factory/acceptance/run-mr-followup-acceptance.sh`
+- `bash factory/acceptance/run-delivery-acceptance.sh`
 
-## Agent-Specific Notes
-Do not mix orchestration logic with implementation details. Agents should delegate platform work to scripts where possible, keep generated artifacts deterministic, and avoid hidden side effects outside `$SDD_WORKDIR`.
+High-signal live/runtime acceptance:
+
+- `PYTHONPATH=. ./.venv/bin/python factory/acceptance/run-real-story-runtime-acceptance.py`
+- `PYTHONPATH=. ./.venv/bin/python factory/acceptance/run-real-codex-quality-loop-validation.py`
+
+Direct shell helpers that still matter:
+
+- `bash scripts/snapshot.sh <KEY>`
+- `bash scripts/run-test.sh <KEY>`
+- `bash scripts/run-lint.sh <KEY>`
+- `bash scripts/run-build.sh <KEY>`
+
+## Coding Conventions
+
+Python:
+
+- prefer small explicit coordinator/runtime changes over broad rewrites
+- keep state transitions and operator semantics easy to trace
+- add tests for lifecycle and regression-sensitive behavior
+
+TypeScript/React:
+
+- preserve the supported operator surface: `Daily`, `Recovery`, runtime visibility, runtime defaults
+- avoid surfacing deprecated or internal-only controls as normal product actions
+- keep labels and tooltips operator-readable rather than backend-internal
+
+Bash:
+
+- use `#!/usr/bin/env bash` and `set -euo pipefail`
+- keep helpers idempotent and fail fast
+
+General:
+
+- prefer ASCII unless the file already uses Unicode
+- keep generated artifacts deterministic
+- do not mix deprecated compatibility cleanup with supported-path feature work unless the change is explicitly about legacy retirement
+
+## Testing Expectations
+
+When behavior changes:
+
+- run the narrowest affected backend tests first
+- run `cd ui && npm run build` for UI changes
+- run targeted acceptance when the change affects orchestration or operator flow
+
+For live acceptance:
+
+- use the shared acceptance runtime defaults in `factory/acceptance/runtime-defaults.json`
+- Claude defaults should stay on `sonnet`
+- Codex live tests should stay on `gpt-5.3-codex-spark`
+- do not rely on dirty repo state; acceptance should execute in isolated task-like environments
+
+## Documentation Expectations
+
+Keep these files aligned with supported behavior:
+
+- `README.md`
+- `AGENTS.md`
+- `DEVELOPERS_GUIDE.md`
+- `docs/setup.md`
+- `docs/operator-guide.md`
+- `docs/runtime-model.md`
+
+If the supported platform changes, update those docs in the same slice unless the change is clearly internal-only.
+
+## Commit Guidance
+
+Use concise conventional commits such as:
+
+- `feat: ...`
+- `fix: ...`
+- `refactor: ...`
+- `docs: ...`
+- `test: ...`
+
+Do not describe deprecated slash-command behavior as if it were the primary product path.
