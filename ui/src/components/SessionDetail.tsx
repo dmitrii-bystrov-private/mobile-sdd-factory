@@ -194,19 +194,18 @@ export function SessionDetail({
             : "Session state";
   const currentFocusBody =
     session.status === "waiting_for_operator"
-        ? blockerSummary ??
-        `The flow is blocked at ${currentStage}. Check the operator actions and blocker panel first.`
+        ? blockerSummary ?? "The run is blocked and needs operator input before it can continue."
       : session.status === "active"
         ? session.current_owner
-          ? `The workflow is currently at ${currentStage} with ${currentOwner} owning the live lane.`
+          ? `${currentOwner} is driving the live lane now.`
           : standbyRoles.length > 0
-            ? `The workflow is currently at ${currentStage}. Live runtimes are standing by for the next handoff.`
-            : `The workflow is currently at ${currentStage}. No single lane has taken ownership yet.`
+            ? "Live runtimes are standing by for the next handoff."
+            : "The run is active, but no single lane has taken ownership yet."
         : session.status === "paused"
-          ? `The workflow is paused at ${currentStage}. Resume it when the external blocker is cleared.`
+          ? "The run is paused until the external blocker is cleared."
           : session.status === "completed"
             ? "The main flow has completed. Use follow-up actions only if new MR, QA, or snapshot updates arrive."
-            : `Current stage: ${currentStage}.`;
+            : "Review the current stage and decide the next operator action.";
   const showRoleStatusPanel =
     bundle.workItems.length > 0 ||
     visibleRoles.some((role) => role.status !== "running");
@@ -260,7 +259,7 @@ export function SessionDetail({
               <strong>{sessionStatusDisplayName(session.status)}</strong>
             </div>
           <div className="metric-card">
-            <span>Active Workers</span>
+            <span>Active</span>
             <strong>{runningRoleCount}</strong>
           </div>
           <div className="metric-card">
@@ -460,7 +459,6 @@ export function SessionDetail({
           >
             <div>
               <strong>Workflow Details</strong>
-              <p>Subtasks, worker queue, planning artifacts, and deeper follow-up context.</p>
             </div>
             <div className="advanced-disclosure-meta">
               <small>{workflowDetailCount} detail panels</small>

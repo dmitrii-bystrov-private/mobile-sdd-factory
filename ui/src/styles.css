@@ -287,6 +287,12 @@ input {
   margin-top: 10px;
 }
 
+.session-card-meta small + small::before {
+  content: "•";
+  margin-right: 12px;
+  color: var(--ink-soft);
+}
+
 .session-card-keyline {
   display: inline-flex;
   align-items: center;
@@ -425,6 +431,11 @@ input {
   text-align: left;
 }
 
+.session-card small {
+  display: inline-flex;
+  align-items: center;
+}
+
 .session-card p,
 .session-card small,
 .subpanel p,
@@ -464,18 +475,18 @@ input {
 .hero-status-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 14px;
+  gap: 10px;
+  margin-top: 12px;
 }
 
 .hero-status-item {
   display: grid;
-  gap: 4px;
-  min-width: 160px;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgba(10, 15, 24, 0.28);
+  gap: 3px;
+  min-width: 144px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  background: rgba(10, 15, 24, 0.18);
 }
 
 .hero-status-item span {
@@ -539,11 +550,17 @@ input {
 }
 
 .hero-stats .metric-card {
-  padding: 12px 14px;
+  padding: 10px 12px;
+  border-radius: 14px;
 }
 
 .hero-stats .metric-card strong {
-  font-size: 1.05rem;
+  font-size: 1rem;
+}
+
+.hero-stats .metric-card span {
+  margin-bottom: 6px;
+  font-size: 0.76rem;
 }
 
 .compact-grid .metric-card strong {

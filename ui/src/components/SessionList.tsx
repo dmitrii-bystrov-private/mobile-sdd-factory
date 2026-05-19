@@ -51,8 +51,8 @@ export function SessionList({
                 )}
                 <div className="session-card-meta">
                   <small>{workflowProfileDisplayName(session.workflow_profile)}</small>
-                  <small>Stage: {stageDisplayName(session.current_stage)}</small>
-                  <small>Owner: {session.current_owner ? roleDisplayName(session.current_owner) : "Not assigned yet"}</small>
+                  <small>{stageDisplayName(session.current_stage)}</small>
+                  <small>{session.current_owner ? roleDisplayName(session.current_owner) : "Unassigned"}</small>
                 </div>
               </button>
             );
