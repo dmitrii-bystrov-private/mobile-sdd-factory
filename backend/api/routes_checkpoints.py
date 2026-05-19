@@ -7,6 +7,6 @@ from fastapi import APIRouter
 router = APIRouter(prefix="/checkpoints", tags=["checkpoints"])
 
 
-@router.get("")
+@router.get("", include_in_schema=False)
 def list_checkpoints() -> dict[str, list]:
     return {"items": []}

@@ -3274,6 +3274,19 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertTrue(hidden_paths.issubset(hidden_route_paths))
 
+    def test_internal_debug_routes_are_hidden_from_public_schema(self) -> None:
+        events_router = __import__("backend.api.routes_events", fromlist=["router"]).router
+        checkpoints_router = __import__("backend.api.routes_checkpoints", fromlist=["router"]).router
+
+        hidden_route_paths = {
+            route.path
+            for route in [*events_router.routes, *checkpoints_router.routes]
+            if getattr(route, "include_in_schema", True) is False
+        }
+
+        self.assertIn("/events", hidden_route_paths)
+        self.assertIn("/checkpoints", hidden_route_paths)
+
 
 if __name__ == "__main__":
     unittest.main()

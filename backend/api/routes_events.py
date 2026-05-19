@@ -56,7 +56,7 @@ def stream_events(
     return StreamingResponse(generator, media_type="text/event-stream")
 
 
-@router.post("", response_model=InjectEventResponse)
+@router.post("", response_model=InjectEventResponse, include_in_schema=False)
 def inject_event(
     payload: InjectEventRequest,
     dependencies: AppDependencies = Depends(get_dependencies),
