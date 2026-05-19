@@ -42,6 +42,8 @@ The main daily actions are:
   Refreshes the task snapshot and lets the coordinator decide whether to continue active work or reopen from new follow-up signals.
 - `Refresh Subtask State`
   Pulls the latest Jira subtask state while story execution is active.
+- `Create Knowledge Entry`
+  Records a reusable project convention, hidden constraint, or non-obvious implementation finding in the shared knowledge base for future sessions.
 
 Most of the time the workflow should progress automatically through:
 
@@ -117,6 +119,18 @@ Recovery actions include:
 
 These are not normal day-to-day buttons.
 If they are needed frequently, treat that as a product/runtime quality issue rather than standard operator practice.
+
+## Shared Knowledge
+
+The UI also supports manual knowledge capture for reusable project guidance.
+
+Use it when a task reveals something future sessions should not rediscover from scratch, for example:
+
+- a project convention that should be followed again
+- a hidden implementation constraint
+- a non-obvious reuse rule or integration seam
+
+This is a supported operator action, but it is not part of the normal recovery path.
 
 ## Cleanup
 

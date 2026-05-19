@@ -156,7 +156,6 @@ The platform supports:
 
 - pause / resume
 - retry current stage
-- redirect parked work to another allowed role
 - runtime input for interactive blockers
 - runtime stop / restart at role or session level
 - automatic runtime recovery after owner-runtime death
@@ -177,6 +176,12 @@ Supported cleanup actions:
 - forced full cleanup for exceptional operator use
 
 Acceptance/test runtime cleanup is isolated separately under project-scoped runtime roots.
+
+## Shared Knowledge
+
+The runtime model also includes a task-local and repo-visible knowledge base under each task repo.
+
+Operators can materialize durable knowledge entries from the UI when a session uncovers guidance that should be reused later instead of rediscovered.
 
 ## Deprecated Surface
 
