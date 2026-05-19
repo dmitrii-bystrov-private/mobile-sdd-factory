@@ -6,6 +6,17 @@ type InteractiveStatePanelProps = {
   interactiveStateSummary: InteractiveStateSummary | null;
 };
 
+function formatReason(reason: string | null): string {
+  if (!reason) {
+    return "unknown";
+  }
+  return reason
+    .split("_")
+    .filter((part) => part.length > 0)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 export function InteractiveStatePanel({
   interactiveStateSummary,
 }: InteractiveStatePanelProps): JSX.Element | null {
@@ -34,6 +45,10 @@ export function InteractiveStatePanel({
         <div className="table-row">
           <span>Source Event</span>
           <strong>{interactiveStateSummary.sourceEventType ?? "unknown"}</strong>
+        </div>
+        <div className="table-row">
+          <span>Reason</span>
+          <strong>{formatReason(interactiveStateSummary.sourceReason)}</strong>
         </div>
         <div className="table-row">
           <span>Needs Operator Input</span>

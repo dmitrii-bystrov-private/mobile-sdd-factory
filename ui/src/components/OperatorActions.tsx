@@ -147,7 +147,8 @@ export function OperatorActions({
   const canStartSubtaskGraph =
     session.workflow_profile === "story_full" &&
     session.status === "waiting_for_operator" &&
-    session.current_stage === "subtask_creation_requested";
+    session.current_stage === "subtask_creation_requested" &&
+    interactiveStateSummary?.sourceReason === "subtask_creation_failed";
   const canRefreshSubtaskState =
     session.status === "active" &&
     session.workflow_profile === "story_full" &&
@@ -155,7 +156,8 @@ export function OperatorActions({
   const canCreateSubtasksFromPlan =
     session.workflow_profile === "story_full" &&
     session.status === "waiting_for_operator" &&
-    session.current_stage === "subtask_creation_requested";
+    session.current_stage === "subtask_creation_requested" &&
+    interactiveStateSummary?.sourceReason === "subtask_creation_failed";
   const canCreateMr = session.current_stage === "mr_handoff_failed";
   const canSendToTest = session.current_stage === "send_to_test_failed";
   const needsInteractiveReply =
