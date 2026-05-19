@@ -44,7 +44,7 @@ def list_roles(
     )
 
 
-@router.post("/output", response_model=RoleOutputResponse)
+@router.post("/output", response_model=RoleOutputResponse, include_in_schema=False)
 def submit_role_output(
     payload: RoleOutputRequest,
     dependencies: AppDependencies = Depends(get_dependencies),
@@ -67,7 +67,7 @@ def submit_role_output(
     )
 
 
-@router.post("/collect-output", response_model=CollectRoleOutputResponse)
+@router.post("/collect-output", response_model=CollectRoleOutputResponse, include_in_schema=False)
 def collect_role_output(
     payload: CollectRoleOutputRequest,
     dependencies: AppDependencies = Depends(get_dependencies),

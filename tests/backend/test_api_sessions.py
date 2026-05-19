@@ -3277,15 +3277,18 @@ class SessionApiTests(unittest.TestCase):
     def test_internal_debug_routes_are_hidden_from_public_schema(self) -> None:
         events_router = __import__("backend.api.routes_events", fromlist=["router"]).router
         checkpoints_router = __import__("backend.api.routes_checkpoints", fromlist=["router"]).router
+        roles_router = __import__("backend.api.routes_roles", fromlist=["router"]).router
 
         hidden_route_paths = {
             route.path
-            for route in [*events_router.routes, *checkpoints_router.routes]
+            for route in [*events_router.routes, *checkpoints_router.routes, *roles_router.routes]
             if getattr(route, "include_in_schema", True) is False
         }
 
         self.assertIn("/events", hidden_route_paths)
         self.assertIn("/checkpoints", hidden_route_paths)
+        self.assertIn("/roles/output", hidden_route_paths)
+        self.assertIn("/roles/collect-output", hidden_route_paths)
 
 
 if __name__ == "__main__":
