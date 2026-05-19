@@ -355,6 +355,7 @@ export function OperatorActions({
           <button
             className="action-button"
             disabled={busy || session.status !== "waiting_for_operator"}
+            title="Send a direct reply into the live runtime session after the agent asked the operator for input."
             type="submit"
           >
             Send Runtime Input
@@ -417,6 +418,7 @@ export function OperatorActions({
           <button
             className="action-button"
             disabled={busy || !canSkipBoyScout}
+            title="Skip the optional Boy Scout lane for this session and continue with the downstream flow."
             type="submit"
           >
             Skip Boy Scout
@@ -462,6 +464,7 @@ export function OperatorActions({
           <button
             className="action-button"
             disabled={busy || !canCompleteSelfReview}
+            title="Record the manual self-review outcome for this optional lane and route the session accordingly."
             type="submit"
           >
             Complete Self Review
@@ -493,6 +496,7 @@ export function OperatorActions({
           <button
             className="action-button"
             disabled={busy || !canCompleteDocHarvest}
+            title="Record the documentation harvest result for this optional lane and let the workflow continue."
             type="submit"
           >
             Complete Doc Harvest
@@ -537,6 +541,7 @@ export function OperatorActions({
           <button
             className="action-button"
             disabled={busy || !canOpenFollowup}
+            title="Pull unresolved merge request comments into the completed session and reopen the follow-up flow."
             type="submit"
           >
             Ingest MR Comments
@@ -558,6 +563,7 @@ export function OperatorActions({
           <button
             className="action-button"
             disabled={busy || !canOpenFollowup}
+            title="Reopen the completed session from a QA comment so the follow-up execution flow can resume."
             type="submit"
           >
             Reopen From QA
@@ -608,7 +614,12 @@ export function OperatorActions({
               value={knowledgeGuidance}
             />
           </label>
-          <button className="action-button" disabled={busy} type="submit">
+          <button
+            className="action-button"
+            disabled={busy}
+            title="Create a reusable knowledge entry from this task for future sessions."
+            type="submit"
+          >
             Create Knowledge Entry
           </button>
         </form>
