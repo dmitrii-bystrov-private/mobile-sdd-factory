@@ -87,6 +87,27 @@ const PLANNING_STEP_DEFINITIONS = [
   },
 ] as const;
 
+function streamStateLabel(streamState: "live" | "reconnecting" | "idle"): string {
+  if (streamState === "live") {
+    return "Live updates connected";
+  }
+  if (streamState === "reconnecting") {
+    return "Reconnecting live updates";
+  }
+  return "Live updates idle";
+}
+
+function streamEventLabel(eventType: string | null): string {
+  if (!eventType) {
+    return "Waiting for session activity";
+  }
+  return eventType
+    .split("_")
+    .filter((part) => part.length > 0)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function latestPlanningArtifactForStage(
   artifacts: Artifact[],
   stageName: string,
@@ -593,11 +614,11 @@ export function SessionsPage(): JSX.Element {
         <div className="topbar-actions">
           <div className={`live-chip live-${streamState}`}>
             <span className="live-dot" />
-            <strong>{streamState}</strong>
+            <strong>{streamStateLabel(streamState)}</strong>
             <small>
               {lastStreamEventType
-                ? `${lastStreamEventType}${lastStreamEventId !== null ? ` #${lastStreamEventId}` : ""}`
-                : "waiting for events"}
+                ? `${streamEventLabel(lastStreamEventType)}${lastStreamEventId !== null ? ` #${lastStreamEventId}` : ""}`
+                : "Waiting for session activity"}
             </small>
           </div>
           <button

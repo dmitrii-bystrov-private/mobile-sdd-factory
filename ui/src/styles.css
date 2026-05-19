@@ -189,11 +189,17 @@ input {
   background:
     linear-gradient(135deg, rgba(255, 93, 45, 0.08), rgba(73, 214, 164, 0.04)),
     var(--surface-muted);
+  color: var(--ink-strong);
 }
 
 .live-chip strong,
 .live-chip small {
   grid-column: 2;
+}
+
+.live-chip strong {
+  font-size: 0.9rem;
+  line-height: 1.2;
 }
 
 .live-chip small {
@@ -261,7 +267,29 @@ input {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 12px;
-  margin-top: 6px;
+  margin-top: 10px;
+}
+
+.session-card-keyline {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.session-card-current {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 131, 92, 0.14);
+  color: var(--brand);
+  font-size: 0.72rem;
+}
+
+.session-card-title {
+  margin-top: 10px;
+  line-height: 1.4;
 }
 
 .form-section-compact {
@@ -437,6 +465,12 @@ input {
   box-shadow: 0 12px 24px rgba(209, 76, 39, 0.12);
 }
 
+.session-card.selected {
+  background:
+    linear-gradient(135deg, rgba(255, 93, 45, 0.12), rgba(73, 214, 164, 0.06)),
+    var(--surface-strong);
+}
+
 .hero-panel {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
@@ -521,6 +555,21 @@ input {
   color: var(--ink-soft);
   font-size: 0.84rem;
   line-height: 1.4;
+}
+
+.worker-note {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.worker-note-label {
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .form-help {

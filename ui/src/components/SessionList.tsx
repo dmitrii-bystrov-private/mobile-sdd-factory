@@ -35,12 +35,19 @@ export function SessionList({
               type="button"
             >
               <div className="session-card-top">
-                <strong>{session.task_key}</strong>
+                <div className="session-card-keyline">
+                  <strong>{session.task_key}</strong>
+                  {isSelected ? <span className="session-card-current">Selected</span> : null}
+                </div>
                 <span className={`status-pill status-${session.status}`}>
                   {sessionStatusDisplayName(session.status)}
                 </span>
               </div>
-              {session.task_title ? <p>{session.task_title}</p> : <p>{workflowProfileDisplayName(session.workflow_profile)}</p>}
+              {session.task_title ? (
+                <p className="session-card-title">{session.task_title}</p>
+              ) : (
+                <p className="session-card-title">{workflowProfileDisplayName(session.workflow_profile)}</p>
+              )}
               <div className="session-card-meta">
                 <small>{workflowProfileDisplayName(session.workflow_profile)}</small>
                 <small>Stage: {stageDisplayName(session.current_stage)}</small>

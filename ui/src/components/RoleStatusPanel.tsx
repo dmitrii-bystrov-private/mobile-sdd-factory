@@ -53,6 +53,29 @@ function workItemStatusDisplayName(status: string): string {
   }
 }
 
+function roleStateHeadline(role: Role, assignedItems: WorkItem[]): string {
+  const activeItem = assignedItems.find((item) => item.status === "active") ?? null;
+  const queuedItem = assignedItems.find((item) => item.status === "pending") ?? null;
+  if (activeItem) {
+    return `Working on ${workTypeDisplayName(activeItem.work_type).toLowerCase()}`;
+  }
+  if (queuedItem) {
+    return `Queued for ${workTypeDisplayName(queuedItem.work_type).toLowerCase()}`;
+  }
+  switch (role.status) {
+    case "running":
+      return "Ready for handoff";
+    case "waiting":
+      return "Waiting on upstream progress";
+    case "completed":
+      return "Finished current assignment";
+    case "stopped":
+      return "Runtime not active";
+    default:
+      return roleStatusSummary(role.status);
+  }
+}
+
 export function RoleStatusPanel({
   roles,
   workItems,
@@ -63,32 +86,49 @@ export function RoleStatusPanel({
     <section className="panel">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Runtime</p>
-          <h3>Roles And Work</h3>
+          <p className="eyebrow">Workers</p>
+          <h3>Worker Status</h3>
           <p className="path-label">
-            Track which lanes are active and what work is currently queued for them.
+            Track which workers are active, which ones are waiting, and what work they currently own.
           </p>
         </div>
       </div>
 
       <div className="stack">
         <div className="grid-two">
-          {visibleRoles.map((role) => (
-            <article className="subpanel" key={role.id}>
-              <div className="subpanel-head">
-                <strong>{roleDisplayName(role.role_name)}</strong>
-                <span className={`status-pill status-${role.status}`}>
-                  {roleStatusSummary(role.status)}
-                </span>
-              </div>
-              <p>{roleStatusSummary(role.status)}</p>
-            </article>
-          ))}
+          {visibleRoles.map((role) => {
+            const assignedItems = workItems.filter((item) => item.owner_role_id === role.id);
+            const activeItem = assignedItems.find((item) => item.status === "active") ?? null;
+            const queuedItem = assignedItems.find((item) => item.status === "pending") ?? null;
+            return (
+              <article className="subpanel" key={role.id}>
+                <div className="subpanel-head">
+                  <strong>{roleDisplayName(role.role_name)}</strong>
+                  <span className={`status-pill status-${role.status}`}>
+                    {roleStatusSummary(role.status)}
+                  </span>
+                </div>
+                <p>{roleStateHeadline(role, assignedItems)}</p>
+                {activeItem ? (
+                  <div className="worker-note">
+                    <span className="worker-note-label">Active work</span>
+                    <strong>{activeItem.title}</strong>
+                  </div>
+                ) : null}
+                {!activeItem && queuedItem ? (
+                  <div className="worker-note">
+                    <span className="worker-note-label">Queued next</span>
+                    <strong>{queuedItem.title}</strong>
+                  </div>
+                ) : null}
+              </article>
+            );
+          })}
         </div>
 
         <div className="subpanel">
           <div className="subpanel-head">
-            <strong>Work Items</strong>
+            <strong>Current Work Queue</strong>
             <span className="badge badge-muted">{workItems.length}</span>
           </div>
           {workItems.length > 0 ? (
