@@ -53,26 +53,56 @@ def create_session(
     payload: CreateSessionRequest,
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> CreateSessionResponse:
+    policy = payload.policy.model_dump(exclude_none=True) if payload.policy else None
+    role_config = (
+        {
+            role_name: config.model_dump(exclude_none=True)
+            for role_name, config in payload.role_config.items()
+        }
+        if payload.role_config
+        else None
+    )
     try:
-        session, event, created = dependencies.coordinator_service.create_task_session(
-            task_key=payload.task_key,
-            workflow_profile=payload.workflow_profile,
-            policy=payload.policy.model_dump(exclude_none=True) if payload.policy else None,
-            role_config=(
-                {
-                    role_name: config.model_dump(exclude_none=True)
-                    for role_name, config in payload.role_config.items()
-                }
-                if payload.role_config
-                else None
-            ),
-        )
+        if payload.prepare:
+            session, event, created, details = dependencies.coordinator_service.prepare_task_session(
+                raw_task_key=payload.task_key,
+                workflow_profile=payload.workflow_profile,
+                policy=policy,
+                role_config=role_config,
+            )
+        else:
+            session, event, created = dependencies.coordinator_service.create_task_session(
+                task_key=payload.task_key,
+                workflow_profile=payload.workflow_profile,
+                policy=policy,
+                role_config=role_config,
+            )
+            details = {
+                "resolved_task_key": None,
+                "issue_type": None,
+                "readiness": None,
+                "snapshot_exit_code": None,
+                "followup_event_type": None,
+            }
     except IntakeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return CreateSessionResponse(
         created=created,
         session=to_session_response(session),
         event_type=event.event_type,
+        resolved_task_key=(
+            str(details["resolved_task_key"]) if details["resolved_task_key"] is not None else None
+        ),
+        issue_type=str(details["issue_type"]) if details["issue_type"] is not None else None,
+        readiness=str(details["readiness"]) if details["readiness"] is not None else None,
+        snapshot_exit_code=(
+            int(details["snapshot_exit_code"]) if details["snapshot_exit_code"] is not None else None
+        ),
+        followup_event_type=(
+            str(details["followup_event_type"])
+            if details["followup_event_type"] is not None
+            else None
+        ),
     )
 
 
@@ -136,7 +166,7 @@ def get_runtime_state(
     return RuntimeSessionStateResponse(**summary)
 
 
-@router.post("/prepare", response_model=PrepareSessionResponse)
+@router.post("/prepare", response_model=PrepareSessionResponse, include_in_schema=False)
 def prepare_session(
     payload: PrepareSessionRequest,
     dependencies: AppDependencies = Depends(get_dependencies),

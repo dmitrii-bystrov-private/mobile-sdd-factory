@@ -208,11 +208,11 @@ export function SessionStartForm({
       const created = await apiClient.createSession({
         task_key: normalizedTaskKey,
         workflow_profile: payload.workflow_profile,
+        prepare: true,
         policy: payload.policy,
         role_config: roleConfig,
       });
-      const prepared = await apiClient.prepareSession(normalizedTaskKey);
-      await onCreated(prepared.session.id ?? created.session.id);
+      await onCreated(created.session.id);
       setTaskKey("");
       setWorkflowProfile("oneshot");
       setPolicy(defaultDraftPolicy());

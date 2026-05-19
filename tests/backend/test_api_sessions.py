@@ -332,6 +332,25 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("required", response.session.policy["test_policy"])
         self.assertEqual("task_started", response.event_type)
 
+    def test_create_session_route_can_prepare_in_one_call(self) -> None:
+        response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40000P",
+                workflow_profile="oneshot",
+                prepare=True,
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        self.assertEqual("task_prepared", response.event_type)
+        self.assertEqual("IOS-40000P", response.resolved_task_key)
+        self.assertEqual("Story", response.issue_type)
+        self.assertEqual("ready_for_execution", response.readiness)
+        self.assertEqual(0, response.snapshot_exit_code)
+        self.assertEqual("implementation_requested", response.followup_event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
+
     def test_cleanup_task_route_soft_keeps_session_and_removes_runtime_residue(self) -> None:
         create_response = create_session(
             CreateSessionRequest(task_key="IOS-40100", workflow_profile="oneshot"),
@@ -3302,6 +3321,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertIn("/events", paths)
         self.assertIn("get", paths["/events"])
         self.assertNotIn("post", paths["/events"])
+        self.assertNotIn("/sessions/prepare", paths)
         self.assertNotIn("/roles/output", paths)
         self.assertNotIn("/roles/collect-output", paths)
         self.assertNotIn("/operator/redirect-session", paths)

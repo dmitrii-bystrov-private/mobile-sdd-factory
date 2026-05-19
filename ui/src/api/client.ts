@@ -87,6 +87,7 @@ const STREAM_EVENT_TYPES = [
 type CreateSessionPayload = {
   task_key: string;
   workflow_profile: WorkflowProfile;
+  prepare?: boolean;
   policy: {
     self_review_policy: SessionPolicyValue;
     boy_scout_policy: SessionPolicyValue;
@@ -117,17 +118,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const apiClient = {
   createSession(
     payload: CreateSessionPayload,
-  ): Promise<{ created: boolean; event_type: string; session: Session }> {
+  ): Promise<{
+    created: boolean;
+    event_type: string;
+    session: Session;
+    resolved_task_key?: string | null;
+    issue_type?: string | null;
+    readiness?: string | null;
+    snapshot_exit_code?: number | null;
+    followup_event_type?: string | null;
+  }> {
     return request("/sessions", {
       method: "POST",
       body: JSON.stringify(payload),
-    });
-  },
-
-  prepareSession(taskKey: string): Promise<{ created: boolean; event_type: string; session: Session }> {
-    return request("/sessions/prepare", {
-      method: "POST",
-      body: JSON.stringify({ task_key: taskKey }),
     });
   },
 

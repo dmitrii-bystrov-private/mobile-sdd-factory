@@ -170,7 +170,11 @@ class CoordinatorService:
         return session, event, True
 
     def prepare_task_session(
-        self, raw_task_key: str
+        self,
+        raw_task_key: str,
+        workflow_profile: str | None = None,
+        policy: dict[str, str] | None = None,
+        role_config: dict[str, dict[str, str]] | None = None,
     ) -> tuple[Session, Event, bool, dict[str, str | int | None]]:
         """Run deterministic intake/setup for a task session."""
 
@@ -196,12 +200,20 @@ class CoordinatorService:
         session, _, created = self.create_task_session(
             resolved_task_key,
             workflow_profile=(
-                existing.workflow_profile
-                if existing is not None
-                else infer_workflow_profile(issue_type)
+                workflow_profile
+                if workflow_profile is not None
+                else (
+                    existing.workflow_profile
+                    if existing is not None
+                    else infer_workflow_profile(issue_type)
+                )
             ),
-            policy=existing.policy if existing is not None else None,
-            role_config=existing.role_config if existing is not None else None,
+            policy=policy if policy is not None else (existing.policy if existing is not None else None),
+            role_config=(
+                role_config
+                if role_config is not None
+                else (existing.role_config if existing is not None else None)
+            ),
         )
 
         snapshot_result = self.snapshot_adapter.run(resolved_task_key)

@@ -24,6 +24,7 @@ class CreateSessionRequest(BaseModel):
     workflow_profile: str
     policy: SessionPolicyPayload | None = None
     role_config: dict[str, RoleRuntimeConfigPayload] | None = None
+    prepare: bool = False
 
 
 class SessionResponse(BaseModel):
@@ -41,6 +42,11 @@ class CreateSessionResponse(BaseModel):
     created: bool
     session: SessionResponse
     event_type: str
+    resolved_task_key: str | None = None
+    issue_type: str | None = None
+    readiness: str | None = None
+    snapshot_exit_code: int | None = None
+    followup_event_type: str | None = None
 
 
 class PrepareSessionRequest(BaseModel):
