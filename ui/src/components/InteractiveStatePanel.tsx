@@ -30,9 +30,6 @@ export function InteractiveStatePanel({
         <div>
           <p className="eyebrow">Interactive State</p>
           <h3>Live Agent Blocker</h3>
-          <p className="path-label">
-            This run needs operator attention before the active workflow can continue.
-          </p>
         </div>
       </div>
 
@@ -88,13 +85,13 @@ export function InteractiveStatePanel({
             {interactiveStateSummary.sourceEventType !== null ? (
               <div className="table-row">
                 <span>Source Event</span>
-                <strong>{interactiveStateSummary.sourceEventType}</strong>
+                <strong>{formatReason(interactiveStateSummary.sourceEventType)}</strong>
               </div>
             ) : null}
             {interactiveStateSummary.resumeStrategy !== null ? (
               <div className="table-row">
                 <span>Resume Strategy</span>
-                <strong>{interactiveStateSummary.resumeStrategy}</strong>
+                <strong>{formatReason(interactiveStateSummary.resumeStrategy)}</strong>
               </div>
             ) : null}
           </div>

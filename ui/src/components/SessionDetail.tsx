@@ -421,7 +421,7 @@ export function SessionDetail({
 
         <div className="subpanel session-updates-panel">
           <div className="subpanel-head">
-            <strong>Recent Updates</strong>
+            <strong>Latest Activity</strong>
             <span className="badge badge-muted">{recentEvents.length}</span>
           </div>
           {recentEvents.length > 0 ? (
@@ -432,12 +432,11 @@ export function SessionDetail({
                     <strong>{eventSummary(event)}</strong>
                     <p>{producerDisplayName(event.producer_type)}</p>
                   </div>
-                  <small>#{event.id}</small>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="path-label">No recent updates have been recorded yet.</p>
+            <p className="path-label">No activity has been recorded yet.</p>
           )}
         </div>
       </section>
@@ -497,10 +496,7 @@ export function SessionDetail({
         <div className="panel-header">
           <div>
             <p className="eyebrow">Runtime</p>
-            <h3>Runtime And Trace</h3>
-            <p className="path-label">
-              Use this surface only when you need runtime intervention or deeper trace debugging.
-            </p>
+            <h3>Runtime</h3>
           </div>
         </div>
         <div className="runtime-surface-stack">

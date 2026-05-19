@@ -105,7 +105,6 @@ export function RuntimeSessionPanel({
               </div>
               <p className="artifact-path">
                 Runtime recovery already happened at {stageDisplayName(runtimeStateSummary.lastAutoRecovery.currentStage)}.
-                Latest recovery event: #{runtimeStateSummary.lastAutoRecovery.eventId}.
               </p>
             </div>
           ) : null}
