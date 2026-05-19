@@ -647,7 +647,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Workflow Runs</strong>
-                <p>Create runs, switch sessions, and handle operator actions.</p>
+                <p>Create runs and manage active sessions.</p>
               </button>
               <button
                 className={`surface-nav-card ${surfaceView === "settings" ? "selected" : ""}`}
@@ -699,9 +699,7 @@ export function SessionsPage(): JSX.Element {
                   <div className="inline-summary-header">
                     <strong>Project-wide defaults</strong>
                   </div>
-                  <p className="form-help">
-                    Keep defaults and reusable knowledge here. Session-specific tweaks stay inside Workflow Runs.
-                  </p>
+                  <p className="form-help">New sessions inherit these defaults automatically.</p>
                 </div>
                 {runtimeDefaultsSummary ? (
                   <div className="inline-summary-card">
@@ -709,9 +707,7 @@ export function SessionsPage(): JSX.Element {
                       <strong>Configured roles</strong>
                       <span>{runtimeDefaultsSummary.knownRoles.length} roles</span>
                     </div>
-                    <p className="form-help">
-                      New sessions inherit these defaults automatically.
-                    </p>
+                    <p className="form-help">Session-specific overrides stay in Workflow Runs.</p>
                   </div>
                 ) : null}
               </div>
@@ -730,9 +726,7 @@ export function SessionsPage(): JSX.Element {
                     <div className="inline-summary-header">
                       <strong>Doctor</strong>
                     </div>
-                    <p className="form-help">
-                      Check environment health before treating a run problem as workflow logic.
-                  </p>
+                    <p className="form-help">Check environment health before debugging a run.</p>
                 </div>
                 {bootstrapGuidanceSummary ? (
                   <div className="inline-summary-card">

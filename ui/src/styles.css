@@ -581,7 +581,7 @@ input {
 }
 
 .operator-action-inline-heading {
-  margin-bottom: -2px;
+  margin-bottom: 2px;
 }
 
 .operator-actions-grid {
@@ -596,13 +596,6 @@ input {
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--surface-muted);
-}
-
-.operator-action-description {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 0.84rem;
-  line-height: 1.4;
 }
 
 .worker-note {
@@ -731,6 +724,15 @@ input {
   color: var(--ink-soft);
   font-size: 0.84rem;
   line-height: 1.4;
+}
+
+.advanced-disclosure-toggle > div {
+  min-width: 0;
+}
+
+.advanced-disclosure-toggle > div:only-child,
+.advanced-disclosure-toggle > div strong:only-child {
+  margin: 0;
 }
 
 .advanced-disclosure-meta {

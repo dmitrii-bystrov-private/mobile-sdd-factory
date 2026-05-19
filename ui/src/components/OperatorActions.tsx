@@ -234,8 +234,8 @@ export function OperatorActions({
 
   function renderActionGroup(
     title: string,
-    eyebrow: string,
-    summary: string,
+    _eyebrow: string,
+    _summary: string,
     actions: ActionDefinition[],
   ): JSX.Element | null {
     if (actions.length === 0) {
@@ -243,17 +243,9 @@ export function OperatorActions({
     }
     return (
       <div className="operator-action-group">
-        {actions.length > 2 ? (
-          <div className="operator-followup-copy">
-            <p className="eyebrow">{eyebrow}</p>
-            <h4>{title}</h4>
-            <p className="path-label">{summary}</p>
-          </div>
-        ) : (
-          <div className="operator-action-inline-heading">
-            <strong>{title}</strong>
-          </div>
-        )}
+        <div className="operator-action-inline-heading">
+          <strong>{title}</strong>
+        </div>
         <div className="actions-grid operator-actions-grid">
           {actions.map((action) => (
             <div key={action.label} className="operator-action-card">
@@ -266,7 +258,6 @@ export function OperatorActions({
               >
                 {action.label}
               </button>
-              <p className="operator-action-description">{action.description}</p>
             </div>
           ))}
         </div>
@@ -316,11 +307,11 @@ export function OperatorActions({
                 value={runtimeInput}
               />
             </label>
-            <button
-              className="action-button"
-              disabled={busy || !canSendRuntimeInput}
-              title="Send a direct reply into the live runtime session after the agent asked the operator for input."
-              type="submit"
+              <button
+                className="action-button"
+                disabled={busy || !canSendRuntimeInput}
+                title="Send a direct reply into the live runtime session after the agent asked the operator for input."
+                type="submit"
             >
               Send Runtime Input
             </button>
@@ -347,9 +338,6 @@ export function OperatorActions({
                 >
                   Implement Boy Scout Findings
                 </button>
-                <p className="operator-action-description">
-                  Route all current Boy Scout findings back into a narrow correction pass without creating separate tech-debt stories.
-                </p>
               </div>
               <div className="operator-action-card">
                 <button
@@ -361,9 +349,6 @@ export function OperatorActions({
                 >
                   Create Tech Debt And Continue
                 </button>
-                <p className="operator-action-description">
-                  Materialize separate tech-debt stories for the old-code findings, then send the remaining implement-now findings back to the coding lane.
-                </p>
               </div>
             </div>
           ) : null}

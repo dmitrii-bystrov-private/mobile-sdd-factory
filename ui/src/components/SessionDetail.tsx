@@ -293,7 +293,30 @@ export function SessionDetail({
 
       {detailSurface === "workflow" ? (
         <>
-      <div className="grid-two">
+      {session.workflow_profile === "story_full" ? (
+        <div className="grid-two">
+          <section className="subpanel">
+            <div className="subpanel-head">
+              <strong>Current Focus</strong>
+              <span className={`status-pill status-${session.status}`}>
+                {sessionStatusDisplayName(session.status)}
+              </span>
+            </div>
+            <div className="stack-tight">
+              <strong>{currentFocusTitle}</strong>
+              <p>{currentFocusBody}</p>
+              <div className="inline-pill-row">
+                <span className="inline-pill">stage: {currentStage}</span>
+                <span className="inline-pill">owner: {currentOwner}</span>
+              </div>
+            </div>
+          </section>
+          <PlanningSummaryPanel
+            planningSummary={bundle.planningSummary}
+            workflowProfile={session.workflow_profile}
+          />
+        </div>
+      ) : (
         <section className="subpanel">
           <div className="subpanel-head">
             <strong>Current Focus</strong>
@@ -310,18 +333,7 @@ export function SessionDetail({
             </div>
           </div>
         </section>
-        {session.workflow_profile === "story_full" ? (
-          <PlanningSummaryPanel
-            planningSummary={bundle.planningSummary}
-            workflowProfile={session.workflow_profile}
-          />
-        ) : (
-          <div className="subpanel progress-placeholder">
-            <strong>Workflow Summary</strong>
-            <p>This run is following the direct one-shot workflow without story planning.</p>
-          </div>
-        )}
-      </div>
+      )}
 
       <section className="panel">
           <div className="panel-header">

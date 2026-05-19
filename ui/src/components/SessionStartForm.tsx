@@ -33,12 +33,6 @@ const REQUIREMENTS_CLARIFICATION_LABELS: Record<RequirementsClarificationMode, s
   autonomous: "Stay autonomous",
 };
 
-const WORKFLOW_PROFILE_DESCRIPTIONS: Record<WorkflowProfile, string> = {
-  oneshot: "Direct execution without story planning or bug-only recovery lanes.",
-  bug_full: "Bug flow with dedicated fix and test handling.",
-  story_full: "Full story flow with planning, clarification, and subtask execution.",
-};
-
 type DraftPolicy = {
   test_policy: SessionPolicyValue;
   self_review_policy: SessionPolicyValue;
@@ -345,9 +339,6 @@ export function SessionStartForm({
             <strong>{workflowProfileDisplayName(workflowProfile)}</strong>
             <span>{effectiveRoleNames.length} workers</span>
           </div>
-          <p className="form-help">
-            {WORKFLOW_PROFILE_DESCRIPTIONS[workflowProfile]}
-          </p>
           <div className="inline-pill-row">
             <span className="inline-pill">Self-review {policy.self_review_policy}</span>
             <span className="inline-pill">Boy Scout {policy.boy_scout_policy}</span>
@@ -368,15 +359,11 @@ export function SessionStartForm({
           >
             <div>
               <strong>Tune This Run</strong>
-              <p>Adjust workflow behavior only when this run should differ from the defaults.</p>
             </div>
             <span className={`chevron${showPolicyTuning ? " expanded" : ""}`} aria-hidden="true" />
           </button>
           {showPolicyTuning ? (
             <div className="advanced-disclosure-body">
-              <p className="path-label compact-note">
-                Leave these at their defaults unless this run needs a different quality or clarification policy.
-              </p>
               {showTestPolicy ? (
                 <div className="form-section-compact">
                   <label className="form-field">
@@ -482,7 +469,6 @@ export function SessionStartForm({
             >
               <div>
                 <strong>Advanced Runtime Overrides</strong>
-                <p>Change lane runner, model, or effort for this session only.</p>
               </div>
               <span className={`chevron${showAdvancedRoleConfig ? " expanded" : ""}`} aria-hidden="true" />
             </button>
