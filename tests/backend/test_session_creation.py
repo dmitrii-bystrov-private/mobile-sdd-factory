@@ -553,11 +553,13 @@ class SessionCreationTests(unittest.TestCase):
                         ],
                     },
                 ],
-                "legacy_role_defaults": [
+                "role_defaults": [
                     {
-                        "role_name": "context-collector",
+                        "role_name": "proposal-context-worker",
                         "model": "sonnet",
                         "effort": "high",
+                        "mcp_servers": ["notion", "ios-rag", "android-rag", "frontend-rag"],
+                        "source": "backend.role_baselines",
                     }
                 ],
             },
@@ -1023,11 +1025,15 @@ class SessionCreationTests(unittest.TestCase):
             (implementer_workspace.directory / "claude.settings.role.json").read_text()
         )
         self.assertEqual(
-            ["ios-rag", "frontend-rag"],
+            ["ios-rag", "android-rag", "frontend-rag"],
             implementer_settings["enabledMcpjsonServers"],
         )
         self.assertEqual(
-            ["Bash(git status)", "mcp__ios-rag__search", "mcp__frontend-rag__read_file"],
+            [
+                "Bash(git status)",
+                "mcp__ios-rag__search",
+                "mcp__frontend-rag__read_file",
+            ],
             implementer_settings["permissions"]["allow"],
         )
         implementer_mcp = json.loads(
@@ -1069,7 +1075,7 @@ class SessionCreationTests(unittest.TestCase):
             (proposal_context_workspace.directory / "claude.settings.role.json").read_text()
         )
         self.assertEqual(
-            {"ios-rag", "frontend-rag", "notion"},
+            {"ios-rag", "android-rag", "frontend-rag", "notion"},
             set(proposal_context_settings["enabledMcpjsonServers"]),
         )
         proposal_context_mcp = json.loads(

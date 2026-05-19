@@ -2732,13 +2732,13 @@ class SessionApiTests(unittest.TestCase):
                     ],
                 }
             ],
-            "legacy_role_defaults": [
+            "role_defaults": [
                 {
                     "role_name": "implementer",
                     "model": "sonnet",
                     "effort": "medium",
                     "mcp_servers": ["ios-rag", "android-rag", "frontend-rag"],
-                    "source": ".claude/agents/implementer.md",
+                    "source": "backend.role_baselines",
                 }
             ],
         }
@@ -2750,7 +2750,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("claude", response.default_runner)
         self.assertEqual("claude", response.runners[0].runner)
         self.assertEqual("sonnet", response.runners[0].models[0].id)
-        self.assertEqual("implementer", response.legacy_role_defaults[0].role_name)
+        self.assertEqual("implementer", response.role_defaults[0].role_name)
 
     def test_get_runtime_state_route_returns_runtime_handles(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

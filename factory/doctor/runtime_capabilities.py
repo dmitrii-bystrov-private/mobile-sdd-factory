@@ -11,6 +11,8 @@ import shutil
 import subprocess
 from typing import Any, Callable
 
+from backend.role_baselines import role_baselines_report
+
 
 WhichFunc = Callable[[str], str | None]
 CommandRunner = Callable[[list[str]], tuple[int, str]]
@@ -44,15 +46,6 @@ class RunnerCapability:
     path: str | None
     supports_custom_model: bool
     models: list[RuntimeModelCapability]
-
-
-@dataclass(frozen=True)
-class LegacyRoleDefault:
-    role_name: str
-    model: str | None
-    effort: str | None
-    mcp_servers: list[str]
-    source: str
 
 
 def _run_command(command: list[str]) -> tuple[int, str]:
@@ -177,59 +170,6 @@ def _build_codex_capability(
     )
 
 
-def _parse_agent_frontmatter(agent_path: Path) -> LegacyRoleDefault:
-    in_frontmatter = False
-    current_list_key: str | None = None
-    model: str | None = None
-    effort: str | None = None
-    mcp_servers: list[str] = []
-
-    for raw_line in agent_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.rstrip()
-        if line.strip() == "---":
-            if not in_frontmatter:
-                in_frontmatter = True
-                continue
-            break
-        if not in_frontmatter:
-            continue
-        stripped = line.strip()
-        if current_list_key == "mcpServers" and stripped.startswith("- "):
-            mcp_servers.append(stripped[2:].strip())
-            continue
-        current_list_key = None
-        if stripped.startswith("model:"):
-            value = stripped.split(":", 1)[1].strip()
-            model = value or None
-        elif stripped.startswith("effort:"):
-            value = stripped.split(":", 1)[1].strip()
-            effort = value or None
-        elif stripped.startswith("mcpServers:"):
-            value = stripped.split(":", 1)[1].strip()
-            if value == "[]":
-                mcp_servers = []
-            else:
-                current_list_key = "mcpServers"
-
-    return LegacyRoleDefault(
-        role_name=agent_path.stem,
-        model=model,
-        effort=effort,
-        mcp_servers=mcp_servers,
-        source=str(agent_path),
-    )
-
-
-def _build_legacy_role_defaults(repo_root: Path) -> list[LegacyRoleDefault]:
-    agent_dir = repo_root / ".claude" / "agents"
-    if not agent_dir.is_dir():
-        return []
-    return sorted(
-        (_parse_agent_frontmatter(path) for path in agent_dir.glob("*.md")),
-        key=lambda item: item.role_name,
-    )
-
-
 def build_runtime_capabilities(
     *,
     repo_root: Path,
@@ -246,5 +186,5 @@ def build_runtime_capabilities(
         "available_runners": available_runners,
         "default_runner": default_runner,
         "runners": [asdict(runner) for runner in runners],
-        "legacy_role_defaults": [asdict(item) for item in _build_legacy_role_defaults(repo_root)],
+        "role_defaults": role_baselines_report(),
     }

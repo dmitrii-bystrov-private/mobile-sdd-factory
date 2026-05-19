@@ -306,7 +306,7 @@ export const apiClient = {
         source: string;
       }>;
     }>;
-    legacy_role_defaults: Array<{
+    role_defaults: Array<{
       role_name: string;
       model: string | null;
       effort: string | null;

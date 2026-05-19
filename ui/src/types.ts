@@ -200,7 +200,7 @@ export type RunnerCapability = {
   models: RuntimeCapabilityModel[];
 };
 
-export type LegacyRoleDefault = {
+export type RoleBaseline = {
   roleName: string;
   model: string | null;
   effort: string | null;
@@ -212,7 +212,7 @@ export type RuntimeCapabilitiesSummary = {
   availableRunners: string[];
   defaultRunner: string | null;
   runners: RunnerCapability[];
-  legacyRoleDefaults: LegacyRoleDefault[];
+  roleDefaults: RoleBaseline[];
 };
 
 export type RuntimeRoleDefaultConfig = {

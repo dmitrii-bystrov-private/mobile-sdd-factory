@@ -69,8 +69,8 @@ export function RuntimeCapabilitiesPanel({
       </div>
 
       <div className="artifact-stack">
-        <p className="eyebrow">Legacy role defaults</p>
-        {capabilities.legacyRoleDefaults.map((item) => (
+        <p className="eyebrow">Role Baselines</p>
+        {capabilities.roleDefaults.map((item) => (
           <article className="artifact-card" key={item.roleName}>
             <div className="artifact-meta">
               <span>{item.effort ?? "no effort"}</span>

@@ -213,7 +213,7 @@ class RunnerCapabilityResponse(BaseModel):
     models: list[RuntimeCapabilityModelResponse]
 
 
-class LegacyRoleDefaultResponse(BaseModel):
+class RoleBaselineResponse(BaseModel):
     role_name: str
     model: str | None = None
     effort: str | None = None
@@ -225,7 +225,7 @@ class RuntimeCapabilitiesResponse(BaseModel):
     available_runners: list[str]
     default_runner: str | None = None
     runners: list[RunnerCapabilityResponse]
-    legacy_role_defaults: list[LegacyRoleDefaultResponse]
+    role_defaults: list[RoleBaselineResponse]
 
 
 class RuntimeRoleDefaultConfigResponse(BaseModel):

@@ -115,7 +115,7 @@ These are the supported way to verify that:
 - required tools exist
 - the runtime host is available
 - runner/model catalogs are visible
-- legacy role metadata and current runtime defaults resolve into a valid configuration
+- supported role baselines and current runtime defaults resolve into a valid configuration
 
 ## Starting the Local Platform
 

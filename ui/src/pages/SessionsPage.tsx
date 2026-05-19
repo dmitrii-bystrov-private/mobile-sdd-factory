@@ -423,7 +423,7 @@ export function SessionsPage(): JSX.Element {
             source: model.source,
           })),
         })),
-        legacyRoleDefaults: runtimeCapabilitiesResponse.legacy_role_defaults.map((item) => ({
+        roleDefaults: runtimeCapabilitiesResponse.role_defaults.map((item) => ({
           roleName: item.role_name,
           model: item.model,
           effort: item.effort,

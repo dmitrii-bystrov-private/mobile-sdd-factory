@@ -6,34 +6,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.role_baselines import known_role_names
 from backend.session_policy import FIELD_ALLOWED_VALUES, PROFILE_POLICY_FIELDS, WORKFLOW_PROFILES
-
-KNOWN_ROLE_NAMES = [
-    "implementer",
-    "bug-fixer",
-    "task-coordinator",
-    "verification-coordinator",
-    "code-reviewer",
-    "code-scout",
-    "mr-comments-analyst-worker",
-    "doc-harvest-worker",
-    "proposal-context-worker",
-    "requirements-clarifier-worker",
-    "acceptance-criteria-worker",
-    "constraints-worker",
-    "spec-verifier-worker",
-    "story-spec-worker",
-    "task-decomposer-worker",
-]
 
 
 SETTINGS_DIR_NAME = ".sdd-factory"
 LOCAL_SETTINGS_FILENAME = "settings.local.json"
-
-
-def known_role_names() -> list[str]:
-    return sorted(KNOWN_ROLE_NAMES)
-
 
 def settings_file_path(repo_root: Path) -> Path:
     return repo_root / SETTINGS_DIR_NAME / LOCAL_SETTINGS_FILENAME
@@ -97,7 +75,7 @@ def save_runtime_defaults(
     path.parent.mkdir(parents=True, exist_ok=True)
     normalized_role_defaults: dict[str, dict[str, str]] = {}
     for role_name, value in role_defaults.items():
-        if role_name not in KNOWN_ROLE_NAMES or not isinstance(value, dict):
+        if role_name not in known_role_names() or not isinstance(value, dict):
             continue
         normalized_value = {
             "runner": _string_or_none(value.get("runner")) or "",

@@ -6,27 +6,9 @@ from pathlib import Path
 from typing import Final
 
 from backend.coordinator.intake import IntakeError
+from backend.role_baselines import role_baselines_by_name
 from backend.runtime_defaults import load_runtime_defaults
 from factory.doctor.runtime_capabilities import build_runtime_capabilities
-
-
-ROLE_DEFAULT_SOURCE_MAP = {
-    "implementer": "implementer",
-    "bug-fixer": "bug-fixer",
-    "task-coordinator": None,
-    "verification-coordinator": "final-verifier",
-    "code-reviewer": "code-reviewer",
-    "code-scout": "code-scout",
-    "mr-comments-analyst-worker": "mr-comments-analyst",
-    "doc-harvest-worker": "doc-harvest",
-    "proposal-context-worker": "context-collector",
-    "requirements-clarifier-worker": "requirements-clarifier",
-    "acceptance-criteria-worker": "acceptance-criteria-writer",
-    "constraints-worker": "constraints-definer",
-    "spec-verifier-worker": "spec-verifier",
-    "story-spec-worker": None,
-    "task-decomposer-worker": "task-decomposer",
-}
 
 _CLAUDE_SCOPED_MCP_RUNNER: Final[str] = "claude"
 
@@ -40,7 +22,7 @@ def normalize_role_runtime_config(
     capabilities = build_runtime_capabilities(repo_root=repo_root)
     operator_defaults = load_runtime_defaults(repo_root)
     runners_by_name = {item["runner"]: item for item in capabilities["runners"]}
-    legacy_defaults = {item["role_name"]: item for item in capabilities["legacy_role_defaults"]}
+    role_baselines = role_baselines_by_name()
     available_runners = set(capabilities["available_runners"])
     configured_default_runner = operator_defaults.get("default_runner")
     default_runner = (
@@ -67,11 +49,10 @@ def normalize_role_runtime_config(
         runner_capability = runners_by_name[runner]
         models = runner_capability.get("models", [])
         model_ids = [item["id"] for item in models]
-        legacy_key = ROLE_DEFAULT_SOURCE_MAP.get(role_name)
-        legacy_default = legacy_defaults.get(legacy_key) if legacy_key is not None else None
-        legacy_default_model = (
-            (legacy_default or {}).get("model")
-            if (legacy_default or {}).get("model") in model_ids
+        role_baseline = role_baselines.get(role_name)
+        baseline_model = (
+            role_baseline.model
+            if role_baseline is not None and role_baseline.model in model_ids
             else None
         )
 
@@ -82,7 +63,7 @@ def normalize_role_runtime_config(
         )
         default_model = (
             operator_default_model
-            or legacy_default_model
+            or baseline_model
             or ("sonnet" if runner == "claude" and "sonnet" in model_ids else None)
             or (model_ids[0] if model_ids else None)
         )
@@ -94,12 +75,13 @@ def normalize_role_runtime_config(
 
         model_capability = next(item for item in models if item["id"] == model)
         supported_efforts = list(model_capability.get("supported_efforts", []))
-        legacy_default_effort = (
-            (legacy_default or {}).get("effort")
-            if legacy_default_model == model
+        baseline_effort = (
+            role_baseline.effort
+            if role_baseline is not None
+            and baseline_model == model
             and (
                 not supported_efforts
-                or (legacy_default or {}).get("effort") in supported_efforts
+                or role_baseline.effort in supported_efforts
             )
             else None
         )
@@ -110,7 +92,7 @@ def normalize_role_runtime_config(
                 and operator_role_default.get("model") in {None, "", model}
                 and operator_role_default.get("effort")
             )
-            or legacy_default_effort
+            or baseline_effort
             or model_capability.get("default_effort")
             or ("medium" if "medium" in supported_efforts else (supported_efforts[0] if supported_efforts else None))
         )
@@ -136,51 +118,7 @@ def resolve_role_mcp_servers(
     if runner != _CLAUDE_SCOPED_MCP_RUNNER:
         return []
 
-    if role_name == "proposal-context-worker":
-        merged: list[str] = []
-        for legacy_role_name in ("proposal-collector", "context-collector"):
-            agent_path = repo_root / ".claude" / "agents" / f"{legacy_role_name}.md"
-            if not agent_path.is_file():
-                continue
-            for server_name in _parse_agent_mcp_servers(agent_path):
-                if server_name not in merged:
-                    merged.append(server_name)
-        return merged
-
-    legacy_role_name = ROLE_DEFAULT_SOURCE_MAP.get(role_name)
-    if not legacy_role_name:
+    baseline = role_baselines_by_name().get(role_name)
+    if baseline is None:
         return []
-
-    agent_path = repo_root / ".claude" / "agents" / f"{legacy_role_name}.md"
-    if not agent_path.is_file():
-        return []
-
-    return _parse_agent_mcp_servers(agent_path)
-
-
-def _parse_agent_mcp_servers(agent_path: Path) -> list[str]:
-    in_frontmatter = False
-    current_list_key: str | None = None
-    mcp_servers: list[str] = []
-
-    for raw_line in agent_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.rstrip()
-        if line.strip() == "---":
-            if not in_frontmatter:
-                in_frontmatter = True
-                continue
-            break
-        if not in_frontmatter:
-            continue
-        stripped = line.strip()
-        if current_list_key == "mcpServers" and stripped.startswith("- "):
-            mcp_servers.append(stripped[2:].strip())
-            continue
-        current_list_key = None
-        if stripped.startswith("mcpServers:"):
-            value = stripped.split(":", 1)[1].strip()
-            if value == "[]":
-                mcp_servers = []
-            else:
-                current_list_key = "mcpServers"
-    return mcp_servers
+    return list(baseline.mcp_servers)

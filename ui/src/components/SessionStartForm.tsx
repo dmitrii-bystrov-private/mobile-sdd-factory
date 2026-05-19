@@ -48,24 +48,6 @@ const CLARIFICATION_MODE_DESCRIPTIONS: Record<RequirementsClarificationMode, str
   autonomous: "Prefer carrying the task forward without operator clarification unless the flow hard-blocks.",
 };
 
-const ROLE_DEFAULT_SOURCE_MAP: Record<string, string | null> = {
-  implementer: "implementer",
-  "bug-fixer": "bug-fixer",
-  "task-coordinator": null,
-  "verification-coordinator": "final-verifier",
-  "code-reviewer": "code-reviewer",
-  "code-scout": "code-scout",
-  "mr-comments-analyst-worker": "mr-comments-analyst",
-  "doc-harvest-worker": "doc-harvest",
-  "proposal-context-worker": "context-collector",
-  "requirements-clarifier-worker": "requirements-clarifier",
-  "acceptance-criteria-worker": "acceptance-criteria-writer",
-  "constraints-worker": "constraints-definer",
-  "spec-verifier-worker": "spec-verifier",
-  "story-spec-worker": null,
-  "task-decomposer-worker": "task-decomposer",
-};
-
 type DraftPolicy = {
   test_policy: SessionPolicyValue;
   self_review_policy: SessionPolicyValue;
@@ -199,7 +181,7 @@ export function SessionStartForm({
     }
 
     const runnerIndex = new Map(runtimeCapabilities.runners.map((runner) => [runner.runner, runner]));
-    const legacyIndex = new Map(runtimeCapabilities.legacyRoleDefaults.map((item) => [item.roleName, item]));
+    const roleDefaultsIndex = new Map(runtimeCapabilities.roleDefaults.map((item) => [item.roleName, item]));
     const defaultRunner =
       runtimeDefaults?.defaultRunner ??
       runtimeCapabilities.defaultRunner ??
@@ -210,25 +192,24 @@ export function SessionStartForm({
       const storedRoleDefault = runtimeDefaults?.roleDefaults[roleName];
       const runner = storedRoleDefault?.runner ?? defaultRunner;
       const runnerCapability = runnerIndex.get(runner);
-      const legacyKey = ROLE_DEFAULT_SOURCE_MAP[roleName] ?? null;
-      const legacyDefault = legacyKey === null ? undefined : legacyIndex.get(legacyKey);
+      const roleDefault = roleDefaultsIndex.get(roleName);
       const models = runnerCapability?.models ?? [];
       const modelIds = models.map((item) => item.id);
-      const compatibleLegacyModel =
-        legacyDefault?.model && modelIds.includes(legacyDefault.model) ? legacyDefault.model : undefined;
+      const compatibleRoleModel =
+        roleDefault?.model && modelIds.includes(roleDefault.model) ? roleDefault.model : undefined;
       const model =
         (storedRoleDefault?.runner === null || storedRoleDefault?.runner === runner ? storedRoleDefault?.model : null) ??
-        compatibleLegacyModel ??
+        compatibleRoleModel ??
         (runner === "claude" ? models.find((item) => item.id === "sonnet")?.id : undefined) ??
         models[0]?.id ??
         "";
       const modelCapability = models.find((item) => item.id === model);
       const supportedEfforts = modelCapability?.supportedEfforts ?? [];
-      const compatibleLegacyEffort =
-        compatibleLegacyModel === model &&
-        legacyDefault?.effort &&
-        (supportedEfforts.length === 0 || supportedEfforts.includes(legacyDefault.effort))
-          ? legacyDefault.effort
+      const compatibleRoleEffort =
+        compatibleRoleModel === model &&
+        roleDefault?.effort &&
+        (supportedEfforts.length === 0 || supportedEfforts.includes(roleDefault.effort))
+          ? roleDefault.effort
           : undefined;
       const effort =
         (
@@ -237,7 +218,7 @@ export function SessionStartForm({
             ? storedRoleDefault?.effort
             : null
         ) ??
-        compatibleLegacyEffort ??
+        compatibleRoleEffort ??
         modelCapability?.defaultEffort ??
         supportedEfforts[0] ??
         "medium";
