@@ -128,7 +128,7 @@ The current pipeline is composed of specialized long-running or on-demand roles:
 
 ## Legacy Skill Reference
 
-The legacy slash-command surface still exists for compatibility and local scripted use:
+The legacy slash-command surface still exists only as deprecated compatibility and migration reference:
 
 | Skill | Trigger condition |
 |-------|------------------|
@@ -294,7 +294,7 @@ From there the UI exposes:
 - environment doctor, bootstrap guidance, and runtime capabilities
 - task cleanup controls
 
-The legacy slash-command entrypoints still exist for manual use:
+The legacy slash-command entrypoints still exist only as deprecated compatibility entrypoints:
 
 ```bash
 /jira-task IOS-1234
@@ -319,7 +319,7 @@ When a task comes back from QA (status: Reopened), resume the normal task flow f
 
 ### Individual steps
 
-Legacy/manual steps can still be run standalone if you need to resume a partial flow:
+Deprecated/manual steps can still be run standalone only when you explicitly need legacy compatibility or migration reference behavior:
 
 ```bash
 /snapshot IOS-1234       # re-fetch Jira data
