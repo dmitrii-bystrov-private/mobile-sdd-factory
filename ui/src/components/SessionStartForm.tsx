@@ -22,6 +22,31 @@ const REQUIREMENTS_CLARIFICATION_OPTIONS: RequirementsClarificationMode[] = [
   "autonomous",
 ];
 
+const WORKFLOW_PROFILE_DESCRIPTIONS: Record<WorkflowProfile, string> = {
+  oneshot: "Single-task flow without story decomposition or bug-only recovery lanes.",
+  bug_full: "Bug-oriented flow with dedicated bug-fix and test policy handling.",
+  story_full: "Full story planning and execution flow with clarification, spec, and subtask stages.",
+};
+
+const POLICY_DESCRIPTIONS: Record<
+  "test_policy" | "self_review_policy" | "boy_scout_policy" | "doc_harvest_policy",
+  string
+> = {
+  test_policy: "Controls whether the bug flow treats testing as optional, agent-decided, or mandatory.",
+  self_review_policy:
+    "Controls whether the self-review lane is disabled, auto-started with agent skip semantics, or required.",
+  boy_scout_policy:
+    "Controls whether the code-scout lane is disabled, auto-started with agent skip semantics, or required.",
+  doc_harvest_policy:
+    "Controls whether documentation follow-up is disabled, auto-started with agent skip semantics, or required.",
+};
+
+const CLARIFICATION_MODE_DESCRIPTIONS: Record<RequirementsClarificationMode, string> = {
+  "ask-a-lot": "Bias toward interactive clarification whenever the spec is incomplete or ambiguous.",
+  "ask-selectively": "Ask only when ambiguity is likely to change implementation or planning decisions.",
+  autonomous: "Prefer carrying the task forward without operator clarification unless the flow hard-blocks.",
+};
+
 type DraftPolicy = {
   test_policy: SessionPolicyValue;
   self_review_policy: SessionPolicyValue;
@@ -243,6 +268,10 @@ export function SessionStartForm({
         </div>
       </div>
 
+      <p className="path-label">
+        Start a new task session with the selected workflow profile, policy defaults, and per-role runtime settings.
+      </p>
+
       <form className="session-start-form" onSubmit={(event) => void handleSubmit(event)}>
         <label className="form-field">
           <span>Task Key</span>
@@ -253,6 +282,7 @@ export function SessionStartForm({
             value={taskKey}
           />
         </label>
+        <p className="form-help">Use the Jira task key that should own this workflow run.</p>
 
         <label className="form-field">
           <span>Workflow Profile</span>
@@ -266,22 +296,27 @@ export function SessionStartForm({
             <option value="story_full">story_full</option>
           </select>
         </label>
+        <p className="form-help">{WORKFLOW_PROFILE_DESCRIPTIONS[workflowProfile]}</p>
 
         {showTestPolicy ? (
-          <label className="form-field">
-            <span>Test Policy</span>
-            <select
-              className="select-input"
-              onChange={(event) => updatePolicy("test_policy", event.target.value as SessionPolicyValue)}
-              value={policy.test_policy}
-            >
-              {POLICY_OPTIONS.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </label>
+          <>
+            <label className="form-field">
+              <span>Test Policy</span>
+              <select
+                className="select-input"
+                onChange={(event) => updatePolicy("test_policy", event.target.value as SessionPolicyValue)}
+                title={POLICY_DESCRIPTIONS.test_policy}
+                value={policy.test_policy}
+              >
+                {POLICY_OPTIONS.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="form-help">{POLICY_DESCRIPTIONS.test_policy}</p>
+          </>
         ) : null}
 
         <label className="form-field">
@@ -289,6 +324,7 @@ export function SessionStartForm({
           <select
             className="select-input"
             onChange={(event) => updatePolicy("self_review_policy", event.target.value as SessionPolicyValue)}
+            title={POLICY_DESCRIPTIONS.self_review_policy}
             value={policy.self_review_policy}
           >
             {POLICY_OPTIONS.map((value) => (
@@ -298,12 +334,14 @@ export function SessionStartForm({
             ))}
           </select>
         </label>
+        <p className="form-help">{POLICY_DESCRIPTIONS.self_review_policy}</p>
 
         <label className="form-field">
           <span>Boy Scout</span>
           <select
             className="select-input"
             onChange={(event) => updatePolicy("boy_scout_policy", event.target.value as SessionPolicyValue)}
+            title={POLICY_DESCRIPTIONS.boy_scout_policy}
             value={policy.boy_scout_policy}
           >
             {POLICY_OPTIONS.map((value) => (
@@ -313,12 +351,14 @@ export function SessionStartForm({
             ))}
           </select>
         </label>
+        <p className="form-help">{POLICY_DESCRIPTIONS.boy_scout_policy}</p>
 
         <label className="form-field">
           <span>Doc Harvest</span>
           <select
             className="select-input"
             onChange={(event) => updatePolicy("doc_harvest_policy", event.target.value as SessionPolicyValue)}
+            title={POLICY_DESCRIPTIONS.doc_harvest_policy}
             value={policy.doc_harvest_policy}
           >
             {POLICY_OPTIONS.map((value) => (
@@ -328,32 +368,42 @@ export function SessionStartForm({
             ))}
           </select>
         </label>
+        <p className="form-help">{POLICY_DESCRIPTIONS.doc_harvest_policy}</p>
 
         {showRequirementsClarificationMode ? (
-          <label className="form-field">
-            <span>Requirements Clarification</span>
-            <select
-              className="select-input"
-              onChange={(event) =>
-                updatePolicy(
-                  "requirements_clarification_mode",
-                  event.target.value as RequirementsClarificationMode,
-                )
-              }
-              value={policy.requirements_clarification_mode}
-            >
-              {REQUIREMENTS_CLARIFICATION_OPTIONS.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
-          </label>
+          <>
+            <label className="form-field">
+              <span>Requirements Clarification</span>
+              <select
+                className="select-input"
+                onChange={(event) =>
+                  updatePolicy(
+                    "requirements_clarification_mode",
+                    event.target.value as RequirementsClarificationMode,
+                  )
+                }
+                title={CLARIFICATION_MODE_DESCRIPTIONS[policy.requirements_clarification_mode]}
+                value={policy.requirements_clarification_mode}
+              >
+                {REQUIREMENTS_CLARIFICATION_OPTIONS.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="form-help">
+              {CLARIFICATION_MODE_DESCRIPTIONS[policy.requirements_clarification_mode]}
+            </p>
+          </>
         ) : null}
 
         {runtimeCapabilities !== null ? (
           <div className="artifact-stack">
             <p className="eyebrow">Role Runtime Config</p>
+            <p className="path-label">
+              These defaults are prefilled from Runtime Defaults and can be overridden per role for this single session.
+            </p>
             {effectiveRoleNames.map((roleName) => {
               const current = roleConfig[roleName] ?? { runner: "", model: "", effort: "" };
               const runnerCapability = runtimeCapabilities.runners.find(
@@ -368,6 +418,9 @@ export function SessionStartForm({
                     <span>{roleName}</span>
                     <strong>{current.runner || "unconfigured"}</strong>
                   </div>
+                  <p className="form-help">
+                    Set the runner, model, and effort for the {roleName} lane in this session only.
+                  </p>
 
                   <label className="form-field">
                     <span>Runner</span>

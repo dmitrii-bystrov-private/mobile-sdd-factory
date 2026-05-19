@@ -400,6 +400,13 @@ input {
   line-height: 1.4;
 }
 
+.form-help {
+  margin: -6px 0 0;
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
 .runtime-defaults-list {
   display: grid;
   gap: 12px;
