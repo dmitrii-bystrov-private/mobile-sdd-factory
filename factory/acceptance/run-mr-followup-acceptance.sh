@@ -61,12 +61,10 @@ if ! curl -fsS "${BASE_URL}/sessions" >/dev/null 2>&1; then
   exec env PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" "${REPO_ROOT}/.venv/bin/python" factory/acceptance/run-mr-followup-acceptance.py
 fi
 
-CREATE_PAYLOAD='{"task_key":"IOS-ACCEPT-MR-001","workflow_profile":"oneshot","policy":{"self_review_policy":"required","boy_scout_policy":"disabled","doc_harvest_policy":"disabled"}}'
+CREATE_PAYLOAD='{"task_key":"IOS-ACCEPT-MR-001","workflow_profile":"oneshot","prepare":true,"policy":{"self_review_policy":"required","boy_scout_policy":"disabled","doc_harvest_policy":"disabled"}}'
 CREATE_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/sessions" -H 'content-type: application/json' -d "${CREATE_PAYLOAD}")"
 SESSION_ID="$(jq -r '.session.id' <<<"${CREATE_RESPONSE}")"
-
-PREPARE_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/sessions/prepare" -H 'content-type: application/json' -d "{\"task_key\":\"${TASK_KEY}\"}")"
-jq -e '.followup_event_type == "implementation_requested"' <<<"${PREPARE_RESPONSE}" >/dev/null
+jq -e '.followup_event_type == "implementation_requested"' <<<"${CREATE_RESPONSE}" >/dev/null
 
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"role_name\":\"implementer\",\"output_type\":\"completed\",\"payload\":{\"summary\":\"implementation done\"}}" \

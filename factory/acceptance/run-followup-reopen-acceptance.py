@@ -9,11 +9,10 @@ from backend.api.routes_artifacts import list_artifacts
 from backend.api.routes_events import inject_event, list_events
 from backend.api.routes_operator import reopen_from_qa
 from backend.api.routes_roles import submit_role_output
-from backend.api.routes_sessions import create_session, prepare_session
+from backend.api.routes_sessions import create_session
 from backend.api.schemas import (
     CreateSessionRequest,
     InjectEventRequest,
-    PrepareSessionRequest,
     ReopenFromQaRequest,
     RoleOutputRequest,
 )
@@ -104,6 +103,7 @@ def main() -> None:
             CreateSessionRequest(
                 task_key="IOS-ACCEPT-REOPEN-001",
                 workflow_profile="oneshot",
+                prepare=True,
                 policy={
                     "self_review_policy": "required",
                     "boy_scout_policy": "disabled",
@@ -113,12 +113,7 @@ def main() -> None:
             dependencies=deps,
         )
         session_id = create_response.session.id
-
-        prepare_response = prepare_session(
-            PrepareSessionRequest(task_key="IOS-ACCEPT-REOPEN-001"),
-            dependencies=deps,
-        )
-        assert prepare_response.followup_event_type == "implementation_requested"
+        assert create_response.followup_event_type == "implementation_requested"
 
         implementation_response = submit_role_output(
             RoleOutputRequest(
