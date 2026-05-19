@@ -10,6 +10,7 @@ import { RuntimeSessionPanel } from "./RuntimeSessionPanel";
 import { SubtaskGraphPanel } from "./SubtaskGraphPanel";
 import { SubtaskProgressPanel } from "./SubtaskProgressPanel";
 import { roleDisplayName } from "../roleDisplay";
+import { stageDisplayName } from "../stageDisplay";
 import type { Session, SessionBundle } from "../types";
 
 type SessionDetailProps = {
@@ -42,7 +43,7 @@ export function SessionDetail({
             Profile: <strong>{session.workflow_profile}</strong>
           </p>
           <p className="hero-meta">
-            Stage: <strong>{session.current_stage}</strong>
+            Stage: <strong>{stageDisplayName(session.current_stage)}</strong>
           </p>
           <p className="hero-meta">
             Owner: <strong>{session.current_owner ? roleDisplayName(session.current_owner) : "unowned"}</strong>

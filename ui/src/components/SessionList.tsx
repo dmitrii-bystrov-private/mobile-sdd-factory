@@ -1,4 +1,5 @@
 import { roleDisplayName } from "../roleDisplay";
+import { stageDisplayName } from "../stageDisplay";
 import type { Session } from "../types";
 
 type SessionListProps = {
@@ -29,7 +30,7 @@ export function SessionList({
               className={`session-card ${isSelected ? "selected" : ""}`}
               key={session.id}
               onClick={() => onSelect(session.id)}
-              title={`Open ${session.task_key} at stage ${session.current_stage}${session.current_owner ? ` owned by ${roleDisplayName(session.current_owner)}` : ""}.`}
+              title={`Open ${session.task_key} at stage ${stageDisplayName(session.current_stage)}${session.current_owner ? ` owned by ${roleDisplayName(session.current_owner)}` : ""}.`}
               type="button"
             >
               <div className="session-card-top">
@@ -39,7 +40,7 @@ export function SessionList({
                 </span>
               </div>
               <p>{session.workflow_profile}</p>
-              <small>{session.current_stage}</small>
+              <small>{stageDisplayName(session.current_stage)}</small>
               <small>{session.current_owner ? roleDisplayName(session.current_owner) : "unowned"}</small>
             </button>
           );

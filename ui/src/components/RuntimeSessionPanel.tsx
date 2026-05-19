@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { apiClient } from "../api/client";
 import { roleDisplayName } from "../roleDisplay";
+import { stageDisplayName } from "../stageDisplay";
 import type { RuntimeSessionStateSummary, Session } from "../types";
 
 type RuntimeSessionPanelProps = {
@@ -76,7 +77,7 @@ export function RuntimeSessionPanel({
                 <strong>{roleDisplayName(runtimeStateSummary.lastAutoRecovery.roleName)}</strong>
               </div>
               <p className="artifact-path">
-                recovered at stage {runtimeStateSummary.lastAutoRecovery.currentStage ?? "unknown"} ·
+                recovered at stage {stageDisplayName(runtimeStateSummary.lastAutoRecovery.currentStage)} ·
                 event #{runtimeStateSummary.lastAutoRecovery.eventId}
               </p>
               <p className="artifact-path">
