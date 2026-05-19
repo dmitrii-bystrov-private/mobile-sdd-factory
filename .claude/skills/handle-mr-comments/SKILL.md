@@ -9,6 +9,8 @@ description: >
 
 Process GitLab MR review comments and create Jira subtasks. Arguments: `$ARGUMENTS`
 
+This skill defines the deprecated slash-command MR follow-up surface. The current primary product flow handles MR follow-up through backend session stages, MR comment ingestion, analysis, and follow-up execution.
+
 ## Step 1 — Parse arguments
 
 Extract from `$ARGUMENTS`:

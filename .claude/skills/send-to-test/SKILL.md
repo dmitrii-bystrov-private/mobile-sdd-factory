@@ -8,6 +8,8 @@ description: >
 
 Send a Jira task to QA. Arguments: `$ARGUMENTS`
 
+This skill defines the deprecated slash-command send-to-test surface. In the current primary product flow, send-to-test normally runs automatically after delivery succeeds and only failed delivery needs manual recovery.
+
 ## Step 1 — Collect parameters
 
 Parse `<KEY>` from `$ARGUMENTS`. If missing, ask for it.

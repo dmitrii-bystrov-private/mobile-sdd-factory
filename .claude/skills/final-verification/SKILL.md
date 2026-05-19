@@ -6,6 +6,8 @@ description: >
 
 Run final verification for Jira task `$ARGUMENTS`.
 
+This skill defines the deprecated slash-command final-verification surface. The current primary product flow runs verification through the backend session runtime and persistent verification lane.
+
 Parse `<KEY>` from `$ARGUMENTS`. If missing, ask for it.
 
 ## Step 1 — Run verification

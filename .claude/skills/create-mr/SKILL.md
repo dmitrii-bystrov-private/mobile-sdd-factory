@@ -7,6 +7,8 @@ description: >
 
 Commit staged changes, push the branch, and open a merge request on GitLab. Arguments: `$ARGUMENTS`
 
+This skill defines the deprecated slash-command MR handoff surface. In the current primary product flow, delivery normally performs MR handoff automatically and surfaces only failures for operator recovery.
+
 ## Step 1 — Determine project and working directory
 
 Identify the Jira key from `$ARGUMENTS` or the current branch name.

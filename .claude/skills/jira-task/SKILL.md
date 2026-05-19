@@ -8,6 +8,8 @@ description: >
 
 Route Jira task `$ARGUMENTS` to the appropriate skill.
 
+This skill defines the deprecated slash-command router surface. The current primary product flow starts from the operator UI and backend session runtime.
+
 ## Step 1 — Detect bare URL
 
 Before parsing `$ARGUMENTS` as a key, check if the raw input matches:

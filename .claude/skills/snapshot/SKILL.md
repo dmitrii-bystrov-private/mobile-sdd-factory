@@ -7,6 +7,8 @@ DO NOT TRIGGER when: the workspace already exists and snapshot files are up to d
 
 Prepare a Jira workspace for a parent issue and its subtasks. Argument: Jira issue key (parent or subtask — always resolved to parent before proceeding).
 
+This skill defines the deprecated slash-command snapshot surface. The current primary product flow normally prepares the task workspace from the operator UI and backend session runtime.
+
 ## Step 0 — Resolve to parent key
 
 Before anything else, resolve the input key to its parent:
