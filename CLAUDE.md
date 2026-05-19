@@ -35,11 +35,15 @@ Per-task work lives in `$SDD_WORKDIR/<TASK-KEY>/`:
 - `plan/index.md` + `plan/NN-task-name.md` — implementation task list (stories only)
 - `repo/` — git worktree on branch `feature/<KEY>` (story) or `bugfix/<KEY>` (bug)
 
-Entry points: `/jira-task <KEY>` (auto-routes by type), `/jira-story <KEY>`, `/jira-bug <KEY>`.
+Legacy slash entry points: `/jira-task <KEY>` (auto-routes by type), `/jira-story <KEY>`, `/jira-bug <KEY>`, `/oneshot <KEY>`.
 
-## Feature flags
+The current primary product entrypoint is the operator UI plus backend session runtime. This file mainly documents the compatibility orchestration surface used by legacy slash-driven flows.
 
-Experimental or optional steps are gated by env vars. The project default (`.claude/settings.json`) is `false` for all flags. Override locally in `.claude/settings.local.json` (gitignored) under the `env` key.
+## Legacy feature flags
+
+The current platform normally stores runtime and workflow defaults in `.sdd-factory/settings.local.json` and edits them through the operator UI.
+
+The env flags below still gate the legacy slash-command skills. The project default (`.claude/settings.json`) is `false` for all flags. Override locally in `.claude/settings.local.json` (gitignored) under the `env` key when you specifically need the legacy skill surface to enable them.
 
 | Flag | Default | What it controls |
 |------|---------|-----------------|
