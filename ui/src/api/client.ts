@@ -75,7 +75,6 @@ const STREAM_EVENT_TYPES = [
   "role_output_collected",
   "role_progress_reported",
   "role_runtime_error_reported",
-  "session_output_polled",
   "session_paused_by_operator",
   "session_resumed_by_operator",
   "session_retried_by_operator",
@@ -83,8 +82,6 @@ const STREAM_EVENT_TYPES = [
   "runtime_session_restarted_by_operator",
   "operator_runtime_input_sent",
   "session_escalated_to_operator",
-  "session_dispatch_reconciled",
-  "coordinator_loop_ran",
 ] as const;
 
 type CreateSessionPayload = {
