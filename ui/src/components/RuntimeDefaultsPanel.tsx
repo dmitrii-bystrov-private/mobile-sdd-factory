@@ -55,6 +55,24 @@ const CLARIFICATION_MODE_DESCRIPTIONS: Record<RequirementsClarificationMode, str
   autonomous: "Carry the story forward without clarification unless the flow hard-blocks.",
 };
 
+const ROLE_DEFAULT_SOURCE_MAP: Record<string, string | null> = {
+  implementer: "implementer",
+  "bug-fixer": "bug-fixer",
+  "task-coordinator": null,
+  "verification-coordinator": "final-verifier",
+  "code-reviewer": "code-reviewer",
+  "code-scout": "code-scout",
+  "mr-comments-analyst-worker": "mr-comments-analyst",
+  "doc-harvest-worker": "doc-harvest",
+  "proposal-context-worker": "context-collector",
+  "requirements-clarifier-worker": "requirements-clarifier",
+  "acceptance-criteria-worker": "acceptance-criteria-writer",
+  "constraints-worker": "constraints-definer",
+  "spec-verifier-worker": "spec-verifier",
+  "story-spec-worker": null,
+  "task-decomposer-worker": "task-decomposer",
+};
+
 function defaultPolicyDefaults(): DraftPolicyDefaults {
   return {
     test_policy: "enabled",
@@ -84,6 +102,10 @@ export function RuntimeDefaultsPanel({
     () => new Map((runtimeCapabilities?.runners ?? []).map((runner) => [runner.runner, runner])),
     [runtimeCapabilities],
   );
+  const legacyIndex = useMemo(
+    () => new Map((runtimeCapabilities?.legacyRoleDefaults ?? []).map((role) => [role.roleName, role])),
+    [runtimeCapabilities],
+  );
 
   useEffect(() => {
     if (runtimeCapabilities === null || runtimeDefaults === null) {
@@ -99,11 +121,17 @@ export function RuntimeDefaultsPanel({
       const stored = runtimeDefaults.roleDefaults[roleName];
       const runner = stored?.runner ?? resolvedDefaultRunner;
       const runnerCapability = runnerIndex.get(runner);
+      const legacyKey = ROLE_DEFAULT_SOURCE_MAP[roleName] ?? null;
+      const legacyDefault = legacyKey === null ? undefined : legacyIndex.get(legacyKey);
       const models = runnerCapability?.models ?? [];
-      const model = stored?.model ?? models[0]?.id ?? "";
+      const model = stored?.model ?? legacyDefault?.model ?? models[0]?.id ?? "";
       const modelCapability = models.find((item) => item.id === model);
       const effort =
-        stored?.effort ?? modelCapability?.defaultEffort ?? modelCapability?.supportedEfforts[0] ?? "";
+        stored?.effort ??
+        legacyDefault?.effort ??
+        modelCapability?.defaultEffort ??
+        modelCapability?.supportedEfforts[0] ??
+        "";
       nextRoleDefaults[roleName] = { runner, model, effort };
     }
     setDefaultRunner(resolvedDefaultRunner);
@@ -122,7 +150,7 @@ export function RuntimeDefaultsPanel({
         ...(runtimeDefaults.policyDefaults.story_full ?? {}),
       },
     });
-  }, [runnerIndex, runtimeCapabilities, runtimeDefaults]);
+  }, [legacyIndex, runnerIndex, runtimeCapabilities, runtimeDefaults]);
 
   function updateRoleDefault(
     roleName: string,
