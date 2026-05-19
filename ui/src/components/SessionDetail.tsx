@@ -153,6 +153,7 @@ export function SessionDetail({
   onRefresh,
 }: SessionDetailProps): JSX.Element {
   const [detailSurface, setDetailSurface] = useState<"workflow" | "runtime">("workflow");
+  const [showWorkflowDetails, setShowWorkflowDetails] = useState(false);
 
   if (session === null || bundle === null) {
     return (
@@ -217,6 +218,14 @@ export function SessionDetail({
   const standbyRoleCount = standbyRoles.length;
   const blockedRoleCount = waitingRoles.length;
   const recentEvents = [...bundle.events].slice(-4).reverse();
+  const workflowDetailCount = [
+    showRoleStatusPanel,
+    bundle.subtaskProgressSummary !== null && bundle.subtaskProgressSummary.available,
+    bundle.jiraSubtasksSummary !== null,
+    showFollowupContextPanel,
+    bundle.subtaskGraphSummary !== null && bundle.subtaskGraphSummary.available,
+    bundle.planningSummary !== null && session.workflow_profile === "story_full",
+  ].filter(Boolean).length;
 
   return (
     <section className="detail-layout">
@@ -451,24 +460,47 @@ export function SessionDetail({
       />
 
       <InteractiveStatePanel interactiveStateSummary={bundle.interactiveStateSummary} />
-      {showRoleStatusPanel ? (
-        <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
-      ) : null}
-      <SubtaskProgressPanel subtaskProgressSummary={bundle.subtaskProgressSummary} />
-      <JiraSubtasksPanel
-        jiraSubtasksSummary={bundle.jiraSubtasksSummary}
-        subtaskGraphSummary={bundle.subtaskGraphSummary}
-        subtaskProgressSummary={bundle.subtaskProgressSummary}
-      />
+      {workflowDetailCount > 0 ? (
+        <div className="advanced-disclosure">
+          <button
+            className="advanced-disclosure-toggle"
+            onClick={() => setShowWorkflowDetails((current) => !current)}
+            aria-expanded={showWorkflowDetails}
+            type="button"
+          >
+            <div>
+              <strong>Workflow Details</strong>
+              <p>Subtasks, worker queue, planning artifacts, and deeper follow-up context.</p>
+            </div>
+            <div className="advanced-disclosure-meta">
+              <small>{workflowDetailCount} detail panels</small>
+              <span className={`chevron${showWorkflowDetails ? " expanded" : ""}`} aria-hidden="true" />
+            </div>
+          </button>
+          {showWorkflowDetails ? (
+            <div className="advanced-disclosure-body runtime-surface-stack">
+              {showRoleStatusPanel ? (
+                <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
+              ) : null}
+              <SubtaskProgressPanel subtaskProgressSummary={bundle.subtaskProgressSummary} />
+              <JiraSubtasksPanel
+                jiraSubtasksSummary={bundle.jiraSubtasksSummary}
+                subtaskGraphSummary={bundle.subtaskGraphSummary}
+                subtaskProgressSummary={bundle.subtaskProgressSummary}
+              />
 
-      {showFollowupContextPanel ? (
-        <FollowupContextPanel followupContext={bundle.followupContext} />
+              {showFollowupContextPanel ? (
+                <FollowupContextPanel followupContext={bundle.followupContext} />
+              ) : null}
+              <SubtaskGraphPanel subtaskGraphSummary={bundle.subtaskGraphSummary} />
+              <PlanningArtifactPanel
+                planningSummary={bundle.planningSummary}
+                workflowProfile={session.workflow_profile}
+              />
+            </div>
+          ) : null}
+        </div>
       ) : null}
-      <SubtaskGraphPanel subtaskGraphSummary={bundle.subtaskGraphSummary} />
-      <PlanningArtifactPanel
-        planningSummary={bundle.planningSummary}
-        workflowProfile={session.workflow_profile}
-      />
         </>
       ) : null}
 
