@@ -1375,22 +1375,12 @@ class CoordinatorService:
         if active_item.work_type != "implementation":
             return session, event, None
 
-        followup_event = self._enqueue_subtask_graph(
+        _graph_event, followup_event = self._start_subtask_graph_flow(
             session=session,
-            source_event=event,
+            producer_type="coordinator",
             subtasks=subtasks,
             initial_work_item=active_item,
             decomposition_artifact=decomposition_artifact,
-        )
-        self._append_event(
-            session_id=session.id,
-            event_type="subtask_graph_requested",
-            producer_type="coordinator",
-            payload={
-                "subtask_count": len(subtasks),
-                "unresolved_count": len(unresolved),
-                "decomposition_artifact_id": decomposition_artifact.id,
-            },
         )
         session = self._get_session_or_raise(session.id)
         return session, event, followup_event
