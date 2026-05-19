@@ -1,3 +1,4 @@
+import { roleDisplayName } from "../roleDisplay";
 import type { RuntimeCapabilitiesSummary } from "../types";
 
 type RuntimeCapabilitiesPanelProps = {
@@ -73,10 +74,10 @@ export function RuntimeCapabilitiesPanel({
           <article className="artifact-card" key={item.roleName}>
             <div className="artifact-meta">
               <span>{item.effort ?? "no effort"}</span>
-              <strong>{item.roleName}</strong>
+              <strong>{roleDisplayName(item.roleName)}</strong>
             </div>
             <p className="artifact-path">
-              model: {item.model ?? "none"} · mcp: {item.mcpServers.join(", ") || "none"}
+              id: {item.roleName} · model: {item.model ?? "none"} · mcp: {item.mcpServers.join(", ") || "none"}
             </p>
           </article>
         ))}
