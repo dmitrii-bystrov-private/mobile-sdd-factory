@@ -31,7 +31,7 @@ export function BootstrapGuidancePanel({
           <p className="eyebrow">Setup</p>
           <h3>Bootstrap Guidance</h3>
           <p className="path-label">
-            Use this when the local stack is not ready yet or when a new machine needs initial setup.
+            Use this when the local stack is not ready yet.
           </p>
         </div>
       </div>

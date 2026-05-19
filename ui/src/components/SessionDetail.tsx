@@ -121,8 +121,8 @@ function laneSummary(
   switch (role.status) {
     case "running":
       return {
-        title: "Live and ready",
-        body: "This lane has a live runtime and is ready for routed work.",
+        title: "Standing by",
+        body: "This lane is live, but no work has been handed to it yet.",
       };
     case "waiting":
       return {
@@ -166,6 +166,23 @@ export function SessionDetail({
   const blockerSummary = bundle.interactiveStateSummary?.summary;
   const currentOwner = session.current_owner ? roleDisplayName(session.current_owner) : "Not assigned yet";
   const currentStage = stageDisplayName(session.current_stage);
+  const visibleRoles = bundle.roles.filter((role) => role.role_name !== "task-coordinator");
+  const ownedRoleNames = new Set(
+    bundle.workItems
+      .filter((item) => item.status === "active" || item.status === "pending")
+      .map((item) => item.owner_role_id),
+  );
+  const activeRoles = visibleRoles.filter(
+    (role) =>
+      role.status === "running" &&
+      (session.current_owner === role.role_name || ownedRoleNames.has(role.id)),
+  );
+  const standbyRoles = visibleRoles.filter(
+    (role) =>
+      role.status === "running" &&
+      !activeRoles.some((candidate) => candidate.id === role.id),
+  );
+  const waitingRoles = visibleRoles.filter((role) => role.status === "waiting");
   const currentFocusTitle =
     session.status === "waiting_for_operator"
       ? "Operator attention needed"
@@ -183,21 +200,21 @@ export function SessionDetail({
       : session.status === "active"
         ? session.current_owner
           ? `The workflow is currently at ${currentStage} with ${currentOwner} owning the live lane.`
-          : `The workflow is currently at ${currentStage}. No single lane has taken ownership yet.`
+          : standbyRoles.length > 0
+            ? `The workflow is currently at ${currentStage}. Live runtimes are standing by for the next handoff.`
+            : `The workflow is currently at ${currentStage}. No single lane has taken ownership yet.`
         : session.status === "paused"
           ? `The workflow is paused at ${currentStage}. Resume it when the external blocker is cleared.`
           : session.status === "completed"
             ? "The main flow has completed. Use follow-up actions only if new MR, QA, or snapshot updates arrive."
             : `Current stage: ${currentStage}.`;
   const roleCount = bundle.roles.length;
-  const visibleRoles = bundle.roles.filter((role) => role.role_name !== "task-coordinator");
-  const runningRoles = visibleRoles.filter((role) => role.status === "running");
-  const waitingRoles = visibleRoles.filter((role) => role.status === "waiting");
   const showRoleStatusPanel =
     bundle.workItems.length > 0 ||
     visibleRoles.some((role) => role.status !== "running");
   const showFollowupContextPanel = bundle.followupContext !== null;
-  const runningRoleCount = runningRoles.length;
+  const runningRoleCount = activeRoles.length;
+  const standbyRoleCount = standbyRoles.length;
   const blockedRoleCount = waitingRoles.length;
   const recentEvents = [...bundle.events].slice(-4).reverse();
 
@@ -251,10 +268,14 @@ export function SessionDetail({
             <div className="inline-pill-row">
               <span className="inline-pill">stage: {currentStage}</span>
               <span className="inline-pill">owner: {currentOwner}</span>
-              <span className="inline-pill">running lanes: {runningRoleCount}/{roleCount}</span>
-              {blockedRoleCount > 0 ? (
-                <span className="inline-pill">blocked lanes: {blockedRoleCount}</span>
+              <span className="inline-pill">active lanes: {runningRoleCount}</span>
+              {standbyRoleCount > 0 ? (
+                <span className="inline-pill">standing by: {standbyRoleCount}</span>
               ) : null}
+              {blockedRoleCount > 0 ? (
+                <span className="inline-pill">waiting: {blockedRoleCount}</span>
+              ) : null}
+              <span className="inline-pill">roles in run: {roleCount}</span>
             </div>
           </div>
         </section>
@@ -278,24 +299,21 @@ export function SessionDetail({
       </div>
 
       <section className="panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Progress</p>
-            <h3>Workflow Pulse</h3>
-            <p className="path-label">
-              Use this view first when you want to understand who is active, who is waiting, and what changed recently.
-            </p>
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Progress</p>
+              <h3>Workflow Pulse</h3>
+            </div>
           </div>
-        </div>
         <div className="grid-two progress-grid">
           <div className="subpanel">
             <div className="subpanel-head">
               <strong>Active Now</strong>
-              <span className="badge badge-muted">{runningRoles.length}</span>
+              <span className="badge badge-muted">{activeRoles.length}</span>
             </div>
-            {runningRoles.length > 0 ? (
+            {activeRoles.length > 0 ? (
               <div className="progress-card-stack">
-                {runningRoles.map((role) => {
+                {activeRoles.map((role) => {
                   const summary = laneSummary(role, bundle.workItems, session);
                   return (
                     <article className="progress-card" key={`active-${role.id}`}>
@@ -311,6 +329,32 @@ export function SessionDetail({
               </div>
             ) : (
               <p className="path-label">No lanes are actively working right now.</p>
+            )}
+          </div>
+
+          <div className="subpanel">
+            <div className="subpanel-head">
+              <strong>Standing By</strong>
+              <span className="badge badge-muted">{standbyRoles.length}</span>
+            </div>
+            {standbyRoles.length > 0 ? (
+              <div className="progress-card-stack">
+                {standbyRoles.map((role) => {
+                  const summary = laneSummary(role, bundle.workItems, session);
+                  return (
+                    <article className="progress-card" key={`standby-${role.id}`}>
+                      <div className="subpanel-head">
+                        <strong>{roleDisplayName(role.role_name)}</strong>
+                        <span className="status-pill status-running">Standing by</span>
+                      </div>
+                      <p className="progress-card-title">{summary.title}</p>
+                      <p className="progress-card-body">{summary.body}</p>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="path-label">No live lanes are currently standing by.</p>
             )}
           </div>
 

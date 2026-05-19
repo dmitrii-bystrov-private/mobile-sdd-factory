@@ -42,7 +42,7 @@ export function EnvironmentDoctorPanel({
           <p className="eyebrow">Doctor</p>
           <h3>Environment Health</h3>
           <p className="path-label">
-            Check environment blockers here before treating a failed run as workflow logic.
+            Check environment blockers here first.
           </p>
         </div>
       </div>
@@ -69,13 +69,13 @@ export function EnvironmentDoctorPanel({
       </div>
 
       {nonOkChecks.length === 0 ? (
-        <div className="inline-summary-card">
-          <div className="inline-summary-header">
-            <strong>Ready for normal operation</strong>
-            <span>all clear</span>
-          </div>
+          <div className="inline-summary-card">
+            <div className="inline-summary-header">
+              <strong>Ready for normal operation</strong>
+              <span>all clear</span>
+            </div>
           <p className="form-help">
-            All required checks are green. You should only return here if a later runtime problem appears.
+            All required checks are green.
           </p>
         </div>
       ) : (

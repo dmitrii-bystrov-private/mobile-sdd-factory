@@ -342,7 +342,7 @@ export function SessionStartForm({
       </div>
 
       <p className="path-label">
-        Start a new task session quickly. Tune policies or runtime overrides only when this run needs something different from the defaults.
+        Start a task run first. Tune policies or lane overrides only when this session should diverge from the defaults.
       </p>
 
       <form className="session-start-form" onSubmit={(event) => void handleSubmit(event)}>
@@ -355,7 +355,6 @@ export function SessionStartForm({
             value={taskKey}
           />
         </label>
-        <p className="form-help">Use the Jira task key that should own this workflow run.</p>
 
         <label className="form-field">
           <span>Workflow Profile</span>
@@ -369,7 +368,6 @@ export function SessionStartForm({
             <option value="story_full">{workflowProfileDisplayName("story_full")}</option>
           </select>
         </label>
-        <p className="form-help">{WORKFLOW_PROFILE_DESCRIPTIONS[workflowProfile]}</p>
 
         <div className="inline-summary-card">
           <div className="inline-summary-header">
@@ -377,11 +375,7 @@ export function SessionStartForm({
             <span>{effectiveRoleNames.length} active lanes</span>
           </div>
           <p className="form-help">
-            {workflowProfile === "story_full"
-              ? "Story planning, spec work, decomposition, and implementation will all run in one prepared flow."
-              : workflowProfile === "bug_full"
-                ? "Bug recovery stays focused on implementation while keeping test and quality policies visible."
-                : "Direct implementation flow with quality lanes controlled by the policy defaults below."}
+            {WORKFLOW_PROFILE_DESCRIPTIONS[workflowProfile]}
           </p>
           <div className="inline-pill-row">
             <span className="inline-pill">self-review: {policy.self_review_policy}</span>
@@ -402,14 +396,17 @@ export function SessionStartForm({
           >
             <div>
               <strong>Tune This Run</strong>
-              <p>Change workflow policies only when this run should behave differently from the defaults.</p>
+              <p>Adjust workflow behavior only when this run should diverge from the defaults.</p>
             </div>
             <span>{showPolicyTuning ? "hide" : "show"}</span>
           </button>
           {showPolicyTuning ? (
             <div className="advanced-disclosure-body">
+              <p className="path-label compact-note">
+                Leave these at their defaults unless this run needs a different quality or clarification policy.
+              </p>
               {showTestPolicy ? (
-                <>
+                <div className="form-section-compact">
                   <label className="form-field">
                     <span>Test Policy</span>
                     <select
@@ -425,63 +422,63 @@ export function SessionStartForm({
                       ))}
                     </select>
                   </label>
-                  <p className="form-help">{POLICY_DESCRIPTIONS.test_policy}</p>
-                </>
+                </div>
               ) : null}
 
-              <label className="form-field">
-                <span>Self Review</span>
-                <select
-                  className="select-input"
-                  onChange={(event) => updatePolicy("self_review_policy", event.target.value as SessionPolicyValue)}
-                  title={POLICY_DESCRIPTIONS.self_review_policy}
-                  value={policy.self_review_policy}
-                >
-                  {POLICY_OPTIONS.map((value) => (
-                    <option key={value} value={value}>
-                      {POLICY_OPTION_LABELS[value]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="form-help">{POLICY_DESCRIPTIONS.self_review_policy}</p>
+              <div className="followup-form-grid">
+                <label className="form-field">
+                  <span>Self Review</span>
+                  <select
+                    className="select-input"
+                    onChange={(event) => updatePolicy("self_review_policy", event.target.value as SessionPolicyValue)}
+                    title={POLICY_DESCRIPTIONS.self_review_policy}
+                    value={policy.self_review_policy}
+                  >
+                    {POLICY_OPTIONS.map((value) => (
+                      <option key={value} value={value}>
+                        {POLICY_OPTION_LABELS[value]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-              <label className="form-field">
-                <span>Boy Scout</span>
-                <select
-                  className="select-input"
-                  onChange={(event) => updatePolicy("boy_scout_policy", event.target.value as SessionPolicyValue)}
-                  title={POLICY_DESCRIPTIONS.boy_scout_policy}
-                  value={policy.boy_scout_policy}
-                >
-                  {POLICY_OPTIONS.map((value) => (
-                    <option key={value} value={value}>
-                      {POLICY_OPTION_LABELS[value]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="form-help">{POLICY_DESCRIPTIONS.boy_scout_policy}</p>
+                <label className="form-field">
+                  <span>Boy Scout</span>
+                  <select
+                    className="select-input"
+                    onChange={(event) => updatePolicy("boy_scout_policy", event.target.value as SessionPolicyValue)}
+                    title={POLICY_DESCRIPTIONS.boy_scout_policy}
+                    value={policy.boy_scout_policy}
+                  >
+                    {POLICY_OPTIONS.map((value) => (
+                      <option key={value} value={value}>
+                        {POLICY_OPTION_LABELS[value]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
 
-              <label className="form-field">
-                <span>Doc Harvest</span>
-                <select
-                  className="select-input"
-                  onChange={(event) => updatePolicy("doc_harvest_policy", event.target.value as SessionPolicyValue)}
-                  title={POLICY_DESCRIPTIONS.doc_harvest_policy}
-                  value={policy.doc_harvest_policy}
-                >
-                  {POLICY_OPTIONS.map((value) => (
-                    <option key={value} value={value}>
-                      {POLICY_OPTION_LABELS[value]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="form-help">{POLICY_DESCRIPTIONS.doc_harvest_policy}</p>
+              <div className="form-section-compact">
+                <label className="form-field">
+                  <span>Doc Harvest</span>
+                  <select
+                    className="select-input"
+                    onChange={(event) => updatePolicy("doc_harvest_policy", event.target.value as SessionPolicyValue)}
+                    title={POLICY_DESCRIPTIONS.doc_harvest_policy}
+                    value={policy.doc_harvest_policy}
+                  >
+                    {POLICY_OPTIONS.map((value) => (
+                      <option key={value} value={value}>
+                        {POLICY_OPTION_LABELS[value]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
 
               {showRequirementsClarificationMode ? (
-                <>
+                <div className="form-section-compact">
                   <label className="form-field">
                     <span>Requirements Clarification</span>
                     <select
@@ -502,10 +499,7 @@ export function SessionStartForm({
                       ))}
                     </select>
                   </label>
-                  <p className="form-help">
-                    {CLARIFICATION_MODE_DESCRIPTIONS[policy.requirements_clarification_mode]}
-                  </p>
-                </>
+                </div>
               ) : null}
             </div>
           ) : null}
@@ -520,16 +514,14 @@ export function SessionStartForm({
             >
               <div>
                 <strong>Advanced Runtime Overrides</strong>
-                <p>
-                  Optional per-role runner/model/effort overrides for this one session.
-                </p>
+                <p>Change lane runner, model, or effort for this session only.</p>
               </div>
               <span>{effectiveRoleNames.length} lanes · {enabledOptionalLaneCount} optional lanes enabled</span>
             </button>
             {showAdvancedRoleConfig ? (
               <div className="advanced-disclosure-body artifact-stack">
                 <p className="path-label">
-                  These values are prefilled from Runtime Defaults. Change them only when this single session needs a different runner, model, or effort than the project baseline.
+                  These values start from the project defaults. Change them only when this session needs a specific lane override.
                 </p>
                 {effectiveRoleNames.map((roleName) => {
                   const current = roleConfig[roleName] ?? { runner: "", model: "", effort: "" };
@@ -545,9 +537,6 @@ export function SessionStartForm({
                         <span>{roleName}</span>
                         <strong>{roleDisplayName(roleName)} · {current.runner || "unconfigured"}</strong>
                       </div>
-                      <p className="form-help">
-                        Session-only override for the {roleDisplayName(roleName)} lane.
-                      </p>
 
                       <label className="form-field">
                         <span>Runner</span>

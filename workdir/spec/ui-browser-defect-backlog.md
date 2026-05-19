@@ -9,6 +9,26 @@ Source of truth for this backlog:
 
 This file intentionally captures product defects from rendered behavior first, not from code inspection.
 
+## Progress Notes
+
+- Completed in the latest browser-driven passes:
+  - navigation copy shortened
+  - `Start Session` happy path compressed
+  - settings file-system path removed from the normal surface
+  - health cards no longer expose runner binary paths in the normal path
+  - loading state now uses session-aware language instead of a generic hydration blank
+  - `Workflow Pulse` now distinguishes:
+    - active now
+    - standing by
+    - waiting
+
+- Still worth another dedicated pass:
+  - selected-session detail should dominate the page more strongly than left-column run creation
+  - queue cards still read as compressed metadata stacks
+  - runtime/debug affordances still need a friendlier `Open Console` style entrypoint
+  - health sidebar still duplicates some low-value summary copy
+  - top-level and panel-level prose can still be trimmed further
+
 ## Workflow Runs
 
 ### 1. Start form is still too dense for the normal path
@@ -263,10 +283,11 @@ This file intentionally captures product defects from rendered behavior first, n
 The next implementation batch should prioritize:
 
 1. `Session Detail`
-  - add real worker progress / recent updates / clearer lane intent
+  - make selected-session work dominate more strongly than the left column
+  - replace remaining runtime/debug semantics with operator-safe debug actions
 2. `Runs`
-  - compress the start flow and reduce visible policy density
-3. `Runtime debug containment`
-  - replace raw debug semantics with operator-safe debug actions
-4. `Health accuracy`
-  - fix active local stack URLs and remove binary path noise from the normal surface
+  - improve queue-card scanability and reduce compressed metadata blobs
+3. `Health`
+  - remove duplicated sidebar explanation and keep the page more status-driven
+4. `Navigation / Copy`
+  - keep trimming explanatory prose until the interface reads like a product surface rather than embedded documentation

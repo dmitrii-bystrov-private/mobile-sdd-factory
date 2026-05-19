@@ -587,7 +587,7 @@ export function SessionsPage(): JSX.Element {
           <p className="eyebrow">SDD Factory</p>
           <h1>Operator Console</h1>
           <p className="topbar-summary">
-            Live workflow runs, runtime defaults, environment health, and operator recovery from one workspace.
+            Run work, project defaults, and environment health from one operator workspace.
           </p>
         </div>
         <div className="topbar-actions">
@@ -629,7 +629,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Workflow Runs</strong>
-                <p>Start sessions, inspect the selected run, and handle operator actions.</p>
+                <p>Start runs and handle operator work.</p>
               </button>
               <button
                 className={`surface-nav-card ${surfaceView === "settings" ? "selected" : ""}`}
@@ -637,7 +637,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Settings</strong>
-                <p>Project-local defaults and shared knowledge, separated from day-to-day run execution.</p>
+                <p>Project defaults and shared knowledge.</p>
               </button>
               <button
                 className={`surface-nav-card ${surfaceView === "health" ? "selected" : ""}`}
@@ -645,7 +645,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Health</strong>
-                <p>Doctor, bootstrap guidance, and runtime capabilities for environment debugging.</p>
+                <p>Doctor, setup, and runtime readiness.</p>
               </button>
             </div>
           </section>
@@ -705,11 +705,11 @@ export function SessionsPage(): JSX.Element {
               <div className="sidebar-note-stack">
                 <div className="inline-summary-card">
                   <div className="inline-summary-header">
-                    <strong>What belongs here</strong>
-                    <span>stable defaults</span>
+                    <strong>Project-wide defaults</strong>
+                    <span>stable settings</span>
                   </div>
                   <p className="form-help">
-                    Keep project-wide runtime defaults and shared knowledge here. Session-specific tweaks stay inside Workflow Runs.
+                    Keep defaults and reusable knowledge here. Session-specific tweaks stay inside Workflow Runs.
                   </p>
                 </div>
                 {runtimeDefaultsSummary ? (
@@ -719,7 +719,7 @@ export function SessionsPage(): JSX.Element {
                       <span>{runtimeDefaultsSummary.knownRoles.length} roles</span>
                     </div>
                     <p className="form-help">
-                      Project defaults are stored locally and applied to new sessions automatically.
+                      New sessions inherit these defaults automatically.
                     </p>
                   </div>
                 ) : null}
@@ -741,13 +741,13 @@ export function SessionsPage(): JSX.Element {
                     <span>{doctorSummary?.overallStatus ?? "unknown"}</span>
                   </div>
                   <p className="form-help">
-                    Use this surface before debugging workflow logic when the environment itself might be broken.
+                    Check environment health before treating a run problem as workflow logic.
                   </p>
                 </div>
                 {bootstrapGuidanceSummary ? (
                   <div className="inline-summary-card">
                     <div className="inline-summary-header">
-                      <strong>Next setup step</strong>
+                      <strong>Setup</strong>
                       <span>{bootstrapGuidanceSummary.overallStatus}</span>
                     </div>
                     <p className="form-help">{bootstrapGuidanceSummary.nextStep}</p>
@@ -760,12 +760,21 @@ export function SessionsPage(): JSX.Element {
         {loading ? (
           <section className="panel panel-empty">
             <p className="eyebrow">Loading</p>
-            <h2>Hydrating operator surface…</h2>
+            <h2>
+              {selectedSession?.task_key
+                ? `Loading ${selectedSession.task_key}`
+                : "Loading operator surface"}
+            </h2>
+            <p className="path-label">
+              {selectedSession?.task_key
+                ? "Refreshing the selected session and operator surfaces."
+                : "Fetching sessions, defaults, and environment status."}
+            </p>
           </section>
         ) : (
           <section className="detail-layout">
             <div className="panel workspace-panel">
-              <p className="eyebrow">Current Surface</p>
+              <p className="eyebrow">Workspace</p>
               <h2>
                 {surfaceView === "runs"
                   ? "Workflow Runs"
@@ -775,10 +784,10 @@ export function SessionsPage(): JSX.Element {
               </h2>
               <p className="path-label">
                 {surfaceView === "runs"
-                  ? "Run the factory, inspect a selected session, and work through runtime-driven operator flows."
+                  ? "Start sessions, inspect the selected run, and handle operator actions."
                   : surfaceView === "settings"
-                    ? "Manage project-local defaults and shared knowledge without mixing them into the execution screen."
-                    : "Inspect doctor output, bootstrap guidance, and runtime capabilities before blaming workflow logic."}
+                    ? "Manage project defaults without mixing them into run execution."
+                    : "Check doctor, setup, and runtime readiness before debugging workflow logic."}
               </p>
             </div>
             {surfaceView === "runs" ? (

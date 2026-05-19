@@ -68,9 +68,9 @@ input {
 
 .topbar-summary {
   margin: 0;
-  max-width: 52rem;
+  max-width: 42rem;
   color: var(--ink-soft);
-  line-height: 1.55;
+  line-height: 1.45;
 }
 
 .topbar h1,
@@ -105,14 +105,14 @@ input {
 
 .sidebar-stack {
   display: grid;
-  gap: 18px;
+  gap: 16px;
   align-self: start;
 }
 
 .panel {
   border: 1px solid var(--line);
   border-radius: 24px;
-  padding: 20px;
+  padding: 18px;
   background: var(--surface-panel);
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
@@ -243,6 +243,15 @@ input {
 .table-list {
   display: grid;
   gap: 12px;
+}
+
+.form-section-compact {
+  display: grid;
+  gap: 10px;
+}
+
+.compact-note {
+  margin-bottom: 4px;
 }
 
 .knowledge-card {

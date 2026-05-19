@@ -310,7 +310,7 @@ export function RuntimeDefaultsPanel({
       </div>
 
       <p className="path-label">
-        Set project-local defaults for new sessions. Policy defaults stay up front; lane-by-lane runtime overrides stay available as advanced settings.
+        Set project defaults for new sessions. Lane-specific runtime overrides stay in advanced settings.
       </p>
 
       <div className="runtime-default-card">
@@ -353,14 +353,11 @@ export function RuntimeDefaultsPanel({
         </div>
 
         {policyProfileView === "oneshot" ? (
-          <div className="runtime-default-card">
-            <div className="inline-summary-header">
-              <strong>{workflowProfileDisplayName("oneshot")}</strong>
-              <span>direct execution</span>
-            </div>
-            <p className="form-help">
-              Baseline policy for direct implementation flows without story planning or bug-specific branches.
-            </p>
+            <div className="runtime-default-card">
+              <div className="inline-summary-header">
+                <strong>{workflowProfileDisplayName("oneshot")}</strong>
+                <span>direct execution</span>
+              </div>
             <div className="followup-form-grid">
               <label className="form-field">
                 <span>Self Review</span>
@@ -421,14 +418,11 @@ export function RuntimeDefaultsPanel({
         ) : null}
 
         {policyProfileView === "bug_full" ? (
-          <div className="runtime-default-card">
-            <div className="inline-summary-header">
-              <strong>{workflowProfileDisplayName("bug_full")}</strong>
-              <span>bug recovery</span>
-            </div>
-            <p className="form-help">
-              Defaults for bug flows, including whether testing becomes an automatic, optional, or mandatory lane.
-            </p>
+            <div className="runtime-default-card">
+              <div className="inline-summary-header">
+                <strong>{workflowProfileDisplayName("bug_full")}</strong>
+                <span>bug recovery</span>
+              </div>
             <div className="followup-form-grid">
               <label className="form-field">
                 <span>Test Policy</span>
@@ -509,14 +503,11 @@ export function RuntimeDefaultsPanel({
         ) : null}
 
         {policyProfileView === "story_full" ? (
-          <div className="runtime-default-card">
-            <div className="inline-summary-header">
-              <strong>{workflowProfileDisplayName("story_full")}</strong>
-              <span>planning + execution</span>
-            </div>
-            <p className="form-help">
-              Defaults for the full story planning pipeline, including clarification behavior before implementation begins.
-            </p>
+            <div className="runtime-default-card">
+              <div className="inline-summary-header">
+                <strong>{workflowProfileDisplayName("story_full")}</strong>
+                <span>planning + execution</span>
+              </div>
             <div className="followup-form-grid">
               <label className="form-field">
                 <span>Self Review</span>
@@ -697,7 +688,6 @@ export function RuntimeDefaultsPanel({
         Save Runtime Defaults
       </button>
 
-      {runtimeDefaults ? <p className="path-label">Stored in project config: {runtimeDefaults.sourcePath}</p> : null}
       {error ? <p className="error-banner">{error}</p> : null}
     </section>
   );
