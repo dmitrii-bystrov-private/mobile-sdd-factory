@@ -62,6 +62,18 @@ wait_snapshot_contains() {
   return 1
 }
 
+extract_ref_by_text() {
+  local snapshot_path="$1"
+  local text="$2"
+  local ref
+  ref="$(grep -F "${text}" "${snapshot_path}" | sed -n 's/.*\[ref=\([^]]*\)\].*/\1/p' | head -n 1)"
+  if [[ -z "${ref}" ]]; then
+    echo "Could not find ref for text: ${text}" >&2
+    return 1
+  fi
+  printf '%s\n' "${ref}"
+}
+
 cleanup() {
   local code=$?
   trap - EXIT INT TERM
@@ -116,14 +128,16 @@ if grep -q 'Failed to fetch' "${CONSOLE_LOG}"; then
   exit 1
 fi
 
-playwright-cli click e26 >/dev/null
+SETTINGS_REF="$(extract_ref_by_text "${RUNS_SNAPSHOT}" 'button "Settings ')"
+playwright-cli click "${SETTINGS_REF}" >/dev/null
 wait_snapshot_contains "${SETTINGS_SNAPSHOT}" 'heading "Project Settings"'
 grep -q 'heading "Runtime Defaults"' "${SETTINGS_SNAPSHOT}"
 grep -q 'heading "Shared Knowledge"' "${SETTINGS_SNAPSHOT}"
 
 playwright-cli goto "${UI_URL}" >/dev/null
 wait_snapshot_contains "${RUNS_SNAPSHOT}" 'heading "New Workflow Run"'
-playwright-cli click e29 >/dev/null
+HEALTH_REF="$(extract_ref_by_text "${RUNS_SNAPSHOT}" 'button "Health ')"
+playwright-cli click "${HEALTH_REF}" >/dev/null
 wait_snapshot_contains "${HEALTH_SNAPSHOT}" 'heading "Environment Health"'
 grep -q 'heading "Capabilities"' "${HEALTH_SNAPSHOT}"
 grep -q 'heading "Bootstrap Guidance"' "${HEALTH_SNAPSHOT}"

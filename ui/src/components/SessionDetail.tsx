@@ -189,6 +189,10 @@ export function SessionDetail({
   const visibleRoles = bundle.roles.filter((role) => role.role_name !== "task-coordinator");
   const runningRoles = visibleRoles.filter((role) => role.status === "running");
   const waitingRoles = visibleRoles.filter((role) => role.status === "waiting");
+  const showRoleStatusPanel =
+    bundle.workItems.length > 0 ||
+    visibleRoles.some((role) => role.status !== "running");
+  const showFollowupContextPanel = bundle.followupContext !== null;
   const runningRoleCount = runningRoles.length;
   const blockedRoleCount = waitingRoles.length;
   const recentEvents = [...bundle.events].slice(-4).reverse();
@@ -363,7 +367,9 @@ export function SessionDetail({
       />
 
       <InteractiveStatePanel interactiveStateSummary={bundle.interactiveStateSummary} />
-      <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
+      {showRoleStatusPanel ? (
+        <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
+      ) : null}
       <SubtaskProgressPanel subtaskProgressSummary={bundle.subtaskProgressSummary} />
       <JiraSubtasksPanel
         jiraSubtasksSummary={bundle.jiraSubtasksSummary}
@@ -371,7 +377,9 @@ export function SessionDetail({
         subtaskProgressSummary={bundle.subtaskProgressSummary}
       />
 
-      <FollowupContextPanel followupContext={bundle.followupContext} />
+      {showFollowupContextPanel ? (
+        <FollowupContextPanel followupContext={bundle.followupContext} />
+      ) : null}
       <SubtaskGraphPanel subtaskGraphSummary={bundle.subtaskGraphSummary} />
       <PlanningArtifactPanel
         planningSummary={bundle.planningSummary}

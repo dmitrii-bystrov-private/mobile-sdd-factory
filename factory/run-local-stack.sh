@@ -66,7 +66,7 @@ BACKEND_PID=$!
 
 (
   cd "${REPO_ROOT}/ui"
-  VITE_SDD_FACTORY_API_BASE="$API_BASE" npm run dev -- --host "$UI_HOST" --port "$UI_PORT"
+  VITE_SDD_FACTORY_API_BASE="$API_BASE" npm run dev -- --host "$UI_HOST" --port "$UI_PORT" --strictPort
 ) &
 UI_PID=$!
 
