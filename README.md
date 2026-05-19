@@ -331,6 +331,8 @@ Deprecated/manual steps can still be run standalone only when you explicitly nee
 
 The repo also exposes direct shell entry points for automation and debugging:
 
+- `bash scripts/run-supported-tests.sh` — run the supported backend + UI + shell + operator-acceptance test rail
+- `bash scripts/run-supported-tests.sh --live` — include the high-signal live runtime acceptance harnesses
 - `bash scripts/snapshot.sh <KEY>` — fetch Jira data, create/update the task worktree, and refresh snapshot files
 - `bash scripts/run-test.sh <KEY>` / `run-lint.sh <KEY>` — platform-aware wrappers used by the current workflow-level verification gate
 - `bash scripts/run-build.sh <KEY>` — legacy wrapper kept for manual use; no longer part of the default workflow gate

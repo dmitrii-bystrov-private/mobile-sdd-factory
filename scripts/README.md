@@ -20,6 +20,26 @@ Scripts that use `IOS_DIR` / `ANDROID_DIR` will fail fast if the variable is not
 
 ### Scripts
 
+#### `run-supported-tests.sh`
+
+Runs the supported SDD Factory test rail from the repository root:
+
+```bash
+bash scripts/run-supported-tests.sh
+bash scripts/run-supported-tests.sh --live
+```
+
+Default coverage:
+
+- backend regression suite
+- UI production build
+- shell regression tests under `scripts/tests/`
+- supported operator acceptance harnesses
+
+Optional `--live` additionally runs the high-signal live runtime acceptance harnesses.
+
+Use this as the primary single entry point when you want broad validation of the supported platform.
+
 #### `snapshot.sh`
 
 Prepares a Jira workspace for a parent issue and its subtasks:

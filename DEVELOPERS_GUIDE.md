@@ -42,6 +42,18 @@ Backend regression:
 ./.venv/bin/python -m unittest discover -s tests/backend -p 'test_*.py'
 ```
 
+Full supported test rail:
+
+```bash
+bash scripts/run-supported-tests.sh
+```
+
+Full supported test rail plus live acceptance:
+
+```bash
+bash scripts/run-supported-tests.sh --live
+```
+
 UI build:
 
 ```bash

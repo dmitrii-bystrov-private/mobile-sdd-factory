@@ -31,6 +31,7 @@ Run commands from the repository root.
 
 Supported platform checks:
 
+- `bash scripts/run-supported-tests.sh`
 - `./.venv/bin/python -m unittest discover -s tests/backend -p 'test_*.py'`
 - `cd ui && npm run build`
 - `bash factory/acceptance/run-happy-path-acceptance.sh`
@@ -40,6 +41,7 @@ Supported platform checks:
 
 High-signal live/runtime acceptance:
 
+- `bash scripts/run-supported-tests.sh --live`
 - `PYTHONPATH=. ./.venv/bin/python factory/acceptance/run-real-story-runtime-acceptance.py`
 - `PYTHONPATH=. ./.venv/bin/python factory/acceptance/run-real-codex-quality-loop-validation.py`
 

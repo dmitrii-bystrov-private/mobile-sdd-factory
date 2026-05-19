@@ -14,8 +14,8 @@ source "$SCRIPT_DIR/snapshot-formatters.sh"
 #
 # Required environment variables:
 #   SDD_WORKDIR  — root directory for task workspaces
-#   IOS_DIR      — path to iOS repo (mutually exclusive with ANDROID_DIR)
-#   ANDROID_DIR  — path to Android repo (mutually exclusive with IOS_DIR)
+#   IOS_DIR      — path to iOS repo
+#   ANDROID_DIR  — path to Android repo
 
 # ---------------------------------------------------------------------------
 # Stage 0: Validate environment and arguments

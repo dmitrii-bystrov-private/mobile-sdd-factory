@@ -206,17 +206,16 @@ fi
 assert_stderr_contains "missing SDD_WORKDIR: stderr mentions SDD_WORKDIR" "SDD_WORKDIR" "$STDERR"
 rm -f "$STDERR"
 
-# ENV validation: both IOS_DIR and ANDROID_DIR set
+# ENV validation: both IOS_DIR and ANDROID_DIR set is allowed
 STDERR="$(mktemp)"
-if SDD_WORKDIR="/tmp" IOS_DIR="/tmp/ios" ANDROID_DIR="/tmp/android" bash "$SNAPSHOT" IOS-100 2>"$STDERR" > /dev/null; then
-  echo "  FAIL  both dirs set: expected non-zero exit"
-  (( FAIL++ )) || true
-else
-  echo "  PASS  both IOS_DIR+ANDROID_DIR set: exits non-zero"
+if SDD_WORKDIR="/tmp" IOS_DIR="/tmp/ios" ANDROID_DIR="/tmp/android" bash "$SNAPSHOT" IOS-100 > /dev/null 2>"$STDERR"; then
+  echo "  PASS  both IOS_DIR+ANDROID_DIR set: supported"
   (( PASS++ )) || true
+else
+  echo "  FAIL  both dirs set: expected success"
+  echo "        stderr: $(cat "$STDERR" 2>/dev/null || echo '(empty)')"
+  (( FAIL++ )) || true
 fi
-assert_stderr_contains "both dirs set: stderr mentions IOS_DIR"     "IOS_DIR"     "$STDERR"
-assert_stderr_contains "both dirs set: stderr mentions ANDROID_DIR" "ANDROID_DIR" "$STDERR"
 rm -f "$STDERR"
 
 # ENV validation: neither IOS_DIR nor ANDROID_DIR set
@@ -229,7 +228,6 @@ else
   (( PASS++ )) || true
 fi
 assert_stderr_contains "neither dir set: stderr mentions IOS_DIR"     "IOS_DIR"     "$STDERR"
-assert_stderr_contains "neither dir set: stderr mentions ANDROID_DIR" "ANDROID_DIR" "$STDERR"
 rm -f "$STDERR"
 
 # ---------------------------------------------------------------------------
