@@ -10,6 +10,11 @@ import { RuntimeSessionPanel } from "./RuntimeSessionPanel";
 import { SubtaskGraphPanel } from "./SubtaskGraphPanel";
 import { SubtaskProgressPanel } from "./SubtaskProgressPanel";
 import { roleDisplayName } from "../roleDisplay";
+import {
+  sessionPolicyLabel,
+  sessionPolicyValueLabel,
+  workflowProfileDisplayName,
+} from "../sessionDisplay";
 import { stageDisplayName } from "../stageDisplay";
 import type { Session, SessionBundle } from "../types";
 
@@ -40,7 +45,7 @@ export function SessionDetail({
           <p className="eyebrow">Current Session</p>
           <h1>{session.task_key}</h1>
           <p className="hero-meta">
-            Profile: <strong>{session.workflow_profile}</strong>
+            Profile: <strong>{workflowProfileDisplayName(session.workflow_profile)}</strong>
           </p>
           <p className="hero-meta">
             Stage: <strong>{stageDisplayName(session.current_stage)}</strong>
@@ -77,8 +82,8 @@ export function SessionDetail({
           <div className="table-list">
             {Object.entries(session.policy).map(([key, value]) => (
               <div className="table-row" key={key}>
-                <span>{key}</span>
-                <strong>{value}</strong>
+                <span>{sessionPolicyLabel(key)}</span>
+                <strong>{sessionPolicyValueLabel(value)}</strong>
               </div>
             ))}
           </div>

@@ -1,4 +1,5 @@
 import { roleDisplayName } from "../roleDisplay";
+import { workflowProfileDisplayName } from "../sessionDisplay";
 import { stageDisplayName } from "../stageDisplay";
 import type { Session } from "../types";
 
@@ -39,7 +40,7 @@ export function SessionList({
                   {session.status}
                 </span>
               </div>
-              <p>{session.workflow_profile}</p>
+              <p>{workflowProfileDisplayName(session.workflow_profile)}</p>
               <small>{stageDisplayName(session.current_stage)}</small>
               <small>{session.current_owner ? roleDisplayName(session.current_owner) : "unowned"}</small>
             </button>
