@@ -512,6 +512,71 @@ class SessionCreationTests(unittest.TestCase):
             normalized["implementer"],
         )
 
+    def test_story_session_accepts_role_config_for_planning_and_optional_lanes(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30001",
+            workflow_profile="story_full",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+                "requirements_clarification_mode": "ask-selectively",
+            },
+            role_config={
+                "proposal-context-worker": {
+                    "runner": "codex",
+                    "model": "gpt-5.5",
+                    "effort": "medium",
+                },
+                "requirements-clarifier-worker": {
+                    "runner": "claude",
+                    "model": "sonnet",
+                    "effort": "medium",
+                },
+                "code-scout": {
+                    "runner": "codex",
+                    "model": "gpt-5.5",
+                    "effort": "high",
+                },
+                "doc-harvest-worker": {
+                    "runner": "claude",
+                    "model": "sonnet",
+                    "effort": "medium",
+                },
+                "mr-comments-analyst-worker": {
+                    "runner": "codex",
+                    "model": "gpt-5.5",
+                    "effort": "medium",
+                },
+            },
+        )
+
+        self.assertEqual(
+            {
+                "runner": "codex",
+                "model": "gpt-5.5",
+                "effort": "medium",
+            },
+            session.role_config["proposal-context-worker"],
+        )
+        self.assertEqual(
+            {
+                "runner": "codex",
+                "model": "gpt-5.5",
+                "effort": "high",
+            },
+            session.role_config["code-scout"],
+        )
+        self.assertEqual(
+            {
+                "runner": "claude",
+                "model": "sonnet",
+                "effort": "medium",
+            },
+            session.role_config["doc-harvest-worker"],
+        )
+        self.assertIn("mr-comments-analyst-worker", session.role_config)
+
     def test_send_operator_runtime_input_reactivates_waiting_session_without_new_handoff(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30002",
@@ -1061,7 +1126,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(created)
         self.assertEqual(first_session.id, second_session.id)
         self.assertEqual("task_session_reused", event.event_type)
-        self.assertEqual(3, len(roles))
+        self.assertEqual(4, len(roles))
 
     def test_create_task_session_rejects_conflicting_existing_policy(self) -> None:
         self.coordinator.create_task_session(
@@ -3394,7 +3459,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertEqual("session_output_polled", event.event_type)
-        self.assertEqual(3, role_count)
+        self.assertEqual(4, role_count)
         self.assertEqual(2, chunk_count)
         self.assertEqual(
             2,
@@ -3424,7 +3489,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertEqual("session_output_polled", event.event_type)
-        self.assertEqual(3, role_count)
+        self.assertEqual(4, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertFalse(result_path.exists())
@@ -3786,7 +3851,7 @@ class SessionCreationTests(unittest.TestCase):
         artifacts = self.artifact_repository.list_for_session(session.id)
 
         self.assertEqual("session_output_polled", event.event_type)
-        self.assertEqual(4, role_count)
+        self.assertEqual(5, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("self_review_requested", updated_session.current_stage)
         self.assertEqual("code-reviewer", updated_session.current_owner)

@@ -2103,7 +2103,7 @@ class SessionApiTests(unittest.TestCase):
         )
 
         self.assertTrue(response.polled)
-        self.assertEqual(3, response.role_count)
+        self.assertEqual(4, response.role_count)
         self.assertEqual(2, response.chunk_count)
         self.assertEqual("session_output_polled", response.event_type)
         runtime_outputs = [a for a in artifacts_response.items if a.artifact_type == "runtime_output"]
@@ -2134,7 +2134,7 @@ class SessionApiTests(unittest.TestCase):
         )
 
         self.assertTrue(response.polled)
-        self.assertEqual(3, response.role_count)
+        self.assertEqual(4, response.role_count)
         self.assertEqual(1, response.chunk_count)
         self.assertEqual("session_output_polled", response.event_type)
         self.assertEqual("verification_requested", response.session.current_stage)

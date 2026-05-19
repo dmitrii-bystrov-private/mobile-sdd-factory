@@ -5346,10 +5346,28 @@ class CoordinatorService:
 
     def _effective_role_names(self, workflow_profile: str, policy: dict[str, str] | None) -> list[str]:
         role_names = list(self.default_roles)
+        if MR_COMMENTS_ANALYST_ROLE not in role_names:
+            role_names.append(MR_COMMENTS_ANALYST_ROLE)
         if workflow_profile == "bug_full" and BUG_FIXER_ROLE not in role_names:
             role_names.append(BUG_FIXER_ROLE)
         if (policy or {}).get("self_review_policy") != "disabled" and CODE_REVIEWER_ROLE not in role_names:
             role_names.append(CODE_REVIEWER_ROLE)
+        if (policy or {}).get("boy_scout_policy") != "disabled" and CODE_SCOUT_ROLE not in role_names:
+            role_names.append(CODE_SCOUT_ROLE)
+        if (policy or {}).get("doc_harvest_policy") != "disabled" and DOC_HARVEST_ROLE not in role_names:
+            role_names.append(DOC_HARVEST_ROLE)
+        if workflow_profile == "story_full":
+            for role_name in (
+                PROPOSAL_CONTEXT_WORKER_ROLE,
+                REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+                ACCEPTANCE_CRITERIA_WORKER_ROLE,
+                CONSTRAINTS_WORKER_ROLE,
+                SPEC_VERIFIER_WORKER_ROLE,
+                STORY_SPEC_WORKER_ROLE,
+                TASK_DECOMPOSER_WORKER_ROLE,
+            ):
+                if role_name not in role_names:
+                    role_names.append(role_name)
         return role_names
 
     def _primary_coding_role_name_for_work_type(self, session: Session, work_type: str) -> str:

@@ -130,15 +130,42 @@ export function SessionStartForm({
   }, [policy, workflowProfile]);
 
   const effectiveRoleNames = useMemo(() => {
-    const roleNames = ["task-coordinator", "implementer", "verification-coordinator"];
+    const roleNames = [
+      "task-coordinator",
+      "implementer",
+      "verification-coordinator",
+      "mr-comments-analyst-worker",
+    ];
     if (workflowProfile === "bug_full") {
       roleNames.push("bug-fixer");
     }
     if (policy.self_review_policy !== "disabled") {
       roleNames.push("code-reviewer");
     }
+    if (policy.boy_scout_policy !== "disabled") {
+      roleNames.push("code-scout");
+    }
+    if (policy.doc_harvest_policy !== "disabled") {
+      roleNames.push("doc-harvest-worker");
+    }
+    if (workflowProfile === "story_full") {
+      roleNames.push(
+        "proposal-context-worker",
+        "requirements-clarifier-worker",
+        "acceptance-criteria-worker",
+        "constraints-worker",
+        "spec-verifier-worker",
+        "story-spec-worker",
+        "task-decomposer-worker",
+      );
+    }
     return roleNames;
-  }, [policy.self_review_policy, workflowProfile]);
+  }, [
+    policy.boy_scout_policy,
+    policy.doc_harvest_policy,
+    policy.self_review_policy,
+    workflowProfile,
+  ]);
 
   useEffect(() => {
     setPolicy(
