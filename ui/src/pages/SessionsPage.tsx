@@ -650,50 +650,26 @@ export function SessionsPage(): JSX.Element {
             </div>
           </section>
           <section className="panel panel-sidebar">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Overview</p>
-                <h2>Factory State</h2>
-              </div>
-            </div>
-            <div className="factory-state-grid">
-              <div className="metric-card">
-                <span>Active</span>
-                <strong>{activeSessionCount}</strong>
-              </div>
-              <div className="metric-card">
-                <span>Blocked</span>
-                <strong>{blockedSessionCount}</strong>
-              </div>
-              <div className="metric-card">
-                <span>Completed</span>
-                <strong>{completedSessionCount}</strong>
-              </div>
-              <div className="metric-card">
-                <span>Selected</span>
-                <strong>{selectedSession?.task_key ?? "none"}</strong>
-              </div>
-            </div>
+            {surfaceView === "runs" ? (
+              <>
+                <SessionList
+                  onSelect={(sessionId) => setSelectedSessionId(sessionId)}
+                  selectedSessionId={selectedSessionId}
+                  sessions={sessions}
+                />
+                <SessionStartForm
+                  onCreated={async (sessionId) => {
+                    await loadSessions();
+                    setSelectedSessionId(sessionId);
+                    setSurfaceView("runs");
+                    await loadBundle(sessionId);
+                  }}
+                  runtimeCapabilities={runtimeCapabilitiesSummary}
+                  runtimeDefaults={runtimeDefaultsSummary}
+                />
+              </>
+            ) : null}
           </section>
-          {surfaceView === "runs" ? (
-            <>
-              <SessionList
-                onSelect={(sessionId) => setSelectedSessionId(sessionId)}
-                selectedSessionId={selectedSessionId}
-                sessions={sessions}
-              />
-              <SessionStartForm
-                onCreated={async (sessionId) => {
-                  await loadSessions();
-                  setSelectedSessionId(sessionId);
-                  setSurfaceView("runs");
-                  await loadBundle(sessionId);
-                }}
-                runtimeCapabilities={runtimeCapabilitiesSummary}
-                runtimeDefaults={runtimeDefaultsSummary}
-              />
-            </>
-          ) : null}
           {surfaceView === "settings" ? (
             <section className="panel panel-sidebar">
               <div className="panel-header">
@@ -790,6 +766,32 @@ export function SessionsPage(): JSX.Element {
                     : "Check doctor, setup, and runtime readiness before debugging workflow logic."}
               </p>
             </div>
+            <section className="panel overview-strip">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Overview</p>
+                  <h2>Factory State</h2>
+                </div>
+              </div>
+              <div className="factory-state-grid">
+                <div className="metric-card">
+                  <span>Active</span>
+                  <strong>{activeSessionCount}</strong>
+                </div>
+                <div className="metric-card">
+                  <span>Blocked</span>
+                  <strong>{blockedSessionCount}</strong>
+                </div>
+                <div className="metric-card">
+                  <span>Completed</span>
+                  <strong>{completedSessionCount}</strong>
+                </div>
+                <div className="metric-card">
+                  <span>Selected</span>
+                  <strong>{selectedSession?.task_key ?? "none"}</strong>
+                </div>
+              </div>
+            </section>
             {surfaceView === "runs" ? (
               <SessionDetail
                 bundle={bundle}

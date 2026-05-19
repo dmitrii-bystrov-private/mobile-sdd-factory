@@ -124,6 +124,11 @@ input {
     linear-gradient(90deg, rgba(255, 93, 45, 0.08), rgba(73, 214, 164, 0.05));
 }
 
+.overview-strip {
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
 .panel-empty {
   min-height: 280px;
   display: grid;
@@ -422,6 +427,10 @@ input {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.overview-strip .metric-card {
+  padding: 14px 16px;
 }
 
 .actions-grid {
