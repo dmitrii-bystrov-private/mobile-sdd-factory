@@ -30,7 +30,10 @@ import type {
   SubtaskProgressSummary,
 } from "../types";
 
-const FOLLOWUP_ARTIFACT_TYPES = new Set(["mr_comments_markdown", "qa_reopen_comments"]);
+const FOLLOWUP_ARTIFACT_TYPES_BY_SOURCE: Record<"mr" | "qa", readonly string[]> = {
+  mr: ["mr_followup_plan_markdown", "mr_comments_markdown"],
+  qa: ["qa_reopen_comments"],
+};
 const FOLLOWUP_STAGE_EVENT_TYPES: Record<"mr" | "qa", readonly string[]> = {
   mr: [
     "mr_comments_analysis_requested",
@@ -295,9 +298,13 @@ function buildFollowupContext(
       event.id > sourceEvent.id &&
       FOLLOWUP_STAGE_EVENT_TYPES[source].includes(event.event_type),
   );
-  const followupArtifact = [...artifacts]
-    .reverse()
-    .find((artifact) => FOLLOWUP_ARTIFACT_TYPES.has(artifact.artifact_type));
+  const followupArtifact = FOLLOWUP_ARTIFACT_TYPES_BY_SOURCE[source]
+    .map((artifactType) =>
+      [...artifacts]
+        .reverse()
+        .find((artifact) => artifact.artifact_type === artifactType),
+    )
+    .find((artifact): artifact is Artifact => artifact !== undefined);
 
   if (followupArtifact === undefined) {
     return {
