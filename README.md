@@ -288,6 +288,7 @@ To launch the local backend/UI stack and open the operator console in a browser:
 
 ```bash
 bash factory/open-local-ui.sh
+bash scripts/dev.sh ui
 ```
 
 From there the UI exposes:

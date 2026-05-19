@@ -70,6 +70,23 @@ Local backend/UI stack plus auto-opened browser:
 
 ```bash
 bash factory/open-local-ui.sh
+bash scripts/dev.sh ui
+```
+
+Developer convenience entrypoint:
+
+```bash
+bash scripts/dev.sh help
+```
+
+Useful shortcuts:
+
+```bash
+bash scripts/dev.sh stack
+bash scripts/dev.sh test
+bash scripts/dev.sh test-live
+bash scripts/dev.sh doctor
+bash scripts/dev.sh bootstrap
 ```
 
 Supported operator-flow acceptance:

@@ -20,6 +20,22 @@ Scripts that use `IOS_DIR` / `ANDROID_DIR` will fail fast if the variable is not
 
 ### Scripts
 
+#### `dev.sh`
+
+Convenience entrypoint for the most common supported local developer actions:
+
+```bash
+bash scripts/dev.sh help
+bash scripts/dev.sh ui
+bash scripts/dev.sh stack
+bash scripts/dev.sh test
+bash scripts/dev.sh test-live
+bash scripts/dev.sh doctor
+bash scripts/dev.sh bootstrap
+```
+
+It is a thin wrapper over the supported launcher, doctor, bootstrap, and test-rail scripts so contributors do not need to remember multiple entrypoints.
+
 #### `run-supported-tests.sh`
 
 Runs the supported SDD Factory test rail from the repository root:

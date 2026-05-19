@@ -47,6 +47,11 @@ High-signal live/runtime acceptance:
 
 Direct shell helpers that still matter:
 
+- `bash scripts/dev.sh help`
+- `bash scripts/dev.sh ui`
+- `bash scripts/dev.sh test`
+- `bash scripts/dev.sh doctor`
+- `bash scripts/dev.sh bootstrap`
 - `bash factory/run-local-stack.sh`
 - `bash factory/open-local-ui.sh`
 - `bash scripts/snapshot.sh <KEY>`
