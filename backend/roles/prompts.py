@@ -191,8 +191,10 @@ def role_handoff_prompt(
         f"{instruction}\n\n"
         "For intermediate progress updates, you may emit:\n"
         'SDD_PROGRESS: {"status":"in_progress","message":"short progress update","progress":25}\n'
-        "If you hit a runtime/tooling problem and need operator visibility, emit:\n"
-        'SDD_ERROR: {"summary":"short error summary","details":"optional detail"}\n\n'
+        "If you need to escalate through the live runtime, emit `SDD_ERROR`.\n"
+        "- Set `needs_operator_input: true` only when you are explicitly waiting for a direct operator reply in this same live session.\n"
+        "- Set `needs_operator_input: false` for runtime/tooling failures, missing diagnostics, MCP/network blockers, or other cases that need recovery rather than a direct reply.\n"
+        'SDD_ERROR: {"summary":"short error summary","details":"optional detail","needs_operator_input":false}\n\n'
         "Required terminal outcome path:\n"
         "- Write `RESULT.json` in the current directory using the same JSON object you would place after `SDD_OUTPUT:` before you finish the turn.\n"
         "- For example: `{\"output_type\":\"completed\",\"payload\":{\"summary\":\"short result\"}}`\n"

@@ -485,7 +485,7 @@ class CoordinatorService:
             "summary": source_event.payload.get("summary") or source_event.payload.get("reason"),
             "details": source_event.payload.get("details"),
             "source_event_type": source_event.event_type,
-            "needs_operator_input": session.status == SessionStatus.WAITING_FOR_OPERATOR,
+            "needs_operator_input": bool(source_event.payload.get("needs_operator_input") is True),
         }
 
     def handle_operator_event(

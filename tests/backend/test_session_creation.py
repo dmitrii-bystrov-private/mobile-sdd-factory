@@ -560,7 +560,7 @@ class SessionCreationTests(unittest.TestCase):
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed"}',
+            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed","needs_operator_input":true}',
         )
         self.coordinator.collect_role_output(
             session_id=session.id,
@@ -591,7 +591,7 @@ class SessionCreationTests(unittest.TestCase):
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed"}',
+            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed","needs_operator_input":true}',
         )
         self.coordinator.collect_role_output(
             session_id=session.id,
@@ -605,6 +605,33 @@ class SessionCreationTests(unittest.TestCase):
         summary = self.coordinator.get_interactive_state_summary(session.id)
 
         self.assertFalse(summary["available"])
+        self.assertFalse(summary["needs_operator_input"])
+
+    def test_get_interactive_state_summary_runtime_error_does_not_require_operator_input(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004RUNTIME",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "disabled",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30004RUNTIME")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1","needs_operator_input":false}',
+        )
+        self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertTrue(summary["available"])
+        self.assertEqual("tool failed", summary["summary"])
         self.assertFalse(summary["needs_operator_input"])
 
     def test_create_task_session_creates_role_workspaces(self) -> None:

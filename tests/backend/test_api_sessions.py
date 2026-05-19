@@ -2350,7 +2350,7 @@ class SessionApiTests(unittest.TestCase):
         )
         self.dependencies.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed"}',
+            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed","needs_operator_input":true}',
         )
         collect_role_output(
             CollectRoleOutputRequest(
@@ -2383,7 +2383,7 @@ class SessionApiTests(unittest.TestCase):
         )
         self.dependencies.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed"}',
+            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed","needs_operator_input":true}',
         )
         collect_role_output(
             CollectRoleOutputRequest(
@@ -2406,6 +2406,36 @@ class SessionApiTests(unittest.TestCase):
         )
 
         self.assertFalse(response.available)
+        self.assertFalse(response.needs_operator_input)
+
+    def test_get_interactive_state_route_runtime_error_does_not_require_operator_input(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013CERR"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1","needs_operator_input":false}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = get_interactive_state(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.available)
+        self.assertEqual("tool failed", response.summary)
         self.assertFalse(response.needs_operator_input)
 
     def test_requirements_clarifier_runtime_input_can_continue_story_flow(self) -> None:
@@ -2435,7 +2465,7 @@ class SessionApiTests(unittest.TestCase):
         )
         self.dependencies.session_backend.simulate_output(
             clarifier_role.runtime_handle,
-            'SDD_ERROR: {"summary":"clarification required","details":"Need product decision about fallback behavior."}',
+            'SDD_ERROR: {"summary":"clarification required","details":"Need product decision about fallback behavior.","needs_operator_input":true}',
         )
         collect_role_output(
             CollectRoleOutputRequest(

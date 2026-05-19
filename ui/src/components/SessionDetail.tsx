@@ -105,7 +105,11 @@ export function SessionDetail({
         planningSummary={bundle.planningSummary}
         workflowProfile={session.workflow_profile}
       />
-      <OperatorActions onRefresh={onRefresh} session={session} />
+      <OperatorActions
+        interactiveStateSummary={bundle.interactiveStateSummary}
+        onRefresh={onRefresh}
+        session={session}
+      />
       <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
       <ArtifactPanel artifacts={bundle.artifacts} events={bundle.events} />
     </section>

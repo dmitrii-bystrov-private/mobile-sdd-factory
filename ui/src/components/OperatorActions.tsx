@@ -1,10 +1,11 @@
 import { useState } from "react";
 
 import { apiClient } from "../api/client";
-import type { Session } from "../types";
+import type { InteractiveStateSummary, Session } from "../types";
 
 type OperatorActionsProps = {
   session: Session;
+  interactiveStateSummary: InteractiveStateSummary | null;
   onRefresh: () => Promise<void>;
 };
 
@@ -18,6 +19,7 @@ type ActionDefinition = {
 
 export function OperatorActions({
   session,
+  interactiveStateSummary,
   onRefresh,
 }: OperatorActionsProps): JSX.Element {
   const [busy, setBusy] = useState(false);
@@ -154,7 +156,10 @@ export function OperatorActions({
     session.current_stage === "subtask_creation_requested";
   const canCreateMr = session.current_stage === "mr_handoff_failed";
   const canSendToTest = session.current_stage === "send_to_test_failed";
-  const canSendRuntimeInput = session.status === "waiting_for_operator";
+  const canSendRuntimeInput =
+    session.status === "waiting_for_operator" &&
+    interactiveStateSummary?.available === true &&
+    interactiveStateSummary.needsOperatorInput;
 
   const dailyActions: ActionDefinition[] = [];
   if (canRefreshSnapshot) {

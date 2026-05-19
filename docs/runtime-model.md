@@ -160,6 +160,13 @@ The platform supports:
 - runtime stop / restart at role or session level
 - automatic runtime recovery after owner-runtime death
 
+For live runtime escalations, roles should distinguish between:
+
+- interactive blockers that need a direct operator reply in the same live session
+- runtime/tooling/recovery blockers that need retry, resume, or external repair instead
+
+Use `SDD_ERROR` for both, but set `needs_operator_input: true` only for the first case.
+
 The supported rule is:
 
 - happy path should be automatic
