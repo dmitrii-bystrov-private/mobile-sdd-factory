@@ -104,6 +104,7 @@ export function SessionStartForm({
   const [workflowProfile, setWorkflowProfile] = useState<WorkflowProfile>("oneshot");
   const [policy, setPolicy] = useState<DraftPolicy>(defaultDraftPolicy());
   const [roleConfig, setRoleConfig] = useState<Record<string, { runner: string; model: string; effort: string }>>({});
+  const [showPolicyTuning, setShowPolicyTuning] = useState(false);
   const [showAdvancedRoleConfig, setShowAdvancedRoleConfig] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -341,7 +342,7 @@ export function SessionStartForm({
       </div>
 
       <p className="path-label">
-        Start a new task session with the selected workflow profile and policy defaults. Per-role runtime overrides stay available, but no longer dominate the happy path.
+        Start a new task session quickly. Tune policies or runtime overrides only when this run needs something different from the defaults.
       </p>
 
       <form className="session-start-form" onSubmit={(event) => void handleSubmit(event)}>
@@ -393,105 +394,122 @@ export function SessionStartForm({
           </div>
         </div>
 
-        {showTestPolicy ? (
-          <>
-            <label className="form-field">
-              <span>Test Policy</span>
-              <select
-                className="select-input"
-                onChange={(event) => updatePolicy("test_policy", event.target.value as SessionPolicyValue)}
-                title={POLICY_DESCRIPTIONS.test_policy}
-                value={policy.test_policy}
-              >
-                {POLICY_OPTIONS.map((value) => (
-                  <option key={value} value={value}>
-                    {POLICY_OPTION_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <p className="form-help">{POLICY_DESCRIPTIONS.test_policy}</p>
-          </>
-        ) : null}
-
-        <label className="form-field">
-          <span>Self Review</span>
-          <select
-            className="select-input"
-            onChange={(event) => updatePolicy("self_review_policy", event.target.value as SessionPolicyValue)}
-            title={POLICY_DESCRIPTIONS.self_review_policy}
-            value={policy.self_review_policy}
+        <div className="advanced-disclosure">
+          <button
+            className="advanced-disclosure-toggle"
+            onClick={() => setShowPolicyTuning((current) => !current)}
+            type="button"
           >
-            {POLICY_OPTIONS.map((value) => (
-              <option key={value} value={value}>
-                {POLICY_OPTION_LABELS[value]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="form-help">{POLICY_DESCRIPTIONS.self_review_policy}</p>
+            <div>
+              <strong>Tune This Run</strong>
+              <p>Change workflow policies only when this run should behave differently from the defaults.</p>
+            </div>
+            <span>{showPolicyTuning ? "hide" : "show"}</span>
+          </button>
+          {showPolicyTuning ? (
+            <div className="advanced-disclosure-body">
+              {showTestPolicy ? (
+                <>
+                  <label className="form-field">
+                    <span>Test Policy</span>
+                    <select
+                      className="select-input"
+                      onChange={(event) => updatePolicy("test_policy", event.target.value as SessionPolicyValue)}
+                      title={POLICY_DESCRIPTIONS.test_policy}
+                      value={policy.test_policy}
+                    >
+                      {POLICY_OPTIONS.map((value) => (
+                        <option key={value} value={value}>
+                          {POLICY_OPTION_LABELS[value]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="form-help">{POLICY_DESCRIPTIONS.test_policy}</p>
+                </>
+              ) : null}
 
-        <label className="form-field">
-          <span>Boy Scout</span>
-          <select
-            className="select-input"
-            onChange={(event) => updatePolicy("boy_scout_policy", event.target.value as SessionPolicyValue)}
-            title={POLICY_DESCRIPTIONS.boy_scout_policy}
-            value={policy.boy_scout_policy}
-          >
-            {POLICY_OPTIONS.map((value) => (
-              <option key={value} value={value}>
-                {POLICY_OPTION_LABELS[value]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="form-help">{POLICY_DESCRIPTIONS.boy_scout_policy}</p>
+              <label className="form-field">
+                <span>Self Review</span>
+                <select
+                  className="select-input"
+                  onChange={(event) => updatePolicy("self_review_policy", event.target.value as SessionPolicyValue)}
+                  title={POLICY_DESCRIPTIONS.self_review_policy}
+                  value={policy.self_review_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="form-help">{POLICY_DESCRIPTIONS.self_review_policy}</p>
 
-        <label className="form-field">
-          <span>Doc Harvest</span>
-          <select
-            className="select-input"
-            onChange={(event) => updatePolicy("doc_harvest_policy", event.target.value as SessionPolicyValue)}
-            title={POLICY_DESCRIPTIONS.doc_harvest_policy}
-            value={policy.doc_harvest_policy}
-          >
-            {POLICY_OPTIONS.map((value) => (
-              <option key={value} value={value}>
-                {POLICY_OPTION_LABELS[value]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="form-help">{POLICY_DESCRIPTIONS.doc_harvest_policy}</p>
+              <label className="form-field">
+                <span>Boy Scout</span>
+                <select
+                  className="select-input"
+                  onChange={(event) => updatePolicy("boy_scout_policy", event.target.value as SessionPolicyValue)}
+                  title={POLICY_DESCRIPTIONS.boy_scout_policy}
+                  value={policy.boy_scout_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="form-help">{POLICY_DESCRIPTIONS.boy_scout_policy}</p>
 
-        {showRequirementsClarificationMode ? (
-          <>
-            <label className="form-field">
-              <span>Requirements Clarification</span>
-              <select
-                className="select-input"
-                onChange={(event) =>
-                  updatePolicy(
-                    "requirements_clarification_mode",
-                    event.target.value as RequirementsClarificationMode,
-                  )
-                }
-                title={CLARIFICATION_MODE_DESCRIPTIONS[policy.requirements_clarification_mode]}
-                value={policy.requirements_clarification_mode}
-              >
-                {REQUIREMENTS_CLARIFICATION_OPTIONS.map((value) => (
-                  <option key={value} value={value}>
-                    {REQUIREMENTS_CLARIFICATION_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <p className="form-help">
-              {CLARIFICATION_MODE_DESCRIPTIONS[policy.requirements_clarification_mode]}
-            </p>
-          </>
-        ) : null}
+              <label className="form-field">
+                <span>Doc Harvest</span>
+                <select
+                  className="select-input"
+                  onChange={(event) => updatePolicy("doc_harvest_policy", event.target.value as SessionPolicyValue)}
+                  title={POLICY_DESCRIPTIONS.doc_harvest_policy}
+                  value={policy.doc_harvest_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={value} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="form-help">{POLICY_DESCRIPTIONS.doc_harvest_policy}</p>
+
+              {showRequirementsClarificationMode ? (
+                <>
+                  <label className="form-field">
+                    <span>Requirements Clarification</span>
+                    <select
+                      className="select-input"
+                      onChange={(event) =>
+                        updatePolicy(
+                          "requirements_clarification_mode",
+                          event.target.value as RequirementsClarificationMode,
+                        )
+                      }
+                      title={CLARIFICATION_MODE_DESCRIPTIONS[policy.requirements_clarification_mode]}
+                      value={policy.requirements_clarification_mode}
+                    >
+                      {REQUIREMENTS_CLARIFICATION_OPTIONS.map((value) => (
+                        <option key={value} value={value}>
+                          {REQUIREMENTS_CLARIFICATION_LABELS[value]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <p className="form-help">
+                    {CLARIFICATION_MODE_DESCRIPTIONS[policy.requirements_clarification_mode]}
+                  </p>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
 
         {runtimeCapabilities !== null ? (
           <div className="advanced-disclosure">

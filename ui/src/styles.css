@@ -361,13 +361,15 @@ input {
 
 .hero-stats,
 .grid-two,
-.actions-grid {
+.actions-grid,
+.progress-grid {
   display: grid;
   gap: 12px;
 }
 
 .hero-stats,
-.grid-two {
+.grid-two,
+.progress-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -558,6 +560,37 @@ input {
 .followup-snippet p,
 .followup-empty {
   margin: 0;
+}
+
+.progress-card-stack,
+.session-updates-panel,
+.stack-tight {
+  display: grid;
+  gap: 12px;
+}
+
+.progress-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.progress-card-title,
+.progress-card-body {
+  margin: 0;
+}
+
+.progress-card-title {
+  font-weight: 600;
+}
+
+.progress-card-body {
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+  line-height: 1.45;
 }
 
 .followup-snippet {

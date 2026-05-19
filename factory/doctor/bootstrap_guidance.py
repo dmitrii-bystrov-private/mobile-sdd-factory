@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import os
 from typing import Any
 
 
@@ -17,7 +18,12 @@ class GuidanceItem:
     hint: str | None
 
 
-def build_bootstrap_guidance(report: dict[str, Any]) -> dict[str, Any]:
+def build_bootstrap_guidance(
+    report: dict[str, Any],
+    *,
+    backend_url: str | None = None,
+    ui_url: str | None = None,
+) -> dict[str, Any]:
     checks = report.get("checks", [])
     required_actions = [
         GuidanceItem(
@@ -54,8 +60,10 @@ def build_bootstrap_guidance(report: dict[str, Any]) -> dict[str, Any]:
         "optional_action_count": len(optional_actions),
         "next_step": next_step,
         "launch_command": "bash factory/run-local-stack.sh",
-        "backend_url": "http://127.0.0.1:8000",
-        "ui_url": "http://127.0.0.1:4173",
+        "backend_url": backend_url
+        or f"http://{os.environ.get('SDD_FACTORY_BACKEND_HOST', '127.0.0.1')}:{os.environ.get('SDD_FACTORY_BACKEND_PORT', '8000')}",
+        "ui_url": ui_url
+        or f"http://{os.environ.get('SDD_FACTORY_UI_HOST', '127.0.0.1')}:{os.environ.get('SDD_FACTORY_UI_PORT', '4173')}",
         "required_actions": [item.__dict__ for item in required_actions],
         "optional_actions": [item.__dict__ for item in optional_actions],
     }

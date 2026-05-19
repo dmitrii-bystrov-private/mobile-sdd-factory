@@ -32,6 +32,7 @@ export function RuntimeSessionPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCleanup, setShowCleanup] = useState(false);
+  const [debugNotice, setDebugNotice] = useState<string | null>(null);
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
@@ -43,6 +44,21 @@ export function RuntimeSessionPanel({
       setError(err instanceof Error ? err.message : "Unknown request error");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function copyDebugCommand(
+    command: string | null | undefined,
+    successMessage: string,
+  ): Promise<void> {
+    if (!command) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(command);
+      setDebugNotice(successMessage);
+    } catch {
+      setDebugNotice("Clipboard copy failed.");
     }
   }
 
@@ -164,19 +180,45 @@ export function RuntimeSessionPanel({
                   <details className="advanced-disclosure">
                     <summary>
                       <div>
-                        <strong>Advanced Runtime Details</strong>
-                        <p>Low-level runtime inspection for debugging only.</p>
+                        <strong>Worker Console And Debug</strong>
+                        <p>Use this only when you need to inspect or attach to the live worker runtime.</p>
                       </div>
-                      <span>{role.runtimeBackend}</span>
+                      <span>debug</span>
                     </summary>
                     <div className="advanced-disclosure-body">
-                      <p className="artifact-path">Runtime inspection details for this lane.</p>
-                      {role.tmuxAttachCommand ? (
-                        <pre className="artifact-path">{role.tmuxAttachCommand}</pre>
-                      ) : null}
-                      {role.tmuxCaptureCommand ? (
-                        <pre className="artifact-path">{role.tmuxCaptureCommand}</pre>
-                      ) : null}
+                      <p className="artifact-path">
+                        Open or inspect the runtime only if the normal operator flow is not enough.
+                      </p>
+                      <div className="actions-grid">
+                        {role.tmuxAttachCommand ? (
+                          <button
+                            className="action-button"
+                            onClick={() =>
+                              void copyDebugCommand(
+                                role.tmuxAttachCommand,
+                                `${roleDisplayName(role.roleName)} attach command copied.`,
+                              )
+                            }
+                            type="button"
+                          >
+                            Copy Attach Command
+                          </button>
+                        ) : null}
+                        {role.tmuxCaptureCommand ? (
+                          <button
+                            className="action-button"
+                            onClick={() =>
+                              void copyDebugCommand(
+                                role.tmuxCaptureCommand,
+                                `${roleDisplayName(role.roleName)} capture command copied.`,
+                              )
+                            }
+                            type="button"
+                          >
+                            Copy Capture Command
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   </details>
                 ) : null}
@@ -188,17 +230,28 @@ export function RuntimeSessionPanel({
             <details className="advanced-disclosure">
               <summary>
                 <div>
-                  <strong>Advanced Session Runtime Details</strong>
-                  <p>Session-wide tmux/runtime plumbing for debugging only.</p>
+                  <strong>Session Debug Tools</strong>
+                  <p>Use these commands only when you need session-wide runtime debugging.</p>
                 </div>
                 <span>debug</span>
               </summary>
               <div className="advanced-disclosure-body">
-                {runtimeStateSummary.tmuxSocketPath ? (
-                  <p className="artifact-path">Socket path available for low-level debugging.</p>
-                ) : null}
+                <p className="artifact-path">
+                  Session-wide debug commands stay hidden from the normal operator path.
+                </p>
                 {runtimeStateSummary.tmuxAttachCommand ? (
-                  <pre className="artifact-path">{runtimeStateSummary.tmuxAttachCommand}</pre>
+                  <button
+                    className="action-button"
+                    onClick={() =>
+                      void copyDebugCommand(
+                        runtimeStateSummary.tmuxAttachCommand,
+                        "Session attach command copied.",
+                      )
+                    }
+                    type="button"
+                  >
+                    Copy Session Attach Command
+                  </button>
                 ) : null}
               </div>
             </details>
@@ -252,6 +305,7 @@ export function RuntimeSessionPanel({
         ) : null}
       </div>
 
+      {debugNotice ? <p className="path-label">{debugNotice}</p> : null}
       {error ? <p className="error-banner">{error}</p> : null}
     </section>
   );

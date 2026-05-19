@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -99,14 +100,36 @@ def get_environment_doctor(
     return EnvironmentDoctorResponse(**report)
 
 
-@router.get("/bootstrap-guidance", response_model=BootstrapGuidanceResponse)
 def get_bootstrap_guidance(
-    dependencies: AppDependencies = Depends(get_dependencies),
+    dependencies: AppDependencies,
+    request: Request | None = None,
 ) -> BootstrapGuidanceResponse:
     repo_root = _repo_root_from_dependencies(dependencies)
     report = build_report(repo_root=repo_root)
-    guidance = build_bootstrap_guidance(report)
+    backend_base = (
+        str(request.base_url).rstrip("/")
+        if request is not None
+        else f"http://{os.environ.get('SDD_FACTORY_BACKEND_HOST', '127.0.0.1')}:{os.environ.get('SDD_FACTORY_BACKEND_PORT', '8000')}"
+    )
+    ui_host = os.environ.get("SDD_FACTORY_UI_HOST", "127.0.0.1")
+    ui_port = os.environ.get("SDD_FACTORY_UI_PORT", "4173")
+    guidance = build_bootstrap_guidance(
+        report,
+        backend_url=backend_base,
+        ui_url=f"http://{ui_host}:{ui_port}",
+    )
     return BootstrapGuidanceResponse(**guidance)
+
+
+@router.get("/bootstrap-guidance", response_model=BootstrapGuidanceResponse)
+def get_bootstrap_guidance_route(
+    request: Request,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> BootstrapGuidanceResponse:
+    return get_bootstrap_guidance(
+        dependencies=dependencies,
+        request=request,
+    )
 
 
 @router.get("/runtime-capabilities", response_model=RuntimeCapabilitiesResponse)
