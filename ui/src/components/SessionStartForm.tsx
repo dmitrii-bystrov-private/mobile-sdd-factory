@@ -93,6 +93,7 @@ export function SessionStartForm({
   const [workflowProfile, setWorkflowProfile] = useState<WorkflowProfile>("oneshot");
   const [policy, setPolicy] = useState<DraftPolicy>(defaultDraftPolicy());
   const [roleConfig, setRoleConfig] = useState<Record<string, { runner: string; model: string; effort: string }>>({});
+  const [showAdvancedRoleConfig, setShowAdvancedRoleConfig] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const previousPrefillRef = useRef<Record<string, { runner: string; model: string; effort: string }>>({});
@@ -100,6 +101,11 @@ export function SessionStartForm({
   const showTestPolicy = workflowProfile === "bug_full";
   const showRequirementsClarificationMode = workflowProfile === "story_full";
   const normalizedTaskKey = taskKey.trim().toUpperCase();
+  const enabledOptionalLaneCount = [
+    policy.self_review_policy,
+    policy.boy_scout_policy,
+    policy.doc_harvest_policy,
+  ].filter((value) => value !== "disabled").length;
 
   const payload = useMemo(() => {
     const basePolicy = {
@@ -324,7 +330,7 @@ export function SessionStartForm({
       </div>
 
       <p className="path-label">
-        Start a new task session with the selected workflow profile, policy defaults, and per-role runtime settings.
+        Start a new task session with the selected workflow profile and policy defaults. Per-role runtime overrides stay available, but no longer dominate the happy path.
       </p>
 
       <form className="session-start-form" onSubmit={(event) => void handleSubmit(event)}>
@@ -352,6 +358,29 @@ export function SessionStartForm({
           </select>
         </label>
         <p className="form-help">{WORKFLOW_PROFILE_DESCRIPTIONS[workflowProfile]}</p>
+
+        <div className="inline-summary-card">
+          <div className="inline-summary-header">
+            <strong>{workflowProfile}</strong>
+            <span>{effectiveRoleNames.length} active lanes</span>
+          </div>
+          <p className="form-help">
+            {workflowProfile === "story_full"
+              ? "Story planning, spec work, decomposition, and implementation will all run in one prepared flow."
+              : workflowProfile === "bug_full"
+                ? "Bug recovery stays focused on implementation while keeping test and quality policies visible."
+                : "Direct implementation flow with quality lanes controlled by the policy defaults below."}
+          </p>
+          <div className="inline-pill-row">
+            <span className="inline-pill">self-review: {policy.self_review_policy}</span>
+            <span className="inline-pill">boy-scout: {policy.boy_scout_policy}</span>
+            <span className="inline-pill">doc-harvest: {policy.doc_harvest_policy}</span>
+            {showTestPolicy ? <span className="inline-pill">tests: {policy.test_policy}</span> : null}
+            {showRequirementsClarificationMode ? (
+              <span className="inline-pill">clarification: {policy.requirements_clarification_mode}</span>
+            ) : null}
+          </div>
+        </div>
 
         {showTestPolicy ? (
           <>
@@ -454,79 +483,95 @@ export function SessionStartForm({
         ) : null}
 
         {runtimeCapabilities !== null ? (
-          <div className="artifact-stack">
-            <p className="eyebrow">Role Runtime Config</p>
-            <p className="path-label">
-              These defaults are prefilled from Runtime Defaults and can be overridden per role for this single session.
-            </p>
-            {effectiveRoleNames.map((roleName) => {
-              const current = roleConfig[roleName] ?? { runner: "", model: "", effort: "" };
-              const runnerCapability = runtimeCapabilities.runners.find(
-                (item) => item.runner === current.runner,
-              );
-              const models = runnerCapability?.models ?? [];
-              const modelCapability = models.find((item) => item.id === current.model) ?? null;
+          <details
+            className="advanced-disclosure"
+            open={showAdvancedRoleConfig}
+            onToggle={(event) =>
+              setShowAdvancedRoleConfig((event.currentTarget as HTMLDetailsElement).open)
+            }
+          >
+            <summary>
+              <div>
+                <strong>Advanced Runtime Overrides</strong>
+                <p>
+                  Optional per-role runner/model/effort overrides for this one session.
+                </p>
+              </div>
+              <span>{effectiveRoleNames.length} lanes · {enabledOptionalLaneCount} optional lanes enabled</span>
+            </summary>
+            <div className="advanced-disclosure-body artifact-stack">
+              <p className="path-label">
+                These values are prefilled from Runtime Defaults. Change them only when this single session needs a different runner, model, or effort than the project baseline.
+              </p>
+              {effectiveRoleNames.map((roleName) => {
+                const current = roleConfig[roleName] ?? { runner: "", model: "", effort: "" };
+                const runnerCapability = runtimeCapabilities.runners.find(
+                  (item) => item.runner === current.runner,
+                );
+                const models = runnerCapability?.models ?? [];
+                const modelCapability = models.find((item) => item.id === current.model) ?? null;
 
-              return (
-                <article className="artifact-card" key={roleName}>
-                  <div className="artifact-meta">
-                    <span>{roleName}</span>
-                    <strong>{roleDisplayName(roleName)} · {current.runner || "unconfigured"}</strong>
-                  </div>
-                  <p className="form-help">
-                    Set the runner, model, and effort for the {roleDisplayName(roleName)} lane in this session only.
-                  </p>
+                return (
+                  <article className="artifact-card" key={roleName}>
+                    <div className="artifact-meta">
+                      <span>{roleName}</span>
+                      <strong>{roleDisplayName(roleName)} · {current.runner || "unconfigured"}</strong>
+                    </div>
+                    <p className="form-help">
+                      Session-only override for the {roleDisplayName(roleName)} lane.
+                    </p>
 
-                  <label className="form-field">
-                    <span>Runner</span>
-                    <select
-                      className="select-input"
-                      onChange={(event) =>
-                        updateRoleConfig(roleName, { runner: event.target.value, model: "", effort: "" })
-                      }
-                      value={current.runner}
-                    >
-                      {runtimeCapabilities.availableRunners.map((runnerName) => (
-                        <option key={`${roleName}-${runnerName}`} value={runnerName}>
-                          {runnerName}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <label className="form-field">
+                      <span>Runner</span>
+                      <select
+                        className="select-input"
+                        onChange={(event) =>
+                          updateRoleConfig(roleName, { runner: event.target.value, model: "", effort: "" })
+                        }
+                        value={current.runner}
+                      >
+                        {runtimeCapabilities.availableRunners.map((runnerName) => (
+                          <option key={`${roleName}-${runnerName}`} value={runnerName}>
+                            {runnerName}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                  <label className="form-field">
-                    <span>Model</span>
-                    <select
-                      className="select-input"
-                      onChange={(event) => updateRoleConfig(roleName, { model: event.target.value, effort: "" })}
-                      value={current.model}
-                    >
-                      {models.map((model) => (
-                        <option key={`${roleName}-${model.id}`} value={model.id}>
-                          {model.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <label className="form-field">
+                      <span>Model</span>
+                      <select
+                        className="select-input"
+                        onChange={(event) => updateRoleConfig(roleName, { model: event.target.value, effort: "" })}
+                        value={current.model}
+                      >
+                        {models.map((model) => (
+                          <option key={`${roleName}-${model.id}`} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                  <label className="form-field">
-                    <span>Effort</span>
-                    <select
-                      className="select-input"
-                      onChange={(event) => updateRoleConfig(roleName, { effort: event.target.value })}
-                      value={current.effort}
-                    >
-                      {(modelCapability?.supportedEfforts ?? []).map((effort) => (
-                        <option key={`${roleName}-${current.model}-${effort}`} value={effort}>
-                          {effort}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </article>
-              );
-            })}
-          </div>
+                    <label className="form-field">
+                      <span>Effort</span>
+                      <select
+                        className="select-input"
+                        onChange={(event) => updateRoleConfig(roleName, { effort: event.target.value })}
+                        value={current.effort}
+                      >
+                        {(modelCapability?.supportedEfforts ?? []).map((effort) => (
+                          <option key={`${roleName}-${current.model}-${effort}`} value={effort}>
+                            {effort}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </article>
+                );
+              })}
+            </div>
+          </details>
         ) : null}
 
         <button

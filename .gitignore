@@ -48,6 +48,7 @@ workdir/
 .runtime/
 .ts/
 .cache/
+.playwright-cli/
 
 # =============================================================================
 # Claude local settings (device-specific, not shared)

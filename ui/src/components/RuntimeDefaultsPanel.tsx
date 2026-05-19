@@ -78,6 +78,7 @@ export function RuntimeDefaultsPanel({
     bug_full: defaultPolicyDefaults(),
     story_full: defaultPolicyDefaults(),
   });
+  const [showRoleDefaults, setShowRoleDefaults] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -297,27 +298,33 @@ export function RuntimeDefaultsPanel({
       </div>
 
       <p className="path-label">
-        Set project-local defaults for new sessions instead of relying only on supported role baselines.
+        Set project-local defaults for new sessions. Policy defaults stay up front; lane-by-lane runtime overrides stay available as advanced settings.
       </p>
 
-      <label className="form-field">
-        <span>Default Runner</span>
-        <select
-          className="select-input"
-          disabled={busy || runtimeCapabilities === null}
-          onChange={(event) => handleDefaultRunnerChange(event.target.value)}
-          value={defaultRunner}
-        >
-          {(runtimeCapabilities?.availableRunners ?? []).map((runner) => (
-            <option key={runner} value={runner}>
-              {runner}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p className="form-help">
-        This runner is used first when a role does not have a more specific default saved below.
-      </p>
+      <div className="runtime-default-card">
+        <div className="inline-summary-header">
+          <strong>Default Runtime Baseline</strong>
+          <span>{runtimeDefaults?.knownRoles.length ?? 0} known roles</span>
+        </div>
+        <p className="form-help">
+          This runner becomes the inherited baseline for roles that do not carry an explicit override.
+        </p>
+        <label className="form-field">
+          <span>Default Runner</span>
+          <select
+            className="select-input"
+            disabled={busy || runtimeCapabilities === null}
+            onChange={(event) => handleDefaultRunnerChange(event.target.value)}
+            value={defaultRunner}
+          >
+            {(runtimeCapabilities?.availableRunners ?? []).map((runner) => (
+              <option key={runner} value={runner}>
+                {runner}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
       <div className="runtime-defaults-list">
         <div className="runtime-default-card">
@@ -554,70 +561,88 @@ export function RuntimeDefaultsPanel({
         </div>
       </div>
 
-      <div className="runtime-defaults-list">
-        {runtimeDefaults?.knownRoles.map((roleName) => {
-          const draft = roleDefaults[roleName];
-          const runnerCapability = runnerIndex.get(draft?.runner ?? "");
-          const models = runnerCapability?.models ?? [];
-          const modelCapability = models.find((item) => item.id === draft?.model);
-          const efforts = modelCapability?.supportedEfforts ?? [];
-          return (
-            <div key={roleName} className="runtime-default-card">
-              <strong>{roleDisplayName(roleName)}</strong>
-              <p className="form-help">
-                Internal id: {roleName}. These values prefill new sessions for this role unless the session creator overrides them explicitly.
-              </p>
-              <div className="followup-form-grid">
+      <details
+        className="advanced-disclosure"
+        open={showRoleDefaults}
+        onToggle={(event) => setShowRoleDefaults((event.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary>
+          <div>
+            <strong>Advanced Role Overrides</strong>
+            <p>
+              Change runner/model/effort for specific lanes when the project-wide baseline is not enough.
+            </p>
+          </div>
+          <span>{runtimeDefaults?.knownRoles.length ?? 0} roles</span>
+        </summary>
+        <div className="advanced-disclosure-body runtime-defaults-list">
+          {runtimeDefaults?.knownRoles.map((roleName) => {
+            const draft = roleDefaults[roleName];
+            const runnerCapability = runnerIndex.get(draft?.runner ?? "");
+            const models = runnerCapability?.models ?? [];
+            const modelCapability = models.find((item) => item.id === draft?.model);
+            const efforts = modelCapability?.supportedEfforts ?? [];
+            return (
+              <div key={roleName} className="runtime-default-card">
+                <div className="inline-summary-header">
+                  <strong>{roleDisplayName(roleName)}</strong>
+                  <span>{draft?.runner ?? "runner?"}</span>
+                </div>
+                <p className="form-help">
+                  Internal id: {roleName}. These values prefill new sessions only when a specific lane should diverge from the project baseline.
+                </p>
+                <div className="followup-form-grid">
+                  <label className="form-field">
+                    <span>Runner</span>
+                    <select
+                      className="select-input"
+                      disabled={busy || runtimeCapabilities === null}
+                      onChange={(event) => updateRoleDefault(roleName, { runner: event.target.value })}
+                      value={draft?.runner ?? ""}
+                    >
+                      {(runtimeCapabilities?.availableRunners ?? []).map((runner) => (
+                        <option key={runner} value={runner}>
+                          {runner}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="form-field">
+                    <span>Model</span>
+                    <select
+                      className="select-input"
+                      disabled={busy}
+                      onChange={(event) => updateRoleDefault(roleName, { model: event.target.value })}
+                      value={draft?.model ?? ""}
+                    >
+                      {models.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
                 <label className="form-field">
-                  <span>Runner</span>
-                  <select
-                    className="select-input"
-                    disabled={busy || runtimeCapabilities === null}
-                    onChange={(event) => updateRoleDefault(roleName, { runner: event.target.value })}
-                    value={draft?.runner ?? ""}
-                  >
-                    {(runtimeCapabilities?.availableRunners ?? []).map((runner) => (
-                      <option key={runner} value={runner}>
-                        {runner}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="form-field">
-                  <span>Model</span>
+                  <span>Effort</span>
                   <select
                     className="select-input"
                     disabled={busy}
-                    onChange={(event) => updateRoleDefault(roleName, { model: event.target.value })}
-                    value={draft?.model ?? ""}
+                    onChange={(event) => updateRoleDefault(roleName, { effort: event.target.value })}
+                    value={draft?.effort ?? ""}
                   >
-                    {models.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label}
+                    {efforts.map((effort) => (
+                      <option key={effort} value={effort}>
+                        {effort}
                       </option>
                     ))}
                   </select>
                 </label>
               </div>
-              <label className="form-field">
-                <span>Effort</span>
-                <select
-                  className="select-input"
-                  disabled={busy}
-                  onChange={(event) => updateRoleDefault(roleName, { effort: event.target.value })}
-                  value={draft?.effort ?? ""}
-                >
-                  {efforts.map((effort) => (
-                    <option key={effort} value={effort}>
-                      {effort}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      </details>
 
       <button
         className="action-button action-button-strong"

@@ -10,6 +10,7 @@ Usage: bash scripts/dev.sh <command>
 
 Supported convenience commands:
   ui             Start the local backend/UI stack and open the operator UI
+  ui-smoke       Run browser smoke for Workflow Runs, Settings, and Health
   stack          Start the local backend/UI stack without opening a browser
   test           Run the supported test rail
   test-live      Run the supported test rail plus live acceptance
@@ -19,6 +20,7 @@ Supported convenience commands:
 
 Examples:
   bash scripts/dev.sh ui
+  bash scripts/dev.sh ui-smoke
   bash scripts/dev.sh test
   bash scripts/dev.sh test-live
 EOF
@@ -38,6 +40,9 @@ cd "$REPO_ROOT"
 case "$command_name" in
   ui)
     exec bash factory/open-local-ui.sh
+    ;;
+  ui-smoke)
+    exec bash factory/acceptance/run-ui-surface-smoke.sh
     ;;
   stack)
     exec bash factory/run-local-stack.sh

@@ -30,6 +30,8 @@ import type {
   SubtaskProgressSummary,
 } from "../types";
 
+type SurfaceView = "runs" | "settings" | "health";
+
 const FOLLOWUP_ARTIFACT_TYPES_BY_SOURCE: Record<"mr" | "qa", readonly string[]> = {
   mr: ["mr_followup_plan_markdown", "mr_comments_markdown"],
   qa: ["qa_reopen_comments"],
@@ -334,6 +336,7 @@ export function SessionsPage(): JSX.Element {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [bundle, setBundle] = useState<SessionBundle | null>(null);
+  const [surfaceView, setSurfaceView] = useState<SurfaceView>("runs");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
@@ -351,6 +354,9 @@ export function SessionsPage(): JSX.Element {
 
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? null;
+  const activeSessionCount = sessions.filter((session) => session.status === "active").length;
+  const blockedSessionCount = sessions.filter((session) => session.status === "waiting_for_operator").length;
+  const completedSessionCount = sessions.filter((session) => session.status === "completed").length;
 
   async function loadSessions(): Promise<number | null> {
     setLoading(true);
@@ -577,9 +583,12 @@ export function SessionsPage(): JSX.Element {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
+        <div className="topbar-copy">
           <p className="eyebrow">SDD Factory</p>
           <h1>Operator Console</h1>
+          <p className="topbar-summary">
+            Live workflow runs, runtime defaults, environment health, and operator recovery from one workspace.
+          </p>
         </div>
         <div className="topbar-actions">
           <div className={`live-chip live-${streamState}`}>
@@ -606,31 +615,145 @@ export function SessionsPage(): JSX.Element {
 
       <div className="page-layout">
         <div className="sidebar-stack">
-          <SessionStartForm
-            onCreated={async (sessionId) => {
-              await loadSessions();
-              setSelectedSessionId(sessionId);
-              await loadBundle(sessionId);
-            }}
-            runtimeCapabilities={runtimeCapabilitiesSummary}
-            runtimeDefaults={runtimeDefaultsSummary}
-          />
-          <RuntimeDefaultsPanel
-            onSaved={(summary) => {
-              setRuntimeDefaultsSummary(summary);
-            }}
-            runtimeCapabilities={runtimeCapabilitiesSummary}
-            runtimeDefaults={runtimeDefaultsSummary}
-          />
-          <SessionList
-            onSelect={(sessionId) => setSelectedSessionId(sessionId)}
-            selectedSessionId={selectedSessionId}
-            sessions={sessions}
-          />
-          <EnvironmentDoctorPanel doctorSummary={doctorSummary} />
-          <BootstrapGuidancePanel guidanceSummary={bootstrapGuidanceSummary} />
-          <RuntimeCapabilitiesPanel capabilities={runtimeCapabilitiesSummary} />
-          <KnowledgePanel items={knowledgeItems} />
+          <section className="panel panel-sidebar">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Workspace</p>
+                <h2>Navigation</h2>
+              </div>
+            </div>
+            <div className="surface-nav">
+              <button
+                className={`surface-nav-card ${surfaceView === "runs" ? "selected" : ""}`}
+                onClick={() => setSurfaceView("runs")}
+                type="button"
+              >
+                <strong>Workflow Runs</strong>
+                <p>Start sessions, inspect the selected run, and handle operator actions.</p>
+              </button>
+              <button
+                className={`surface-nav-card ${surfaceView === "settings" ? "selected" : ""}`}
+                onClick={() => setSurfaceView("settings")}
+                type="button"
+              >
+                <strong>Settings</strong>
+                <p>Project-local defaults and shared knowledge, separated from day-to-day run execution.</p>
+              </button>
+              <button
+                className={`surface-nav-card ${surfaceView === "health" ? "selected" : ""}`}
+                onClick={() => setSurfaceView("health")}
+                type="button"
+              >
+                <strong>Health</strong>
+                <p>Doctor, bootstrap guidance, and runtime capabilities for environment debugging.</p>
+              </button>
+            </div>
+          </section>
+          <section className="panel panel-sidebar">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Overview</p>
+                <h2>Factory State</h2>
+              </div>
+            </div>
+            <div className="grid-two compact-grid">
+              <div className="metric-card">
+                <span>Active</span>
+                <strong>{activeSessionCount}</strong>
+              </div>
+              <div className="metric-card">
+                <span>Blocked</span>
+                <strong>{blockedSessionCount}</strong>
+              </div>
+              <div className="metric-card">
+                <span>Completed</span>
+                <strong>{completedSessionCount}</strong>
+              </div>
+              <div className="metric-card">
+                <span>Selected</span>
+                <strong>{selectedSession?.task_key ?? "none"}</strong>
+              </div>
+            </div>
+          </section>
+          {surfaceView === "runs" ? (
+            <>
+              <SessionStartForm
+                onCreated={async (sessionId) => {
+                  await loadSessions();
+                  setSelectedSessionId(sessionId);
+                  setSurfaceView("runs");
+                  await loadBundle(sessionId);
+                }}
+                runtimeCapabilities={runtimeCapabilitiesSummary}
+                runtimeDefaults={runtimeDefaultsSummary}
+              />
+              <SessionList
+                onSelect={(sessionId) => setSelectedSessionId(sessionId)}
+                selectedSessionId={selectedSessionId}
+                sessions={sessions}
+              />
+            </>
+          ) : null}
+          {surfaceView === "settings" ? (
+            <section className="panel panel-sidebar">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Settings Scope</p>
+                  <h2>Project Defaults</h2>
+                </div>
+              </div>
+              <div className="sidebar-note-stack">
+                <div className="inline-summary-card">
+                  <div className="inline-summary-header">
+                    <strong>What belongs here</strong>
+                    <span>stable defaults</span>
+                  </div>
+                  <p className="form-help">
+                    Keep project-wide runtime defaults and shared knowledge here. Session-specific tweaks stay inside Workflow Runs.
+                  </p>
+                </div>
+                {runtimeDefaultsSummary ? (
+                  <div className="inline-summary-card">
+                    <div className="inline-summary-header">
+                      <strong>Defaults File</strong>
+                      <span>{runtimeDefaultsSummary.knownRoles.length} roles</span>
+                    </div>
+                    <p className="form-help">{runtimeDefaultsSummary.sourcePath}</p>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+          {surfaceView === "health" ? (
+            <section className="panel panel-sidebar">
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Health Scope</p>
+                  <h2>Environment Status</h2>
+                </div>
+              </div>
+              <div className="sidebar-note-stack">
+                <div className="inline-summary-card">
+                  <div className="inline-summary-header">
+                    <strong>Doctor</strong>
+                    <span>{doctorSummary?.overallStatus ?? "unknown"}</span>
+                  </div>
+                  <p className="form-help">
+                    Use this surface before debugging workflow logic when the environment itself might be broken.
+                  </p>
+                </div>
+                {bootstrapGuidanceSummary ? (
+                  <div className="inline-summary-card">
+                    <div className="inline-summary-header">
+                      <strong>Launch Stack</strong>
+                      <span>{bootstrapGuidanceSummary.overallStatus}</span>
+                    </div>
+                    <p className="form-help">{bootstrapGuidanceSummary.launchCommand}</p>
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
         </div>
         {loading ? (
           <section className="panel panel-empty">
@@ -638,11 +761,51 @@ export function SessionsPage(): JSX.Element {
             <h2>Hydrating operator surface…</h2>
           </section>
         ) : (
-          <SessionDetail
-            bundle={bundle}
-            onRefresh={refreshSelected}
-            session={selectedSession}
-          />
+          <section className="detail-layout">
+            <div className="panel workspace-panel">
+              <p className="eyebrow">Current Surface</p>
+              <h2>
+                {surfaceView === "runs"
+                  ? "Workflow Runs"
+                  : surfaceView === "settings"
+                    ? "Project Settings"
+                    : "Environment Health"}
+              </h2>
+              <p className="path-label">
+                {surfaceView === "runs"
+                  ? "Run the factory, inspect a selected session, and work through runtime-driven operator flows."
+                  : surfaceView === "settings"
+                    ? "Manage project-local defaults and shared knowledge without mixing them into the execution screen."
+                    : "Inspect doctor output, bootstrap guidance, and runtime capabilities before blaming workflow logic."}
+              </p>
+            </div>
+            {surfaceView === "runs" ? (
+              <SessionDetail
+                bundle={bundle}
+                onRefresh={refreshSelected}
+                session={selectedSession}
+              />
+            ) : null}
+            {surfaceView === "settings" ? (
+              <div className="settings-layout">
+                <RuntimeDefaultsPanel
+                  onSaved={(summary) => {
+                    setRuntimeDefaultsSummary(summary);
+                  }}
+                  runtimeCapabilities={runtimeCapabilitiesSummary}
+                  runtimeDefaults={runtimeDefaultsSummary}
+                />
+                <KnowledgePanel items={knowledgeItems} />
+              </div>
+            ) : null}
+            {surfaceView === "health" ? (
+              <div className="settings-layout">
+                <EnvironmentDoctorPanel doctorSummary={doctorSummary} />
+                <BootstrapGuidancePanel guidanceSummary={bootstrapGuidanceSummary} />
+                <RuntimeCapabilitiesPanel capabilities={runtimeCapabilitiesSummary} />
+              </div>
+            ) : null}
+          </section>
         )}
       </div>
     </main>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.routes_artifacts import router as artifacts_router
 from backend.api.routes_events import router as events_router
@@ -16,6 +17,13 @@ from backend.dependencies import build_dependencies
 
 def create_app() -> FastAPI:
     app = FastAPI(title="SDD Factory")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https?://(127\.0\.0\.1|localhost)(:\d+)?$",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.dependencies = build_dependencies()
     app.include_router(sessions_router)
     app.include_router(events_router)

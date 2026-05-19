@@ -77,6 +77,9 @@ run_step "Operator acceptance: delivery" \
   bash factory/acceptance/run-delivery-acceptance.sh
 
 if [[ "${INCLUDE_LIVE}" -eq 1 ]]; then
+  run_step "Browser smoke: UI surfaces" \
+    bash factory/acceptance/run-ui-surface-smoke.sh
+
   run_step "Live runtime acceptance: story flow" \
     env PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" ./.venv/bin/python factory/acceptance/run-real-story-runtime-acceptance.py
 
