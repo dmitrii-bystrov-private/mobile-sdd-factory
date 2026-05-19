@@ -8,6 +8,8 @@ description: >
 
 Orchestrate a one-shot implementation for Jira issue `$ARGUMENTS`.
 
+This skill defines the legacy slash-command oneshot flow. The current primary product flow runs through the operator UI and backend session runtime, where even oneshot execution continues through persistent quality and delivery stages.
+
 ## Step 1 — Snapshot
 
 Run `/snapshot <KEY>` to fetch Jira data, create the worktree, and write `description.md`, `comments.md`, `statuses.md`.

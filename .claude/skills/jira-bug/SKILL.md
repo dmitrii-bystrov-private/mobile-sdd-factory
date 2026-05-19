@@ -7,6 +7,8 @@ description: >
 
 Orchestrate the full bug-fix flow for Jira bug `$ARGUMENTS`.
 
+This skill defines the legacy slash-command bug flow. The current primary product flow runs through the operator UI and backend session runtime, where bug execution, quality lanes, and delivery are coordinated as persistent session stages.
+
 ## Step 0 — Resolve parent
 
 Determine whether `<KEY>` is a standalone bug or a sub-bug on a story:

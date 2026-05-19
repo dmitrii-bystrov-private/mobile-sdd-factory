@@ -7,6 +7,8 @@ description: >
 
 Orchestrate the full story flow for Jira story `$ARGUMENTS`.
 
+This skill defines the legacy slash-command story flow. The current primary product flow runs through the operator UI and backend session runtime, where decomposition, execution, quality lanes, and delivery are coordinated as persistent session stages.
+
 ## Step 0 — Resolve key
 
 ```bash
