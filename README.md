@@ -366,6 +366,7 @@ index.html        # local static presentation deck for the SDD workflow
 ## More Docs
 
 - [`scripts/README.md`](scripts/README.md) — direct CLI reference for every helper script
+- [`docs/operator-guide.md`](docs/operator-guide.md) — practical operator workflow for the supported backend/UI runtime model
 - [`docs/deprecated-surface.md`](docs/deprecated-surface.md) — deprecated slash-command compatibility inventory and retirement criteria
 - [`.claude/skills/README.md`](.claude/skills/README.md) — slash-command catalog and task workspace layout
 - [`AGENTS.md`](AGENTS.md) — repository conventions for contributors and coding agents
