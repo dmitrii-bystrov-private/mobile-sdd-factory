@@ -101,7 +101,7 @@ Project-local defaults are stored in:
 .sdd-factory/settings.local.json
 ```
 
-Manage them from `Settings → Runtime Defaults`.
+Manage them from the `Runtime Defaults` panel in the operator sidebar.
 
 This is the supported place for:
 

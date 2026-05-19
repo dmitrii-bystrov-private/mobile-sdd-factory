@@ -226,7 +226,7 @@ Project-local runtime and workflow defaults are stored in:
 .sdd-factory/settings.local.json
 ```
 
-These defaults are editable from the UI `Settings → Runtime Defaults` panel and cover:
+These defaults are editable from the UI `Runtime Defaults` panel in the operator sidebar and cover:
 
 - default runner
 - per-role runner/model/effort defaults
