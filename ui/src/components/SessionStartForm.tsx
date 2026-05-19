@@ -47,6 +47,24 @@ const CLARIFICATION_MODE_DESCRIPTIONS: Record<RequirementsClarificationMode, str
   autonomous: "Prefer carrying the task forward without operator clarification unless the flow hard-blocks.",
 };
 
+const ROLE_DEFAULT_SOURCE_MAP: Record<string, string | null> = {
+  implementer: "implementer",
+  "bug-fixer": "bug-fixer",
+  "task-coordinator": null,
+  "verification-coordinator": "final-verifier",
+  "code-reviewer": "code-reviewer",
+  "code-scout": "code-scout",
+  "mr-comments-analyst-worker": "mr-comments-analyst",
+  "doc-harvest-worker": "doc-harvest",
+  "proposal-context-worker": "context-collector",
+  "requirements-clarifier-worker": "requirements-clarifier",
+  "acceptance-criteria-worker": "acceptance-criteria-writer",
+  "constraints-worker": "constraints-definer",
+  "spec-verifier-worker": "spec-verifier",
+  "story-spec-worker": null,
+  "task-decomposer-worker": "task-decomposer",
+};
+
 type DraftPolicy = {
   test_policy: SessionPolicyValue;
   self_review_policy: SessionPolicyValue;
@@ -190,7 +208,8 @@ export function SessionStartForm({
       const storedRoleDefault = runtimeDefaults?.roleDefaults[roleName];
       const runner = storedRoleDefault?.runner ?? defaultRunner;
       const runnerCapability = runnerIndex.get(runner);
-      const legacyDefault = legacyIndex.get(roleName);
+      const legacyKey = ROLE_DEFAULT_SOURCE_MAP[roleName] ?? null;
+      const legacyDefault = legacyKey === null ? undefined : legacyIndex.get(legacyKey);
       const models = runnerCapability?.models ?? [];
       const model =
         (storedRoleDefault?.runner === null || storedRoleDefault?.runner === runner ? storedRoleDefault?.model : null) ??
