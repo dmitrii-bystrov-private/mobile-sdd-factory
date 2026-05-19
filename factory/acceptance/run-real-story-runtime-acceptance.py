@@ -9,12 +9,11 @@ from pathlib import Path
 from backend.api.routes_events import inject_event, list_events
 from backend.api.routes_operator import create_subtasks_from_plan, resume_session
 from backend.api.routes_roles import submit_role_output
-from backend.api.routes_sessions import create_session, prepare_session
+from backend.api.routes_sessions import create_session
 from backend.api.schemas import (
     CreateSessionRequest,
     CreateSubtasksFromPlanRequest,
     InjectEventRequest,
-    PrepareSessionRequest,
     ResumeSessionRequest,
     RoleOutputRequest,
 )
@@ -76,6 +75,7 @@ def main() -> None:
             CreateSessionRequest(
                 task_key=task_key,
                 workflow_profile="story_full",
+                prepare=True,
                 policy={
                     "self_review_policy": "disabled",
                     "boy_scout_policy": "disabled",
@@ -91,12 +91,7 @@ def main() -> None:
 
         assert_role_launch_script(temp_root / "workdir", task_key, IMPLEMENTER_ROLE, "persistent")
         assert_role_launch_script(temp_root / "workdir", task_key, VERIFICATION_COORDINATOR_ROLE, "persistent")
-
-        prepare_response = prepare_session(
-            PrepareSessionRequest(task_key=task_key),
-            dependencies=deps,
-        )
-        assert prepare_response.followup_event_type == "proposal_context_requested"
+        assert create_response.followup_event_type == "proposal_context_requested"
 
         statuses_path = temp_root / "workdir" / task_key / "statuses.md"
         statuses_path.write_text(

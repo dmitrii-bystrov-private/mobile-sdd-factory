@@ -9,11 +9,10 @@ from pathlib import Path
 from backend.api.routes_events import list_events
 from backend.api.routes_operator import ingest_mr_comments
 from backend.api.routes_roles import submit_role_output
-from backend.api.routes_sessions import create_session, prepare_session
+from backend.api.routes_sessions import create_session
 from backend.api.schemas import (
     CreateSessionRequest,
     IngestMrCommentsRequest,
-    PrepareSessionRequest,
     RoleOutputRequest,
 )
 from backend.roles.contracts import (
@@ -66,6 +65,7 @@ def main() -> None:
             CreateSessionRequest(
                 task_key=task_key,
                 workflow_profile="oneshot",
+                prepare=True,
                 policy={
                     "self_review_policy": "disabled",
                     "boy_scout_policy": "disabled",
@@ -86,12 +86,7 @@ def main() -> None:
             VERIFICATION_COORDINATOR_ROLE,
             "persistent",
         )
-
-        prepare_response = prepare_session(
-            PrepareSessionRequest(task_key=task_key),
-            dependencies=deps,
-        )
-        assert prepare_response.followup_event_type == "implementation_requested"
+        assert create_response.followup_event_type == "implementation_requested"
 
         implementation_role = deps.role_repository.get_by_name(session_id, IMPLEMENTER_ROLE)
         verification_role = deps.role_repository.get_by_name(session_id, VERIFICATION_COORDINATOR_ROLE)

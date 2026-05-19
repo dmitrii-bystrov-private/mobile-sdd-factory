@@ -1893,6 +1893,24 @@ class CoordinatorService:
                 },
             )
             return None
+        if output_type == "error":
+            self._record_runtime_marker_artifact(
+                session=session,
+                role=role,
+                marker_type="error",
+                payload=output_payload,
+            )
+            self._append_runtime_marker_event(
+                session=session,
+                role=role,
+                marker_type="error",
+                payload=output_payload,
+            )
+            return self._escalate_runtime_error(
+                session=session,
+                role=role,
+                payload=output_payload,
+            )
         updated_session, _, _ = self.handle_role_output(
             session_id=session.id,
             role_name=role.role_name,
@@ -1912,19 +1930,19 @@ class CoordinatorService:
         # result as stale instead of failing the whole session intake path.
         if (
             role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE}
-            and output_type == "completed"
+            and output_type in {"completed", "error"}
             and session.current_owner != role_name
         ):
             return True
         if (
             role_name == VERIFICATION_COORDINATOR_ROLE
-            and output_type in {"passed", "completed", "failed", "blocked_verification_cycle"}
+            and output_type in {"passed", "completed", "failed", "blocked_verification_cycle", "error"}
             and session.current_owner != VERIFICATION_COORDINATOR_ROLE
         ):
             return True
         if (
             role_name == CODE_REVIEWER_ROLE
-            and output_type in {"passed", "completed", "failed", "blocked_review_cycle"}
+            and output_type in {"passed", "completed", "failed", "blocked_review_cycle", "error"}
             and session.current_owner != CODE_REVIEWER_ROLE
         ):
             return True
@@ -4618,6 +4636,23 @@ class CoordinatorService:
                     output_type = payload.get("output_type")
                     output_payload = payload.get("payload", {})
                     if not isinstance(output_type, str) or not isinstance(output_payload, dict):
+                        continue
+                    if self._should_ignore_stale_role_output(
+                        session=current_session,
+                        role_name=role.role_name,
+                        output_type=output_type,
+                    ):
+                        self._append_event(
+                            session_id=current_session.id,
+                            event_type="stale_role_output_ignored",
+                            producer_type="coordinator",
+                            payload={
+                                "role_name": role.role_name,
+                                "output_type": output_type,
+                                "current_stage": current_session.current_stage,
+                                "current_owner": current_session.current_owner,
+                            },
+                        )
                         continue
                     current_session, _, _ = self.handle_role_output(
                         session_id=current_session.id,

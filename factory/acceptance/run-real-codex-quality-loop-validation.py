@@ -10,13 +10,12 @@ from pathlib import Path
 from backend.api.routes_events import inject_event, list_events
 from backend.api.routes_operator import poll_session_output
 from backend.api.routes_roles import collect_role_output
-from backend.api.routes_sessions import create_session, prepare_session
+from backend.api.routes_sessions import create_session
 from backend.api.schemas import (
     CollectRoleOutputRequest,
     CreateSessionRequest,
     InjectEventRequest,
     PollSessionOutputRequest,
-    PrepareSessionRequest,
 )
 from runtime_config import acceptance_role_config
 
@@ -76,6 +75,7 @@ def main() -> None:
             CreateSessionRequest(
                 task_key=task_key,
                 workflow_profile="oneshot",
+                prepare=True,
                 policy={
                     "self_review_policy": "required",
                     "boy_scout_policy": "disabled",
@@ -93,12 +93,7 @@ def main() -> None:
             dependencies=deps,
         )
         session_id = create_response.session.id
-
-        prepare_response = prepare_session(
-            PrepareSessionRequest(task_key=task_key),
-            dependencies=deps,
-        )
-        assert prepare_response.followup_event_type == "implementation_requested"
+        assert create_response.followup_event_type == "implementation_requested"
 
         first_verification = wait_for_stage(
             session_id=session_id,

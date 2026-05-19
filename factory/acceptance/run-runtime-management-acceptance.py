@@ -15,11 +15,10 @@ from backend.api.routes_operator import (
     stop_runtime_session,
 )
 from backend.api.routes_roles import collect_role_output
-from backend.api.routes_sessions import create_session, prepare_session
+from backend.api.routes_sessions import create_session
 from backend.api.schemas import (
     CollectRoleOutputRequest,
     CreateSessionRequest,
-    PrepareSessionRequest,
     RestartRuntimeRoleRequest,
     RestartRuntimeSessionRequest,
     StopRuntimeRoleRequest,
@@ -192,6 +191,7 @@ def _create_prepared_session(*, task_key: str, dependencies) -> int:
         CreateSessionRequest(
             task_key=task_key,
             workflow_profile="oneshot",
+            prepare=True,
             policy={
                 "self_review_policy": "disabled",
                 "boy_scout_policy": "disabled",
@@ -202,11 +202,7 @@ def _create_prepared_session(*, task_key: str, dependencies) -> int:
         dependencies=dependencies,
     )
     session_id = create_response.session.id
-    prepare_response = prepare_session(
-        PrepareSessionRequest(task_key=task_key),
-        dependencies=dependencies,
-    )
-    assert prepare_response.followup_event_type == "implementation_requested"
+    assert create_response.followup_event_type == "implementation_requested"
     return session_id
 
 

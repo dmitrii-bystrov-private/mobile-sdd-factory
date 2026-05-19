@@ -3649,6 +3649,43 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, sum(1 for item in events if item.event_type == "implementation_completed"))
         self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
 
+    def test_poll_session_output_ignores_stale_implementer_runtime_marker_after_handoff_to_reviewer(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009G",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30009G")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"late stale implementer result"}}',
+        )
+
+        updated_session, event, role_count, chunk_count = self.coordinator.poll_session_output(
+            session_id=session.id,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("session_output_polled", event.event_type)
+        self.assertEqual(4, role_count)
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("self_review_requested", updated_session.current_stage)
+        self.assertEqual("code-reviewer", updated_session.current_owner)
+        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
+        self.assertEqual(1, sum(1 for item in events if item.event_type == "implementation_completed"))
+        self.assertTrue(any(item.artifact_type == "runtime_output" for item in artifacts))
+
     def test_collect_role_output_records_progress_marker_without_stage_transition(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30010")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
@@ -3696,6 +3733,43 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "role_runtime_error_reported" for item in events))
         self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
         self.assertFalse(any(item.event_type == "implementation_completed" for item in events))
+        self.assertTrue(any(item.artifact_type == "runtime_error_json" for item in artifacts))
+
+    def test_collect_role_output_escalates_result_json_error_payload(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30014B")
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            "implementer",
+        )
+        result_path = role_workspace / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "error",
+                    "payload": {
+                        "summary": "tool failed",
+                        "details": "lint diagnostics missing",
+                    },
+                }
+            )
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        events = self.event_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertIsNone(updated_session.current_owner)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(any(item.event_type == "role_runtime_error_reported" for item in events))
+        self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "runtime_error_json" for item in artifacts))
 
     def test_event_bus_receives_published_session_events(self) -> None:
