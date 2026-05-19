@@ -497,6 +497,33 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(1, len(response.items))
         self.assertEqual("IOS-40001", response.items[0].task_key)
 
+    def test_list_sessions_route_enriches_task_title_and_jira_url(self) -> None:
+        create_session(
+            CreateSessionRequest(task_key="IOS-40001TITLE", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        task_dir = Path(self.temp_dir.name) / "IOS-40001TITLE"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "description.md").write_text(
+            "\n".join(
+                [
+                    "# Description",
+                    "ID: IOS-40001TITLE",
+                    "Type: Story",
+                    "Title: Add biometric login",
+                    "Status: In Progress",
+                ]
+            )
+        )
+
+        response = list_sessions(dependencies=self.dependencies)
+
+        self.assertEqual("Add biometric login", response.items[0].task_title)
+        self.assertEqual(
+            "https://pnlfintech.atlassian.net/browse/IOS-40001TITLE",
+            response.items[0].jira_url,
+        )
+
     def test_get_subtask_graph_route_returns_snapshot_summary(self) -> None:
         response = create_session(
             CreateSessionRequest(task_key="IOS-40001G", workflow_profile="story_full"),

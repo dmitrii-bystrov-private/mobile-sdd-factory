@@ -6,6 +6,8 @@ export type SessionPolicyEntry = SessionPolicyValue | RequirementsClarificationM
 export type Session = {
   id: number;
   task_key: string;
+  task_title?: string | null;
+  jira_url?: string | null;
   status: string;
   current_stage: string;
   current_owner: string | null;

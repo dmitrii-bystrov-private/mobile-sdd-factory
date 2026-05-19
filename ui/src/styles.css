@@ -370,6 +370,29 @@ input {
   color: var(--ink-soft);
 }
 
+.hero-title {
+  margin: 8px 0 0;
+  font-size: 1.05rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  max-width: 52rem;
+}
+
+.hero-link-row {
+  margin: 8px 0 0;
+}
+
+.hero-link {
+  color: var(--brand);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255, 131, 92, 0.35);
+}
+
+.hero-link:hover {
+  color: #ff9d7d;
+  border-bottom-color: rgba(255, 157, 125, 0.55);
+}
+
 .session-card:hover,
 .action-button:hover,
 .session-card.selected {

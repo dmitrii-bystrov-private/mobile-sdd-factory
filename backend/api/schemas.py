@@ -30,6 +30,8 @@ class CreateSessionRequest(BaseModel):
 class SessionResponse(BaseModel):
     id: int
     task_key: str
+    task_title: str | None = None
+    jira_url: str | None = None
     status: str
     current_stage: str
     current_owner: str | None = None

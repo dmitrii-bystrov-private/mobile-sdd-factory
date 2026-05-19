@@ -224,6 +224,14 @@ export function SessionDetail({
         <div className="hero-copy">
           <p className="eyebrow">Current Session</p>
           <h1>{session.task_key}</h1>
+          {session.task_title ? <p className="hero-title">{session.task_title}</p> : null}
+          {session.jira_url ? (
+            <p className="hero-link-row">
+              <a className="hero-link" href={session.jira_url} rel="noreferrer" target="_blank">
+                Open in Jira
+              </a>
+            </p>
+          ) : null}
           <p className="hero-meta">
             Profile: <strong>{workflowProfileDisplayName(session.workflow_profile)}</strong>
           </p>
