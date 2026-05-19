@@ -572,6 +572,7 @@ export function SessionsPage(): JSX.Element {
           <button
             className="action-button action-button-strong"
             onClick={() => void refreshSelected()}
+            title="Reload the session list and the currently selected session surface."
             type="button"
           >
             Refresh Surface

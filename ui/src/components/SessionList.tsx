@@ -28,6 +28,7 @@ export function SessionList({
               className={`session-card ${isSelected ? "selected" : ""}`}
               key={session.id}
               onClick={() => onSelect(session.id)}
+              title={`Open ${session.task_key} at stage ${session.current_stage}${session.current_owner ? ` owned by ${session.current_owner}` : ""}.`}
               type="button"
             >
               <div className="session-card-top">
