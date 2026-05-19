@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { apiClient } from "../api/client";
-import type { Role, Session } from "../types";
+import type { Session } from "../types";
 
 type OperatorActionsProps = {
-  roles: Role[];
   session: Session;
   onRefresh: () => Promise<void>;
 };
@@ -18,7 +17,6 @@ type ActionDefinition = {
 };
 
 export function OperatorActions({
-  roles,
   session,
   onRefresh,
 }: OperatorActionsProps): JSX.Element {
@@ -34,48 +32,6 @@ export function OperatorActions({
   const [knowledgeScope, setKnowledgeScope] = useState("");
   const [knowledgeGuidance, setKnowledgeGuidance] = useState("");
   const [runtimeInput, setRuntimeInput] = useState("");
-  const [redirectTargetRole, setRedirectTargetRole] = useState("");
-
-  const allowedRedirectTargetsByStage: Record<string, string[]> = {
-    bug_analysis_requested: ["bug-fixer"],
-    story_spec_requested: ["story-spec-worker"],
-    proposal_context_requested: ["proposal-context-worker"],
-    requirements_requested: ["requirements-clarifier-worker"],
-    acceptance_criteria_requested: ["acceptance-criteria-worker"],
-    constraints_requested: ["constraints-worker"],
-    spec_verification_requested: ["spec-verifier-worker"],
-    task_decomposition_requested: ["task-decomposer-worker"],
-    subtask_implementation_requested: ["implementer"],
-    implementation_requested: ["implementer", "bug-fixer"],
-    verification_requested: ["verification-coordinator"],
-    verification_correction_requested: ["implementer", "bug-fixer"],
-    self_review_requested: ["code-reviewer"],
-    boy_scout_requested: ["code-scout"],
-    boy_scout_correction_requested: ["implementer", "bug-fixer"],
-    doc_harvest_requested: ["doc-harvest-worker"],
-    mr_comments_analysis_requested: ["mr-comments-analyst-worker"],
-    self_review_correction_requested: ["implementer", "bug-fixer"],
-  };
-
-  const availableRedirectTargets = allowedRedirectTargetsByStage[session.current_stage]
-    ?.filter((roleName) => roleName !== session.current_owner)
-    .filter((roleName) => roles.some((role) => role.role_name === roleName)) ?? [];
-
-  const canRedirectSession =
-    session.status === "waiting_for_operator" &&
-    availableRedirectTargets.length > 0;
-
-  useEffect(() => {
-    if (availableRedirectTargets.length === 0) {
-      if (redirectTargetRole !== "") {
-        setRedirectTargetRole("");
-      }
-      return;
-    }
-    if (!availableRedirectTargets.includes(redirectTargetRole)) {
-      setRedirectTargetRole(availableRedirectTargets[0] ?? "");
-    }
-  }, [availableRedirectTargets, redirectTargetRole]);
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
@@ -168,17 +124,6 @@ export function OperatorActions({
     await run(async () => {
       await apiClient.sendRuntimeInput(session.id, normalizedInput);
       setRuntimeInput("");
-    });
-  }
-
-  async function handleRedirectSession(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    if (redirectTargetRole.length === 0) {
-      setError("Redirect target role is required");
-      return;
-    }
-    await run(async () => {
-      await apiClient.redirectSession(session.id, redirectTargetRole);
     });
   }
 
@@ -376,44 +321,6 @@ export function OperatorActions({
               type="submit"
             >
               Send Runtime Input
-            </button>
-          </form>
-        </div>
-      ) : null}
-
-      {canRedirectSession ? (
-        <div className="operator-followup-stack">
-          <div className="operator-followup-copy">
-            <p className="eyebrow">Recovery Redirect</p>
-            <h4>Redirect Parked Work</h4>
-            <p className="path-label">
-              Reassign the current operator-blocked work item to another role that is valid for this same stage.
-            </p>
-          </div>
-
-          <form className="followup-form" onSubmit={(event) => void handleRedirectSession(event)}>
-            <label className="form-field">
-              <span>Target Role</span>
-              <select
-                className="select-input"
-                disabled={busy || !canRedirectSession}
-                onChange={(event) => setRedirectTargetRole(event.target.value)}
-                value={redirectTargetRole}
-              >
-                {availableRedirectTargets.map((roleName) => (
-                  <option key={roleName} value={roleName}>
-                    {roleName}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="action-button"
-              disabled={busy || !canRedirectSession || redirectTargetRole.length === 0}
-              title="Redirect the parked operator-blocked work item to another allowed role for the same stage."
-              type="submit"
-            >
-              Redirect Session
             </button>
           </form>
         </div>
