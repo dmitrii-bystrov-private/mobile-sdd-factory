@@ -1,5 +1,4 @@
 const ROLE_LABELS: Record<string, string> = {
-  "task-coordinator": "Task Coordinator",
   implementer: "Implementer",
   "verification-coordinator": "Verification Coordinator",
   "bug-fixer": "Bug Fixer",

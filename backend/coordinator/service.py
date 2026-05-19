@@ -40,7 +40,6 @@ from backend.roles.contracts import (
     TASK_DECOMPOSER_WORKER_ROLE,
     IMPLEMENTER_ROLE,
     STORY_SPEC_WORKER_ROLE,
-    TASK_COORDINATOR_ROLE,
     VERIFICATION_COORDINATOR_ROLE,
 )
 from backend.session_backend.base import SessionBackend
@@ -2407,8 +2406,6 @@ class CoordinatorService:
             raise IntakeError(
                 f"Session {session_id} is not waiting for operator; current status is {session.status.value}"
             )
-        if target_role_name == TASK_COORDINATOR_ROLE:
-            raise IntakeError("Redirecting active work to task-coordinator is not supported")
         allowed_targets = ALLOWED_STAGE_ROLE_TARGETS.get(session.current_stage, set())
         if target_role_name not in allowed_targets:
             allowed_list = ", ".join(sorted(allowed_targets)) if allowed_targets else "none"

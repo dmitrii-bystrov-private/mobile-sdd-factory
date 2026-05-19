@@ -2,7 +2,6 @@
 
 IMPLEMENTER_ROLE = "implementer"
 BUG_FIXER_ROLE = "bug-fixer"
-TASK_COORDINATOR_ROLE = "task-coordinator"
 VERIFICATION_COORDINATOR_ROLE = "verification-coordinator"
 CODE_REVIEWER_ROLE = "code-reviewer"
 CODE_SCOUT_ROLE = "code-scout"
