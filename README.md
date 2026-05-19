@@ -1,10 +1,10 @@
-# SDD Assistant
+# SDD Factory
 
 > *"The earlier you invest in clarity, the cheaper the implementation."*
 
-**SDD Assistant** is an AI orchestration layer built on [Claude Code](https://claude.ai/code) that automates the full mobile development workflow for iOS and Android Jira tasks — from ticket to merged MR.
+**SDD Factory** is the current orchestration platform for the mobile SDD workflow. It runs a backend + UI operator console, launches persistent tmux-backed role runtimes, and drives Jira tasks from snapshot through implementation, review, verification, MR handoff, and send-to-test.
 
-One command kicks off a pipeline that writes the spec, decomposes the work, implements the code, opens the MR, and hands off to QA. You stay in the loop at the decisions that matter; the pipeline handles everything in between.
+The current implementation supports both Claude and Codex runners, project-local runtime defaults, task cleanup, runtime recovery, and live operator intervention when the workflow genuinely needs a human decision. Legacy slash-command flows still exist as a compatibility surface, but they are no longer the primary product model.
 
 ---
 
@@ -12,7 +12,7 @@ One command kicks off a pipeline that writes the spec, decomposes the work, impl
 
 Most AI coding tools are interactive chat assistants — you prompt, they generate, you review, you correct. That model works for small tasks but breaks down at the feature level, where the real cost is not writing code but *understanding what to build*.
 
-SDD Assistant is built around a different premise: **spec first, code second**.
+SDD Factory is built around a different premise: **spec first, code second**.
 
 Before any implementation starts, the pipeline forces a full spec pass — collecting requirements from Jira, clarifying ambiguities, writing acceptance criteria, defining constraints, and verifying the spec for completeness. Only then does an implementer agent touch the code. The spec becomes the contract; the implementation agent works from it in isolation.
 
@@ -20,58 +20,66 @@ This is what *Spec-Driven Development* means in practice.
 
 ---
 
-## How It Works
+## Current Runtime Model
 
-The pipeline has three flows — two full flows selected automatically, and one lightweight flow invoked explicitly:
+The current system is centered on the operator console and persistent role runtimes:
 
-### Story flow — `feature/IOS-*`
+- the backend owns session state, work items, stage transitions, and cleanup
+- the UI exposes session creation, runtime visibility, operator actions, runtime defaults, doctor, bootstrap guidance, and runtime capabilities
+- live roles run under persistent tmux-backed runtimes
+- quality lanes such as self-review and verification are long-running roles that keep their context across correction rounds
+- task execution, MR follow-up, and QA reopen flows can route through the same subtask graph instead of spawning disconnected one-off lanes
 
-```
-/snapshot          →  worktree on feature/ branch, Jira snapshot written
-proposal-collector →  collect requirements from Jira comments & description
-context-collector  →  find relevant code, write context files
-requirements-clarifier  →  [CHECKPOINT] one Q&A round with you
-acceptance-criteria-writer + constraints-definer + spec-verifier
-task-decomposer    →  plan/index.md + per-task files, subtasks created in Jira
-                   →  [CHECKPOINT] step-by-step or auto implementation mode
-implementer loop   →  each task implemented and committed
-/self-review       →  optional diff review; internally runs code-reviewer and implementer fix passes
-/final-verification → workflow-level test + lint gate after code changes; internally runs final-verifier and implementer correction passes
-doc-harvest        →  optional feature README update from structured branch diff
-/create-mr → /send-to-test
-```
+The main workflow profiles are still the same:
 
-### Bug flow — `bugfix/IOS-*`
+### Story flow — `story_full`
 
 ```
-/snapshot          →  worktree on bugfix/ branch, Jira snapshot written
-bug-fixer          →  analyze root cause, optionally commit a failing test, and implement fix
-                   →  [CHECKPOINT] analysis can be reviewed before the fix starts
-commit             →  code committed to branch
-/self-review       →  optional diff review; internally runs code-reviewer and implementer fix passes
-/final-verification → workflow-level test + lint gate after code changes; internally runs final-verifier and implementer correction passes
-doc-harvest        →  optional feature README update from structured branch diff
-/create-mr → /send-to-test
+prepare snapshot   →  Jira snapshot + task-local git repo/worktree prepared
+proposal/context   →  proposal package + grounded context package materialized
+story planning     →  requirements, acceptance criteria, constraints, spec verification, story spec
+decomposition      →  plan/index.md + per-task plan files
+execution          →  implementation starts automatically, Jira subtasks are created automatically when needed, and the flow enters subtask execution if unresolved subtasks exist
+self-review        →  optional/required persistent reviewer lane with correction loop
+boy scout          →  optional/required scout lane with implement-now vs tech-debt resolution flow
+verification       →  persistent verifier lane with correction loop
+delivery           →  automatic MR handoff + automatic send-to-test
+follow-up          →  MR comments and QA reopen can materialize new subtasks and resume the same execution model
 ```
 
-### One-shot flow — `/oneshot <KEY>`
+### Bug flow — `bug_full`
+
+```
+prepare snapshot   →  Jira snapshot + task-local git repo/worktree prepared
+bug analysis/fix   →  bug-fixer diagnoses and implements the fix
+self-review        →  optional/required persistent reviewer lane
+boy scout          →  optional/required scout lane
+verification       →  persistent verifier lane
+delivery           →  automatic MR handoff + automatic send-to-test
+```
+
+### One-shot flow — `oneshot`
 
 For small, self-contained tasks where spec preparation would be overkill:
 
 ```
-/snapshot          →  worktree created, Jira snapshot written
-implementer        →  reads description.md + comments.md directly
-commit             →  code committed to branch
-/self-review       →  optional diff review; internally runs code-reviewer and implementer fix passes
-/final-verification → workflow-level test + lint gate after code changes; internally runs final-verifier and implementer correction passes
-doc-harvest        →  optional feature README update from structured branch diff
-/create-mr → /send-to-test
+prepare snapshot   →  Jira snapshot + task-local git repo/worktree prepared
+implementation     →  implementer reads the snapshot directly without story planning
+self-review        →  optional/required persistent reviewer lane
+boy scout          →  optional/required scout lane
+verification       →  persistent verifier lane
+delivery           →  automatic MR handoff + automatic send-to-test
 ```
 
-No proposal, no requirements pass, no plan. Just snapshot → implement → document → ship.
-Must be invoked explicitly with `/oneshot` — never triggered automatically by a bare Jira key.
+No proposal, no requirements pass, no plan. Just snapshot → implement → quality loops → ship.
 
-Human checkpoints are deliberate but not fixed to a constant number. Full flows may pause for clarification answers, blocker resolutions, bug-flow mode selection, and explicit user decisions on follow-up work when the workflow requires them.
+Human checkpoints still exist, but only where the workflow actually needs a person:
+
+- requirements clarification when the agent cannot proceed safely without answers
+- Boy Scout findings that may need to become tech-debt stories
+- blocked review / verification cycles that cannot converge automatically
+- external blockers such as missing MCP access, authentication, or VPN
+- manual cleanup and exceptional recovery actions
 
 ---
 
@@ -94,31 +102,33 @@ Every pipeline stage either produces its artifact or reports failure and halts. 
 
 ---
 
-## Agent Catalog
+## Role Catalog
 
-The pipeline is composed of specialized subagents, each with a single responsibility:
+The current pipeline is composed of specialized long-running or on-demand roles:
 
-| Agent | Role |
-|-------|------|
-| `proposal-collector` | Reads Jira issue, extracts structured requirements into `spec/proposal.md` |
-| `context-collector` | Searches the codebase via RAG, writes `spec/context/` files |
-| `requirements-clarifier` | Identifies ambiguities, runs one Q&A round, produces `spec/requirements.md` |
-| `acceptance-criteria-writer` | Writes testable WHEN-THEN-SHALL criteria |
-| `constraints-definer` | Defines architecture, performance, and platform constraints |
-| `spec-verifier` | Checks the spec package for completeness and consistency; blocks on blockers |
-| `task-decomposer` | Decomposes spec into ordered, self-contained task files with dependency graph |
-| `bug-fixer` | Unified bug agent: analyzes root cause, optionally writes and commits a failing test, implements the fix, and leaves the workflow-level `test + lint` gate to `final-verifier` |
-| `implementer` | Implements a single task file; has no access to spec — task file is the spec |
-| `mr-comments-analyst` | Groups unresolved MR review threads into actionable themes, enriches them with code context, and writes `plan/` files for Jira subtask creation |
-| `code-reviewer` | Reviews the feature branch diff against project conventions (read from CLAUDE.md); produces a structured issue report; triggers implementer if issues found |
-| `final-verifier` | Runs the current workflow gate (`test + lint`), writes `spec/final-verification.md`, and never modifies code |
-| `doc-harvest` | Generates structured full diff, creates or enriches feature-level README docs from what actually changed |
+| Role | Responsibility |
+|------|----------------|
+| `task-coordinator` | Owns session routing, stage transitions, follow-up dispatch, and recovery decisions. |
+| `proposal-context-worker` | Builds the proposal and grounded context package from Jira plus relevant code context. |
+| `requirements-clarifier-worker` | Clarifies requirements and can stop for live operator answers when ambiguity matters. |
+| `acceptance-criteria-worker` | Writes testable acceptance criteria. |
+| `constraints-worker` | Defines technical and architectural constraints. |
+| `spec-verifier-worker` | Checks planning artifacts for blockers and can stop the flow for blocker resolution. |
+| `story-spec-worker` | Produces the final implementation-shaping story spec. |
+| `task-decomposer-worker` | Produces `plan/index.md` and the self-contained task package for execution. |
+| `bug-fixer` | Analyzes bug root cause and implements the fix. |
+| `implementer` | Executes the current implementation or correction pass against the task-local repo. |
+| `code-reviewer` | Persistent self-review lane that can pass, request corrections, skip when optional, or block a non-converging review cycle. |
+| `code-scout` | Boy Scout lane that can produce implement-now findings or old-code tech-debt candidates. |
+| `verification-coordinator` | Persistent verification lane that runs the workflow gate and can request corrections or block a non-converging verification cycle. |
+| `mr-comments-analyst-worker` | Groups unresolved MR discussions into actionable themes and a follow-up subtask plan. |
+| `doc-harvest-worker` | Produces or updates documentation when the diff justifies it. |
 
 ---
 
-## Skill Reference
+## Legacy Skill Reference
 
-Skills are slash commands available in Claude Code:
+The legacy slash-command surface still exists for compatibility and local scripted use:
 
 | Skill | Trigger condition |
 |-------|------------------|
@@ -187,12 +197,14 @@ For subtasks: there is no separate `repo/`; they reuse the parent issue's worktr
 
 | Tool | Purpose | Install |
 |------|---------|---------|
-| [Claude Code](https://claude.ai/code) | The AI runtime | See docs |
+| [Claude Code](https://claude.ai/code) | One supported live runner host | See docs |
+| Codex CLI | One supported live runner host | See local environment setup |
 | `acli` | Jira Cloud CLI | `brew install acli` or see [acli docs](https://developer.atlassian.com/cloud/acli/) |
 | `glab` | GitLab CLI | `brew install glab` |
 | `jq` | JSON processing | `brew install jq` |
+| `tmux` | Required operational runtime host | `brew install tmux` |
 
-For codebase semantic search, the `ios-rag` and `android-rag` MCP servers must be configured in Claude Code settings.
+For codebase semantic search, the `ios-rag`, `android-rag`, and `frontend-rag` MCP servers should be available in the runner environment. The operator console exposes Environment Doctor, Bootstrap Guidance, and Runtime Capabilities to make missing setup visible before sessions start.
 
 ### Environment variables
 
@@ -206,27 +218,50 @@ JIRA_BASE_URL=https://your-org.atlassian.net/browse/   # optional override for J
 DEFAULT_JIRA_ASSIGNEE=you@example.com                  # optional default for create-issue.sh
 ```
 
-### Feature flags
+### Runtime Defaults
 
-Optional pipeline steps are gated by env vars. The project default is `false` for all flags — they are disabled for everyone unless explicitly opted in.
+Project-local runtime and workflow defaults are stored in:
 
-To enable locally, add the flags to `.claude/settings.local.json` (gitignored):
+```text
+.sdd-factory/settings.local.json
+```
+
+These defaults are editable from the UI `Settings → Runtime Defaults` panel and cover:
+
+- default runner
+- per-role runner/model/effort defaults
+- per-workflow policy defaults
+
+Example:
 
 ```json
 {
-  "env": {
-    "BOY_SCOUT_ENABLED": "true",
-    "DOC_HARVEST_ENABLED": "true",
-    "SELF_REVIEW_ENABLED": "true"
+  "runtime_defaults": {
+    "default_runner": "claude",
+    "role_defaults": {
+      "implementer": {
+        "runner": "codex",
+        "model": "gpt-5.3-codex-spark",
+        "effort": "medium"
+      }
+    },
+    "policy_defaults": {
+      "story_full": {
+        "self_review_policy": "enabled",
+        "boy_scout_policy": "enabled",
+        "doc_harvest_policy": "enabled",
+        "requirements_clarification_mode": "ask-selectively"
+      }
+    }
   }
 }
 ```
 
-| Flag | Default | What it controls |
-|------|---------|-----------------|
-| `BOY_SCOUT_ENABLED` | `false` | Boy Scout pass at the end of jira-story / jira-bug / oneshot — scans the diff for SOLID/DRY improvement opportunities and offers to create subtasks or tech-debt stories. |
-| `DOC_HARVEST_ENABLED` | `false` | Doc harvest pass at the end of jira-story / jira-bug / oneshot — generates or enriches feature-level README.md files from the structured branch diff and commits them to the branch. |
-| `SELF_REVIEW_ENABLED` | `false` | Self-review pass before doc-harvest / MR creation — runs convention-focused diff review and routes fixes through the implementer. |
+Policy values use:
+
+- `disabled`
+- `enabled` = auto-start with agent-controlled `skipped_not_needed`
+- `required`
 
 ### Add scripts to PATH
 
@@ -240,20 +275,30 @@ export PATH="$PATH:/path/to/mobile-dev-sdd/scripts"
 
 ### Starting a task
 
+The current primary entrypoint is the operator UI:
+
+- create a session for a Jira key
+- choose `story_full`, `bug_full`, or `oneshot`
+- adjust role/runtime config if needed
+- let the coordinator drive the flow
+
+From there the UI exposes:
+
+- live session state
+- runtime visibility and tmux attach/capture commands
+- operator actions grouped into `Daily Flow`, `Advanced Flow`, and `Recovery And Debug`
+- runtime defaults
+- environment doctor, bootstrap guidance, and runtime capabilities
+- task cleanup controls
+
+The legacy slash-command entrypoints still exist for manual use:
+
 ```bash
-# Auto-route by issue type (recommended)
 /jira-task IOS-1234
-
-# Or paste the Jira URL directly — auto-detected
-/jira-task https://your-org.atlassian.net/browse/IOS-1234
-
-# Explicit flow selection
-/jira-story IOS-1234   # story — full spec pipeline
-/jira-bug   IOS-1234   # bug — root cause analysis + failing test
-/oneshot    IOS-1234   # any type — skip spec, implement directly (for micro-tasks)
+/jira-story IOS-1234
+/jira-bug IOS-1234
+/oneshot IOS-1234
 ```
-
-The pipeline runs, pausing at the three checkpoints for your input.
 
 When a workflow writes follow-up artifacts into an existing `plan/` directory and only the newly added files should become Jira subtasks, use selective batch creation:
 
@@ -271,7 +316,7 @@ When a task comes back from QA (status: Reopened), resume the normal task flow f
 
 ### Individual steps
 
-Each step can also be run standalone if you need to resume a partial flow:
+Legacy/manual steps can still be run standalone if you need to resume a partial flow:
 
 ```bash
 /snapshot IOS-1234       # re-fetch Jira data
@@ -282,7 +327,7 @@ Each step can also be run standalone if you need to resume a partial flow:
 
 ### Standalone script toolbox
 
-The slash commands are the primary interface, but the repo also exposes direct shell entry points for automation and debugging:
+The repo also exposes direct shell entry points for automation and debugging:
 
 - `bash scripts/snapshot.sh <KEY>` — fetch Jira data, create/update the task worktree, and refresh snapshot files
 - `bash scripts/run-test.sh <KEY>` / `run-lint.sh <KEY>` — platform-aware wrappers used by the current workflow-level verification gate
@@ -300,18 +345,22 @@ Detailed CLI usage lives in [`scripts/README.md`](scripts/README.md).
 ## Project Layout
 
 ```
+backend/          # backend API, coordinator, runtime, repositories, session logic
+factory/          # doctor, cleanup, acceptance harnesses, local stack helpers
+ui/               # operator console frontend
 .claude/
-├── agents/       # subagent definitions used by the orchestration flows
-├── commands/     # lightweight slash-command entry points
+├── agents/       # legacy agent definitions and role metadata
+├── commands/     # legacy slash-command entry points
 ├── hooks/        # assistant runtime hooks
 ├── memory/       # persistent Claude memory
-└── skills/       # workflow skills, one directory per slash command
+└── skills/       # legacy workflow skills
+tests/            # backend test suite
 scripts/          # bash automation and standalone helpers
 │   └── tests/    # shell regression tests + golden fixtures
 AGENTS.md         # repository-specific coding and workflow rules
-CLAUDE.md         # orchestrator instructions consumed by Claude Code
+CLAUDE.md         # runner guidance and legacy orchestration context
 README.md         # high-level workflow and setup guide
-index.html        # local static presentation deck for the SDD Assistant workflow
+index.html        # local static presentation deck for the SDD workflow
 ```
 
 ## More Docs
