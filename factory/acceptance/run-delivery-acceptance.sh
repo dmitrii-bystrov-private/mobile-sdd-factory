@@ -3,13 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+source "${SCRIPT_DIR}/shell-run-root.sh"
 
 PORT="${SDD_FACTORY_ACCEPTANCE_PORT:-8014}"
 TASK_KEY="IOS-ACCEPT-DELIVERY-001"
 WORKDIR_ROOT="${REPO_ROOT}/workdir"
-TASK_ROOT="${WORKDIR_ROOT}/${TASK_KEY}"
-mkdir -p "${TASK_ROOT}/tmp"
-TMP_ROOT="$(mktemp -d "${TASK_ROOT}/tmp/delivery-acceptance.XXXXXX")"
+TMP_ROOT="$(make_shell_acceptance_tmp_root "${REPO_ROOT}" "delivery-acceptance")"
 DB_PATH="${TMP_ROOT}/acceptance.sqlite3"
 RUNTIME_ROOT="${WORKDIR_ROOT}"
 BASE_URL="http://127.0.0.1:${PORT}"
