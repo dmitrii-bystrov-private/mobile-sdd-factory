@@ -608,8 +608,8 @@ export function SessionsPage(): JSX.Element {
     <main className="app-shell">
       <header className="topbar">
         <div className="topbar-copy">
-          <p className="eyebrow">SDD Factory</p>
-          <h1>Operator Console</h1>
+          <p className="eyebrow">Constellation</p>
+          <h1>Agent Runtime</h1>
           <p className="topbar-summary">
             Track active work and manage project defaults.
           </p>

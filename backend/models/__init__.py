@@ -1,2 +1,1 @@
-"""Domain models for SDD Factory."""
-
+"""Domain models for Constellation: Agent Runtime."""

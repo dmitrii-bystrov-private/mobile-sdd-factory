@@ -1,2 +1,1 @@
-"""HTTP API package for SDD Factory."""
-
+"""HTTP API package for Constellation: Agent Runtime."""

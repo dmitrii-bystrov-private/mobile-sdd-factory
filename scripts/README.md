@@ -38,7 +38,7 @@ It is a thin wrapper over the supported launcher, doctor, bootstrap, and test-ra
 
 #### `run-supported-tests.sh`
 
-Runs the supported SDD Factory test rail from the repository root:
+Runs the supported Constellation: Agent Runtime test rail from the repository root:
 
 ```bash
 bash scripts/run-supported-tests.sh

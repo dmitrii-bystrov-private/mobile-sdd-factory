@@ -1,6 +1,6 @@
 # Runtime Model
 
-This document describes the supported runtime model of SDD Factory.
+This document describes the supported runtime model of Constellation: Agent Runtime.
 
 ## Core Principles
 

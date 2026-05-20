@@ -1,4 +1,4 @@
-"""ASGI entrypoint for the SDD Factory backend."""
+"""ASGI entrypoint for the Constellation: Agent Runtime backend."""
 
 from backend.api.app import create_app
 

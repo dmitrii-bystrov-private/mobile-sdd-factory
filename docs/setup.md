@@ -1,6 +1,6 @@
 # Setup Guide
 
-This guide describes the supported setup for the current SDD Factory platform.
+This guide describes the supported setup for the current Constellation: Agent Runtime platform.
 
 Use this guide for the backend/UI runtime model.
 Do not treat the deprecated slash-command surface as the primary setup target.

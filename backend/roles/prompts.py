@@ -7,7 +7,7 @@ import json
 
 def base_role_prompt(role_name: str) -> str:
     return (
-        "You are a persistent SDD Factory role.\n"
+        "You are a persistent Constellation: Agent Runtime role.\n"
         f"Role: {role_name}\n"
         "Operate only on coordinator-routed work with deterministic hydration.\n"
     )

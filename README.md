@@ -1,8 +1,8 @@
-# SDD Factory
+# Constellation: Agent Runtime
 
 > *"The earlier you invest in clarity, the cheaper the implementation."*
 
-**SDD Factory** is the current orchestration platform for the mobile SDD workflow. It runs a backend + UI operator console, launches persistent tmux-backed role runtimes, and drives Jira tasks from snapshot through implementation, review, verification, MR handoff, and send-to-test.
+**Constellation: Agent Runtime** is the current orchestration platform for the mobile SDD workflow. It runs a backend + UI operator surface, launches persistent tmux-backed role runtimes, and drives Jira tasks from snapshot through implementation, review, verification, MR handoff, and send-to-test.
 
 The current implementation supports both Claude and Codex runners, project-local runtime defaults, task cleanup, runtime recovery, and live operator intervention when the workflow genuinely needs a human decision. Legacy slash-command flows still exist as a compatibility surface, but they are no longer the primary product model.
 
@@ -12,7 +12,7 @@ The current implementation supports both Claude and Codex runners, project-local
 
 Most AI coding tools are interactive chat assistants — you prompt, they generate, you review, you correct. That model works for small tasks but breaks down at the feature level, where the real cost is not writing code but *understanding what to build*.
 
-SDD Factory is built around a different premise: **spec first, code second**.
+Constellation: Agent Runtime is built around a different premise: **spec first, code second**.
 
 Before any implementation starts, the pipeline forces a full spec pass — collecting requirements from Jira, clarifying ambiguities, writing acceptance criteria, defining constraints, and verifying the spec for completeness. Only then does an implementer agent touch the code. The spec becomes the contract; the implementation agent works from it in isolation.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entrypoint for the SDD Factory environment doctor."""
+"""CLI entrypoint for the Constellation: Agent Runtime environment doctor."""
 
 from __future__ import annotations
 

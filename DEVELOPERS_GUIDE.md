@@ -1,6 +1,6 @@
 # Developers Guide
 
-This guide is for engineers working on the supported SDD Factory platform.
+This guide is for engineers working on the supported Constellation: Agent Runtime platform.
 
 It complements:
 

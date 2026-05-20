@@ -19,7 +19,7 @@ export function SessionList({
       <div className="panel-header">
         <div>
           <p className="eyebrow">Sessions</p>
-          <h2>Factory Queue</h2>
+          <h2>Session Queue</h2>
         </div>
         {sessions.length > 0 ? <span className="badge badge-muted">{sessions.length}</span> : null}
       </div>

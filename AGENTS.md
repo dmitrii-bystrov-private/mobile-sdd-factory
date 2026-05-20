@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Supported Platform First
-This repository is the current SDD Factory orchestration platform.
+This repository is the current Constellation: Agent Runtime orchestration platform.
 The supported product model is:
 
 - `backend/` for API, coordinator, session lifecycle, runtime contracts, and state

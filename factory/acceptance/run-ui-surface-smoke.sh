@@ -120,9 +120,9 @@ wait_playwright_browser
 playwright-cli snapshot >"${RUNS_SNAPSHOT}"
 playwright-cli console >"${CONSOLE_LOG}"
 
-grep -q 'heading "Operator Console"' "${RUNS_SNAPSHOT}"
+grep -q 'heading "Agent Runtime"' "${RUNS_SNAPSHOT}"
 grep -q 'heading "New Workflow"' "${RUNS_SNAPSHOT}"
-grep -q 'heading "Factory Queue"' "${RUNS_SNAPSHOT}"
+grep -q 'heading "Session Queue"' "${RUNS_SNAPSHOT}"
 if grep -q 'Failed to fetch' "${CONSOLE_LOG}"; then
   echo "UI surface smoke saw a failed fetch in browser console." >&2
   exit 1

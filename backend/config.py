@@ -1,4 +1,4 @@
-"""Configuration for the SDD Factory backend."""
+"""Configuration for the Constellation: Agent Runtime backend."""
 
 from __future__ import annotations
 

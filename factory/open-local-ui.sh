@@ -93,7 +93,7 @@ STACK_PID=$!
 wait_http "$UI_BASE" "UI"
 open_browser "$UI_BASE" || true
 
-echo "Opened SDD Factory UI: ${UI_BASE}"
+echo "Opened Constellation: Agent Runtime UI: ${UI_BASE}"
 echo "Press Ctrl+C to stop the local stack."
 
 wait "$STACK_PID"

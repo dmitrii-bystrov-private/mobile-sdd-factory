@@ -73,8 +73,8 @@ UI_PID=$!
 wait_http "${API_BASE}/sessions" "backend API"
 wait_http "${UI_BASE}" "UI"
 
-echo "SDD Factory backend: ${API_BASE}"
-echo "SDD Factory UI: ${UI_BASE}"
+echo "Constellation: Agent Runtime backend: ${API_BASE}"
+echo "Constellation: Agent Runtime UI: ${UI_BASE}"
 echo "Press Ctrl+C to stop both processes."
 
 while true; do

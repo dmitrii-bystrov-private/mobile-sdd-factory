@@ -1,4 +1,4 @@
-"""Logging bootstrap for the SDD Factory backend."""
+"""Logging bootstrap for the Constellation: Agent Runtime backend."""
 
 from __future__ import annotations
 

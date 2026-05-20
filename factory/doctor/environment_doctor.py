@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Baseline environment doctor for the SDD Factory."""
+"""Baseline environment doctor for Constellation: Agent Runtime."""
 
 from __future__ import annotations
 
@@ -536,7 +536,7 @@ def build_report(
 
 def format_human_report(report: dict[str, object]) -> str:
     lines = [
-        "SDD Factory Environment Doctor",
+        "Constellation: Agent Runtime Environment Doctor",
         f"Overall status: {report['overall_status']}",
         f"Required checks: {report['required_ok']}/{report['required_total']} OK",
     ]

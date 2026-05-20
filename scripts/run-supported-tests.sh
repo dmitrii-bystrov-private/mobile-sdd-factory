@@ -10,7 +10,7 @@ usage() {
   cat <<'EOF'
 Usage: bash scripts/run-supported-tests.sh [--live]
 
-Runs the supported SDD Factory test rail:
+Runs the supported Constellation: Agent Runtime test rail:
   - backend regression suite
   - UI production build
   - shell regression tests for scripts/

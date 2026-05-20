@@ -71,7 +71,7 @@ def build_bootstrap_guidance(
 
 def format_bootstrap_guidance(guidance: dict[str, Any]) -> str:
     lines = [
-        "SDD Factory Bootstrap Guidance",
+        "Constellation: Agent Runtime Bootstrap Guidance",
         f"Overall doctor status: {guidance['overall_status']}",
         f"Next step: {guidance['next_step']}",
         f"Launch command: {guidance['launch_command']}",

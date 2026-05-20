@@ -15,7 +15,7 @@ from backend.dependencies import build_dependencies
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="SDD Factory")
+    app = FastAPI(title="Constellation: Agent Runtime")
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"https?://(127\.0\.0\.1|localhost)(:\d+)?$",

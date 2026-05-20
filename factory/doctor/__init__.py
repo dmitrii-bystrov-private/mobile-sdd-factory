@@ -1,1 +1,1 @@
-"""Environment doctor tooling for the SDD Factory."""
+"""Environment doctor tooling for Constellation: Agent Runtime."""

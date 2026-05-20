@@ -1,6 +1,6 @@
 # Operator Guide
 
-This guide describes the supported day-to-day workflow for the current SDD Factory platform.
+This guide describes the supported day-to-day workflow for the current Constellation: Agent Runtime platform.
 
 Use this document for the backend/UI runtime model.
 Do not use the deprecated slash-command skill surface as the primary operational reference.
