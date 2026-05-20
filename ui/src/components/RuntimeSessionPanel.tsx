@@ -204,7 +204,7 @@ export function RuntimeSessionPanel({
                               ? "This lane is currently stopped."
                               : "This lane is waiting on runtime or orchestration state."}
                         </p>
-                        <div className="runtime-role-actions">
+                        <div className="actions-grid runtime-role-actions">
                           <button
                             className="action-button"
                             disabled={busy || role.runtimeHandle === null || role.status === "stopped"}
@@ -223,50 +223,35 @@ export function RuntimeSessionPanel({
                           >
                             Restart This Runtime
                           </button>
+                          {role.tmuxAttachCommand ? (
+                            <button
+                              className="action-button"
+                              onClick={() =>
+                                void copyDebugCommand(
+                                  role.tmuxAttachCommand,
+                                  `${roleDisplayName(role.roleName)} console command copied`,
+                                )
+                              }
+                              type="button"
+                            >
+                              Copy Console Command
+                            </button>
+                          ) : null}
+                          {role.tmuxCaptureCommand ? (
+                            <button
+                              className="action-button"
+                              onClick={() =>
+                                void copyDebugCommand(
+                                  role.tmuxCaptureCommand,
+                                  `${roleDisplayName(role.roleName)} output command copied`,
+                                )
+                              }
+                              type="button"
+                            >
+                              Copy Output Command
+                            </button>
+                          ) : null}
                         </div>
-                        {(role.tmuxAttachCommand || role.tmuxCaptureCommand || role.runtimeHandle) ? (
-                          <details className="advanced-disclosure runtime-debug-disclosure">
-                            <summary>
-                              <div>
-                                <strong>Worker Console</strong>
-                                <p>Open or capture the live console for this lane only when deeper debugging is needed.</p>
-                              </div>
-                              <span className="chevron" aria-hidden="true" />
-                            </summary>
-                            <div className="advanced-disclosure-body">
-                              <div className="actions-grid runtime-session-actions">
-                                {role.tmuxAttachCommand ? (
-                                  <button
-                                    className="action-button"
-                                    onClick={() =>
-                                      void copyDebugCommand(
-                                        role.tmuxAttachCommand,
-                                        `${roleDisplayName(role.roleName)} console command copied`,
-                                      )
-                                    }
-                                    type="button"
-                                  >
-                                    Copy Console Command
-                                  </button>
-                                ) : null}
-                                {role.tmuxCaptureCommand ? (
-                                  <button
-                                    className="action-button"
-                                    onClick={() =>
-                                      void copyDebugCommand(
-                                        role.tmuxCaptureCommand,
-                                        `${roleDisplayName(role.roleName)} output command copied`,
-                                      )
-                                    }
-                                    type="button"
-                                  >
-                                    Copy Output Command
-                                  </button>
-                                ) : null}
-                              </div>
-                            </div>
-                          </details>
-                        ) : null}
                       </article>
                     ))}
                   </div>
