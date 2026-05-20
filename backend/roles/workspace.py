@@ -406,7 +406,8 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Treat this role as a bounded one-shot worker: prepare task decomposition, write the routed result, and exit.",
             "- Start from the verified planning package, final story spec, and `spec/context/feature-overview.md`; use `relevant-code.md` and `implementation-patterns.md` when they materially affect task boundaries.",
-            "- Always include a plan package in the routed output: `plan_index_markdown` plus `plan_task_files` with self-contained Markdown task files.",
+            "- Write the decomposition package directly into `plan/` inside your role workspace: `plan/index.md` plus self-contained Markdown task files for each task.",
+            "- Keep the routed output minimal: return a concise summary only after the `plan/` package is fully written.",
             "- Make every task file self-contained: copy relevant acceptance criteria, constraints, exact repo file paths, and validation steps into the task instead of pointing back to spec files.",
             "- Keep the output compact and downstream-oriented so execution can start from an explicit decomposition instead of implicit planning assumptions.",
         ]

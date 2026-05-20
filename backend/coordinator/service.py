@@ -6664,72 +6664,45 @@ class CoordinatorService:
         session: Session,
         payload: dict[str, object],
     ) -> tuple[str, list[dict[str, str]]]:
-        plan_index_markdown = str(payload.get("plan_index_markdown") or "").strip()
-        raw_plan_task_files = payload.get("plan_task_files")
-        if plan_index_markdown and isinstance(raw_plan_task_files, list) and raw_plan_task_files:
-            return plan_index_markdown, raw_plan_task_files
-
         if self.workdir_root is None:
             raise IntakeError("Coordinator is missing workdir root")
 
-        legacy_paths = payload.get("paths")
-        if not isinstance(legacy_paths, list) or not legacy_paths:
-            legacy_paths = payload.get("artifacts")
-        if not isinstance(legacy_paths, list) or not legacy_paths:
-            if not plan_index_markdown:
-                raise IntakeError("Task decomposition must include plan_index_markdown")
-            raise IntakeError("Task decomposition must include non-empty plan_task_files")
-
         plan_dir = self.workdir_root / session.task_key / "plan"
-        if not plan_dir.is_dir():
+        role_plan_dir: Path | None = None
+        if self.role_workspace_manager is not None:
+            candidate = self.role_workspace_manager.role_directory(
+                session.task_key,
+                TASK_DECOMPOSER_WORKER_ROLE,
+            ) / "plan"
+            if candidate.is_dir():
+                role_plan_dir = candidate
+        source_plan_dir = plan_dir if plan_dir.is_dir() else role_plan_dir
+        if source_plan_dir is None:
             raise IntakeError(f"Temporary plan package is missing for session {session.task_key}")
 
-        index_path = plan_dir / "index.md"
+        index_path = source_plan_dir / "index.md"
         if not index_path.is_file():
-            raise IntakeError("Task decomposition legacy package is missing plan/index.md")
+            raise IntakeError("Task decomposition package is missing plan/index.md")
+        plan_index_markdown = index_path.read_text().strip()
         if not plan_index_markdown:
-            plan_index_markdown = index_path.read_text().strip()
-        if not plan_index_markdown:
-            raise IntakeError("Task decomposition legacy package contains an empty plan/index.md")
+            raise IntakeError("Task decomposition package contains an empty plan/index.md")
 
         normalized_task_files: list[dict[str, str]] = []
-        for item in legacy_paths:
-            relative_path = str(item or "").strip()
-            if not relative_path:
+        for file_path in sorted(source_plan_dir.glob("*.md")):
+            if file_path.name == "index.md":
                 continue
-            candidate = Path(relative_path)
-            filename = candidate.name
-            if filename == "index.md" or not filename.endswith(".md"):
-                continue
-            file_path = plan_dir / filename
-            if not file_path.is_file():
-                raise IntakeError(f"Task decomposition legacy package is missing {candidate.as_posix()}")
             content = file_path.read_text().strip()
             if not content:
-                raise IntakeError(f"Task decomposition legacy package contains an empty {candidate.as_posix()}")
+                continue
             normalized_task_files.append(
                 {
-                    "filename": filename,
+                    "filename": file_path.name,
                     "content": content,
                 }
             )
 
         if not normalized_task_files:
-            for file_path in sorted(plan_dir.glob("*.md")):
-                if file_path.name == "index.md":
-                    continue
-                content = file_path.read_text().strip()
-                if not content:
-                    continue
-                normalized_task_files.append(
-                    {
-                        "filename": file_path.name,
-                        "content": content,
-                    }
-                )
-
-        if not normalized_task_files:
-            raise IntakeError("Task decomposition legacy package must contain at least one task markdown file")
+            raise IntakeError("Task decomposition package must contain at least one task markdown file")
 
         return plan_index_markdown, normalized_task_files
 
