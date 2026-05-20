@@ -134,6 +134,12 @@ export function CompletedFollowupPanel({
 
   return (
     <section className="panel completed-followup-panel">
+      {mrUrl ? (
+        <a className="hero-link hero-link-button completed-followup-link" href={mrUrl} rel="noreferrer" target="_blank">
+          Open MR
+        </a>
+      ) : null}
+
       <div className="panel-header">
         <div>
           <p className="eyebrow">Follow-up</p>
@@ -142,11 +148,22 @@ export function CompletedFollowupPanel({
       </div>
 
       <div className="completed-followup-stack">
-        {mrUrl ? (
-          <a className="hero-link hero-link-button completed-followup-link" href={mrUrl} rel="noreferrer" target="_blank">
-            Open MR
-          </a>
-        ) : null}
+        <div className="completed-followup-preview">
+          <strong className="completed-followup-preview-title">Review Message</strong>
+          <button
+            className="hero-link hero-link-button completed-followup-copy"
+            disabled={!previewText}
+            onClick={() => void copyPreview()}
+            type="button"
+          >
+            Copy
+          </button>
+          <pre className="completed-followup-preview-body">
+            {previewLoading
+              ? "Loading review message..."
+              : previewText ?? "MR data is not available for this session yet."}
+          </pre>
+        </div>
 
         <div className="completed-followup-actions">
           <button
@@ -165,25 +182,6 @@ export function CompletedFollowupPanel({
           >
             Refresh Snapshot And Resume Subtasks
           </button>
-        </div>
-
-        <div className="completed-followup-preview">
-          <div className="completed-followup-preview-head">
-            <strong>Review Message</strong>
-            <button
-              className="action-button action-button-ghost"
-              disabled={!previewText}
-              onClick={() => void copyPreview()}
-              type="button"
-            >
-              Copy
-            </button>
-          </div>
-          <pre className="completed-followup-preview-body">
-            {previewLoading
-              ? "Loading review message..."
-              : previewText ?? "MR data is not available for this session yet."}
-          </pre>
         </div>
       </div>
 
