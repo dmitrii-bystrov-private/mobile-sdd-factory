@@ -23,7 +23,11 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.state.dependencies = build_dependencies()
+    dependencies = build_dependencies()
+    app.state.dependencies = dependencies
+    loop_runner = getattr(dependencies, "loop_runner", None)
+    if loop_runner is not None and hasattr(loop_runner, "start"):
+        loop_runner.start()
     app.include_router(sessions_router)
     app.include_router(events_router)
     app.include_router(roles_router)

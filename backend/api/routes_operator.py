@@ -306,6 +306,7 @@ def restart_runtime_role(
         )
     except IntakeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    dependencies.loop_runner.start()
 
     return RestartRuntimeRoleResponse(
         restarted=True,
@@ -345,6 +346,7 @@ def restart_runtime_session(
         )
     except IntakeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    dependencies.loop_runner.start()
 
     return RestartRuntimeSessionResponse(
         restarted=True,

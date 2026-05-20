@@ -308,6 +308,7 @@ class SessionApiTests(unittest.TestCase):
         session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = self._original_boy_scout_default
         session_policy_module.COMMON_DEFAULTS["self_review_policy"] = self._original_self_review_default
         session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"] = self._original_doc_harvest_default
+        self.dependencies.loop_runner.stop()
         self.temp_dir.cleanup()
 
     def write_statuses_file(self, task_key: str, content: str) -> None:
@@ -2951,6 +2952,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("paused", response.session.status)
 
     def test_restart_runtime_role_route_restarts_owner_and_redispatches_work(self) -> None:
+        self.dependencies.loop_runner.stop()
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40013U"),
             dependencies=self.dependencies,
@@ -2976,8 +2978,10 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("runtime_role_restarted_by_operator", response.event_type)
         self.assertEqual("role_input_dispatched", response.followup_event_type)
         self.assertEqual("active", response.session.status)
+        self.assertTrue(self.dependencies.loop_runner.status().running)
 
     def test_restart_runtime_session_route_restarts_roles_and_redispatches_owner(self) -> None:
+        self.dependencies.loop_runner.stop()
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40013V"),
             dependencies=self.dependencies,
@@ -2997,6 +3001,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("runtime_session_restarted_by_operator", response.event_type)
         self.assertEqual("role_input_dispatched", response.followup_event_type)
         self.assertEqual("active", response.session.status)
+        self.assertTrue(self.dependencies.loop_runner.status().running)
 
     def test_pause_session_route_pauses_active_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
