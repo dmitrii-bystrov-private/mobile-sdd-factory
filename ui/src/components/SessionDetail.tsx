@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { apiClient } from "../api/client";
 import { ActiveRuntimeOutputPanel } from "./ActiveRuntimeOutputPanel";
@@ -18,6 +18,12 @@ type SessionDetailProps = {
   bundle: SessionBundle | null;
   onRefresh: () => Promise<void>;
 };
+
+type DeliveryFailureState = {
+  stageLabel: string;
+  summary: string;
+  details: string | null;
+} | null;
 
 function humanizeEventType(value: string): string {
   return value
@@ -227,6 +233,7 @@ export function SessionDetail({
   const [workerMenuRoleName, setWorkerMenuRoleName] = useState<string | null>(null);
   const [workerActionBusyRoleName, setWorkerActionBusyRoleName] = useState<string | null>(null);
   const [workerActionError, setWorkerActionError] = useState<string | null>(null);
+  const [deliveryFailure, setDeliveryFailure] = useState<DeliveryFailureState>(null);
   const { showToast } = useToast();
 
   if (session === null || bundle === null) {
@@ -282,6 +289,64 @@ export function SessionDetail({
   const runtimeRoleIndex = new Map(
     (bundle.runtimeStateSummary?.roles ?? []).map((role) => [role.roleName, role]),
   );
+
+  useEffect(() => {
+    if (
+      session.current_stage !== "mr_handoff_failed" &&
+      session.current_stage !== "send_to_test_failed"
+    ) {
+      setDeliveryFailure(null);
+      return;
+    }
+
+    const artifactType =
+      session.current_stage === "mr_handoff_failed"
+        ? "mr_handoff_stderr"
+        : "send_to_test_stderr";
+    const latestStderrArtifact = [...bundle.artifacts]
+      .reverse()
+      .find((artifact) => artifact.artifact_type === artifactType);
+
+    if (!latestStderrArtifact) {
+      setDeliveryFailure({
+        stageLabel: stageDisplayName(session.current_stage),
+        summary: "The delivery step failed, but no stderr artifact was captured.",
+        details: null,
+      });
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const artifactDetail = await apiClient.getArtifact(latestStderrArtifact.id);
+        if (cancelled) {
+          return;
+        }
+        setDeliveryFailure({
+          stageLabel: stageDisplayName(session.current_stage),
+          summary:
+            session.current_stage === "mr_handoff_failed"
+              ? "Merge request handoff could not complete."
+              : "Send-to-test could not complete.",
+          details: artifactDetail.content?.trim() || null,
+        });
+      } catch {
+        if (cancelled) {
+          return;
+        }
+        setDeliveryFailure({
+          stageLabel: stageDisplayName(session.current_stage),
+          summary: "The delivery step failed, but the stderr artifact could not be loaded.",
+          details: null,
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bundle.artifacts, session.current_stage]);
 
   async function runWorkerAction(
     roleName: string,
@@ -362,6 +427,23 @@ export function SessionDetail({
         onRefresh={onRefresh}
         session={session}
       />
+
+      {deliveryFailure ? (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Recovery</p>
+              <h3>{deliveryFailure.stageLabel}</h3>
+            </div>
+          </div>
+          <div className="completed-followup-preview">
+            <strong className="completed-followup-preview-title">{deliveryFailure.summary}</strong>
+            <pre className="completed-followup-preview-body">
+              {deliveryFailure.details ?? "No stderr details were captured for this failure."}
+            </pre>
+          </div>
+        </section>
+      ) : null}
 
       <section className="panel">
           <div className="panel-header">
