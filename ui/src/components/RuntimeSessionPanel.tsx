@@ -92,10 +92,6 @@ export function RuntimeSessionPanel({
                       <span>Stopped lanes</span>
                       <strong>{visibleRoles.filter((role) => role.status === "stopped").length}</strong>
                     </div>
-                    <div className="table-row">
-                      <span>Session console</span>
-                      <strong>{runtimeStateSummary.runtimeSessionId ? "Available" : "Unknown"}</strong>
-                    </div>
                   </div>
 
                   {runtimeStateSummary.lastAutoRecovery ? (
@@ -220,34 +216,6 @@ export function RuntimeSessionPanel({
                       </article>
                     ))}
                   </div>
-
-                  {(runtimeStateSummary.tmuxAttachCommand || runtimeStateSummary.tmuxSocketPath) ? (
-                    <details className="advanced-disclosure runtime-debug-disclosure">
-                      <summary>
-                        <div>
-                          <strong>Session Console</strong>
-                          <p>Use this only when you need the shared runtime console for the whole session.</p>
-                        </div>
-                        <span className="chevron" aria-hidden="true" />
-                      </summary>
-                      <div className="advanced-disclosure-body">
-                        {runtimeStateSummary.tmuxAttachCommand ? (
-                          <button
-                            className="action-button"
-                            onClick={() =>
-                              void copyDebugCommand(
-                                runtimeStateSummary.tmuxAttachCommand,
-                                "Session console command copied",
-                              )
-                            }
-                            type="button"
-                          >
-                            Copy Session Console Command
-                          </button>
-                        ) : null}
-                      </div>
-                    </details>
-                  ) : null}
                 </div>
               </>
             );

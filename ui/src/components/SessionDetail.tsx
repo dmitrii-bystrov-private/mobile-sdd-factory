@@ -335,21 +335,11 @@ export function SessionDetail({
       ) : null}
 
       {detailSurface === "runtime" ? (
-      <section className="panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">Runtime</p>
-            <h3>Runtime</h3>
-          </div>
-        </div>
-        <div className="runtime-surface-stack">
-          <RuntimeSessionPanel
-            onRefresh={onRefresh}
-            runtimeStateSummary={bundle.runtimeStateSummary}
-            session={session}
-          />
-        </div>
-      </section>
+        <RuntimeSessionPanel
+          onRefresh={onRefresh}
+          runtimeStateSummary={bundle.runtimeStateSummary}
+          session={session}
+        />
       ) : null}
     </section>
   );
