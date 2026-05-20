@@ -29,6 +29,116 @@ This file intentionally captures product defects from rendered behavior first, n
   - health sidebar still duplicates some low-value summary copy
   - top-level and panel-level prose can still be trimmed further
 
+## External Review Triage
+
+Reviewed independently against the current product direction. Only items that still look valid or strategically useful were accepted into the backlog below.
+
+### Accepted
+
+- `Workspace` appears twice in the page hierarchy.
+  - The left sidebar already establishes the navigation context.
+  - Repeating `Workspace` again above the right-side surface header weakens hierarchy instead of helping it.
+
+- Current surface selection is still too subtle.
+  - Border-only selection on the navigation cards is serviceable but not strong enough.
+  - The selected section should be easier to identify at a glance.
+
+- The left sidebar still reads as one long control column.
+  - `Navigation`, `Factory Queue`, and `New Workflow` are different tasks but still feel too close in tone and structure.
+  - The sections need clearer visual zoning.
+
+- The top-right live status chip is still ambiguous.
+  - It can legitimately disagree with the selected session card because it reflects the event stream rather than run state.
+  - That distinction is not explained clearly enough in the UI, so the operator can read it as a contradiction.
+
+- `Refresh Surface` still uses internal wording.
+  - `Surface` is product-internal language, not operator language.
+  - Rename to something simpler such as `Refresh`.
+
+- Queue card metadata hierarchy is still too flat.
+  - Stage and owner should visually outrank workflow profile.
+  - Right now the three values still read too much like one metadata line.
+
+- Truncated task titles still need a recovery affordance.
+  - Clamp is good, but queue cards should provide either a native tooltip/title or another easy way to inspect the full text.
+
+- `Current Focus` still duplicates nearby session state.
+  - It is better than before but still too close to repeating header + metrics + stage/owner context.
+  - It should become either tighter or more action-oriented.
+
+- Jira affordance should be more visible.
+  - `Open in Jira` remains important enough to deserve stronger placement than a quiet text link under the title block.
+
+- Queue/session state mismatches need product clarification.
+  - Cases like `In Progress` with `Unassigned`, or `In Progress` with no active lanes, may be valid.
+  - But when they are valid, the UI should explain that state rather than leaving it as an apparent contradiction.
+
+- `Standing By` roles still need better expectation setting.
+  - A standing-by role should say what kind of handoff or trigger it is waiting for, not just that it exists.
+
+- `Runtime & Trace` naming is still too internal.
+  - `Trace` is not operator language.
+  - The tab and panel naming should become more explicit and less implementation-flavoured.
+
+- `Latest Activity` still lacks time information.
+  - Without timestamps or relative age, the operator cannot judge whether progress is fresh or stale.
+
+- `Task Key` still needs friendlier input guidance.
+  - Placeholder alone is weak.
+  - Inline validation or format guidance would reduce avoidable errors.
+
+- Start-form policy pills still need explanation.
+  - `Self-review`, `Boy Scout`, `Doc Harvest` are meaningful but still opaque for less experienced operators.
+
+- `Tune This Run` and `Advanced Runtime Overrides` still overlap semantically.
+  - The distinction is cleaner than before but still not obvious enough from labels alone.
+
+- `Start Run` discoverability can still degrade in long left-column states.
+  - This especially matters when advanced sections are opened.
+
+- `Operator Actions` hierarchy remains weak.
+  - `Daily Flow` and `Recovery And Debug` still look more like section labels than intentionally structured action groups.
+
+- `Pause Session` should look riskier than normal actions.
+  - It should have stronger destructive/recovery affordance and likely a confirmation step.
+
+- `Process Updates` still needs a clearer label.
+  - The current label does not tell the operator what concrete outcome to expect.
+
+- `Settings` still mixes too much abstraction on one surface.
+  - Project defaults, workflow defaults, and advanced role-level configuration are all present, but the hierarchy is not fully obvious yet.
+
+- Profile tabs in `Settings` still need contextual explanation.
+  - The differences between `One-shot`, `Bug Flow`, and `Story Flow` are still not discoverable enough from the surface itself.
+
+- `Advanced Role Overrides` is still easy to miss.
+  - It is correctly hidden from the happy path, but first-time configuration still needs a stronger cue that deeper role defaults exist.
+
+- `Save Runtime Defaults` needs clearer success feedback.
+  - Save semantics should be explicit through toast, status copy, or other visible confirmation.
+
+- `Health` still contains some low-value duplication in ready states.
+  - Especially when everything is healthy, always-visible setup/bootstrap framing still feels heavier than necessary.
+
+- Empty “none” sections in `Health` are still too literal.
+  - When nothing requires attention, absence should compress into a stronger success state instead of multiple empty subsections.
+
+- Ready runner cards still lack meaningful differentiation.
+  - When multiple runners are healthy, the normal surface should help the operator understand what matters about each one.
+
+### Not Accepted
+
+- “No empty state for queue.”
+  - Not accepted; the queue already has a dedicated empty state.
+
+- “Advanced Runtime Overrides” is hidden in the `New Workflow` happy path.
+  - Not accepted as stated; hiding it is intentional.
+  - The valid issue is discoverability/label clarity, not visibility by default.
+
+- “Health section title is duplicated.”
+  - Partially rejected.
+  - Repeating the page title and the first panel title is not ideal, but it is a lower-priority copy/structure issue than the stronger health-state problems above.
+
 ## Latest Operator Review Batch
 
 These items were reconfirmed from the current UI direction and direct operator feedback. They should be treated as the next highest-priority cleanup batch.

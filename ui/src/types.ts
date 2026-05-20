@@ -33,6 +33,7 @@ export type EventItem = {
   producer_id?: string | null;
   payload: Record<string, unknown>;
   correlation_id?: string | null;
+  created_at: string;
 };
 
 export type StreamEventPayload = {

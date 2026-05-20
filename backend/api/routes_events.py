@@ -34,6 +34,7 @@ def list_events(
                 producer_id=event.producer_id,
                 payload=event.payload,
                 correlation_id=event.correlation_id,
+                created_at=event.created_at,
             )
             for event in events
         ]

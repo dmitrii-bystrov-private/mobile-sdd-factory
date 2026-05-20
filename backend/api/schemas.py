@@ -304,6 +304,7 @@ class EventResponse(BaseModel):
     producer_id: str | None = None
     payload: dict
     correlation_id: str | None = None
+    created_at: str
 
 
 class EventsResponse(BaseModel):

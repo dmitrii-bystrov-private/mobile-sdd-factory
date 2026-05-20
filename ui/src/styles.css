@@ -493,14 +493,28 @@ input {
   overflow: hidden;
 }
 
-.hero-link-row {
-  margin: 0;
+.hero-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
 }
 
 .hero-link {
   color: var(--brand);
   text-decoration: none;
   border-bottom: 1px solid rgba(255, 131, 92, 0.35);
+}
+
+.hero-link-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 131, 92, 0.25);
+  border-radius: 999px;
+  background: rgba(255, 131, 92, 0.08);
+  white-space: nowrap;
 }
 
 .hero-status-strip {

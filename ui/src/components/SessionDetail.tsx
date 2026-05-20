@@ -46,6 +46,25 @@ function producerDisplayName(value: string): string {
   return humanizeEventType(value);
 }
 
+function relativeTimeLabel(value: string): string {
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) {
+    return "Unknown time";
+  }
+  const diffMs = timestamp - Date.now();
+  const diffMinutes = Math.round(diffMs / 60000);
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+  if (Math.abs(diffMinutes) < 60) {
+    return rtf.format(diffMinutes, "minute");
+  }
+  const diffHours = Math.round(diffMinutes / 60);
+  if (Math.abs(diffHours) < 24) {
+    return rtf.format(diffHours, "hour");
+  }
+  const diffDays = Math.round(diffHours / 24);
+  return rtf.format(diffDays, "day");
+}
+
 function eventSummary(event: EventItem): string {
   switch (event.event_type) {
     case "task_started":
@@ -260,16 +279,16 @@ export function SessionDetail({
       <div className="panel hero-panel">
         <div className="hero-copy">
           <p className="eyebrow">Current Session</p>
-          <h1>{session.task_key}</h1>
+          <div className="hero-heading-row">
+            <h1>{session.task_key}</h1>
+            {session.jira_url ? (
+              <a className="hero-link hero-link-button" href={session.jira_url} rel="noreferrer" target="_blank">
+                Open in Jira
+              </a>
+            ) : null}
+          </div>
           <div className="hero-task-card">
             {session.task_title ? <p className="hero-title">{session.task_title}</p> : null}
-            {session.jira_url ? (
-              <p className="hero-link-row">
-                <a className="hero-link" href={session.jira_url} rel="noreferrer" target="_blank">
-                  Open in Jira
-                </a>
-              </p>
-            ) : null}
           </div>
           <div className="hero-status-strip">
             <div className="hero-status-item">
@@ -464,6 +483,7 @@ export function SessionDetail({
                     <strong>{eventSummary(event)}</strong>
                     <p>{producerDisplayName(event.producer_type)}</p>
                   </div>
+                  <small>{relativeTimeLabel(event.created_at)}</small>
                 </div>
               ))}
             </div>
