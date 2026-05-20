@@ -4,7 +4,6 @@ import { apiClient } from "../api/client";
 import { ActiveRuntimeOutputPanel } from "./ActiveRuntimeOutputPanel";
 import { InteractiveStatePanel } from "./InteractiveStatePanel";
 import { OperatorActions } from "./OperatorActions";
-import { RuntimeSessionPanel } from "./RuntimeSessionPanel";
 import { useToast } from "./ToastProvider";
 import { roleDisplayName } from "../roleDisplay";
 import {
@@ -212,7 +211,6 @@ export function SessionDetail({
   bundle,
   onRefresh,
 }: SessionDetailProps): JSX.Element {
-  const [detailSurface, setDetailSurface] = useState<"workflow" | "runtime">("workflow");
   const [workerMenuRoleName, setWorkerMenuRoleName] = useState<string | null>(null);
   const [workerActionBusyRoleName, setWorkerActionBusyRoleName] = useState<string | null>(null);
   const [workerActionError, setWorkerActionError] = useState<string | null>(null);
@@ -328,25 +326,7 @@ export function SessionDetail({
         </div>
       </div>
 
-      <div className="session-detail-nav">
-        <button
-          className={`inline-pill inline-pill-button ${detailSurface === "workflow" ? "selected" : ""}`}
-          onClick={() => setDetailSurface("workflow")}
-          type="button"
-        >
-          Workflow
-        </button>
-        <button
-          className={`inline-pill inline-pill-button ${detailSurface === "runtime" ? "selected" : ""}`}
-          onClick={() => setDetailSurface("runtime")}
-          type="button"
-        >
-          Runtime Tools
-        </button>
-      </div>
-
-      {detailSurface === "workflow" ? (
-        <>
+      <>
       <section className="panel">
           <div className="panel-header">
             <div>
@@ -490,16 +470,7 @@ export function SessionDetail({
       />
 
       <InteractiveStatePanel interactiveStateSummary={bundle.interactiveStateSummary} />
-        </>
-      ) : null}
-
-      {detailSurface === "runtime" ? (
-        <RuntimeSessionPanel
-          onRefresh={onRefresh}
-          runtimeStateSummary={bundle.runtimeStateSummary}
-          session={session}
-        />
-      ) : null}
+      </>
     </section>
   );
 }
