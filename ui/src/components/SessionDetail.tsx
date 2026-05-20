@@ -77,10 +77,10 @@ function eventContextLabel(event: EventItem): string {
   }
 }
 
-function relativeTimeLabel(value: string): string {
+function relativeTimeLabel(value: string): string | null {
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) {
-    return "—";
+    return null;
   }
   const diffMs = timestamp - Date.now();
   const diffMinutes = Math.round(diffMs / 60000);
@@ -293,7 +293,7 @@ export function SessionDetail({
           <p className="eyebrow">Current Session</p>
           <div className="hero-heading-row">
             <div className="hero-heading-main">
-              <h1>{session.task_key}</h1>
+              <h1 className="hero-key">{session.task_key}</h1>
               {session.task_title ? <p className="hero-title hero-title-inline">{session.task_title}</p> : null}
             </div>
             {session.jira_url ? (
@@ -458,15 +458,18 @@ export function SessionDetail({
           </div>
           {recentEvents.length > 0 ? (
             <div className="table-list limited-list">
-              {recentEvents.map((event) => (
-                <div className="table-row" key={`recent-${event.id}`}>
-                  <div>
-                    <strong>{eventSummary(event)}</strong>
-                    <p>{eventContextLabel(event)}</p>
+              {recentEvents.map((event) => {
+                const timestampLabel = relativeTimeLabel(event.created_at);
+                return (
+                  <div className="table-row" key={`recent-${event.id}`}>
+                    <div>
+                      <strong>{eventSummary(event)}</strong>
+                      <p>{eventContextLabel(event)}</p>
+                    </div>
+                    {timestampLabel ? <small>{timestampLabel}</small> : null}
                   </div>
-                  <small>{relativeTimeLabel(event.created_at)}</small>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <p className="path-label">No activity has been recorded yet.</p>

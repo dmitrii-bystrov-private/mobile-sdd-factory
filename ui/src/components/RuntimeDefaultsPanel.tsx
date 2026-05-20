@@ -109,6 +109,23 @@ export function RuntimeDefaultsPanel({
     [runtimeCapabilities],
   );
 
+  if (runtimeDefaults === null || runtimeCapabilities === null) {
+    return (
+      <section className="panel panel-sidebar">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Settings</p>
+            <h2>Runtime Defaults</h2>
+          </div>
+        </div>
+        <p className="path-label">Runtime defaults are still loading.</p>
+      </section>
+    );
+  }
+
+  const loadedRuntimeDefaults = runtimeDefaults;
+  const loadedRuntimeCapabilities = runtimeCapabilities;
+
   function inheritedRoleDefault(
     roleName: string,
     resolvedDefaultRunner: string,
@@ -141,17 +158,14 @@ export function RuntimeDefaultsPanel({
   }
 
   useEffect(() => {
-    if (runtimeCapabilities === null || runtimeDefaults === null) {
-      return;
-    }
     const resolvedDefaultRunner =
-      runtimeDefaults.defaultRunner ??
-      runtimeCapabilities.defaultRunner ??
-      runtimeCapabilities.availableRunners[0] ??
+      loadedRuntimeDefaults.defaultRunner ??
+      loadedRuntimeCapabilities.defaultRunner ??
+      loadedRuntimeCapabilities.availableRunners[0] ??
       "";
     const nextRoleDefaults: Record<string, DraftRoleDefault> = {};
-    for (const roleName of runtimeDefaults.knownRoles) {
-      const stored = runtimeDefaults.roleDefaults[roleName];
+    for (const roleName of loadedRuntimeDefaults.knownRoles) {
+      const stored = loadedRuntimeDefaults.roleDefaults[roleName];
       if (stored) {
         const inherited = inheritedRoleDefault(roleName, stored.runner ?? resolvedDefaultRunner);
         nextRoleDefaults[roleName] = {
@@ -168,18 +182,18 @@ export function RuntimeDefaultsPanel({
     setPolicyDefaults({
       oneshot: {
         ...defaultPolicyDefaults(),
-        ...(runtimeDefaults.policyDefaults.oneshot ?? {}),
+        ...(loadedRuntimeDefaults.policyDefaults.oneshot ?? {}),
       },
       bug_full: {
         ...defaultPolicyDefaults(),
-        ...(runtimeDefaults.policyDefaults.bug_full ?? {}),
+        ...(loadedRuntimeDefaults.policyDefaults.bug_full ?? {}),
       },
       story_full: {
         ...defaultPolicyDefaults(),
-        ...(runtimeDefaults.policyDefaults.story_full ?? {}),
+        ...(loadedRuntimeDefaults.policyDefaults.story_full ?? {}),
       },
     });
-  }, [roleDefaultsIndex, runnerIndex, runtimeCapabilities, runtimeDefaults]);
+  }, [loadedRuntimeCapabilities, loadedRuntimeDefaults, roleDefaultsIndex, runnerIndex]);
 
   function updateRoleDefault(
     roleName: string,
@@ -221,7 +235,7 @@ export function RuntimeDefaultsPanel({
   function handleDefaultRunnerChange(nextRunner: string): void {
     setRoleDefaults((current) => {
       const nextRoleDefaults: Record<string, DraftRoleDefault> = {};
-      for (const roleName of runtimeDefaults?.knownRoles ?? []) {
+      for (const roleName of loadedRuntimeDefaults.knownRoles) {
         const currentValue = current[roleName] ?? inheritedRoleDefault(roleName, defaultRunner);
         const currentInherited = inheritedRoleDefault(roleName, defaultRunner);
         if (
@@ -240,9 +254,6 @@ export function RuntimeDefaultsPanel({
   }
 
   async function handleSave(): Promise<void> {
-    if (runtimeDefaults === null) {
-      return;
-    }
     setBusy(true);
     setError(null);
     setSaveNotice(null);
@@ -290,8 +301,8 @@ export function RuntimeDefaultsPanel({
             requirements_clarification_mode: policyDefaults.story_full.requirements_clarification_mode,
           },
         },
-        knownRoles: runtimeDefaults.knownRoles,
-        sourcePath: runtimeDefaults.sourcePath,
+        knownRoles: loadedRuntimeDefaults.knownRoles,
+        sourcePath: loadedRuntimeDefaults.sourcePath,
       });
       onSaved({
         defaultRunner: saved.default_runner,
@@ -324,18 +335,18 @@ export function RuntimeDefaultsPanel({
       <div className="runtime-default-card">
         <div className="inline-summary-header">
           <strong>Project Baseline</strong>
-          <span>{runtimeDefaults?.knownRoles.length ?? 0} lanes</span>
+          <span>{loadedRuntimeDefaults.knownRoles.length} lanes</span>
         </div>
         <p className="form-help">Session-specific lane overrides stay in Workflow Runs.</p>
         <label className="form-field">
           <span>Default Runner</span>
           <select
             className="select-input"
-            disabled={busy || runtimeCapabilities === null}
+            disabled={busy}
             onChange={(event) => handleDefaultRunnerChange(event.target.value)}
             value={defaultRunner}
           >
-            {(runtimeCapabilities?.availableRunners ?? []).map((runner) => (
+            {loadedRuntimeCapabilities.availableRunners.map((runner) => (
               <option key={runner} value={runner}>
                 {runner}
               </option>

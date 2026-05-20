@@ -336,6 +336,15 @@ input {
   color: var(--ink-strong);
 }
 
+.session-card-meta-secondary {
+  margin-top: 14px;
+}
+
+.session-card-meta-secondary small {
+  font-size: 0.82rem;
+  color: rgba(232, 237, 243, 0.78);
+}
+
 .session-card-meta-primary small + small::before,
 .session-card-meta:not(.session-card-meta-primary) small + small::before {
   content: "•";
@@ -496,25 +505,28 @@ input {
   overflow: hidden;
 }
 
+.hero-key {
+  white-space: nowrap;
+}
+
 .hero-heading-main {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
+  align-items: center;
   gap: 14px;
   min-width: 0;
 }
 
 .hero-title-inline {
-  margin-top: 8px;
+  margin: 0;
   -webkit-line-clamp: 2;
 }
 
 .hero-heading-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 14px;
-  flex-wrap: wrap;
 }
 
 .hero-link {
@@ -534,28 +546,32 @@ input {
 }
 
 .hero-status-strip {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-top: 18px;
 }
 
-.hero-status-item {
+.hero-status-item,
+.hero-status-strip .metric-card {
   display: grid;
   gap: 3px;
-  min-width: 144px;
+  min-height: 78px;
   padding: 10px 12px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 14px;
   background: rgba(10, 15, 24, 0.18);
 }
 
-.hero-status-item span {
+.hero-status-item span,
+.hero-status-strip .metric-card span {
   color: var(--ink-soft);
   font-size: 0.8rem;
+  margin-bottom: 0;
 }
 
-.hero-status-item strong {
+.hero-status-item strong,
+.hero-status-strip .metric-card strong {
   color: var(--ink-strong);
   font-size: 0.95rem;
 }
@@ -566,8 +582,7 @@ input {
 }
 
 .session-card:hover,
-.action-button:hover,
-.session-card.selected {
+.action-button:hover {
   transform: translateY(-1px);
   border-color: rgba(209, 76, 39, 0.42);
   box-shadow: 0 12px 24px rgba(209, 76, 39, 0.12);
@@ -953,6 +968,10 @@ input {
   gap: 16px;
 }
 
+.session-updates-panel {
+  margin-top: 18px;
+}
+
 .subpanel {
   display: grid;
   gap: 14px;
@@ -1172,7 +1191,7 @@ input {
   flex-wrap: wrap;
   gap: 10px;
   align-self: start;
-  margin: 6px 0 8px;
+  margin: 0;
 }
 
 .runtime-surface-stack {
@@ -1234,7 +1253,7 @@ input {
 
 .table-row:first-child {
   border-top: 0;
-  padding-top: 0;
+  padding-top: 8px;
 }
 
 .limited-list {
@@ -1245,7 +1264,8 @@ input {
 
 .queue-list {
   max-height: 52vh;
-  padding-top: 4px;
+  padding-top: 10px;
+  padding-bottom: 6px;
 }
 
 .progress-placeholder {
@@ -1267,6 +1287,11 @@ input {
 @media (max-width: 1120px) {
   .page-layout,
   .hero-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-heading-row,
+  .hero-status-strip {
     grid-template-columns: 1fr;
   }
 

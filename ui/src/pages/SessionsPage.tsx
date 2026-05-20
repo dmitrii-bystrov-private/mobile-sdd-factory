@@ -709,7 +709,11 @@ export function SessionsPage(): JSX.Element {
               <div className="scope-summary-list">
                 <div className="scope-summary-item">
                   <strong>Project defaults</strong>
-                  <p>New sessions inherit these defaults automatically.</p>
+                  <p>
+                    {runtimeDefaultsSummary
+                      ? "New sessions inherit these defaults automatically."
+                      : "Runtime defaults are still loading."}
+                  </p>
                 </div>
                 {runtimeDefaultsSummary ? (
                   <div className="scope-summary-item">
@@ -731,7 +735,11 @@ export function SessionsPage(): JSX.Element {
               <div className="scope-summary-list">
                 <div className="scope-summary-item">
                   <strong>Doctor</strong>
-                  <p>Check environment health before debugging a workflow issue.</p>
+                  <p>
+                    {doctorSummary
+                      ? "Check environment health before debugging a workflow issue."
+                      : "Environment status is still loading."}
+                  </p>
                 </div>
                 {bootstrapGuidanceSummary ? (
                   <div className="scope-summary-item">

@@ -328,7 +328,7 @@ export function SessionStartForm({
           />
         </label>
         {hasTaskKeyInput && !isTaskKeyValid ? (
-          <p className="form-help form-help-error">Use a Jira key like IOS-1234 or ANDR-5678.</p>
+          <p className="form-help form-help-error">Enter a valid Jira task key.</p>
         ) : null}
 
         <label className="form-field">
