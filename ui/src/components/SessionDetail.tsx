@@ -237,63 +237,11 @@ export function SessionDetail({
   const [deliveryRetryBusy, setDeliveryRetryBusy] = useState(false);
   const { showToast, showActivity, clearActivity } = useToast();
 
-  if (session === null || bundle === null) {
-    return (
-      <section className="panel panel-empty">
-        <p className="eyebrow">No Session Selected</p>
-        <h2>Choose a task session to inspect the factory state.</h2>
-      </section>
-    );
-  }
-
-  const activeSession = session;
-
-  const visibleRoles = bundle.roles.filter((role) => role.role_name !== "task-coordinator");
-  const interactiveOwnerRoleName =
-    session.status === "waiting_for_operator" && bundle.interactiveStateSummary?.available
-      ? bundle.interactiveStateSummary.roleName
-      : null;
-  const ownedRoleIds = new Set(
-    bundle.workItems
-      .filter((item) => item.status === "active" || item.status === "pending")
-      .map((item) => item.owner_role_id),
-  );
-  const activeRoles = visibleRoles.filter(
-    (role) =>
-      role.status === "running" &&
-      (
-        session.current_owner === role.role_name ||
-        interactiveOwnerRoleName === role.role_name ||
-        ownedRoleIds.has(role.id)
-      ),
-  );
-  const currentOwner = session.current_owner
-    ? roleDisplayName(session.current_owner)
-    : interactiveOwnerRoleName
-      ? roleDisplayName(interactiveOwnerRoleName)
-    : session.status === "active"
-      ? "Awaiting assignment"
-      : "Not assigned yet";
-  const activeRoleIds = new Set(activeRoles.map((role) => role.id));
-  const orderedRoles = [...visibleRoles].sort((left, right) => {
-    const orderDelta =
-      roleFlowOrder(left.role_name, session.workflow_profile) -
-      roleFlowOrder(right.role_name, session.workflow_profile);
-    if (orderDelta !== 0) {
-      return orderDelta;
-    }
-    return left.id - right.id;
-  });
-  const firstColumnCount = Math.ceil(orderedRoles.length / 2);
-  const workerColumns = [
-    orderedRoles.slice(0, firstColumnCount),
-    orderedRoles.slice(firstColumnCount),
-  ];
-  const runtimeRoleIndex = new Map(
-    (bundle.runtimeStateSummary?.roles ?? []).map((role) => [role.roleName, role]),
-  );
-
   useEffect(() => {
+    if (session === null || bundle === null) {
+      setDeliveryFailure(null);
+      return;
+    }
     if (
       session.current_stage !== "mr_handoff_failed" &&
       session.current_stage !== "send_to_test_failed"
@@ -349,7 +297,63 @@ export function SessionDetail({
     return () => {
       cancelled = true;
     };
-  }, [bundle.artifacts, session.current_stage]);
+  }, [bundle, session]);
+
+  if (session === null || bundle === null) {
+    return (
+      <section className="panel panel-empty">
+        <p className="eyebrow">No Session Selected</p>
+        <h2>Choose a task session to inspect the factory state.</h2>
+      </section>
+    );
+  }
+
+  const activeSession = session;
+
+  const visibleRoles = bundle.roles.filter((role) => role.role_name !== "task-coordinator");
+  const interactiveOwnerRoleName =
+    session.status === "waiting_for_operator" && bundle.interactiveStateSummary?.available
+      ? bundle.interactiveStateSummary.roleName
+      : null;
+  const ownedRoleIds = new Set(
+    bundle.workItems
+      .filter((item) => item.status === "active" || item.status === "pending")
+      .map((item) => item.owner_role_id),
+  );
+  const activeRoles = visibleRoles.filter(
+    (role) =>
+      role.status === "running" &&
+      (
+        session.current_owner === role.role_name ||
+        interactiveOwnerRoleName === role.role_name ||
+        ownedRoleIds.has(role.id)
+      ),
+  );
+  const currentOwner = session.current_owner
+    ? roleDisplayName(session.current_owner)
+    : interactiveOwnerRoleName
+      ? roleDisplayName(interactiveOwnerRoleName)
+    : session.status === "active"
+      ? "Awaiting assignment"
+      : "Not assigned yet";
+  const activeRoleIds = new Set(activeRoles.map((role) => role.id));
+  const orderedRoles = [...visibleRoles].sort((left, right) => {
+    const orderDelta =
+      roleFlowOrder(left.role_name, session.workflow_profile) -
+      roleFlowOrder(right.role_name, session.workflow_profile);
+    if (orderDelta !== 0) {
+      return orderDelta;
+    }
+    return left.id - right.id;
+  });
+  const firstColumnCount = Math.ceil(orderedRoles.length / 2);
+  const workerColumns = [
+    orderedRoles.slice(0, firstColumnCount),
+    orderedRoles.slice(firstColumnCount),
+  ];
+  const runtimeRoleIndex = new Map(
+    (bundle.runtimeStateSummary?.roles ?? []).map((role) => [role.roleName, role]),
+  );
 
   async function runWorkerAction(
     roleName: string,
