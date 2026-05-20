@@ -5,7 +5,6 @@ import { InteractiveStatePanel } from "./InteractiveStatePanel";
 import { JiraSubtasksPanel } from "./JiraSubtasksPanel";
 import { OperatorActions } from "./OperatorActions";
 import { PlanningArtifactPanel } from "./PlanningArtifactPanel";
-import { PlanningSummaryPanel } from "./PlanningSummaryPanel";
 import { RoleStatusPanel } from "./RoleStatusPanel";
 import { RuntimeSessionPanel } from "./RuntimeSessionPanel";
 import { SubtaskGraphPanel } from "./SubtaskGraphPanel";
@@ -238,13 +237,6 @@ export function SessionDetail({
 
       {detailSurface === "workflow" ? (
         <>
-      {session.workflow_profile === "story_full" ? (
-        <PlanningSummaryPanel
-          planningSummary={bundle.planningSummary}
-          workflowProfile={session.workflow_profile}
-        />
-      ) : null}
-
       <section className="panel">
           <div className="panel-header">
             <div>
