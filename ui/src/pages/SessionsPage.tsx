@@ -85,30 +85,6 @@ const PLANNING_STEP_DEFINITIONS = [
   },
 ] as const;
 
-function streamStateLabel(
-  streamState: "live" | "reconnecting" | "idle",
-  hasSelectedSession: boolean,
-): string {
-  if (streamState === "live") {
-    return "Event stream live";
-  }
-  if (streamState === "reconnecting") {
-    return "Event stream reconnecting";
-  }
-  return hasSelectedSession ? "Live updates ready" : "No live session";
-}
-
-function streamEventLabel(eventType: string | null, hasSelectedSession: boolean): string {
-  if (!eventType) {
-    return hasSelectedSession ? "Listening for live updates" : "Select a session to start live updates";
-  }
-  return eventType
-    .split("_")
-    .filter((part) => part.length > 0)
-    .map((part) => part[0].toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
 function latestPlanningArtifactForStage(
   artifacts: Artifact[],
   stageName: string,
@@ -359,7 +335,6 @@ export function SessionsPage(): JSX.Element {
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [bundle, setBundle] = useState<SessionBundle | null>(null);
   const [surfaceView, setSurfaceView] = useState<SurfaceView>("runs");
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [doctorSummary, setDoctorSummary] = useState<EnvironmentDoctorSummary | null>(null);
   const [bootstrapGuidanceSummary, setBootstrapGuidanceSummary] =
@@ -368,8 +343,6 @@ export function SessionsPage(): JSX.Element {
     useState<RuntimeCapabilitiesSummary | null>(null);
   const [runtimeDefaultsSummary, setRuntimeDefaultsSummary] =
     useState<RuntimeDefaultsSummary | null>(null);
-  const [streamState, setStreamState] = useState<"idle" | "live" | "reconnecting">("idle");
-  const [lastStreamEventType, setLastStreamEventType] = useState<string | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentTopRef = useRef<HTMLElement | null>(null);
 
@@ -520,16 +493,11 @@ export function SessionsPage(): JSX.Element {
   }
 
   async function refreshSelected(): Promise<void> {
-    setRefreshing(true);
-    try {
-      const nextSelectedId = await loadSessions();
-      if (nextSelectedId !== null) {
-        await loadBundle(nextSelectedId);
-      } else {
-        setBundle(null);
-      }
-    } finally {
-      setRefreshing(false);
+    const nextSelectedId = await loadSessions();
+    if (nextSelectedId !== null) {
+      await loadBundle(nextSelectedId);
+    } else {
+      setBundle(null);
     }
   }
 
@@ -560,8 +528,6 @@ export function SessionsPage(): JSX.Element {
 
   useEffect(() => {
     if (selectedSessionId === null) {
-      setStreamState("idle");
-      setLastStreamEventType(null);
       return;
     }
 
@@ -572,14 +538,10 @@ export function SessionsPage(): JSX.Element {
     const close = openSessionEventStream(
       selectedSessionId,
       latestKnownEventId,
-      (eventType, _payload, _incomingEventId) => {
-        setStreamState("live");
-        setLastStreamEventType(eventType);
+      (_eventType, _payload, _incomingEventId) => {
         scheduleLiveRefresh();
       },
-      () => {
-        setStreamState("reconnecting");
-      },
+      () => undefined,
     );
 
     return () => {
@@ -613,26 +575,6 @@ export function SessionsPage(): JSX.Element {
           <p className="topbar-summary">
             Keep every star aligned through the long run.
           </p>
-        </div>
-        <div className="topbar-actions">
-          <div className={`live-chip live-${streamState}`}>
-            <span className="live-dot" />
-            <strong>{streamStateLabel(streamState, selectedSessionId !== null)}</strong>
-            <small>
-              {lastStreamEventType
-                ? streamEventLabel(lastStreamEventType, selectedSessionId !== null)
-                : streamEventLabel(null, selectedSessionId !== null)}
-            </small>
-          </div>
-          <button
-            className="action-button action-button-subtle"
-            disabled={refreshing}
-            onClick={() => void refreshSelected()}
-            title="Reload the session list and the currently selected session surface."
-            type="button"
-          >
-            {refreshing ? "Refreshing…" : "Refresh"}
-          </button>
         </div>
       </header>
 
