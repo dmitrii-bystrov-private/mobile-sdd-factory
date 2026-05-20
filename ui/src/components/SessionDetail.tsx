@@ -1,9 +1,11 @@
 import { useState } from "react";
 
+import { apiClient } from "../api/client";
 import { ActiveRuntimeOutputPanel } from "./ActiveRuntimeOutputPanel";
 import { InteractiveStatePanel } from "./InteractiveStatePanel";
 import { OperatorActions } from "./OperatorActions";
 import { RuntimeSessionPanel } from "./RuntimeSessionPanel";
+import { useToast } from "./ToastProvider";
 import { roleDisplayName } from "../roleDisplay";
 import {
   workflowProfileDisplayName,
@@ -211,6 +213,10 @@ export function SessionDetail({
   onRefresh,
 }: SessionDetailProps): JSX.Element {
   const [detailSurface, setDetailSurface] = useState<"workflow" | "runtime">("workflow");
+  const [workerMenuRoleName, setWorkerMenuRoleName] = useState<string | null>(null);
+  const [workerActionBusyRoleName, setWorkerActionBusyRoleName] = useState<string | null>(null);
+  const [workerActionError, setWorkerActionError] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   if (session === null || bundle === null) {
     return (
@@ -252,6 +258,42 @@ export function SessionDetail({
     orderedRoles.slice(0, firstColumnCount),
     orderedRoles.slice(firstColumnCount),
   ];
+  const runtimeRoleIndex = new Map(
+    (bundle.runtimeStateSummary?.roles ?? []).map((role) => [role.roleName, role]),
+  );
+
+  async function runWorkerAction(
+    roleName: string,
+    action: () => Promise<unknown>,
+  ): Promise<void> {
+    setWorkerActionBusyRoleName(roleName);
+    setWorkerActionError(null);
+    try {
+      await action();
+      setWorkerMenuRoleName(null);
+      await onRefresh();
+    } catch (err) {
+      setWorkerActionError(err instanceof Error ? err.message : "Unknown request error");
+    } finally {
+      setWorkerActionBusyRoleName(null);
+    }
+  }
+
+  async function copyDebugCommand(
+    command: string | null | undefined,
+    successMessage: string,
+  ): Promise<void> {
+    if (!command) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(command);
+      showToast(successMessage);
+      setWorkerMenuRoleName(null);
+    } catch {
+      showToast("Copy failed", "error");
+    }
+  }
 
   return (
     <section className="detail-layout">
@@ -318,6 +360,14 @@ export function SessionDetail({
               {column.map((role) => {
                 const summary = laneSummary(role, bundle.workItems, session);
                 const isActive = activeRoleIds.has(role.id);
+                const runtimeRole = runtimeRoleIndex.get(role.role_name) ?? null;
+                const hasWorkerActions =
+                  runtimeRole !== null &&
+                  (runtimeRole.runtimeHandle !== null ||
+                    runtimeRole.status === "stopped" ||
+                    runtimeRole.tmuxAttachCommand !== null ||
+                    runtimeRole.tmuxCaptureCommand !== null);
+                const menuOpen = workerMenuRoleName === role.role_name;
                 return (
                   <article
                     className={`progress-card workflow-pulse-card${isActive ? " workflow-pulse-card-active" : ""}`}
@@ -333,12 +383,97 @@ export function SessionDetail({
                     <p className="progress-card-body workflow-pulse-runtime">
                       {runtimeConfigSummary(role.role_name, session)}
                     </p>
+                    {hasWorkerActions ? (
+                      <div className="workflow-pulse-card-footer">
+                        <div className="workflow-pulse-menu-anchor">
+                          <button
+                            aria-expanded={menuOpen}
+                            aria-label={`Open actions for ${roleDisplayName(role.role_name)}`}
+                            className="workflow-pulse-menu-button"
+                            onClick={() =>
+                              setWorkerMenuRoleName((current) =>
+                                current === role.role_name ? null : role.role_name,
+                              )
+                            }
+                            type="button"
+                          >
+                            ⋯
+                          </button>
+                          {menuOpen && runtimeRole ? (
+                            <div className="workflow-pulse-menu">
+                              <button
+                                className="action-button"
+                                disabled={
+                                  workerActionBusyRoleName !== null ||
+                                  runtimeRole.runtimeHandle === null ||
+                                  runtimeRole.status === "stopped"
+                                }
+                                onClick={() =>
+                                  void runWorkerAction(role.role_name, () =>
+                                    apiClient.stopRuntimeRole(session.id, role.role_name),
+                                  )
+                                }
+                                type="button"
+                              >
+                                Stop This Runtime
+                              </button>
+                              <button
+                                className="action-button"
+                                disabled={
+                                  workerActionBusyRoleName !== null ||
+                                  runtimeRole.status !== "stopped"
+                                }
+                                onClick={() =>
+                                  void runWorkerAction(role.role_name, () =>
+                                    apiClient.restartRuntimeRole(session.id, role.role_name),
+                                  )
+                                }
+                                type="button"
+                              >
+                                Restart This Runtime
+                              </button>
+                              {runtimeRole.tmuxAttachCommand ? (
+                                <button
+                                  className="action-button"
+                                  disabled={workerActionBusyRoleName !== null}
+                                  onClick={() =>
+                                    void copyDebugCommand(
+                                      runtimeRole.tmuxAttachCommand,
+                                      `${roleDisplayName(role.role_name)} console command copied`,
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  Copy Console Command
+                                </button>
+                              ) : null}
+                              {runtimeRole.tmuxCaptureCommand ? (
+                                <button
+                                  className="action-button"
+                                  disabled={workerActionBusyRoleName !== null}
+                                  onClick={() =>
+                                    void copyDebugCommand(
+                                      runtimeRole.tmuxCaptureCommand,
+                                      `${roleDisplayName(role.role_name)} output command copied`,
+                                    )
+                                  }
+                                  type="button"
+                                >
+                                  Copy Output Command
+                                </button>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
                   </article>
                 );
               })}
             </div>
           ))}
         </div>
+        {workerActionError ? <p className="error-banner">{workerActionError}</p> : null}
 
       </section>
 

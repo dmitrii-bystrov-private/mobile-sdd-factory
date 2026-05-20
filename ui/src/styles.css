@@ -1085,6 +1085,7 @@ input {
 
 .workflow-pulse-card {
   min-height: 100%;
+  position: relative;
 }
 
 .workflow-pulse-card-active {
@@ -1116,6 +1117,59 @@ input {
 .workflow-pulse-runtime {
   color: var(--ink-soft);
   font-size: 0.84rem;
+}
+
+.workflow-pulse-card-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: auto;
+  padding-top: var(--space-2);
+}
+
+.workflow-pulse-menu-anchor {
+  position: relative;
+}
+
+.workflow-pulse-menu-button {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink-soft);
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.workflow-pulse-menu-button:hover {
+  color: var(--ink-strong);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.workflow-pulse-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: 220px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+    rgba(9, 13, 21, 0.98);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+  z-index: 5;
+}
+
+.workflow-pulse-menu .action-button {
+  width: 100%;
+  justify-content: flex-start;
 }
 
 .progress-card-body {
