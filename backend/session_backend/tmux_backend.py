@@ -71,6 +71,7 @@ class TmuxSessionBackend(SessionBackend):
     _ANSI_OSC_RE = re.compile(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\\\)")
     _ANSI_ESC_RE = re.compile(r"\x1B[@-_]")
     _RUNNER_STATUS_SIGNAL_RE = re.compile(r"✻\s+\S+\s+for\s+\d+[smh](?:\s+\d+[smh])*")
+    _SNAPSHOT_SCROLLBACK_LINES = 300
 
     def _sanitize(self, value: str) -> str:
         return re.sub(r"[^A-Za-z0-9_-]+", "-", value)
@@ -217,7 +218,15 @@ class TmuxSessionBackend(SessionBackend):
             return "".join(self.pending_outputs.get(role.role_id, []))
 
         socket_path = self._socket_path(role.session_id)
-        result = self._tmux(socket_path, "capture-pane", "-p", "-t", role.role_id)
+        result = self._tmux(
+            socket_path,
+            "capture-pane",
+            "-p",
+            "-S",
+            f"-{self._SNAPSHOT_SCROLLBACK_LINES}",
+            "-t",
+            role.role_id,
+        )
         if result.returncode != 0:
             error_text = (result.stderr or result.stdout or "").lower()
             if "can't find window" in error_text or "can't find pane" in error_text:
@@ -235,7 +244,15 @@ class TmuxSessionBackend(SessionBackend):
                 or self.tmux_update_prompt_handled.get(role.role_id, False) != before_update
             ):
                 time.sleep(0.12)
-                retry = self._tmux(socket_path, "capture-pane", "-p", "-t", role.role_id)
+                retry = self._tmux(
+                    socket_path,
+                    "capture-pane",
+                    "-p",
+                    "-S",
+                    f"-{self._SNAPSHOT_SCROLLBACK_LINES}",
+                    "-t",
+                    role.role_id,
+                )
                 if retry.returncode == 0:
                     return retry.stdout
         return current
