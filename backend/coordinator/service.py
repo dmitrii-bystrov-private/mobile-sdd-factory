@@ -6676,7 +6676,7 @@ class CoordinatorService:
             ) / "plan"
             if candidate.is_dir():
                 role_plan_dir = candidate
-        source_plan_dir = plan_dir if plan_dir.is_dir() else role_plan_dir
+        source_plan_dir = role_plan_dir if role_plan_dir is not None else (plan_dir if plan_dir.is_dir() else None)
         if source_plan_dir is None:
             raise IntakeError(f"Temporary plan package is missing for session {session.task_key}")
 
