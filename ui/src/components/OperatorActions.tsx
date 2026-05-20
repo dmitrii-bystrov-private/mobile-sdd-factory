@@ -298,6 +298,12 @@ export function OperatorActions({
 
   return (
     <section className="panel">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Control</p>
+        </div>
+      </div>
+
       <div className="operator-actions-two-column">
         {renderActionGroup(
           "Run Controls",
