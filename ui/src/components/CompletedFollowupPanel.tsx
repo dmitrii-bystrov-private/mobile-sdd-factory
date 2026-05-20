@@ -46,21 +46,16 @@ export function CompletedFollowupPanel({
   onRefresh,
 }: CompletedFollowupPanelProps): JSX.Element | null {
   const { showToast } = useToast();
-  const inferredMrId = useMemo(() => mrIdFromUrl(latestMrUrl(artifacts, events)), [artifacts, events]);
+  const mrUrl = useMemo(() => latestMrUrl(artifacts, events), [artifacts, events]);
+  const inferredMrId = useMemo(() => mrIdFromUrl(mrUrl), [mrUrl]);
   const platform = inferPlatform(session.task_key);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mrId, setMrId] = useState(inferredMrId);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewText, setPreviewText] = useState<string | null>(null);
 
   useEffect(() => {
-    setMrId((current) => (current.trim().length === 0 ? inferredMrId : current));
-  }, [inferredMrId]);
-
-  useEffect(() => {
-    const normalizedMrId = mrId.trim();
-    if (normalizedMrId.length === 0) {
+    if (inferredMrId.length === 0) {
       setPreviewText(null);
       return undefined;
     }
@@ -70,7 +65,7 @@ export function CompletedFollowupPanel({
       void (async () => {
         setPreviewLoading(true);
         try {
-          const response = await apiClient.getReviewMessagePreview(session.id, normalizedMrId);
+          const response = await apiClient.getReviewMessagePreview(session.id, inferredMrId);
           if (!cancelled) {
             setPreviewText(response.text);
           }
@@ -90,7 +85,7 @@ export function CompletedFollowupPanel({
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [mrId, session.id]);
+  }, [inferredMrId, session.id]);
 
   async function run(action: () => Promise<void>): Promise<void> {
     setBusy(true);
@@ -118,13 +113,12 @@ export function CompletedFollowupPanel({
   }
 
   async function handleIngestMrComments(): Promise<void> {
-    const normalizedMrId = mrId.trim();
-    if (normalizedMrId.length === 0) {
-      setError("MR id is required");
+    if (inferredMrId.length === 0) {
+      setError("MR data is not available for this session yet");
       return;
     }
     await run(async () => {
-      await apiClient.ingestMrComments(session.id, platform, normalizedMrId);
+      await apiClient.ingestMrComments(session.id, platform, inferredMrId);
     });
   }
 
@@ -148,21 +142,16 @@ export function CompletedFollowupPanel({
       </div>
 
       <div className="completed-followup-stack">
-        <label className="form-field">
-          <span>MR Id</span>
-          <input
-            className="text-input"
-            disabled={busy}
-            onChange={(event) => setMrId(event.target.value)}
-            placeholder="2942"
-            value={mrId}
-          />
-        </label>
+        {mrUrl ? (
+          <a className="hero-link hero-link-button completed-followup-link" href={mrUrl} rel="noreferrer" target="_blank">
+            Open MR
+          </a>
+        ) : null}
 
         <div className="completed-followup-actions">
           <button
             className="action-button"
-            disabled={busy || mrId.trim().length === 0}
+            disabled={busy || inferredMrId.length === 0}
             onClick={() => void handleIngestMrComments()}
             type="button"
           >
@@ -193,7 +182,7 @@ export function CompletedFollowupPanel({
           <pre className="completed-followup-preview-body">
             {previewLoading
               ? "Loading review message..."
-              : previewText ?? "Enter MR id to preview the review message."}
+              : previewText ?? "MR data is not available for this session yet."}
           </pre>
         </div>
       </div>
