@@ -1122,7 +1122,8 @@ class CoordinatorService:
         if not plan_index_path.exists():
             raise IntakeError(f"plan/index.md not found for session {session.task_key}")
 
-        result = self.jira_adapter.create_subtasks(session.task_key, plan_index_path.parent)
+        plan_dir = plan_index_path.parent
+        result = self.jira_adapter.create_subtasks(session.task_key, plan_dir)
         stdout_path = write_text_artifact(
             self.artifacts_root,
             session.task_key,
@@ -1181,6 +1182,7 @@ class CoordinatorService:
 
         snapshot_refresh_exit_code: int | None = None
         if result.ok:
+            self._cleanup_temporary_plan_package(session)
             refresh_result = self.snapshot_adapter.run(session.task_key)
             snapshot_refresh_exit_code = refresh_result.returncode
             refresh_stdout_path = write_text_artifact(
@@ -2878,7 +2880,7 @@ class CoordinatorService:
         )
         instruction = (
             f"Prepare task decomposition for story {session.task_key} before implementation starts. "
-            "Always produce a durable `plan/index.md` plus self-contained `plan/NN-*.md` task package, and break the verified planning package into the smallest useful execution-oriented chunks for later implementation or subtask flow."
+            "Produce a temporary `plan/index.md` plus self-contained `plan/NN-*.md` task package only for Jira subtask materialization, and break the verified planning package into the smallest useful execution-oriented chunks."
         )
         if additional_context:
             instruction = f"{instruction}\n\n{additional_context}"
@@ -3007,7 +3009,7 @@ class CoordinatorService:
         if summary:
             additional_context_lines.append(f"MR analysis summary: {summary}")
         additional_context_lines.append(
-            "Follow-up plan package available under `plan/`; start from `plan/index.md` and the generated `plan/NN-*.md` files before touching product code."
+            "Use the generated follow-up plan package only to materialize Jira subtasks; after snapshot refresh, execution must continue from the Jira subtasks flow rather than from `plan/` files."
         )
         plan_artifact: Artifact | None = None
         if self.workdir_root is not None:
@@ -3307,12 +3309,6 @@ class CoordinatorService:
             raise IntakeError("Task decomposition must include plan_index_markdown")
         if not isinstance(raw_plan_task_files, list) or not raw_plan_task_files:
             raise IntakeError("Task decomposition must include non-empty plan_task_files")
-        context_lines: list[str] = []
-        if summary:
-            context_lines.append(f"Task decomposition summary: {summary}")
-        if task_breakdown:
-            context_lines.append(f"Task breakdown: {task_breakdown}")
-        additional_context = "\n".join(context_lines) if context_lines else None
         decomposition_artifact: Artifact | None = None
         if self.artifacts_root is not None:
             artifact_path = write_text_artifact(
@@ -3407,13 +3403,9 @@ class CoordinatorService:
             stage_name="subtask_implementation_requested",
             instruction=(
                 f"Implement subtask {first_subtask.key} for parent task {session.task_key}. "
-                "Use the routed execution plan artifact as the primary execution plan input. "
+                "Use the refreshed Jira subtask snapshot as the source of truth for scope and status. "
                 "Focus only on this subtask scope before moving to the next one."
             ),
-            extra_hydration={
-                "decomposition_artifact_path": decomposition_artifact.path,
-                "execution_plan_artifact_path": decomposition_artifact.path,
-            },
         )
         return self._append_event(
             session_id=session.id,
@@ -5368,12 +5360,12 @@ class CoordinatorService:
         if stage_name == "task_decomposition_requested":
             return (
                 f"Prepare task decomposition for story {task_key}. "
-                "Always produce a durable `plan/index.md` plus self-contained `plan/NN-*.md` task package, and break the verified planning package into the smallest useful execution-oriented chunks before implementation starts."
+                "Produce a temporary `plan/index.md` plus self-contained `plan/NN-*.md` task package only for Jira subtask materialization, then hand execution over to the Jira-subtask flow."
             )
         if stage_name == "subtask_implementation_requested":
             return (
                 f"Continue sequential subtask implementation for {task_key}. "
-                "Finish the currently assigned subtask before moving to the next one."
+                "Use Jira subtasks from the refreshed snapshot as the source of truth, and finish the currently assigned subtask before moving to the next one."
             )
         if stage_name == "implementation_requested":
             return (
@@ -6468,6 +6460,15 @@ class CoordinatorService:
                 "task_files": normalized_task_files,
             },
         )
+
+    def _cleanup_temporary_plan_package(self, session: Session) -> None:
+        if self.workdir_root is None:
+            raise IntakeError("Coordinator is missing workdir root")
+
+        plan_dir = self.workdir_root / session.task_key / "plan"
+        if not plan_dir.exists():
+            return
+        shutil.rmtree(plan_dir)
 
     def _jira_subtasks_summary_markdown(self, subtask_keys: list[str]) -> str:
         lines = ["# Created Jira Subtasks", ""]

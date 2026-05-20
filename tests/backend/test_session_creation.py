@@ -2222,7 +2222,7 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Prepare task decomposition for story IOS-30003STORY before implementation starts.", sent_inputs[0])
-        self.assertIn("Always produce a durable `plan/index.md` plus self-contained `plan/NN-*.md` task package", sent_inputs[0])
+        self.assertIn("Produce a temporary `plan/index.md` plus self-contained `plan/NN-*.md` task package only for Jira subtask materialization", sent_inputs[0])
         self.assertIn("Story spec summary: Need a new screen plus navigation wiring", sent_inputs[0])
 
     def test_task_decomposition_completed_moves_session_to_subtask_creation_checkpoint(self) -> None:
@@ -2495,6 +2495,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("jira_subtasks_created", event.event_type)
         self.assertEqual(["IOS-90001"], event.payload["created_subtask_keys"])
         self.assertIsNone(followup_event)
+        self.assertFalse(plan_dir.exists())
         self.assertTrue(any(item.artifact_type == "jira_subtasks_stdout" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "jira_subtasks_stderr" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "jira_subtasks_summary" for item in artifacts))
@@ -2660,8 +2661,7 @@ class SessionCreationTests(unittest.TestCase):
             sorted((item.work_type, item.status.value) for item in work_items),
         )
         self.assertIn("Implement subtask IOS-30010", sent_inputs[-1])
-        self.assertIn("Use the routed execution plan artifact as the primary execution plan input.", sent_inputs[-1])
-        self.assertIn("decomposition_artifact_path", sent_inputs[-1])
+        self.assertIn("Use the refreshed Jira subtask snapshot as the source of truth for scope and status.", sent_inputs[-1])
 
     def test_subtask_completion_assigns_next_subtask_before_verification(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
