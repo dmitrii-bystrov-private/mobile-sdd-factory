@@ -9,7 +9,7 @@ from backend.api.sse import SessionEventBus
 from backend import session_policy as session_policy_module
 from backend.coordinator.intake import IntakeError
 from backend.coordinator.service import CoordinatorService
-from backend.models.enums import SessionStatus
+from backend.models.enums import RoleStatus, SessionStatus
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
     BUG_FIXER_ROLE,
@@ -21,6 +21,7 @@ from backend.roles.contracts import (
     CONSTRAINTS_WORKER_ROLE,
     IMPLEMENTER_ROLE,
     MR_COMMENTS_ANALYST_ROLE,
+    PERSISTENT_SESSION_ROLES,
     PROPOSAL_CONTEXT_WORKER_ROLE,
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
     SPEC_VERIFIER_WORKER_ROLE,
@@ -4373,6 +4374,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "subtask_implementation_requested" for item in events))
         self.assertTrue(any(item.artifact_type == "jira_subtasks_summary" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "mr_followup_plan_markdown" for item in artifacts))
+        analyst_role = self.role_repository.get_by_name(session.id, MR_COMMENTS_ANALYST_ROLE)
+        assert analyst_role is not None
+        self.assertEqual(RoleStatus.RUNNING, analyst_role.status)
 
     def test_mr_comments_analysis_completion_falls_back_to_direct_followup_without_resolved_snapshot_subtasks(
         self,
@@ -4957,6 +4961,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "boy_scout_actionable_markdown" for item in artifacts))
         self.assertIn('"issues_file_path"', sent_inputs[-1])
         self.assertIn("boy-scout-actionable.md", sent_inputs[-1])
+        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
+        assert scout_role is not None
+        self.assertEqual(RoleStatus.RUNNING, scout_role.status)
 
     def test_boy_scout_findings_can_be_skipped_into_verification(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -5324,6 +5331,15 @@ class SessionCreationTests(unittest.TestCase):
             ],
             self.gitlab_adapter.commit_requests,
         )
+        doc_role = self.role_repository.get_by_name(session.id, DOC_HARVEST_ROLE)
+        assert doc_role is not None
+        self.assertEqual(RoleStatus.RUNNING, doc_role.status)
+
+    def test_persistent_session_roles_include_reusable_followup_roles(self) -> None:
+        self.assertIn(CODE_REVIEWER_ROLE, PERSISTENT_SESSION_ROLES)
+        self.assertIn(CODE_SCOUT_ROLE, PERSISTENT_SESSION_ROLES)
+        self.assertIn(DOC_HARVEST_ROLE, PERSISTENT_SESSION_ROLES)
+        self.assertIn(MR_COMMENTS_ANALYST_ROLE, PERSISTENT_SESSION_ROLES)
 
     def test_doc_harvest_skipped_not_needed_completes_session_when_policy_enabled(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

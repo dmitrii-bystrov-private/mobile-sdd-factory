@@ -31,6 +31,7 @@ from backend.roles.contracts import (
     CODE_SCOUT_ROLE,
     DOC_HARVEST_ROLE,
     MR_COMMENTS_ANALYST_ROLE,
+    PERSISTENT_SESSION_ROLES,
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
     CONSTRAINTS_WORKER_ROLE,
     PROPOSAL_CONTEXT_WORKER_ROLE,
@@ -5500,6 +5501,8 @@ class CoordinatorService:
         )
 
     def _stop_on_demand_role(self, session: Session, role_name: str) -> None:
+        if role_name in PERSISTENT_SESSION_ROLES:
+            return
         role = self.role_repository.get_by_name(session.id, role_name)
         if role is None or role.runtime_handle is None:
             return
