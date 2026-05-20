@@ -984,6 +984,11 @@ input {
 .completed-followup-stack {
   display: grid;
   gap: var(--space-3);
+  padding-right: 150px;
+}
+
+.completed-followup-panel {
+  position: relative;
 }
 
 .completed-followup-actions {
@@ -993,8 +998,8 @@ input {
 }
 
 .completed-followup-link {
-  justify-self: start;
-  margin-top: var(--space-1);
+  top: var(--space-4);
+  right: var(--space-4);
 }
 
 .completed-followup-preview {
