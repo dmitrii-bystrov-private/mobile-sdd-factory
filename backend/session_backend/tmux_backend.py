@@ -585,6 +585,6 @@ class TmuxSessionBackend(SessionBackend):
                 f"tmux -S {str(socket_path)!r} attach -t {session_id!r} \\; select-window -t {role_id!r}"
             )
             payload["tmux_role_capture_command"] = (
-                f"tmux -S {str(socket_path)!r} capture-pane -p -S -{self._SNAPSHOT_SCROLLBACK_LINES} -t {role_id!r}"
+                f"tmux -S {str(socket_path)!r} capture-pane -p -S - -t {role_id!r}"
             )
         return payload
