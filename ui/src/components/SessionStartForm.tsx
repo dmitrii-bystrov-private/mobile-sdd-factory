@@ -17,6 +17,7 @@ type SessionStartFormProps = {
 };
 
 const TASK_KEY_PATTERN = /^(IOS|ANDR)-\d+$/i;
+const TASK_KEY_EXTRACT_PATTERN = /\b(IOS|ANDR)-\d+\b/i;
 
 const POLICY_OPTIONS: SessionPolicyValue[] = ["disabled", "enabled", "required"];
 const REQUIREMENTS_CLARIFICATION_OPTIONS: RequirementsClarificationMode[] = [
@@ -70,6 +71,12 @@ function mergePolicyDefaults(
   };
 }
 
+function normalizeTaskKeyInput(value: string): string {
+  const trimmed = value.trim();
+  const extracted = trimmed.match(TASK_KEY_EXTRACT_PATTERN)?.[0];
+  return (extracted ?? trimmed).toUpperCase();
+}
+
 export function SessionStartForm({
   onCreated,
   runtimeCapabilities,
@@ -87,7 +94,7 @@ export function SessionStartForm({
 
   const showTestPolicy = workflowProfile === "bug_full";
   const showRequirementsClarificationMode = workflowProfile === "story_full";
-  const normalizedTaskKey = taskKey.trim().toUpperCase();
+  const normalizedTaskKey = normalizeTaskKeyInput(taskKey);
   const hasTaskKeyInput = normalizedTaskKey.length > 0;
   const isTaskKeyValid = !hasTaskKeyInput || TASK_KEY_PATTERN.test(normalizedTaskKey);
 
@@ -322,8 +329,8 @@ export function SessionStartForm({
           <span>Task Key</span>
           <input
             className="text-input"
-            onChange={(event) => setTaskKey(event.target.value)}
-            placeholder="IOS-1234"
+            onChange={(event) => setTaskKey(normalizeTaskKeyInput(event.target.value))}
+            placeholder="IOS-1234 or Jira link"
             value={taskKey}
           />
         </label>
