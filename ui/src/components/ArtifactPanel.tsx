@@ -40,7 +40,7 @@ export function ArtifactPanel({
         </div>
       </div>
 
-      <div className="grid-two">
+      <div className="grid-two runtime-log-grid">
         <div className="subpanel">
           <div className="subpanel-head">
             <strong>Generated Files</strong>

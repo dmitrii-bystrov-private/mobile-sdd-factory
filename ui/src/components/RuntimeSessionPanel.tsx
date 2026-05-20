@@ -79,179 +79,183 @@ export function RuntimeSessionPanel({
             const visibleRoles = runtimeStateSummary.roles.filter((role) => role.roleName !== "task-coordinator");
             return (
               <>
-          <div className="table-list">
-            <div className="table-row">
-              <span>Live lanes</span>
-              <strong>
-                {visibleRoles.filter((role) => role.status === "running").length}/
-                {visibleRoles.length}
-              </strong>
-            </div>
-            <div className="table-row">
-              <span>Stopped lanes</span>
-              <strong>{visibleRoles.filter((role) => role.status === "stopped").length}</strong>
-            </div>
-            <div className="table-row">
-              <span>Session console</span>
-              <strong>{runtimeStateSummary.runtimeSessionId ? "Available" : "Unknown"}</strong>
-            </div>
-          </div>
-
-          {runtimeStateSummary.lastAutoRecovery ? (
-            <div className="artifact-card">
-              <div className="artifact-meta">
-                <span>auto recovery</span>
-                <strong>{roleDisplayName(runtimeStateSummary.lastAutoRecovery.roleName)}</strong>
-              </div>
-              <p className="artifact-path">
-                Runtime recovery already happened at {stageDisplayName(runtimeStateSummary.lastAutoRecovery.currentStage)}.
-              </p>
-            </div>
-          ) : null}
-
-          <div className="actions-grid">
-            <button
-              className="action-button"
-              disabled={busy || visibleRoles.every((role) => role.status === "stopped")}
-              onClick={() => run(() => apiClient.stopRuntimeSession(session.id))}
-              title="Stop every live lane runtime in this session while keeping the task files intact."
-              type="button"
-            >
-              Stop All Live Runtimes
-            </button>
-            <button
-              className="action-button"
-              disabled={busy || visibleRoles.some((role) => role.status !== "stopped")}
-              onClick={() => run(() => apiClient.restartRuntimeSession(session.id))}
-              title="Start the stopped runtime session again and relaunch its lane runtimes."
-              type="button"
-            >
-              Restart All Runtimes
-            </button>
-            <button
-              className="action-button"
-              disabled={busy}
-              onClick={() => run(() => onRefresh())}
-              title="Refresh the runtime state surface without changing the workflow."
-              type="button"
-            >
-              Refresh Runtime View
-            </button>
-          </div>
-
-          <div className="artifact-stack">
-            {visibleRoles.map((role) => (
-              <article className="artifact-card" key={role.roleName}>
-                <div className="artifact-meta">
-                  <span>{runtimeRoleStatusLabel(role.status)}</span>
-                  <strong>{roleDisplayName(role.roleName)}</strong>
-                </div>
-                <p className="artifact-path">
-                  {role.status === "running"
-                    ? "This lane currently has a live runtime."
-                    : role.status === "stopped"
-                      ? "This lane is currently stopped."
-                      : "This lane is waiting on runtime or orchestration state."}
-                </p>
-                <button
-                  className="action-button"
-                  disabled={busy || role.runtimeHandle === null || role.status === "stopped"}
-                  onClick={() => run(() => apiClient.stopRuntimeRole(session.id, role.roleName))}
-                  title={`Stop the live runtime for ${roleDisplayName(role.roleName)} without stopping the whole session.`}
-                  type="button"
-                >
-                  Stop This Runtime
-                </button>
-                <button
-                  className="action-button"
-                  disabled={busy || role.status !== "stopped"}
-                  onClick={() => run(() => apiClient.restartRuntimeRole(session.id, role.roleName))}
-                  title={`Restart the stopped runtime for ${roleDisplayName(role.roleName)} inside this session.`}
-                  type="button"
-                >
-                  Restart This Runtime
-                </button>
-                {(role.tmuxAttachCommand || role.tmuxCaptureCommand || role.runtimeHandle) ? (
-                  <details className="advanced-disclosure">
-                    <summary>
-                      <div>
-                        <strong>Worker Console</strong>
-                        <p>Open or capture the live console for this lane only when deeper debugging is needed.</p>
-                      </div>
-                      <span className="chevron" aria-hidden="true" />
-                    </summary>
-                    <div className="advanced-disclosure-body">
-                      <div className="actions-grid">
-                        {role.tmuxAttachCommand ? (
-                          <button
-                            className="action-button"
-                            onClick={() =>
-                              void copyDebugCommand(
-                                role.tmuxAttachCommand,
-                                `${roleDisplayName(role.roleName)} attach command copied.`,
-                              )
-                            }
-                            type="button"
-                          >
-                            Copy Console Command
-                          </button>
-                        ) : null}
-                        {role.tmuxCaptureCommand ? (
-                          <button
-                            className="action-button"
-                            onClick={() =>
-                              void copyDebugCommand(
-                                role.tmuxCaptureCommand,
-                                `${roleDisplayName(role.roleName)} capture command copied.`,
-                              )
-                            }
-                            type="button"
-                          >
-                            Copy Output Command
-                          </button>
-                        ) : null}
-                      </div>
+                <div className="runtime-controls-stack">
+                  <div className="table-list runtime-summary-list">
+                    <div className="table-row">
+                      <span>Live lanes</span>
+                      <strong>
+                        {visibleRoles.filter((role) => role.status === "running").length}/
+                        {visibleRoles.length}
+                      </strong>
                     </div>
-                  </details>
-                ) : null}
-              </article>
-            ))}
-          </div>
+                    <div className="table-row">
+                      <span>Stopped lanes</span>
+                      <strong>{visibleRoles.filter((role) => role.status === "stopped").length}</strong>
+                    </div>
+                    <div className="table-row">
+                      <span>Session console</span>
+                      <strong>{runtimeStateSummary.runtimeSessionId ? "Available" : "Unknown"}</strong>
+                    </div>
+                  </div>
 
-          {(runtimeStateSummary.tmuxAttachCommand || runtimeStateSummary.tmuxSocketPath) ? (
-            <details className="advanced-disclosure">
-              <summary>
-                <div>
-                  <strong>Session Console</strong>
-                  <p>Use this only when you need the shared runtime console for the whole session.</p>
+                  {runtimeStateSummary.lastAutoRecovery ? (
+                    <div className="artifact-card runtime-note-card">
+                      <div className="artifact-meta">
+                        <span>auto recovery</span>
+                        <strong>{roleDisplayName(runtimeStateSummary.lastAutoRecovery.roleName)}</strong>
+                      </div>
+                      <p className="artifact-path">
+                        Runtime recovery already happened at {stageDisplayName(runtimeStateSummary.lastAutoRecovery.currentStage)}.
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="actions-grid runtime-session-actions">
+                    <button
+                      className="action-button"
+                      disabled={busy || visibleRoles.every((role) => role.status === "stopped")}
+                      onClick={() => run(() => apiClient.stopRuntimeSession(session.id))}
+                      title="Stop every live lane runtime in this session while keeping the task files intact."
+                      type="button"
+                    >
+                      Stop All Live Runtimes
+                    </button>
+                    <button
+                      className="action-button"
+                      disabled={busy || visibleRoles.some((role) => role.status !== "stopped")}
+                      onClick={() => run(() => apiClient.restartRuntimeSession(session.id))}
+                      title="Start the stopped runtime session again and relaunch its lane runtimes."
+                      type="button"
+                    >
+                      Restart All Runtimes
+                    </button>
+                    <button
+                      className="action-button"
+                      disabled={busy}
+                      onClick={() => run(() => onRefresh())}
+                      title="Refresh the runtime state surface without changing the workflow."
+                      type="button"
+                    >
+                      Refresh Runtime View
+                    </button>
+                  </div>
+
+                  <div className="artifact-stack runtime-role-stack">
+                    {visibleRoles.map((role) => (
+                      <article className="artifact-card runtime-role-card" key={role.roleName}>
+                        <div className="artifact-meta">
+                          <span>{runtimeRoleStatusLabel(role.status)}</span>
+                          <strong>{roleDisplayName(role.roleName)}</strong>
+                        </div>
+                        <p className="artifact-path">
+                          {role.status === "running"
+                            ? "This lane currently has a live runtime."
+                            : role.status === "stopped"
+                              ? "This lane is currently stopped."
+                              : "This lane is waiting on runtime or orchestration state."}
+                        </p>
+                        <div className="runtime-role-actions">
+                          <button
+                            className="action-button"
+                            disabled={busy || role.runtimeHandle === null || role.status === "stopped"}
+                            onClick={() => run(() => apiClient.stopRuntimeRole(session.id, role.roleName))}
+                            title={`Stop the live runtime for ${roleDisplayName(role.roleName)} without stopping the whole session.`}
+                            type="button"
+                          >
+                            Stop This Runtime
+                          </button>
+                          <button
+                            className="action-button"
+                            disabled={busy || role.status !== "stopped"}
+                            onClick={() => run(() => apiClient.restartRuntimeRole(session.id, role.roleName))}
+                            title={`Restart the stopped runtime for ${roleDisplayName(role.roleName)} inside this session.`}
+                            type="button"
+                          >
+                            Restart This Runtime
+                          </button>
+                        </div>
+                        {(role.tmuxAttachCommand || role.tmuxCaptureCommand || role.runtimeHandle) ? (
+                          <details className="advanced-disclosure runtime-debug-disclosure">
+                            <summary>
+                              <div>
+                                <strong>Worker Console</strong>
+                                <p>Open or capture the live console for this lane only when deeper debugging is needed.</p>
+                              </div>
+                              <span className="chevron" aria-hidden="true" />
+                            </summary>
+                            <div className="advanced-disclosure-body">
+                              <div className="actions-grid runtime-session-actions">
+                                {role.tmuxAttachCommand ? (
+                                  <button
+                                    className="action-button"
+                                    onClick={() =>
+                                      void copyDebugCommand(
+                                        role.tmuxAttachCommand,
+                                        `${roleDisplayName(role.roleName)} attach command copied.`,
+                                      )
+                                    }
+                                    type="button"
+                                  >
+                                    Copy Console Command
+                                  </button>
+                                ) : null}
+                                {role.tmuxCaptureCommand ? (
+                                  <button
+                                    className="action-button"
+                                    onClick={() =>
+                                      void copyDebugCommand(
+                                        role.tmuxCaptureCommand,
+                                        `${roleDisplayName(role.roleName)} capture command copied.`,
+                                      )
+                                    }
+                                    type="button"
+                                  >
+                                    Copy Output Command
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          </details>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+
+                  {(runtimeStateSummary.tmuxAttachCommand || runtimeStateSummary.tmuxSocketPath) ? (
+                    <details className="advanced-disclosure runtime-debug-disclosure">
+                      <summary>
+                        <div>
+                          <strong>Session Console</strong>
+                          <p>Use this only when you need the shared runtime console for the whole session.</p>
+                        </div>
+                        <span className="chevron" aria-hidden="true" />
+                      </summary>
+                      <div className="advanced-disclosure-body">
+                        {runtimeStateSummary.tmuxAttachCommand ? (
+                          <button
+                            className="action-button"
+                            onClick={() =>
+                              void copyDebugCommand(
+                                runtimeStateSummary.tmuxAttachCommand,
+                                "Session attach command copied.",
+                              )
+                            }
+                            type="button"
+                          >
+                            Copy Session Console Command
+                          </button>
+                        ) : null}
+                      </div>
+                    </details>
+                  ) : null}
                 </div>
-                <span className="chevron" aria-hidden="true" />
-              </summary>
-              <div className="advanced-disclosure-body">
-                {runtimeStateSummary.tmuxAttachCommand ? (
-                  <button
-                    className="action-button"
-                    onClick={() =>
-                      void copyDebugCommand(
-                        runtimeStateSummary.tmuxAttachCommand,
-                        "Session attach command copied.",
-                      )
-                    }
-                    type="button"
-                  >
-                    Copy Session Console Command
-                  </button>
-                ) : null}
-              </div>
-            </details>
-          ) : null}
               </>
             );
           })()}
         </>
       )}
 
-      <div className="advanced-disclosure">
+      <div className="advanced-disclosure runtime-cleanup-disclosure">
         <button
           className="advanced-disclosure-toggle"
           onClick={() => setShowCleanup((value) => !value)}

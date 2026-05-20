@@ -1238,7 +1238,47 @@ input {
 
 .runtime-surface-stack {
   display: grid;
-  gap: 18px;
+  gap: var(--space-4);
+}
+
+.runtime-controls-stack {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.runtime-summary-list {
+  gap: 0;
+}
+
+.runtime-note-card {
+  padding: var(--space-3);
+}
+
+.runtime-session-actions {
+  gap: var(--space-3);
+}
+
+.runtime-role-stack {
+  gap: var(--space-4);
+}
+
+.runtime-role-card {
+  gap: var(--space-3);
+}
+
+.runtime-role-actions {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.runtime-debug-disclosure,
+.runtime-cleanup-disclosure {
+  margin-top: 0;
+}
+
+.runtime-log-grid {
+  gap: var(--space-4);
+  align-items: start;
 }
 
 .table-list.compact .table-row {
