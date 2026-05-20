@@ -126,6 +126,21 @@ function laneSummary(
   }
 }
 
+function runtimeConfigSummary(roleName: string, session: Session): string {
+  const roleConfig = session.role_config[roleName];
+  if (!roleConfig) {
+    return "Runtime defaults";
+  }
+
+  const parts = [roleConfig.model, roleConfig.effort].filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
+  if (parts.length > 0) {
+    return parts.join(" · ");
+  }
+  return "Runtime defaults";
+}
+
 function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_profile"]): number {
   const oneshotOrder = [
     "implementer",
@@ -309,13 +324,15 @@ export function SessionDetail({
                     key={`worker-${role.id}`}
                   >
                     <div className="subpanel-head">
-                      <strong>{roleDisplayName(role.role_name)}</strong>
+                      <strong className="workflow-pulse-role-name">{roleDisplayName(role.role_name)}</strong>
                       <span className={`status-pill status-${role.status === "running" ? "running" : role.status}`}>
                         {workerStateLabel(role, activeRoleIds)}
                       </span>
                     </div>
                     <p className="progress-card-title">{summary.title}</p>
-                    <p className="progress-card-body">{summary.body}</p>
+                    <p className="progress-card-body workflow-pulse-runtime">
+                      {runtimeConfigSummary(role.role_name, session)}
+                    </p>
                   </article>
                 );
               })}
