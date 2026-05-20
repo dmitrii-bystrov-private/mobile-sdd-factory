@@ -349,6 +349,9 @@ export function OperatorActions({
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="operator-action-group">
           {renderActionGroup(
             "Cleanup",
             "Use these only when you need to clear runtime residue or remove local task state.",
