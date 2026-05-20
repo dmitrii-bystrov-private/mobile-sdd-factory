@@ -755,6 +755,15 @@ input {
   gap: 14px;
 }
 
+.session-start-actions {
+  display: grid;
+  gap: 12px;
+  position: sticky;
+  bottom: 0;
+  padding-top: 10px;
+  background: linear-gradient(180deg, rgba(14, 19, 28, 0), rgba(14, 19, 28, 0.96) 26%);
+}
+
 .advanced-disclosure {
   display: grid;
   gap: 14px;

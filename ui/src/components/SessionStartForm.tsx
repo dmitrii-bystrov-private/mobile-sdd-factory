@@ -34,6 +34,11 @@ const REQUIREMENTS_CLARIFICATION_LABELS: Record<RequirementsClarificationMode, s
   "ask-selectively": "Ask selectively",
   autonomous: "Stay autonomous",
 };
+const WORKFLOW_PROFILE_DESCRIPTIONS: Record<WorkflowProfile, string> = {
+  oneshot: "Direct implementation flow for straightforward tasks.",
+  bug_full: "Bug workflow with testing and verification controls.",
+  story_full: "Story workflow with planning, subtasking, and clarification controls.",
+};
 
 type DraftPolicy = {
   test_policy: SessionPolicyValue;
@@ -349,6 +354,7 @@ export function SessionStartForm({
           <div className="inline-summary-header">
             <strong>{workflowProfileDisplayName(workflowProfile)}</strong>
           </div>
+          <p className="form-help">{WORKFLOW_PROFILE_DESCRIPTIONS[workflowProfile]}</p>
           <div className="inline-pill-row">
             <span className="inline-pill">Self-review {policy.self_review_policy}</span>
             <span className="inline-pill">Boy Scout {policy.boy_scout_policy}</span>
@@ -368,7 +374,8 @@ export function SessionStartForm({
             type="button"
           >
             <div>
-              <strong>Tune This Run</strong>
+              <strong>Workflow Policies</strong>
+              <p>Change optional lanes and clarification behavior for this run only.</p>
             </div>
             <span className={`chevron${showPolicyTuning ? " expanded" : ""}`} aria-hidden="true" />
           </button>
@@ -478,9 +485,13 @@ export function SessionStartForm({
               type="button"
             >
               <div>
-                <strong>Advanced Runtime Overrides</strong>
+                <strong>Lane Runtime Overrides</strong>
+                <p>Override runner, model, or effort for specific lanes in this run.</p>
               </div>
-              <span className={`chevron${showAdvancedRoleConfig ? " expanded" : ""}`} aria-hidden="true" />
+              <div className="advanced-disclosure-meta">
+                <small>{effectiveRoleNames.length} lane profiles</small>
+                <span className={`chevron${showAdvancedRoleConfig ? " expanded" : ""}`} aria-hidden="true" />
+              </div>
             </button>
             {showAdvancedRoleConfig ? (
               <div className="advanced-disclosure-body artifact-stack">
@@ -553,16 +564,18 @@ export function SessionStartForm({
           </div>
         ) : null}
 
-        <button
-          className="action-button action-button-strong"
-          disabled={busy || normalizedTaskKey.length === 0 || !isTaskKeyValid}
-          title="Create the task session, prepare the snapshot, and route the first workflow step automatically."
-          type="submit"
-        >
-          {busy ? "Starting Run…" : "Start Run"}
-        </button>
+        <div className="session-start-actions">
+          <button
+            className="action-button action-button-strong"
+            disabled={busy || normalizedTaskKey.length === 0 || !isTaskKeyValid}
+            title="Create the task session, prepare the snapshot, and route the first workflow step automatically."
+            type="submit"
+          >
+            {busy ? "Starting Run…" : "Start Run"}
+          </button>
 
-        {error ? <p className="error-banner">{error}</p> : null}
+          {error ? <p className="error-banner">{error}</p> : null}
+        </div>
       </form>
     </section>
   );
