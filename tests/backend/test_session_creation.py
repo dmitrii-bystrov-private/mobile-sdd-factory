@@ -2288,16 +2288,16 @@ class SessionCreationTests(unittest.TestCase):
         implementer_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
         decomposer_role = self.role_repository.get_by_name(session.id, TASK_DECOMPOSER_WORKER_ROLE)
 
-        self.assertEqual("implementation_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
-        self.assertEqual("active", updated_session.status.value)
-        self.assertEqual("implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_creation_requested", updated_session.current_stage)
+        self.assertIsNone(updated_session.current_owner)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("jira_subtasks_created", followup_event.event_type)
         self.assertEqual("stopped", decomposer_role.status.value)
         self.assertEqual(
             [
                 ("acceptance_criteria", "completed"),
                 ("constraints", "completed"),
-                ("implementation", "assigned"),
+                ("implementation", "waiting_for_operator"),
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
                 ("spec_verification", "completed"),
@@ -2332,13 +2332,11 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "task_decomposition_requested",
                 "task_decomposition_completed",
-                "role_input_dispatched",
-                "implementation_requested",
                 "jira_subtasks_created",
             ],
             [item.event_type for item in events],
         )
-        self.assertTrue(implementer_inputs)
+        self.assertEqual([], implementer_inputs)
 
     def test_task_decomposition_completed_writes_legacy_plan_package_when_provided(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -2417,9 +2415,9 @@ class SessionCreationTests(unittest.TestCase):
         artifacts = self.artifact_repository.list_for_session(session.id)
         plan_dir = Path(self.temp_dir.name) / "IOS-30003PLAN" / "plan"
 
-        self.assertEqual("implementation_requested", followup_event.event_type)
-        self.assertEqual("implementation_requested", updated_session.current_stage)
-        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("jira_subtasks_created", followup_event.event_type)
+        self.assertEqual("subtask_creation_requested", updated_session.current_stage)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
         self.assertTrue((plan_dir / "index.md").is_file())
         self.assertTrue((plan_dir / "01-build-data-source.md").is_file())
         self.assertTrue(

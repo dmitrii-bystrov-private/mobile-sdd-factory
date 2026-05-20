@@ -1243,7 +1243,22 @@ class CoordinatorService:
         )
         followup_event: Event | None = None
         if result.ok and session.current_stage in {"implementation_requested", "subtask_creation_requested"}:
-            active_item = self._find_active_primary_coding_work_item(session)
+            active_item: WorkItem | None = None
+            if session.current_stage == "implementation_requested":
+                active_item = self._find_active_primary_coding_work_item(session)
+            elif session.current_stage == "subtask_creation_requested":
+                implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+                if implementer_role is not None:
+                    active_item = next(
+                        (
+                            item
+                            for item in self.work_item_repository.list_for_session(session.id)
+                            if item.work_type == "implementation"
+                            and item.owner_role_id == implementer_role.id
+                            and item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+                        ),
+                        None,
+                    )
             decomposition_artifact = self._latest_artifact_for_session_type(
                 session.id,
                 "task_decomposition_markdown",
@@ -3321,19 +3336,28 @@ class CoordinatorService:
                 plan_index_markdown=plan_index_markdown,
                 raw_plan_task_files=raw_plan_task_files,
             )
-        implementation_event = self._enqueue_initial_implementation(
-            session=session,
-            resolved_task_key=session.task_key,
-            source_event=source_event,
-            additional_context=additional_context,
+        coding_role = self._primary_coding_role_for_work_type(session, "implementation")
+        self.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title=f"Initial implementation for {session.task_key}",
+            owner_role_id=coding_role.id,
+            source_event_id=source_event.id,
+            priority=100,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
         )
-        session = self._get_session_or_raise(session.id)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_creation_requested",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
         batch_session, batch_event, followup_event = self.create_subtasks_from_plan(session.id)
         if followup_event is not None:
             return batch_session, followup_event
         if batch_event.event_type == "jira_subtasks_creation_failed":
             return batch_session, batch_event
-        return batch_session, implementation_event
+        return batch_session, batch_event
 
     def _enqueue_subtask_graph(
         self,
