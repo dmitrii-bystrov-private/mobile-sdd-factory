@@ -56,16 +56,21 @@ export function BootstrapGuidancePanel({
       </div>
 
       {isReady ? (
-        <div className="inline-summary-card">
-          <div className="inline-summary-header">
-            <strong>Local stack ready</strong>
+        <details className="advanced-disclosure">
+          <summary>
+            <div>
+              <strong>Local stack ready</strong>
+              <p>Expand only if you need the local backend and UI addresses.</p>
+            </div>
+            <span className="chevron" aria-hidden="true" />
+          </summary>
+          <div className="advanced-disclosure-body">
+            <div className="inline-pill-row">
+              <span className="inline-pill">Backend: {guidanceSummary.backendUrl}</span>
+              <span className="inline-pill">UI: {guidanceSummary.uiUrl}</span>
+            </div>
           </div>
-          <p className="form-help">Use the launch command only when you need to restart the stack.</p>
-          <div className="inline-pill-row">
-            <span className="inline-pill">Backend: {guidanceSummary.backendUrl}</span>
-            <span className="inline-pill">UI: {guidanceSummary.uiUrl}</span>
-          </div>
-        </div>
+        </details>
       ) : (
         <div className="inline-summary-card">
           <div className="inline-summary-header">
