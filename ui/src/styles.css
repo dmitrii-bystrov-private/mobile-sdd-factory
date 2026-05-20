@@ -693,6 +693,17 @@ input {
   margin-top: 18px;
 }
 
+.operator-actions-two-column {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.operator-actions-two-column .operator-action-group {
+  margin-top: 0;
+}
+
 .operator-action-inline-heading {
   display: grid;
   gap: 6px;
@@ -701,7 +712,7 @@ input {
 .operator-actions-toolbar {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .operator-actions-toolbar .action-button {
@@ -1469,6 +1480,7 @@ input {
     grid-template-columns: 1fr;
   }
 
+  .operator-actions-two-column,
   .workflow-pulse-grid {
     grid-template-columns: 1fr;
   }

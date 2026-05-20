@@ -306,17 +306,19 @@ export function OperatorActions({
         </div>
       </div>
 
-      {renderActionGroup(
-        "Run Controls",
-        "Use these actions to refresh task state, pause the session, or recover a blocked run.",
-        runControlActions,
-      )}
+      <div className="operator-actions-two-column">
+        {renderActionGroup(
+          "Run Controls",
+          "Use these actions to refresh task state, pause the session, or recover a blocked run.",
+          runControlActions,
+        )}
 
-      {renderActionGroup(
-        "Cleanup",
-        "Use these only when you need to clear runtime residue or remove local task state.",
-        cleanupActions,
-      )}
+        {renderActionGroup(
+          "Cleanup",
+          "Use these only when you need to clear runtime residue or remove local task state.",
+          cleanupActions,
+        )}
+      </div>
 
       {canSendRuntimeInput ? (
         <div className="operator-followup-stack">
