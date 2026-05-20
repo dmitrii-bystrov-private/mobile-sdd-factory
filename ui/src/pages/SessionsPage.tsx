@@ -361,7 +361,6 @@ export function SessionsPage(): JSX.Element {
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
   const [bundle, setBundle] = useState<SessionBundle | null>(null);
   const [surfaceView, setSurfaceView] = useState<SurfaceView>("runs");
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
@@ -379,17 +378,8 @@ export function SessionsPage(): JSX.Element {
 
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? null;
-  const showBlockingLoading =
-    loading &&
-    surfaceView === "runs" &&
-    selectedSession === null &&
-    bundle === null &&
-    sessions.length === 0;
 
-  async function loadSessions(blocking = true): Promise<number | null> {
-    if (blocking) {
-      setLoading(true);
-    }
+  async function loadSessions(): Promise<number | null> {
     setError(null);
     try {
       const sessionResponse = await apiClient.listSessions();
@@ -487,10 +477,6 @@ export function SessionsPage(): JSX.Element {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load sessions");
       return null;
-    } finally {
-      if (blocking) {
-        setLoading(false);
-      }
     }
   }
 
@@ -541,7 +527,7 @@ export function SessionsPage(): JSX.Element {
   async function refreshSelected(): Promise<void> {
     setRefreshing(true);
     try {
-      const nextSelectedId = await loadSessions(false);
+      const nextSelectedId = await loadSessions();
       if (nextSelectedId !== null) {
         await loadBundle(nextSelectedId);
       } else {
@@ -757,43 +743,35 @@ export function SessionsPage(): JSX.Element {
             </section>
           ) : null}
         </div>
-        {showBlockingLoading ? (
-          <section className="panel panel-empty">
-            <p className="eyebrow">Loading</p>
-            <h2>Loading workspace</h2>
-            <p className="path-label">Fetching sessions, defaults, and environment status.</p>
-          </section>
-        ) : (
-          <section className="detail-layout">
-            <div ref={contentTopRef} />
-            {surfaceView === "runs" ? (
-              <SessionDetail
-                bundle={bundle}
-                onRefresh={refreshSelected}
-                session={selectedSession}
+        <section className="detail-layout">
+          <div ref={contentTopRef} />
+          {surfaceView === "runs" ? (
+            <SessionDetail
+              bundle={bundle}
+              onRefresh={refreshSelected}
+              session={selectedSession}
+            />
+          ) : null}
+          {surfaceView === "settings" ? (
+            <div className="settings-layout">
+              <RuntimeDefaultsPanel
+                onSaved={(summary) => {
+                  setRuntimeDefaultsSummary(summary);
+                }}
+                runtimeCapabilities={runtimeCapabilitiesSummary}
+                runtimeDefaults={runtimeDefaultsSummary}
               />
-            ) : null}
-            {surfaceView === "settings" ? (
-              <div className="settings-layout">
-                <RuntimeDefaultsPanel
-                  onSaved={(summary) => {
-                    setRuntimeDefaultsSummary(summary);
-                  }}
-                  runtimeCapabilities={runtimeCapabilitiesSummary}
-                  runtimeDefaults={runtimeDefaultsSummary}
-                />
-                {knowledgeItems.length > 0 ? <KnowledgePanel items={knowledgeItems} /> : null}
-              </div>
-            ) : null}
-            {surfaceView === "health" ? (
-              <div className="settings-layout">
-                <EnvironmentDoctorPanel doctorSummary={doctorSummary} />
-                <BootstrapGuidancePanel guidanceSummary={bootstrapGuidanceSummary} />
-                <RuntimeCapabilitiesPanel capabilities={runtimeCapabilitiesSummary} />
-              </div>
-            ) : null}
-          </section>
-        )}
+              {knowledgeItems.length > 0 ? <KnowledgePanel items={knowledgeItems} /> : null}
+            </div>
+          ) : null}
+          {surfaceView === "health" ? (
+            <div className="settings-layout">
+              <EnvironmentDoctorPanel doctorSummary={doctorSummary} />
+              <BootstrapGuidancePanel guidanceSummary={bootstrapGuidanceSummary} />
+              <RuntimeCapabilitiesPanel capabilities={runtimeCapabilitiesSummary} />
+            </div>
+          ) : null}
+        </section>
       </div>
     </main>
   );
