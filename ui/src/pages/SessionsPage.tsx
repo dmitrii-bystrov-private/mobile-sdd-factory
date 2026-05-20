@@ -751,6 +751,12 @@ export function SessionsPage(): JSX.Element {
                     ? "Project Settings"
                     : "Environment Health"}
               </h2>
+              {surfaceView === "runs" && selectedSession ? (
+                <p className="path-label">
+                  Viewing <strong>{selectedSession.task_key}</strong>
+                  {selectedSession.task_title ? ` · ${selectedSession.task_title}` : ""}
+                </p>
+              ) : null}
               {surfaceView !== "runs" ? (
                 <p className="path-label">
                   {surfaceView === "settings"
