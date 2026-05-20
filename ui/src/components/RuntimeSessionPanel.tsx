@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { apiClient } from "../api/client";
 import { roleDisplayName } from "../roleDisplay";
 import { stageDisplayName } from "../stageDisplay";
+import { useToast } from "./ToastProvider";
 import type { RuntimeSessionStateSummary, Session } from "../types";
 
 type RuntimeSessionPanelProps = {
@@ -31,15 +32,7 @@ export function RuntimeSessionPanel({
 }: RuntimeSessionPanelProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [debugNotice, setDebugNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!debugNotice) {
-      return undefined;
-    }
-    const timeoutId = window.setTimeout(() => setDebugNotice(null), 2200);
-    return () => window.clearTimeout(timeoutId);
-  }, [debugNotice]);
+  const { showToast } = useToast();
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
@@ -63,21 +56,20 @@ export function RuntimeSessionPanel({
     }
     try {
       await navigator.clipboard.writeText(command);
-      setDebugNotice(successMessage);
+      showToast(successMessage);
     } catch {
-      setDebugNotice("Copy failed");
+      showToast("Copy failed", "error");
     }
   }
 
   return (
-    <section className="panel runtime-panel">
+    <section className="panel">
       <div className="panel-header">
         <div>
           <p className="eyebrow">Runtime</p>
           <h3>Runtime Controls</h3>
         </div>
       </div>
-      {debugNotice ? <div className="runtime-toast">{debugNotice}</div> : null}
 
       {runtimeStateSummary === null || !runtimeStateSummary.available ? (
         <p className="path-label">Runtime session state is not available.</p>

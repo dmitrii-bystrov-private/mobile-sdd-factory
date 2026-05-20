@@ -1285,7 +1285,7 @@ input {
   align-items: start;
 }
 
-.runtime-toast {
+.app-toast {
   position: fixed;
   top: 18px;
   left: 50%;
@@ -1304,6 +1304,18 @@ input {
   white-space: nowrap;
   box-shadow: 0 12px 28px rgba(4, 10, 18, 0.32);
   backdrop-filter: blur(10px);
+}
+
+.app-toast-success {
+  background: rgba(73, 214, 164, 0.12);
+  border: 1px solid rgba(73, 214, 164, 0.28);
+  color: var(--mint);
+}
+
+.app-toast-error {
+  background: rgba(255, 125, 158, 0.14);
+  border: 1px solid rgba(255, 125, 158, 0.3);
+  color: #ffd5df;
 }
 
 .table-list.compact .table-row {

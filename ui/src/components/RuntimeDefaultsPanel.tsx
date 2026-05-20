@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { apiClient } from "../api/client";
 import { roleDisplayName } from "../roleDisplay";
 import { workflowProfileDisplayName } from "../sessionDisplay";
+import { useToast } from "./ToastProvider";
 import type {
   RequirementsClarificationMode,
   RuntimeCapabilitiesSummary,
@@ -87,6 +88,7 @@ export function RuntimeDefaultsPanel({
   runtimeDefaults,
   onSaved,
 }: RuntimeDefaultsPanelProps): JSX.Element {
+  const { showToast } = useToast();
   const [defaultRunner, setDefaultRunner] = useState("");
   const [roleDefaults, setRoleDefaults] = useState<Record<string, DraftRoleDefault>>({});
   const [policyDefaults, setPolicyDefaults] = useState<Record<WorkflowProfile, DraftPolicyDefaults>>({
@@ -98,7 +100,6 @@ export function RuntimeDefaultsPanel({
   const [showRoleDefaults, setShowRoleDefaults] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   const runnerIndex = useMemo(
     () => new Map((runtimeCapabilities?.runners ?? []).map((runner) => [runner.runner, runner])),
@@ -256,7 +257,6 @@ export function RuntimeDefaultsPanel({
   async function handleSave(): Promise<void> {
     setBusy(true);
     setError(null);
-    setSaveNotice(null);
     try {
       const normalizedDefaultRunner = defaultRunner || null;
       const explicitRoleDefaults = Object.fromEntries(
@@ -311,7 +311,7 @@ export function RuntimeDefaultsPanel({
         knownRoles: saved.known_roles,
         sourcePath: saved.source_path,
       });
-      setSaveNotice("Runtime defaults saved.");
+      showToast("Runtime defaults saved");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save runtime defaults");
     } finally {
@@ -708,7 +708,6 @@ export function RuntimeDefaultsPanel({
             Save Runtime Defaults
           </button>
 
-          {saveNotice ? <p className="form-help form-help-success">{saveNotice}</p> : null}
           {error ? <p className="error-banner">{error}</p> : null}
         </div>
       </div>
