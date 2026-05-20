@@ -1971,6 +1971,13 @@ class CoordinatorService:
         ):
             return True
         if (
+            role_name == IMPLEMENTER_ROLE
+            and output_type == "completed"
+            and session.current_stage == "subtask_implementation_requested"
+            and self._find_active_primary_coding_work_item(session) is None
+        ):
+            return True
+        if (
             role_name == VERIFICATION_COORDINATOR_ROLE
             and output_type in {"passed", "completed", "failed", "blocked_verification_cycle", "error"}
             and session.current_owner != VERIFICATION_COORDINATOR_ROLE
