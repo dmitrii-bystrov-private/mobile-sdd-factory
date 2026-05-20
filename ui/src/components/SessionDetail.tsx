@@ -131,6 +131,70 @@ function laneSummary(
   }
 }
 
+function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_profile"]): number {
+  const oneshotOrder = [
+    "implementer",
+    "code-reviewer",
+    "verification-coordinator",
+    "code-scout",
+    "doc-harvest-worker",
+    "mr-comments-analyst-worker",
+  ];
+  const bugFullOrder = [
+    "implementer",
+    "bug-fixer",
+    "code-reviewer",
+    "verification-coordinator",
+    "code-scout",
+    "doc-harvest-worker",
+    "mr-comments-analyst-worker",
+  ];
+  const storyFullOrder = [
+    "proposal-context-worker",
+    "requirements-clarifier-worker",
+    "acceptance-criteria-worker",
+    "constraints-worker",
+    "spec-verifier-worker",
+    "story-spec-worker",
+    "task-decomposer-worker",
+    "implementer",
+    "code-reviewer",
+    "verification-coordinator",
+    "code-scout",
+    "doc-harvest-worker",
+    "mr-comments-analyst-worker",
+  ];
+
+  const orderedRoles =
+    workflowProfile === "story_full"
+      ? storyFullOrder
+      : workflowProfile === "bug_full"
+        ? bugFullOrder
+        : oneshotOrder;
+
+  const index = orderedRoles.indexOf(roleName);
+  return index === -1 ? orderedRoles.length + 1 : index;
+}
+
+function workerStateLabel(role: Role, activeRoleIds: Set<number>): string {
+  if (activeRoleIds.has(role.id)) {
+    return "Active";
+  }
+  if (role.status === "running") {
+    return "Standing by";
+  }
+  if (role.status === "waiting") {
+    return "Waiting";
+  }
+  if (role.status === "stopped") {
+    return "Stopped";
+  }
+  if (role.status === "completed") {
+    return "Completed";
+  }
+  return humanizeEventType(role.status);
+}
+
 export function SessionDetail({
   session,
   bundle,
@@ -159,24 +223,30 @@ export function SessionDetail({
       role.status === "running" &&
       (session.current_owner === role.role_name || ownedRoleNames.has(role.id)),
   );
-  const standbyRoles = visibleRoles.filter(
-    (role) =>
-      role.status === "running" &&
-      !activeRoles.some((candidate) => candidate.id === role.id),
-  );
-  const waitingRoles = visibleRoles.filter((role) => role.status === "waiting");
   const currentOwner = session.current_owner
     ? roleDisplayName(session.current_owner)
     : session.status === "active"
       ? "Awaiting assignment"
       : "Not assigned yet";
-  const hasAssignedOwner = session.current_owner !== null;
-  const betweenLiveHandoffs =
-    session.status === "active" && activeRoles.length === 0 && standbyRoles.length > 0;
   const showRoleStatusPanel =
     bundle.workItems.length > 0 ||
     visibleRoles.some((role) => role.status !== "running");
   const showFollowupContextPanel = bundle.followupContext !== null;
+  const activeRoleIds = new Set(activeRoles.map((role) => role.id));
+  const orderedRoles = [...visibleRoles].sort((left, right) => {
+    const orderDelta =
+      roleFlowOrder(left.role_name, session.workflow_profile) -
+      roleFlowOrder(right.role_name, session.workflow_profile);
+    if (orderDelta !== 0) {
+      return orderDelta;
+    }
+    return left.id - right.id;
+  });
+  const firstColumnCount = Math.ceil(orderedRoles.length / 2);
+  const workerColumns = [
+    orderedRoles.slice(0, firstColumnCount),
+    orderedRoles.slice(firstColumnCount),
+  ];
   const workflowDetailCount = [
     bundle.subtaskProgressSummary !== null && bundle.subtaskProgressSummary.available,
     bundle.jiraSubtasksSummary !== null,
@@ -244,87 +314,30 @@ export function SessionDetail({
               <h3>Workflow Pulse</h3>
             </div>
           </div>
-        <div className="grid-two progress-grid">
-          <div className="subpanel">
-            <div className="subpanel-head">
-              <strong>Active Now</strong>
-              <span className="badge badge-muted">{activeRoles.length}</span>
+        <div className="workflow-pulse-grid">
+          {workerColumns.map((column, columnIndex) => (
+            <div className="workflow-pulse-column" key={`worker-column-${columnIndex}`}>
+              {column.map((role) => {
+                const summary = laneSummary(role, bundle.workItems, session);
+                const isActive = activeRoleIds.has(role.id);
+                return (
+                  <article
+                    className={`progress-card workflow-pulse-card${isActive ? " workflow-pulse-card-active" : ""}`}
+                    key={`worker-${role.id}`}
+                  >
+                    <div className="subpanel-head">
+                      <strong>{roleDisplayName(role.role_name)}</strong>
+                      <span className={`status-pill status-${role.status === "running" ? "running" : role.status}`}>
+                        {workerStateLabel(role, activeRoleIds)}
+                      </span>
+                    </div>
+                    <p className="progress-card-title">{summary.title}</p>
+                    <p className="progress-card-body">{summary.body}</p>
+                  </article>
+                );
+              })}
             </div>
-            {activeRoles.length > 0 ? (
-              <div className="progress-card-stack">
-                {activeRoles.map((role) => {
-                  const summary = laneSummary(role, bundle.workItems, session);
-                  return (
-                    <article className="progress-card" key={`active-${role.id}`}>
-                      <div className="subpanel-head">
-                        <strong>{roleDisplayName(role.role_name)}</strong>
-                        <span className="status-pill status-running">Active</span>
-                      </div>
-                      <p className="progress-card-title">{summary.title}</p>
-                      <p className="progress-card-body">{summary.body}</p>
-                    </article>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="path-label">
-                {betweenLiveHandoffs
-                  ? "No lane is executing right now. Live runtimes are standing by for the next handoff."
-                  : hasAssignedOwner
-                    ? "No lane is executing right now, even though the stage already has an owner."
-                    : "No lane has taken ownership yet. The workflow is still preparing the next assignment."}
-              </p>
-            )}
-          </div>
-
-          <div className="subpanel">
-            <div className="subpanel-head">
-              <strong>Standing By</strong>
-              <span className="badge badge-muted">{standbyRoles.length}</span>
-            </div>
-            {standbyRoles.length > 0 ? (
-              <div className="compact-role-list">
-                {standbyRoles.map((role) => {
-                  const summary = laneSummary(role, bundle.workItems, session);
-                  return (
-                    <article className="compact-role-card" key={`standby-${role.id}`}>
-                      <div className="subpanel-head">
-                        <strong>{roleDisplayName(role.role_name)}</strong>
-                        <span className="status-pill status-running">Standing by</span>
-                      </div>
-                      <p className="progress-card-body">{summary.title}</p>
-                    </article>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="path-label">No live lanes are currently standing by.</p>
-            )}
-          </div>
-
-          {waitingRoles.length > 0 ? (
-            <div className="subpanel">
-              <div className="subpanel-head">
-                <strong>Waiting</strong>
-                <span className="badge badge-muted">{waitingRoles.length}</span>
-              </div>
-              <div className="progress-card-stack">
-                {waitingRoles.map((role) => {
-                  const summary = laneSummary(role, bundle.workItems, session);
-                  return (
-                    <article className="progress-card" key={`waiting-${role.id}`}>
-                      <div className="subpanel-head">
-                        <strong>{roleDisplayName(role.role_name)}</strong>
-                        <span className="status-pill status-waiting">Waiting</span>
-                      </div>
-                      <p className="progress-card-title">{summary.title}</p>
-                      <p className="progress-card-body">{summary.body}</p>
-                    </article>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
+          ))}
         </div>
 
       </section>

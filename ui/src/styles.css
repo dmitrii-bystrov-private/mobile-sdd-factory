@@ -312,6 +312,7 @@ input {
 }
 
 .status-paused,
+.status-waiting,
 .status-waiting_for_operator {
   background: rgba(196, 135, 31, 0.14);
   color: var(--gold);
@@ -1059,6 +1060,30 @@ input {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.workflow-pulse-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.workflow-pulse-column {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.workflow-pulse-card {
+  min-height: 100%;
+}
+
+.workflow-pulse-card-active {
+  border-color: rgba(73, 214, 164, 0.5);
+  box-shadow: 0 0 0 1px rgba(73, 214, 164, 0.18);
+  background:
+    linear-gradient(135deg, rgba(73, 214, 164, 0.08), rgba(255, 255, 255, 0.04)),
+    rgba(255, 255, 255, 0.04);
+}
+
 .progress-card-title,
 .progress-card-body {
   margin: 0;
@@ -1423,6 +1448,10 @@ input {
 
   .hero-heading-row,
   .hero-status-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .workflow-pulse-grid {
     grid-template-columns: 1fr;
   }
 
