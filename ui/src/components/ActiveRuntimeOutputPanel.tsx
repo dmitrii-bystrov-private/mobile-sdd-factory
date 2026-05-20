@@ -21,13 +21,16 @@ export function ActiveRuntimeOutputPanel({
 
   useEffect(() => {
     let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
 
-    async function loadActiveOutput(): Promise<void> {
+    async function loadActiveOutput(showLoading = false): Promise<void> {
       if (!runtimeAvailable) {
         setActiveOutput(null);
         return;
       }
-      setLoading(true);
+      if (showLoading) {
+        setLoading(true);
+      }
       try {
         const response = await apiClient.getActiveRuntimeOutput(sessionId);
         if (cancelled) {
@@ -43,15 +46,22 @@ export function ActiveRuntimeOutputPanel({
           setActiveOutput(null);
         }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && showLoading) {
           setLoading(false);
         }
       }
     }
 
-    void loadActiveOutput();
+    void loadActiveOutput(true);
+    intervalId = setInterval(() => {
+      void loadActiveOutput(false);
+    }, 1000);
+
     return () => {
       cancelled = true;
+      if (intervalId !== null) {
+        clearInterval(intervalId);
+      }
     };
   }, [runtimeAvailable, sessionId]);
 
