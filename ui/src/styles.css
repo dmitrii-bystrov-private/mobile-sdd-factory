@@ -318,7 +318,11 @@ input {
   margin-top: 10px;
 }
 
-.session-card-meta small + small::before {
+.session-card-meta-primary {
+  color: var(--ink-strong);
+}
+
+.session-card-meta:not(.session-card-meta-primary) small + small::before {
   content: "•";
   margin-right: 12px;
   color: var(--ink-soft);

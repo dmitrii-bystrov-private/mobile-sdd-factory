@@ -45,10 +45,12 @@ export function SessionList({
                   </span>
                 </div>
                 {session.task_title ? <p className="session-card-title" title={session.task_title}>{session.task_title}</p> : null}
-                <div className="session-card-meta">
-                  <small>{workflowProfileDisplayName(session.workflow_profile)}</small>
+                <div className="session-card-meta session-card-meta-primary">
                   <small>{stageDisplayName(session.current_stage)}</small>
                   <small>{session.current_owner ? roleDisplayName(session.current_owner) : "Unassigned"}</small>
+                </div>
+                <div className="session-card-meta">
+                  <small>{workflowProfileDisplayName(session.workflow_profile)}</small>
                 </div>
               </button>
             );

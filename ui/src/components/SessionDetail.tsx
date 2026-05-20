@@ -46,6 +46,37 @@ function producerDisplayName(value: string): string {
   return humanizeEventType(value);
 }
 
+function eventContextLabel(event: EventItem): string {
+  switch (event.event_type) {
+    case "task_started":
+      return "Coordinator opened the workflow.";
+    case "task_prepared":
+      return "Coordinator refreshed the task snapshot.";
+    case "role_input_dispatched":
+      return "Live runtime received a new handoff.";
+    case "implementation_requested":
+      return "Implementation lane was queued.";
+    case "self_review_requested":
+      return "Self-review lane was queued.";
+    case "self_review_correction_requested":
+      return "Self-review corrections were queued.";
+    case "verification_requested":
+      return "Verification lane was queued.";
+    case "verification_correction_requested":
+      return "Verification corrections were queued.";
+    case "boy_scout_requested":
+      return "Boy Scout lane was queued.";
+    case "mr_handoff_completed":
+      return "Delivery moved to merge request handoff.";
+    case "send_to_test_completed":
+      return "Delivery moved to test handoff.";
+    case "task_completed":
+      return "Coordinator marked the run complete.";
+    default:
+      return producerDisplayName(event.producer_type);
+  }
+}
+
 function relativeTimeLabel(value: string): string {
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) {
@@ -502,7 +533,7 @@ export function SessionDetail({
                 <div className="table-row" key={`recent-${event.id}`}>
                   <div>
                     <strong>{eventSummary(event)}</strong>
-                    <p>{producerDisplayName(event.producer_type)}</p>
+                    <p>{eventContextLabel(event)}</p>
                   </div>
                   <small>{relativeTimeLabel(event.created_at)}</small>
                 </div>
