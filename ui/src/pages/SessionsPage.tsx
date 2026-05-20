@@ -372,6 +372,7 @@ export function SessionsPage(): JSX.Element {
   const [streamState, setStreamState] = useState<"idle" | "live" | "reconnecting">("idle");
   const [lastStreamEventType, setLastStreamEventType] = useState<string | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contentTopRef = useRef<HTMLDivElement | null>(null);
 
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? null;
@@ -604,6 +605,15 @@ export function SessionsPage(): JSX.Element {
     };
   }, []);
 
+  useEffect(() => {
+    if (surfaceView !== "runs" || selectedSessionId === null) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      contentTopRef.current?.scrollIntoView({ block: "start" });
+    });
+  }, [selectedSessionId, surfaceView]);
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -754,6 +764,7 @@ export function SessionsPage(): JSX.Element {
           </section>
         ) : (
           <section className="detail-layout">
+            <div ref={contentTopRef} />
             <div className="surface-heading">
               <h2>
                 {surfaceView === "runs"

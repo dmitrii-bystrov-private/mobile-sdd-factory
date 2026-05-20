@@ -80,7 +80,7 @@ function eventContextLabel(event: EventItem): string {
 function relativeTimeLabel(value: string): string {
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) {
-    return "Unknown time";
+    return "—";
   }
   const diffMs = timestamp - Date.now();
   const diffMinutes = Math.round(diffMs / 60000);

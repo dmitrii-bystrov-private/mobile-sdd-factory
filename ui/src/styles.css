@@ -96,16 +96,20 @@ input {
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
   gap: 24px;
+  align-items: start;
 }
 
 .detail-layout {
   display: grid;
   gap: 26px;
+  align-content: start;
+  align-self: start;
 }
 
 .surface-heading {
   display: grid;
   gap: 8px;
+  margin-bottom: 4px;
 }
 
 .surface-heading h2 {
@@ -487,7 +491,7 @@ input {
 .hero-task-card {
   display: grid;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 14px;
 }
 
 .hero-title {
@@ -530,7 +534,7 @@ input {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: 16px;
 }
 
 .hero-status-item {
@@ -579,6 +583,7 @@ input {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   gap: 20px;
+  align-items: start;
   background:
     linear-gradient(135deg, rgba(24, 34, 54, 0.96), rgba(17, 23, 36, 0.96)),
     linear-gradient(90deg, rgba(255, 93, 45, 0.08), rgba(73, 214, 164, 0.06));
@@ -590,6 +595,10 @@ input {
 .progress-grid {
   display: grid;
   gap: 12px;
+}
+
+.hero-stats {
+  align-content: start;
 }
 
 .hero-stats,
@@ -707,6 +716,10 @@ input {
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--surface-muted);
+}
+
+.runtime-default-card > .form-field {
+  margin-top: 4px;
 }
 
 .runtime-default-card strong {
@@ -868,6 +881,10 @@ input {
   display: grid;
   gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.panel-sidebar .followup-form-grid {
+  grid-template-columns: 1fr;
 }
 
 .artifact-stack {
@@ -1144,6 +1161,7 @@ input {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  align-self: start;
 }
 
 .runtime-surface-stack {

@@ -139,6 +139,62 @@ Reviewed independently against the current product direction. Only items that st
   - Partially rejected.
   - Repeating the page title and the first panel title is not ideal, but it is a lower-priority copy/structure issue than the stronger health-state problems above.
 
+## Additional Review Triage
+
+Reviewed against the current live UI. Only product-relevant items were accepted into the next execution batches.
+
+### Accepted
+
+- `Workflow` / `Runtime Tools` tabs can stretch into malformed vertical pills when the sidebar grows.
+- Switching sessions does not reliably return the main content area to the top.
+- Session hero metrics can collapse into empty-looking blocks under layout stress.
+- `Workflow Policies` side-by-side selects do not have enough width in all states.
+- `Latest Activity` should not show `Unknown time`; missing/invalid time should degrade more gracefully.
+- Event stream wording still conflicts in some idle states.
+- `Settings Guide` / `Health Guide` read too much like dead navigation cards.
+- Surface headings and first cards still need stronger vertical separation.
+- `Current Session` eyebrow/title/title-meta spacing still needs more breathing room.
+- `Project Baseline` body copy and controls need clearer vertical rhythm.
+- Settings tabs, profile description, policy card, runtime override disclosure, and CTA still need more separation.
+- Queue metadata pills still need a more uniform row rhythm and clearer template.
+- Selected-state styling still over-relies on glow-like accents.
+- `Workflow Runs` heading + `Viewing ...` context is still a candidate for removal or stronger compression.
+
+### Not Accepted
+
+- `Latest Activity` missing full task title in every session is not a UI defect by itself.
+  - Some sessions simply do not have title metadata yet.
+  - The valid issue is graceful fallback, not enforced presence.
+
+- Profile description only appearing for `One-shot`.
+  - Not accepted.
+  - The form does provide profile-specific description text; this is not a real current bug.
+
+- `Local Stack` being always present is not automatically wrong.
+  - The valid issue is ready-state weight and default emphasis, not existence.
+
+## Next Execution Order
+
+1. Fix structural layout bugs.
+   - stop cross-column stretch
+   - reset scroll on session switch
+   - protect hero metrics/tabs from layout collapse
+
+2. Fix spacing/rhythm defects.
+   - surface heading vs first card
+   - hero eyebrow/title/meta spacing
+   - settings baseline/profile/CTA gaps
+   - queue metadata row rhythm
+
+3. Simplify ambiguous status language.
+   - event stream idle wording
+   - `Unknown time` fallback
+   - queue/session state mismatch copy where needed
+
+4. Reduce misleading pseudo-navigation.
+   - make `Settings Guide` / `Health Guide` read like notes, not dead links
+   - revisit whether `Workflow Runs` heading/context line should be removed or compressed
+
 ## Latest Operator Review Batch
 
 These items were reconfirmed from the current UI direction and direct operator feedback. They should be treated as the next highest-priority cleanup batch.
