@@ -14,6 +14,8 @@ type ActionDefinition = {
   description: string;
   disabled: boolean;
   strong?: boolean;
+  danger?: boolean;
+  confirmMessage?: string;
   onClick: () => Promise<void>;
 };
 
@@ -156,8 +158,8 @@ export function OperatorActions({
   const dailyActions: ActionDefinition[] = [];
   if (canRefreshSnapshot) {
     dailyActions.push({
-      label: "Refresh Snapshot",
-      description: "Refresh the task snapshot while the session is active, or reopen a completed story flow when new subtasks appear after delivery.",
+      label: "Refresh Task Snapshot",
+      description: "Pull the latest task snapshot into this run and reconcile any task-side changes.",
       disabled: busy,
       onClick: () => run(() => apiClient.refreshSnapshot(session.id)),
     });
@@ -175,9 +177,11 @@ export function OperatorActions({
   if (session.status === "active") {
     recoveryActions.push({
       label: "Pause Session",
-      description: "Pause the current workflow so the coordinator stops advancing the session automatically.",
+      description: "Pause the current workflow so no new automated steps start until you explicitly resume it.",
       disabled: busy,
-      strong: true,
+      danger: true,
+      confirmMessage:
+        "Pause this session? The coordinator will stop advancing it until you resume it.",
       onClick: () => run(() => apiClient.pauseSession(session.id)),
     });
   }
@@ -235,8 +239,7 @@ export function OperatorActions({
 
   function renderActionGroup(
     title: string,
-    _eyebrow: string,
-    _summary: string,
+    summary: string,
     actions: ActionDefinition[],
   ): JSX.Element | null {
     if (actions.length === 0) {
@@ -246,20 +249,25 @@ export function OperatorActions({
       <div className="operator-action-group">
         <div className="operator-action-inline-heading">
           <strong>{title}</strong>
+          <p className="form-help">{summary}</p>
         </div>
-        <div className="actions-grid operator-actions-grid">
+        <div className="operator-actions-toolbar">
           {actions.map((action) => (
-            <div key={action.label} className="operator-action-card">
-              <button
-                className={`action-button${action.strong ? " action-button-strong" : ""}`}
-                disabled={action.disabled}
-                onClick={() => void action.onClick()}
-                title={action.description}
-                type="button"
-              >
-                {action.label}
-              </button>
-            </div>
+            <button
+              key={action.label}
+              className={`action-button${action.strong ? " action-button-strong" : ""}${action.danger ? " action-button-danger" : ""}`}
+              disabled={action.disabled}
+              onClick={() => {
+                if (action.confirmMessage && !window.confirm(action.confirmMessage)) {
+                  return;
+                }
+                void action.onClick();
+              }}
+              title={action.description}
+              type="button"
+            >
+              {action.label}
+            </button>
           ))}
         </div>
       </div>
@@ -276,16 +284,14 @@ export function OperatorActions({
       </div>
 
       {renderActionGroup(
-        "Daily Flow",
-        "Daily",
-        "These are the operator actions that belong to normal day-to-day task handling.",
+        "Run Controls",
+        "Use these actions to refresh task state and keep the current workflow aligned.",
         dailyActions,
       )}
 
       {renderActionGroup(
-        "Recovery And Debug",
         "Recovery",
-        "Use these controls only when the happy path is blocked or you need to intervene manually.",
+        "Use these controls only when the normal flow is blocked or needs manual intervention.",
         recoveryActions,
       )}
 

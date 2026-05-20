@@ -643,21 +643,14 @@ input {
 }
 
 .operator-action-inline-heading {
-  margin-bottom: 2px;
-}
-
-.operator-actions-grid {
-  gap: 12px;
-}
-
-.operator-action-card {
   display: grid;
   gap: 6px;
-  align-content: start;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--surface-muted);
+}
+
+.operator-actions-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .worker-note {
@@ -989,6 +982,17 @@ input {
 
 .operator-actions-grid .action-button-strong {
   box-shadow: 0 10px 20px rgba(255, 93, 45, 0.18);
+}
+
+.action-button-danger {
+  background: rgba(168, 56, 37, 0.18);
+  color: #ffd8ce;
+  border-color: rgba(214, 94, 69, 0.45);
+}
+
+.action-button-danger:hover:not(:disabled) {
+  background: rgba(168, 56, 37, 0.28);
+  box-shadow: 0 12px 20px rgba(120, 40, 26, 0.2);
 }
 
 .select-input {
