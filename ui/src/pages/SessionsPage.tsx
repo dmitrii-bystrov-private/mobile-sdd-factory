@@ -374,7 +374,7 @@ export function SessionsPage(): JSX.Element {
   const [streamState, setStreamState] = useState<"idle" | "live" | "reconnecting">("idle");
   const [lastStreamEventType, setLastStreamEventType] = useState<string | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const contentTopRef = useRef<HTMLDivElement | null>(null);
+  const contentTopRef = useRef<HTMLElement | null>(null);
 
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? null;
@@ -751,8 +751,7 @@ export function SessionsPage(): JSX.Element {
             </section>
           ) : null}
         </div>
-        <section className="detail-layout">
-          <div ref={contentTopRef} />
+        <section className="detail-layout" ref={contentTopRef}>
           {surfaceView === "runs" ? (
             <SessionDetail
               bundle={bundle}
