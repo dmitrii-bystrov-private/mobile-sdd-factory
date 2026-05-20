@@ -42,6 +42,28 @@ class LoopRunnerTests(unittest.TestCase):
         self.assertGreaterEqual(status.tick_count, 1)
         self.assertGreaterEqual(len(calls), 1)
 
+    def test_background_loop_survives_callback_exception(self) -> None:
+        calls = []
+
+        def callback():
+            calls.append(time.time())
+            if len(calls) == 1:
+                raise RuntimeError("boom")
+            return None, 1, 0
+
+        runner = CoordinatorLoopRunner(callback=callback, interval_seconds=0.01)
+
+        started = runner.start()
+        time.sleep(0.06)
+        stopped = runner.stop()
+        status = runner.status()
+
+        self.assertTrue(started)
+        self.assertTrue(stopped)
+        self.assertFalse(status.running)
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertGreaterEqual(status.tick_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

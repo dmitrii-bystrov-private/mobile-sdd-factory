@@ -1918,6 +1918,24 @@ class CoordinatorService:
             and session.current_owner != CODE_REVIEWER_ROLE
         ):
             return True
+        if (
+            role_name == CODE_SCOUT_ROLE
+            and output_type in {"passed", "completed", "skipped_not_needed", "error"}
+            and session.current_owner != CODE_SCOUT_ROLE
+        ):
+            return True
+        if (
+            role_name == DOC_HARVEST_ROLE
+            and output_type in {"passed", "completed", "skipped_not_needed", "error"}
+            and session.current_owner != DOC_HARVEST_ROLE
+        ):
+            return True
+        if (
+            role_name == MR_COMMENTS_ANALYST_ROLE
+            and output_type in {"passed", "completed", "error"}
+            and session.current_owner != MR_COMMENTS_ANALYST_ROLE
+        ):
+            return True
         return False
 
     def run_loop_once(self) -> tuple[Event | None, int, int]:

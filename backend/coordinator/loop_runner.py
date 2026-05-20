@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import threading
 import time
+import traceback
 from typing import Callable
 
 
@@ -71,5 +72,8 @@ class CoordinatorLoopRunner:
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
-            self.run_once()
+            try:
+                self.run_once()
+            except Exception:
+                traceback.print_exc()
             self._stop_event.wait(self._interval_seconds)

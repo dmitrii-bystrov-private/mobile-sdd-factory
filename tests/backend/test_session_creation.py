@@ -4074,6 +4074,49 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, sum(1 for item in events if item.event_type == "implementation_completed"))
         self.assertTrue(any(item.artifact_type == "runtime_output" for item in artifacts))
 
+    def test_poll_session_output_ignores_stale_code_scout_runtime_marker_after_handoff_to_verifier(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009H",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "disabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30009H")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="code-scout",
+            output_type="completed",
+            payload={"summary": "boy scout clean"},
+        )
+        code_scout_role = self.role_repository.get_by_name(session.id, "code-scout")
+        self.session_backend.simulate_output(
+            code_scout_role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"late stale code scout result"}}',
+        )
+
+        updated_session, event, role_count, chunk_count = self.coordinator.poll_session_output(
+            session_id=session.id,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("session_output_polled", event.event_type)
+        self.assertEqual(4, role_count)
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
+        self.assertEqual(1, sum(1 for item in events if item.event_type == "boy_scout_completed"))
+        self.assertTrue(any(item.artifact_type == "runtime_output" for item in artifacts))
+
     def test_collect_role_output_records_progress_marker_without_stage_transition(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30010")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
