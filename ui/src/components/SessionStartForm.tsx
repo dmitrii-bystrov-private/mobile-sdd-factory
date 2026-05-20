@@ -302,7 +302,7 @@ export function SessionStartForm({
   }
 
   return (
-    <section className="panel panel-sidebar">
+    <section className="panel panel-sidebar sidebar-zone sidebar-zone-start">
       <div className="panel-header">
         <div>
           <p className="eyebrow">Start Session</p>

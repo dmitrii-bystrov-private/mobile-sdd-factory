@@ -156,7 +156,7 @@ export function OperatorActions({
   const dailyActions: ActionDefinition[] = [];
   if (canRefreshSnapshot) {
     dailyActions.push({
-      label: "Process Updates",
+      label: "Refresh Snapshot",
       description: "Refresh the task snapshot while the session is active, or reopen a completed story flow when new subtasks appear after delivery.",
       disabled: busy,
       onClick: () => run(() => apiClient.refreshSnapshot(session.id)),
@@ -177,6 +177,7 @@ export function OperatorActions({
       label: "Pause Session",
       description: "Pause the current workflow so the coordinator stops advancing the session automatically.",
       disabled: busy,
+      strong: true,
       onClick: () => run(() => apiClient.pauseSession(session.id)),
     });
   }

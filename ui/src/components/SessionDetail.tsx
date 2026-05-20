@@ -288,7 +288,7 @@ export function SessionDetail({
           onClick={() => setDetailSurface("runtime")}
           type="button"
         >
-          Runtime & Trace
+          Runtime Tools
         </button>
       </div>
 

@@ -162,6 +162,37 @@ input {
   align-self: start;
 }
 
+.sidebar-zone {
+  position: relative;
+}
+
+.sidebar-zone::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 24px;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.sidebar-zone-nav {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+    var(--surface-panel);
+}
+
+.sidebar-zone-queue {
+  background:
+    linear-gradient(180deg, rgba(73, 214, 164, 0.04), rgba(73, 214, 164, 0)),
+    var(--surface-panel);
+}
+
+.sidebar-zone-start {
+  background:
+    linear-gradient(180deg, rgba(255, 93, 45, 0.05), rgba(255, 93, 45, 0)),
+    var(--surface-panel);
+}
+
 .panel-header,
 .subpanel-head,
 .session-card-top {
@@ -934,6 +965,10 @@ input {
   border-color: transparent;
 }
 
+.operator-actions-grid .action-button-strong {
+  box-shadow: 0 10px 20px rgba(255, 93, 45, 0.18);
+}
+
 .select-input {
   flex: 1;
   width: 100%;
@@ -1002,13 +1037,18 @@ input {
   transition:
     transform 160ms ease,
     border-color 160ms ease,
-    box-shadow 160ms ease;
+    box-shadow 160ms ease,
+    background 160ms ease;
 }
 
 .surface-nav-card p {
   margin: 0;
   color: var(--ink-soft);
   line-height: 1.45;
+}
+
+.surface-nav-card strong {
+  transition: color 160ms ease;
 }
 
 .session-detail-nav {
@@ -1037,6 +1077,14 @@ input {
   background:
     linear-gradient(135deg, rgba(255, 93, 45, 0.12), rgba(73, 214, 164, 0.08)),
     var(--surface-muted);
+  border-color: rgba(255, 131, 92, 0.45);
+  box-shadow:
+    inset 3px 0 0 var(--brand),
+    0 12px 24px rgba(255, 93, 45, 0.12);
+}
+
+.surface-nav-card.selected strong {
+  color: #ffffff;
 }
 
 .advanced-inline-summary {

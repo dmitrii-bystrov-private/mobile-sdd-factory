@@ -615,12 +615,12 @@ export function SessionsPage(): JSX.Element {
             </small>
           </div>
           <button
-            className="action-button action-button-strong"
+            className="action-button"
             onClick={() => void refreshSelected()}
             title="Reload the session list and the currently selected session surface."
             type="button"
           >
-            Refresh Surface
+            Refresh
           </button>
         </div>
       </header>
@@ -629,7 +629,7 @@ export function SessionsPage(): JSX.Element {
 
       <div className="page-layout">
         <div className="sidebar-stack">
-          <section className="panel panel-sidebar">
+          <section className="panel panel-sidebar sidebar-zone sidebar-zone-nav">
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Workspace</p>
@@ -683,7 +683,7 @@ export function SessionsPage(): JSX.Element {
             </>
           ) : null}
           {surfaceView === "settings" ? (
-            <section className="panel panel-sidebar">
+            <section className="panel panel-sidebar sidebar-zone">
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">Settings Scope</p>
@@ -710,7 +710,7 @@ export function SessionsPage(): JSX.Element {
             </section>
           ) : null}
           {surfaceView === "health" ? (
-            <section className="panel panel-sidebar">
+            <section className="panel panel-sidebar sidebar-zone">
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">Health Scope</p>
@@ -753,7 +753,6 @@ export function SessionsPage(): JSX.Element {
         ) : (
           <section className="detail-layout">
             <div className="surface-heading">
-              <p className="eyebrow">Workspace</p>
               <h2>
                 {surfaceView === "runs"
                   ? "Workflow Runs"
