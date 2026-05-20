@@ -47,6 +47,11 @@ const REQUIREMENTS_CLARIFICATION_LABELS: Record<RequirementsClarificationMode, s
   "ask-selectively": "Ask selectively",
   autonomous: "Stay autonomous",
 };
+const WORKFLOW_PROFILE_DESCRIPTIONS: Record<WorkflowProfile, string> = {
+  oneshot: "Direct implementation flow for straightforward tasks without the extended planning chain.",
+  bug_full: "Bug-focused workflow that keeps testing and verification policies close at hand.",
+  story_full: "Story workflow with planning, subtask execution, and clarification controls.",
+};
 
 const POLICY_DEFAULT_DESCRIPTIONS: Record<
   "test_policy" | "self_review_policy" | "boy_scout_policy" | "doc_harvest_policy",
@@ -351,6 +356,7 @@ export function RuntimeDefaultsPanel({
             </button>
           ))}
         </div>
+        <p className="form-help">{WORKFLOW_PROFILE_DESCRIPTIONS[policyProfileView]}</p>
 
         {policyProfileView === "oneshot" ? (
             <div className="runtime-default-card">
@@ -599,11 +605,11 @@ export function RuntimeDefaultsPanel({
           <div>
             <strong>Advanced Role Overrides</strong>
             <p>
-              Change runner/model/effort for specific lanes when the project-wide baseline is not enough.
+              Override runner, model, or effort for specific lanes when a workflow needs different execution settings than the project baseline.
             </p>
           </div>
           <div className="advanced-disclosure-meta">
-            <small>{runtimeDefaults?.knownRoles.length ?? 0} roles</small>
+            <small>{runtimeDefaults?.knownRoles.length ?? 0} lane profiles</small>
             <span className={`chevron${showRoleDefaults ? " expanded" : ""}`} aria-hidden="true" />
           </div>
         </button>
