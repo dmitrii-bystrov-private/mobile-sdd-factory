@@ -60,9 +60,6 @@ export function InteractiveStatePanel({
       </div>
 
       <div className="interactive-question-stack">
-        {interactiveStateSummary.summary !== null ? (
-          <p className="interactive-question-summary">{interactiveStateSummary.summary}</p>
-        ) : null}
         {questionText ? (
           <div className="interactive-question-card">
             <p>{questionText}</p>
@@ -70,9 +67,8 @@ export function InteractiveStatePanel({
         ) : null}
       </div>
 
-      <form className="followup-form interactive-reply-form" onSubmit={(event) => void handleRuntimeInput(event)}>
+      <form className="followup-form interactive-reply-form interactive-reply-form-plain" onSubmit={(event) => void handleRuntimeInput(event)}>
         <label className="form-field">
-          <span>Reply</span>
           <textarea
             className="text-area-input"
             disabled={busy}

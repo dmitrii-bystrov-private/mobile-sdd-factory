@@ -954,15 +954,8 @@ input {
   gap: var(--space-3);
 }
 
-.interactive-question-summary,
 .interactive-question-card p {
   margin: 0;
-}
-
-.interactive-question-summary {
-  color: var(--ink-soft);
-  font-size: 0.9rem;
-  line-height: 1.5;
 }
 
 .interactive-question-card {
@@ -980,6 +973,11 @@ input {
 
 .interactive-reply-form {
   gap: var(--space-3);
+}
+
+.interactive-reply-form-plain {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .followup-form-grid {
