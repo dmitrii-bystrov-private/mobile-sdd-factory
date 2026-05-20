@@ -632,7 +632,7 @@ input {
 }
 
 .progress-grid {
-  align-items: start;
+  align-items: stretch;
 }
 
 .metric-card,
@@ -1008,7 +1008,8 @@ input {
 .subpanel {
   display: grid;
   gap: 14px;
-  align-self: start;
+  align-content: start;
+  height: 100%;
 }
 
 .scope-summary-list {
