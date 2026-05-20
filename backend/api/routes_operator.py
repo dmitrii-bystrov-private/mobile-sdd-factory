@@ -28,8 +28,6 @@ from backend.api.schemas import (
     RefreshSnapshotResponse,
     RefreshSubtaskStateRequest,
     RefreshSubtaskStateResponse,
-    CreateKnowledgeRequest,
-    CreateKnowledgeResponse,
     CompleteSelfReviewRequest,
     CompleteSelfReviewResponse,
     CreateMrRequest,
@@ -618,28 +616,6 @@ def refresh_snapshot(
         session=to_session_response(session),
         event_type=event.event_type,
         followup_event_type=followup_event.event_type if followup_event else None,
-    )
-
-
-@router.post("/create-knowledge", response_model=CreateKnowledgeResponse)
-def create_knowledge(
-    payload: CreateKnowledgeRequest,
-    dependencies: AppDependencies = Depends(get_dependencies),
-) -> CreateKnowledgeResponse:
-    try:
-        session, event = dependencies.coordinator_service.create_knowledge(
-            session_id=payload.session_id,
-            title=payload.title,
-            guidance=payload.guidance,
-            scope=payload.scope,
-        )
-    except IntakeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return CreateKnowledgeResponse(
-        created=True,
-        session=to_session_response(session),
-        event_type=event.event_type,
     )
 
 

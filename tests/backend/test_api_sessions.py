@@ -20,7 +20,6 @@ try:
         get_interactive_state,
         get_runtime_state,
     )
-    from backend.api.routes_knowledge import list_knowledge
     from backend.api.schemas import CreateSessionRequest, PrepareSessionRequest
     from backend.api.routes_events import inject_event, list_events
     from backend.api.routes_work_items import list_work_items
@@ -42,7 +41,7 @@ try:
     from backend.api.routes_operator import resolve_boy_scout_findings
     from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
-    from backend.api.routes_operator import create_knowledge, create_subtasks_from_plan
+    from backend.api.routes_operator import create_subtasks_from_plan
     from backend.api.routes_operator import cleanup_task
     from backend.api.routes_operator import get_bootstrap_guidance
     from backend.api.routes_operator import get_environment_doctor
@@ -62,7 +61,6 @@ try:
     from backend.api.schemas import (
         CompleteDocHarvestRequest,
         CompleteSelfReviewRequest,
-        CreateKnowledgeRequest,
         CleanupTaskRequest,
         CreateMrRequest,
         CreateSubtasksFromPlanRequest,
@@ -1833,30 +1831,6 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("verification_requested", second_response.followup_event_type)
         self.assertEqual("verification_requested", second_response.session.current_stage)
 
-    def test_create_knowledge_route_writes_repo_visible_file(self) -> None:
-        from backend.api.routes_sessions import prepare_session
-
-        prepare_response = prepare_session(
-            PrepareSessionRequest(task_key="IOS-40005KNOW"),
-            dependencies=self.dependencies,
-        )
-        response = create_knowledge(
-            CreateKnowledgeRequest(
-                session_id=prepare_response.session.id,
-                title="Reuse existing navigation assembly",
-                guidance="Prefer the existing assembly instead of adding a new navigation helper.",
-                scope="navigation",
-            ),
-            dependencies=self.dependencies,
-        )
-
-        knowledge_files = list(
-            (Path(self.temp_dir.name) / "IOS-40005KNOW" / "repo" / "knowledge").rglob("*.md")
-        )
-        self.assertTrue(response.created)
-        self.assertEqual("knowledge_created", response.event_type)
-        self.assertTrue(any("Reuse existing navigation assembly" in path.read_text() for path in knowledge_files))
-
     def test_create_subtasks_from_plan_route_records_batch_run(self) -> None:
         from backend.api.routes_sessions import create_session, prepare_session
 
@@ -1958,27 +1932,6 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("subtask_implementation_requested", response.followup_event_type)
         self.assertEqual("subtask_implementation_requested", response.session.current_stage)
         self.assertEqual("active", response.session.status)
-
-    def test_list_knowledge_route_returns_repo_visible_items(self) -> None:
-        from backend.api.routes_sessions import prepare_session
-
-        prepare_response = prepare_session(
-            PrepareSessionRequest(task_key="IOS-40008KNOW"),
-            dependencies=self.dependencies,
-        )
-        create_knowledge(
-            CreateKnowledgeRequest(
-                session_id=prepare_response.session.id,
-                title="Presenter cache owns the state",
-                guidance="Treat presenter cache as the durable source of truth in this feature area.",
-                scope="card-details",
-            ),
-            dependencies=self.dependencies,
-        )
-
-        response = list_knowledge(dependencies=self.dependencies)
-
-        self.assertTrue(any(item.title == "Presenter cache owns the state" for item in response.items))
 
     def test_verification_failed_event_returns_correction_handoff(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

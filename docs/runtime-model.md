@@ -186,12 +186,6 @@ Supported cleanup actions:
 Acceptance/test runtime cleanup is isolated separately under project-scoped runtime roots.
 Forced full cleanup remains an internal emergency seam rather than part of the normal supported operator model.
 
-## Shared Knowledge
-
-The runtime model also includes a task-local and repo-visible knowledge base under each task repo.
-
-Operators can materialize durable knowledge entries from the UI when a session uncovers guidance that should be reused later instead of rediscovered.
-
 ## Deprecated Surface
 
 The deprecated slash-command surface is not the source of truth for this runtime model.

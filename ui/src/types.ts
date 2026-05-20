@@ -55,18 +55,6 @@ export type ArtifactDetail = Artifact & {
   content?: string | null;
 };
 
-export type KnowledgeItem = {
-  id: string;
-  title: string;
-  platform: string;
-  workflow_profiles: string[];
-  task_key: string;
-  guidance: string;
-  scope?: string | null;
-  created_at: string;
-  path: string;
-};
-
 export type WorkItem = {
   id: number;
   session_id: number;

@@ -12,7 +12,6 @@ from pathlib import Path
 from backend.api.sse import SessionEventBus
 from backend.coordinator.artifacts import write_text_artifact
 from backend.coordinator.intake import IntakeError, classify_task_readiness
-from backend.knowledge.store import KnowledgeItem, KnowledgeStore
 from backend.coordinator.subtasks import completed_subtasks, read_snapshot_subtasks, unresolved_subtasks
 from backend.coordinator.hydration import build_role_hydration
 from backend.models.event import Event
@@ -76,7 +75,6 @@ class CoordinatorService:
     gitlab_adapter: GitLabAdapter | None = None
     artifacts_root: Path | None = None
     workdir_root: Path | None = None
-    knowledge_root: Path | None = None
     event_bus: SessionEventBus | None = None
     role_workspace_manager: RoleWorkspaceManager | None = None
     role_launcher_manager: RoleLauncherManager | None = None
@@ -1576,61 +1574,6 @@ class CoordinatorService:
         )
         refreshed = self._get_session_or_raise(session.id)
         return refreshed, event, followup_event
-
-    def create_knowledge(
-        self,
-        session_id: int,
-        title: str,
-        guidance: str,
-        scope: str | None = None,
-    ) -> tuple[Session, Event]:
-        session = self._get_session_or_raise(session_id)
-        knowledge_store = self._knowledge_store_for_session_or_raise(session)
-        item = knowledge_store.create_item(
-            title=title,
-            platform=self._platform_for_task_key(session.task_key),
-            workflow_profiles=[session.workflow_profile],
-            task_key=session.task_key,
-            guidance=guidance,
-            scope=scope,
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="knowledge",
-            artifact_type="knowledge_reference_markdown",
-            path=str(item.path),
-            metadata={
-                "knowledge_id": item.id,
-                "scope": item.scope,
-            },
-        )
-        event = self._append_event(
-            session_id=session.id,
-            event_type="knowledge_created",
-            producer_type="operator",
-            payload={
-                "knowledge_id": item.id,
-                "title": item.title,
-                "scope": item.scope,
-                "path": str(item.path),
-            },
-        )
-        return session, event
-
-    def list_knowledge(self) -> list[KnowledgeItem]:
-        if self.workdir_root is None or not self.workdir_root.exists():
-            return []
-        seen: set[tuple[str, str, str]] = set()
-        items: list[KnowledgeItem] = []
-        for root in sorted(self.workdir_root.glob("*/repo/knowledge")):
-            store = KnowledgeStore(root)
-            for item in store.list_items():
-                fingerprint = (item.id, item.title, item.guidance)
-                if fingerprint in seen:
-                    continue
-                seen.add(fingerprint)
-                items.append(item)
-        return items
 
     def start_subtask_graph(
         self,
@@ -5803,13 +5746,6 @@ class CoordinatorService:
                 }
             )
         return results
-
-    def _knowledge_store_for_session_or_raise(self, session: Session) -> KnowledgeStore:
-        if self.workdir_root is not None:
-            return KnowledgeStore(self.workdir_root / session.task_key / "repo" / "knowledge")
-        if self.knowledge_root is not None:
-            return KnowledgeStore(self.knowledge_root)
-        raise IntakeError("Coordinator is missing knowledge root")
 
     def _spawn_role_runtime(
         self,

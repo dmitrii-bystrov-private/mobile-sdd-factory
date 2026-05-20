@@ -31,10 +31,6 @@ def _task_tmp_root(workdir_root: Path, task_key: str) -> Path:
     return _task_snapshot_root(workdir_root, task_key) / "tmp"
 
 
-def _task_knowledge_root(workdir_root: Path, task_key: str) -> Path:
-    return _task_repo_root(workdir_root, task_key) / "knowledge"
-
-
 def _task_artifacts_root(workdir_root: Path, task_key: str) -> Path:
     return workdir_root / "factory-artifacts" / task_key
 
@@ -49,7 +45,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task artifacts and coordinator outputs: `{task_artifacts_root}`",
             "- Main repo scripts: `{repo_root}/scripts`",
             "- Project conventions: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "bug-fixer":
         return [
@@ -62,7 +57,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task artifacts and bug analysis outputs: `{task_artifacts_root}`",
             "- Main repo scripts: `{repo_root}/scripts`",
             "- Project conventions: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "verification-coordinator":
         return [
@@ -72,7 +66,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task artifacts and verification outputs: `{task_artifacts_root}`",
             "- Build/test/lint wrappers: `{repo_root}/scripts/run-build.sh`, `{repo_root}/scripts/run-test.sh`, `{repo_root}/scripts/run-lint.sh`",
             "- Final verification report target: `{task_snapshot_root}/spec/final-verification.md`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "code-reviewer":
         return [
@@ -83,7 +76,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and review outputs: `{task_artifacts_root}`",
             "- Project conventions: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "code-scout":
         return [
@@ -95,7 +87,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "mr-comments-analyst-worker":
         return [
@@ -107,7 +98,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "doc-harvest-worker":
         return [
@@ -120,7 +110,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task artifacts and documentation outputs: `{task_artifacts_root}`",
             "- Main repo diff helper: `{repo_root}/scripts/generate-diff.sh`",
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "proposal-context-worker":
         return [
@@ -134,7 +123,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "requirements-clarifier-worker":
         return [
@@ -146,7 +134,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "acceptance-criteria-worker":
         return [
@@ -159,7 +146,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "constraints-worker":
         return [
@@ -173,7 +159,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "spec-verifier-worker":
         return [
@@ -188,7 +173,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "task-decomposer-worker":
         return [
@@ -204,7 +188,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
         ]
     if role_name == "story-spec-worker":
         return [
@@ -214,7 +197,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and planning outputs: `{task_artifacts_root}`",
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Project knowledge base: `{task_knowledge_root}`",
             "- Completion boundary: stop after producing the routed planning/spec result for this task session.",
         ]
     return [
@@ -452,7 +434,6 @@ def build_role_agents_md(
             task_repo_root=_task_repo_root(workdir_root, task_key),
             task_runtime_root=_task_runtime_root(workdir_root, task_key),
             task_tmp_root=_task_tmp_root(workdir_root, task_key),
-            task_knowledge_root=_task_knowledge_root(workdir_root, task_key),
             task_artifacts_root=_task_artifacts_root(workdir_root, task_key),
         )
         for line in _role_relevant_paths(role_name)

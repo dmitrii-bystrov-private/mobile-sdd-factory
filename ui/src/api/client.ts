@@ -2,7 +2,6 @@ import type {
   Artifact,
   ArtifactDetail,
   EventItem,
-  KnowledgeItem,
   RequirementsClarificationMode,
   Role,
   RuntimeDefaultsSummary,
@@ -46,7 +45,6 @@ const STREAM_EVENT_TYPES = [
   "subtask_creation_requested",
   "subtask_implementation_requested",
   "subtask_completed",
-  "knowledge_created",
   "implementation_requested",
   "implementation_completed",
   "self_review_requested",
@@ -354,10 +352,6 @@ export const apiClient = {
     });
   },
 
-  listKnowledge(): Promise<{ items: KnowledgeItem[] }> {
-    return request("/knowledge");
-  },
-
   getArtifact(artifactId: number): Promise<ArtifactDetail> {
     return request(`/artifacts/${artifactId}`);
   },
@@ -627,27 +621,6 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify({
         session_id: sessionId,
-      }),
-    });
-  },
-
-  createKnowledge(
-    sessionId: number,
-    title: string,
-    guidance: string,
-    scope: string,
-  ): Promise<{
-    created: boolean;
-    event_type: string;
-    session: Session;
-  }> {
-    return request("/operator/create-knowledge", {
-      method: "POST",
-      body: JSON.stringify({
-        session_id: sessionId,
-        title,
-        guidance,
-        scope: scope || null,
       }),
     });
   },

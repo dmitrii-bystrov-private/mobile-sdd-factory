@@ -121,26 +121,17 @@ class FakeSnapshotAdapter:
         repo_dir = task_dir / "repo"
         repo_claude_path = repo_dir / "CLAUDE.md"
         repo_claude_dir = repo_dir / ".claude"
-        knowledge_dir = repo_dir / "knowledge"
         spec_dir = task_dir / "spec"
         placeholder_change_path = repo_dir / "placeholder_change.txt"
         task_dir.mkdir(parents=True, exist_ok=True)
         repo_dir.mkdir(parents=True, exist_ok=True)
         repo_claude_dir.mkdir(parents=True, exist_ok=True)
-        knowledge_dir.mkdir(parents=True, exist_ok=True)
         spec_dir.mkdir(parents=True, exist_ok=True)
 
         if not repo_claude_path.exists():
             repo_claude_path.write_text(
                 "# Project Conventions\n\n"
                 "- Placeholder project-local conventions for fake acceptance snapshots.\n"
-            )
-
-        readme_path = knowledge_dir / "README.md"
-        if not readme_path.exists():
-            readme_path.write_text(
-                "# Knowledge\n\n"
-                "Project-local knowledge base for fake acceptance snapshots.\n"
             )
 
         if not placeholder_change_path.exists():

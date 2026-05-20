@@ -2555,22 +2555,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
         self.assertEqual("active", updated_session.status.value)
 
-    def test_knowledge_is_repo_visible_markdown(self) -> None:
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003KNOW")
-        _, event = self.coordinator.create_knowledge(
-            session_id=session.id,
-            title="Reuse existing formatter helper",
-            guidance="Do not add a new helper here; reuse the shared formatter already used in this module.",
-            scope="shared-formatting",
-        )
-
-        knowledge_files = list(
-            (Path(self.temp_dir.name) / "IOS-30003KNOW" / "repo" / "knowledge").rglob("*.md")
-        )
-        self.assertEqual("knowledge_created", event.event_type)
-        self.assertTrue(any("Reuse existing formatter helper" in path.read_text() for path in knowledge_files))
-        self.assertTrue(any("shared-formatting" in str(path) for path in knowledge_files))
-
     def test_start_subtask_graph_converts_story_implementation_into_subtask_lane(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003SUBTASK",

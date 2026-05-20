@@ -6,7 +6,6 @@ import { BootstrapGuidancePanel } from "../components/BootstrapGuidancePanel";
 import { RuntimeCapabilitiesPanel } from "../components/RuntimeCapabilitiesPanel";
 import { RuntimeDefaultsPanel } from "../components/RuntimeDefaultsPanel";
 import { SessionDetail } from "../components/SessionDetail";
-import { KnowledgePanel } from "../components/KnowledgePanel";
 import { SessionList } from "../components/SessionList";
 import { SessionStartForm } from "../components/SessionStartForm";
 import type {
@@ -18,7 +17,6 @@ import type {
   FollowupContext,
   InteractiveStateSummary,
   JiraSubtasksSummary,
-  KnowledgeItem,
   PlanningSummary,
   PlanningStepSummary,
   RuntimeCapabilitiesSummary,
@@ -363,7 +361,6 @@ export function SessionsPage(): JSX.Element {
   const [surfaceView, setSurfaceView] = useState<SurfaceView>("runs");
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [doctorSummary, setDoctorSummary] = useState<EnvironmentDoctorSummary | null>(null);
   const [bootstrapGuidanceSummary, setBootstrapGuidanceSummary] =
     useState<BootstrapGuidanceSummary | null>(null);
@@ -383,13 +380,11 @@ export function SessionsPage(): JSX.Element {
     setError(null);
     try {
       const sessionResponse = await apiClient.listSessions();
-      const knowledgeResponse = await apiClient.listKnowledge();
       const doctorResponse = await apiClient.getEnvironmentDoctor();
       const guidanceResponse = await apiClient.getBootstrapGuidance();
       const runtimeCapabilitiesResponse = await apiClient.getRuntimeCapabilities();
       const runtimeDefaultsResponse = await apiClient.getRuntimeDefaults();
       setSessions(sessionResponse.items);
-      setKnowledgeItems(knowledgeResponse.items);
       setDoctorSummary({
         overallStatus: doctorResponse.overall_status,
         repoRoot: doctorResponse.repo_root,
@@ -722,7 +717,6 @@ export function SessionsPage(): JSX.Element {
                 runtimeCapabilities={runtimeCapabilitiesSummary}
                 runtimeDefaults={runtimeDefaultsSummary}
               />
-              {knowledgeItems.length > 0 ? <KnowledgePanel items={knowledgeItems} /> : null}
             </div>
           ) : null}
           {surfaceView === "health" ? (

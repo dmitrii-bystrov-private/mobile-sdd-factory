@@ -343,22 +343,6 @@ class ArtifactDetailResponse(BaseModel):
     content: str | None = None
 
 
-class KnowledgeItemResponse(BaseModel):
-    id: str
-    title: str
-    platform: str
-    workflow_profiles: list[str]
-    task_key: str
-    guidance: str
-    scope: str | None = None
-    created_at: str
-    path: str
-
-
-class KnowledgeItemsResponse(BaseModel):
-    items: list[KnowledgeItemResponse]
-
-
 class WorkItemResponse(BaseModel):
     id: int
     session_id: int
@@ -594,19 +578,6 @@ class RefreshSnapshotResponse(BaseModel):
     session: SessionResponse
     event_type: str
     followup_event_type: str | None = None
-
-
-class CreateKnowledgeRequest(BaseModel):
-    session_id: int
-    title: str
-    guidance: str
-    scope: str | None = None
-
-
-class CreateKnowledgeResponse(BaseModel):
-    created: bool
-    session: SessionResponse
-    event_type: str
 
 
 class CompleteDocHarvestRequest(BaseModel):
