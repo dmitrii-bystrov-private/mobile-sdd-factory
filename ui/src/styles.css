@@ -1568,6 +1568,55 @@ input {
   backdrop-filter: blur(10px);
 }
 
+.app-activity-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 18px;
+  pointer-events: none;
+}
+
+.app-activity-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-radius: 999px;
+  background: rgba(19, 27, 40, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #f5f7fb;
+  box-shadow: 0 16px 40px rgba(4, 10, 18, 0.42);
+  backdrop-filter: blur(12px);
+}
+
+.app-activity-chip strong {
+  font-size: 0.96rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.app-activity-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--accent);
+  animation: app-activity-spin 0.85s linear infinite;
+}
+
+@keyframes app-activity-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .app-toast-success {
   background: rgba(73, 214, 164, 0.12);
   border: 1px solid rgba(73, 214, 164, 0.28);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { apiClient } from "../api/client";
+import { useToast } from "./ToastProvider";
 import { workflowProfileDisplayName } from "../sessionDisplay";
 import type {
   RequirementsClarificationMode,
@@ -82,6 +83,7 @@ export function SessionStartForm({
   runtimeCapabilities,
   runtimeDefaults,
 }: SessionStartFormProps): JSX.Element {
+  const { showActivity, clearActivity } = useToast();
   const [taskKey, setTaskKey] = useState("");
   const [workflowProfile, setWorkflowProfile] = useState<WorkflowProfile>("oneshot");
   const [policy, setPolicy] = useState<DraftPolicy>(defaultDraftPolicy());
@@ -259,6 +261,7 @@ export function SessionStartForm({
 
     setBusy(true);
     setError(null);
+    showActivity("Preparing new workflow…");
     try {
       const created = await apiClient.createSession({
         task_key: normalizedTaskKey,
@@ -276,6 +279,7 @@ export function SessionStartForm({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start session");
     } finally {
+      clearActivity();
       setBusy(false);
     }
   }

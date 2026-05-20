@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { apiClient } from "../api/client";
+import { useToast } from "./ToastProvider";
 import type { InteractiveStateSummary, RuntimeSessionStateSummary, Session } from "../types";
 
 type OperatorActionsProps = {
@@ -26,19 +27,26 @@ export function OperatorActions({
   runtimeStateSummary,
   onRefresh,
 }: OperatorActionsProps): JSX.Element {
+  const { showActivity, clearActivity } = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [boyScoutSkipReason, setBoyScoutSkipReason] = useState("");
 
-  async function run(action: () => Promise<unknown>): Promise<void> {
+  async function run(action: () => Promise<unknown>, activityLabel?: string): Promise<void> {
     setBusy(true);
     setError(null);
+    if (activityLabel) {
+      showActivity(activityLabel);
+    }
     try {
       await action();
       await onRefresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown request error");
     } finally {
+      if (activityLabel) {
+        clearActivity();
+      }
       setBusy(false);
     }
   }
@@ -209,7 +217,7 @@ export function OperatorActions({
       disabled: busy,
       confirmMessage:
         "Run safe cleanup for this task? Open tasks keep their local state, while closed tasks are cleaned fully.",
-      onClick: () => run(() => apiClient.cleanupTask(session.id, "smart")),
+      onClick: () => run(() => apiClient.cleanupTask(session.id, "smart"), "Running safe cleanup…"),
     },
     {
       label: "Force Cleanup",
@@ -218,7 +226,7 @@ export function OperatorActions({
       danger: true,
       confirmMessage:
         "Force full cleanup for this task regardless of status? This will remove the task snapshot and worktree.",
-      onClick: () => run(() => apiClient.cleanupTask(session.id, "full", true)),
+      onClick: () => run(() => apiClient.cleanupTask(session.id, "full", true), "Removing task state…"),
     },
   ];
 

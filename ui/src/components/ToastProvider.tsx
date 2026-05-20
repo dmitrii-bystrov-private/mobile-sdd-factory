@@ -18,6 +18,8 @@ type ToastState = {
 
 type ToastContextValue = {
   showToast: (message: string, tone?: ToastTone) => void;
+  showActivity: (message: string) => void;
+  clearActivity: () => void;
 };
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -28,9 +30,18 @@ type ToastProviderProps = {
 
 export function ToastProvider({ children }: ToastProviderProps): JSX.Element {
   const [toast, setToast] = useState<ToastState>(null);
+  const [activityMessage, setActivityMessage] = useState<string | null>(null);
 
   const showToast = useCallback((message: string, tone: ToastTone = "success") => {
     setToast({ id: Date.now(), message, tone });
+  }, []);
+
+  const showActivity = useCallback((message: string) => {
+    setActivityMessage(message);
+  }, []);
+
+  const clearActivity = useCallback(() => {
+    setActivityMessage(null);
   }, []);
 
   useEffect(() => {
@@ -41,11 +52,22 @@ export function ToastProvider({ children }: ToastProviderProps): JSX.Element {
     return () => window.clearTimeout(timeoutId);
   }, [toast]);
 
-  const value = useMemo(() => ({ showToast }), [showToast]);
+  const value = useMemo(
+    () => ({ showToast, showActivity, clearActivity }),
+    [showToast, showActivity, clearActivity],
+  );
 
   return (
     <ToastContext.Provider value={value}>
       {children}
+      {activityMessage ? (
+        <div className="app-activity-overlay" role="status" aria-live="polite">
+          <div className="app-activity-chip">
+            <span className="app-activity-spinner" aria-hidden="true" />
+            <strong>{activityMessage}</strong>
+          </div>
+        </div>
+      ) : null}
       {toast ? (
         <div className={`app-toast app-toast-${toast.tone}`} key={toast.id} role="status" aria-live="polite">
           {toast.message}
