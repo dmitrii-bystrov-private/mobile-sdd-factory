@@ -1107,7 +1107,10 @@ input {
 }
 
 .progress-card-title {
-  font-weight: 600;
+  color: rgba(233, 240, 247, 0.82);
+  font-size: 0.84rem;
+  font-weight: 500;
+  line-height: 1.4;
 }
 
 .workflow-pulse-runtime {
