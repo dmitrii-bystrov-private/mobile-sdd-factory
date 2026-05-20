@@ -631,6 +631,10 @@ input {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.progress-grid {
+  align-items: start;
+}
+
 .metric-card,
 .subpanel {
   border: 1px solid var(--line);
@@ -1004,6 +1008,7 @@ input {
 .subpanel {
   display: grid;
   gap: 14px;
+  align-self: start;
 }
 
 .scope-summary-list {
