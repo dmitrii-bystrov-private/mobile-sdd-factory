@@ -102,9 +102,9 @@ export function OperatorActions({
     session.status === "waiting_for_operator" &&
     session.current_stage === "subtask_creation_requested" &&
     interactiveStateSummary?.sourceReason === "subtask_creation_failed";
-  const canCreateMr = session.current_stage === "mr_handoff_failed";
-  const canSendToTest = session.current_stage === "send_to_test_failed";
-  const hasStageSpecificDeliveryRetry = canCreateMr || canSendToTest;
+  const hasStageSpecificDeliveryRetry =
+    session.current_stage === "mr_handoff_failed" ||
+    session.current_stage === "send_to_test_failed";
   const needsInteractiveReply =
     session.status === "waiting_for_operator" &&
     interactiveStateSummary?.available === true &&
@@ -192,25 +192,6 @@ export function OperatorActions({
       onClick: () => run(() => apiClient.startSubtaskGraph(session.id), "Starting subtask graph…"),
     });
   }
-  if (canCreateMr) {
-    recoveryActions.push({
-      label: "Retry MR Handoff",
-      description: "Manually rerun MR handoff only after automatic delivery failed at the merge request creation step.",
-      disabled: busy,
-      strong: true,
-      onClick: () => run(() => apiClient.createMr(session.id), "Retrying MR handoff…"),
-    });
-  }
-  if (canSendToTest) {
-    recoveryActions.push({
-      label: "Retry Send To Test",
-      description: "Manually rerun send-to-test only after automatic delivery failed after MR handoff completed.",
-      disabled: busy,
-      strong: true,
-      onClick: () => run(() => apiClient.sendToTest(session.id), "Retrying send to test…"),
-    });
-  }
-
   const cleanupActions: ActionDefinition[] = [
     {
       label: "Soft Cleanup",

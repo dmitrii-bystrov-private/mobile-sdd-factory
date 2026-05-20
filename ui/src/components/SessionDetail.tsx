@@ -234,7 +234,8 @@ export function SessionDetail({
   const [workerActionBusyRoleName, setWorkerActionBusyRoleName] = useState<string | null>(null);
   const [workerActionError, setWorkerActionError] = useState<string | null>(null);
   const [deliveryFailure, setDeliveryFailure] = useState<DeliveryFailureState>(null);
-  const { showToast } = useToast();
+  const [deliveryRetryBusy, setDeliveryRetryBusy] = useState(false);
+  const { showToast, showActivity, clearActivity } = useToast();
 
   if (session === null || bundle === null) {
     return (
@@ -244,6 +245,8 @@ export function SessionDetail({
       </section>
     );
   }
+
+  const activeSession = session;
 
   const visibleRoles = bundle.roles.filter((role) => role.role_name !== "task-coordinator");
   const interactiveOwnerRoleName =
@@ -381,6 +384,28 @@ export function SessionDetail({
     }
   }
 
+  async function retryDeliveryStep(): Promise<void> {
+    const activityLabel =
+      activeSession.current_stage === "mr_handoff_failed"
+        ? "Retrying MR handoff…"
+        : "Retrying send to test…";
+    setDeliveryRetryBusy(true);
+    showActivity(activityLabel);
+    try {
+      if (activeSession.current_stage === "mr_handoff_failed") {
+        await apiClient.createMr(activeSession.id);
+      } else if (activeSession.current_stage === "send_to_test_failed") {
+        await apiClient.sendToTest(activeSession.id);
+      }
+      await onRefresh();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Unknown request error", "error");
+    } finally {
+      clearActivity();
+      setDeliveryRetryBusy(false);
+    }
+  }
+
   return (
     <section className="detail-layout">
       <div className="panel hero-panel">
@@ -441,6 +466,16 @@ export function SessionDetail({
             <pre className="completed-followup-preview-body">
               {deliveryFailure.details ?? "No stderr details were captured for this failure."}
             </pre>
+          </div>
+          <div className="completed-followup-actions">
+            <button
+              className="action-button action-button-strong"
+              disabled={deliveryRetryBusy}
+              onClick={() => void retryDeliveryStep()}
+              type="button"
+            >
+              {activeSession.current_stage === "mr_handoff_failed" ? "Retry MR Handoff" : "Retry Send To Test"}
+            </button>
           </div>
         </section>
       ) : null}
