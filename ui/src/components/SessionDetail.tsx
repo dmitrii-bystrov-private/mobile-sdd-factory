@@ -215,7 +215,6 @@ export function SessionDetail({
   }
 
   const blockerSummary = bundle.interactiveStateSummary?.summary;
-  const currentOwner = session.current_owner ? roleDisplayName(session.current_owner) : "Not assigned yet";
   const currentStage = stageDisplayName(session.current_stage);
   const visibleRoles = bundle.roles.filter((role) => role.role_name !== "task-coordinator");
   const ownedRoleNames = new Set(
@@ -234,11 +233,25 @@ export function SessionDetail({
       !activeRoles.some((candidate) => candidate.id === role.id),
   );
   const waitingRoles = visibleRoles.filter((role) => role.status === "waiting");
+  const currentOwner = session.current_owner
+    ? roleDisplayName(session.current_owner)
+    : session.status === "active"
+      ? "Awaiting assignment"
+      : "Not assigned yet";
+  const hasAssignedOwner = session.current_owner !== null;
+  const betweenLiveHandoffs =
+    session.status === "active" && activeRoles.length === 0 && standbyRoles.length > 0;
   const currentFocusTitle =
     session.status === "waiting_for_operator"
       ? "Operator attention needed"
       : session.status === "active"
-        ? `${currentStage} in progress`
+        ? activeRoles.length > 0
+          ? `${currentStage} in progress`
+          : hasAssignedOwner
+            ? `${currentStage} is queued`
+            : betweenLiveHandoffs
+              ? "Awaiting next handoff"
+              : "Preparing next lane"
         : session.status === "paused"
           ? "Session is paused"
           : session.status === "completed"
@@ -248,11 +261,13 @@ export function SessionDetail({
     session.status === "waiting_for_operator"
         ? blockerSummary ?? "The run is blocked and needs operator input before it can continue."
       : session.status === "active"
-        ? session.current_owner
+        ? activeRoles.length > 0
           ? `${currentOwner} is driving the live lane now.`
-          : standbyRoles.length > 0
-            ? "Live runtimes are standing by for the next handoff."
-            : "The run is active, but no single lane has taken ownership yet."
+          : betweenLiveHandoffs
+            ? "The workflow is between handoffs. Live runtimes are ready for the next stage to activate."
+            : hasAssignedOwner
+              ? `${currentOwner} owns the stage, but no lane is actively executing yet.`
+              : "The run is active, but the next lane has not been assigned yet."
         : session.status === "paused"
           ? "The run is paused until the external blocker is cleared."
           : session.status === "completed"
@@ -416,7 +431,13 @@ export function SessionDetail({
                 })}
               </div>
             ) : (
-              <p className="path-label">No lanes are actively working right now.</p>
+              <p className="path-label">
+                {betweenLiveHandoffs
+                  ? "No lane is executing right now. Live runtimes are standing by for the next handoff."
+                  : hasAssignedOwner
+                    ? "No lane is executing right now, even though the stage already has an owner."
+                    : "No lane has taken ownership yet. The workflow is still preparing the next assignment."}
+              </p>
             )}
           </div>
 
