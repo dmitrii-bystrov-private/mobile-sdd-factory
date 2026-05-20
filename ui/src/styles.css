@@ -1523,7 +1523,7 @@ input {
   font: 0.84rem/1.5 "IBM Plex Mono", "SFMono-Regular", monospace;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 360px;
+  max-height: 540px;
   overflow: auto;
 }
 

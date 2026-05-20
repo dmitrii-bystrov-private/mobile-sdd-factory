@@ -8,15 +8,14 @@ type ActiveRuntimeOutputPanelProps = {
   runtimeAvailable: boolean;
 };
 
-function trimTrailingLines(content: string, count: number): string {
-  if (count <= 0) {
-    return content;
-  }
+function trimPromptTail(content: string): string {
   const lines = content.split("\n");
-  if (lines.length <= count) {
-    return "";
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (/^\s*[❯›»>]\s/.test(lines[index])) {
+      return lines.slice(0, index).join("\n");
+    }
   }
-  return lines.slice(0, -count).join("\n");
+  return content;
 }
 
 export function ActiveRuntimeOutputPanel({
@@ -103,7 +102,7 @@ export function ActiveRuntimeOutputPanel({
     setFollowOutput(distanceFromBottom <= 24);
   }
 
-  const visibleContent = activeOutput ? trimTrailingLines(activeOutput.content, 4) : "";
+  const visibleContent = activeOutput ? trimPromptTail(activeOutput.content) : "";
 
   if (!runtimeAvailable) {
     return null;
