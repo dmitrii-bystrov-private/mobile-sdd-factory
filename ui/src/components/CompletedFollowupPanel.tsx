@@ -151,12 +151,17 @@ export function CompletedFollowupPanel({
         <div className="completed-followup-preview">
           <strong className="completed-followup-preview-title">Review Message</strong>
           <button
-            className="hero-link hero-link-button completed-followup-copy"
+            aria-label="Copy review message"
+            className="completed-followup-copy"
             disabled={!previewText}
             onClick={() => void copyPreview()}
+            title="Copy review message"
             type="button"
           >
-            Copy
+            <span className="completed-followup-copy-icon" aria-hidden="true">
+              <span />
+              <span />
+            </span>
           </button>
           <pre className="completed-followup-preview-body">
             {previewLoading
