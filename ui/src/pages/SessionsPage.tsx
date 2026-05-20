@@ -601,7 +601,7 @@ export function SessionsPage(): JSX.Element {
           <p className="eyebrow">SDD Factory</p>
           <h1>Operator Console</h1>
           <p className="topbar-summary">
-            Run the factory, inspect sessions, and manage project defaults.
+            Run tasks, inspect sessions, and manage project defaults.
           </p>
         </div>
         <div className="topbar-actions">
@@ -742,11 +742,11 @@ export function SessionsPage(): JSX.Element {
             <h2>
               {selectedSession?.task_key
                 ? `Loading ${selectedSession.task_key}`
-                : "Loading operator surface"}
+                : "Loading workspace"}
             </h2>
             <p className="path-label">
               {selectedSession?.task_key
-                ? "Refreshing the selected session and operator surfaces."
+                ? "Refreshing the selected session."
                 : "Fetching sessions, defaults, and environment status."}
             </p>
           </section>

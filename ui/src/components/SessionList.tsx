@@ -57,11 +57,9 @@ export function SessionList({
       ) : (
         <div className="inline-summary-card">
           <div className="inline-summary-header">
-            <strong>No workflow runs yet</strong>
+            <strong>No runs yet</strong>
           </div>
-          <p className="form-help">
-            Start a new run below to populate the queue.
-          </p>
+          <p className="form-help">Start a workflow below to populate the queue.</p>
         </div>
       )}
     </section>
