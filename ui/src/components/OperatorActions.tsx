@@ -248,7 +248,6 @@ export function OperatorActions({
       label: "Full Cleanup If Closed",
       description: "Remove the full task snapshot and worktree only when closed-task cleanup is allowed.",
       disabled: busy,
-      danger: true,
       confirmMessage:
         "Run full cleanup for this task if Jira status allows it? This can remove the task snapshot and worktree.",
       onClick: () => run(() => apiClient.cleanupTask(session.id, "full")),

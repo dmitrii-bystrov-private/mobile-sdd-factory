@@ -698,9 +698,14 @@ input {
 }
 
 .operator-actions-toolbar {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.operator-actions-toolbar .action-button {
+  width: 100%;
+  justify-content: center;
 }
 
 .worker-note {
