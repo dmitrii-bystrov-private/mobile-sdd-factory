@@ -233,27 +233,6 @@ export function RuntimeDefaultsPanel({
     }));
   }
 
-  function handleDefaultRunnerChange(nextRunner: string): void {
-    setRoleDefaults((current) => {
-      const nextRoleDefaults: Record<string, DraftRoleDefault> = {};
-      for (const roleName of loadedRuntimeDefaults.knownRoles) {
-        const currentValue = current[roleName] ?? inheritedRoleDefault(roleName, defaultRunner);
-        const currentInherited = inheritedRoleDefault(roleName, defaultRunner);
-        if (
-          currentValue.runner === currentInherited.runner &&
-          currentValue.model === currentInherited.model &&
-          currentValue.effort === currentInherited.effort
-        ) {
-          nextRoleDefaults[roleName] = inheritedRoleDefault(roleName, nextRunner);
-          continue;
-        }
-        nextRoleDefaults[roleName] = currentValue;
-      }
-      return nextRoleDefaults;
-    });
-    setDefaultRunner(nextRunner);
-  }
-
   async function handleSave(): Promise<void> {
     setBusy(true);
     setError(null);
@@ -328,34 +307,7 @@ export function RuntimeDefaultsPanel({
         </div>
       </div>
 
-      <p className="path-label">
-        Set the default runner and workflow policies for new sessions.
-      </p>
-
       <div className="settings-surface-stack">
-        <div className="runtime-default-card">
-          <div className="inline-summary-header">
-            <strong>Project Baseline</strong>
-            <span>{loadedRuntimeDefaults.knownRoles.length} lanes</span>
-          </div>
-          <p className="form-help">Session-specific lane overrides stay in Workflow Runs.</p>
-          <label className="form-field">
-            <span>Default Runner</span>
-            <select
-              className="select-input"
-              disabled={busy}
-              onChange={(event) => handleDefaultRunnerChange(event.target.value)}
-              value={defaultRunner}
-            >
-              {loadedRuntimeCapabilities.availableRunners.map((runner) => (
-                <option key={runner} value={runner}>
-                  {runner}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
         <div className="runtime-defaults-list">
           <div className="settings-profile-stack">
             <div className="inline-pill-row">
