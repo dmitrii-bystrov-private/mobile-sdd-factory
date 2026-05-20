@@ -722,6 +722,10 @@ input {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.operator-actions-toolbar-horizontal {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
 .operator-actions-toolbar .action-button {
   width: 100%;
   justify-content: center;

@@ -277,43 +277,6 @@ export function OperatorActions({
 
   const runControlActions: ActionDefinition[] = [...dailyActions, ...recoveryActions];
 
-  function renderActionGroup(
-    title: string,
-    summary: string,
-    actions: ActionDefinition[],
-  ): JSX.Element | null {
-    if (actions.length === 0) {
-      return null;
-    }
-    return (
-      <div className="operator-action-group">
-        <div className="operator-action-inline-heading">
-          <strong>{title}</strong>
-          <p className="form-help">{summary}</p>
-        </div>
-        <div className="operator-actions-toolbar">
-          {actions.map((action) => (
-            <button
-              key={action.label}
-              className={`action-button${action.strong ? " action-button-strong" : ""}${action.danger ? " action-button-danger" : ""}`}
-              disabled={action.disabled}
-              onClick={() => {
-                if (action.confirmMessage && !window.confirm(action.confirmMessage)) {
-                  return;
-                }
-                void action.onClick();
-              }}
-              title={action.description}
-              type="button"
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   return (
     <section className="panel">
       <div className="panel-header">
@@ -352,13 +315,8 @@ export function OperatorActions({
         </div>
 
         <div className="operator-action-group">
-          {renderActionGroup(
-            "Cleanup",
-            "Use these only when you need to clear runtime residue or remove local task state.",
-            cleanupActions,
-          )}
           {runtimeSessionActions.length > 0 ? (
-            <div className="operator-action-subgroup">
+            <div className="operator-action-group">
               <div className="operator-action-inline-heading">
                 <strong>Runtime Session</strong>
                 <p className="form-help">Use these only when you need to stop or relaunch every live runtime at once.</p>
@@ -386,6 +344,36 @@ export function OperatorActions({
           ) : null}
         </div>
       </div>
+
+      {cleanupActions.length > 0 ? (
+        <div className="operator-action-group operator-action-group-wide">
+          <div className="operator-action-inline-heading">
+            <strong>Cleanup</strong>
+            <p className="form-help">
+              Use these only when you need to clear runtime residue or remove local task state.
+            </p>
+          </div>
+          <div className="operator-actions-toolbar operator-actions-toolbar-horizontal">
+            {cleanupActions.map((action) => (
+              <button
+                key={action.label}
+                className={`action-button${action.strong ? " action-button-strong" : ""}${action.danger ? " action-button-danger" : ""}`}
+                disabled={action.disabled}
+                onClick={() => {
+                  if (action.confirmMessage && !window.confirm(action.confirmMessage)) {
+                    return;
+                  }
+                  void action.onClick();
+                }}
+                title={action.description}
+                type="button"
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {canSendRuntimeInput ? (
         <div className="operator-followup-stack">
