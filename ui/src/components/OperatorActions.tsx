@@ -142,14 +142,12 @@ export function OperatorActions({
     !requiresRuntimeReactivation;
   const dailyActions: ActionDefinition[] = [];
   const runtimeSessionActions: ActionDefinition[] = [];
-  if (canRefreshSnapshot) {
-    dailyActions.push({
-      label: "Refresh Task Snapshot",
-      description: "Pull the latest task snapshot into this run and reconcile any task-side changes.",
-      disabled: busy,
-      onClick: () => run(() => apiClient.refreshSnapshot(session.id)),
-    });
-  }
+  dailyActions.push({
+    label: "Refresh Task Snapshot",
+    description: "Pull the latest task snapshot into this run and reconcile any task-side changes.",
+    disabled: busy || !canRefreshSnapshot,
+    onClick: () => run(() => apiClient.refreshSnapshot(session.id)),
+  });
   if (canRefreshSubtaskState) {
     dailyActions.push({
       label: "Refresh Subtask State",
@@ -175,16 +173,14 @@ export function OperatorActions({
   }
 
   const recoveryActions: ActionDefinition[] = [];
-  if (session.status === "active") {
-    recoveryActions.push({
-      label: "Pause Session",
-      description: "Pause the current workflow so no new automated steps start until you explicitly resume it.",
-      disabled: busy,
-      confirmMessage:
-        "Pause this session? The coordinator will stop advancing it until you resume it.",
-      onClick: () => run(() => apiClient.pauseSession(session.id)),
-    });
-  }
+  recoveryActions.push({
+    label: "Pause Session",
+    description: "Pause the current workflow so no new automated steps start until you explicitly resume it.",
+    disabled: busy || session.status !== "active",
+    confirmMessage:
+      "Pause this session? The coordinator will stop advancing it until you resume it.",
+    onClick: () => run(() => apiClient.pauseSession(session.id)),
+  });
   if (session.status === "paused" || supportsGenericRecovery) {
     recoveryActions.push({
       label: "Resume Session",
