@@ -1156,7 +1156,7 @@ input {
   position: absolute;
   right: 0;
   bottom: calc(100% + 8px);
-  width: 220px;
+  width: 420px;
   display: grid;
   gap: 8px;
   padding: 10px;
