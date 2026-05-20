@@ -976,6 +976,7 @@ input {
 }
 
 .interactive-reply-form-plain {
+  margin-top: var(--space-3);
   padding-top: 0;
   border-top: 0;
 }
