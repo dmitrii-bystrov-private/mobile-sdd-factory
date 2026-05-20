@@ -67,7 +67,7 @@ export function RuntimeSessionPanel({
       <div className="panel-header">
         <div>
           <p className="eyebrow">Runtime</p>
-          <h3>Runtime Session</h3>
+          <h3>Runtime Controls</h3>
         </div>
       </div>
 
@@ -92,7 +92,7 @@ export function RuntimeSessionPanel({
               <strong>{visibleRoles.filter((role) => role.status === "stopped").length}</strong>
             </div>
             <div className="table-row">
-              <span>Session runtime</span>
+              <span>Session console</span>
               <strong>{runtimeStateSummary.runtimeSessionId ? "Available" : "Unknown"}</strong>
             </div>
           </div>
@@ -114,19 +114,19 @@ export function RuntimeSessionPanel({
               className="action-button"
               disabled={busy || visibleRoles.every((role) => role.status === "stopped")}
               onClick={() => run(() => apiClient.stopRuntimeSession(session.id))}
-              title="Stop every live role runtime in this session while keeping the task files intact."
+              title="Stop every live lane runtime in this session while keeping the task files intact."
               type="button"
             >
-              Stop Runtime Session
+              Stop All Live Runtimes
             </button>
             <button
               className="action-button"
               disabled={busy || visibleRoles.some((role) => role.status !== "stopped")}
               onClick={() => run(() => apiClient.restartRuntimeSession(session.id))}
-              title="Start the stopped runtime session again and relaunch its role runtimes."
+              title="Start the stopped runtime session again and relaunch its lane runtimes."
               type="button"
             >
-              Restart Runtime Session
+              Restart All Runtimes
             </button>
             <button
               className="action-button"
@@ -160,7 +160,7 @@ export function RuntimeSessionPanel({
                   title={`Stop the live runtime for ${roleDisplayName(role.roleName)} without stopping the whole session.`}
                   type="button"
                 >
-                  Stop Role Runtime
+                  Stop This Runtime
                 </button>
                 <button
                   className="action-button"
@@ -169,13 +169,14 @@ export function RuntimeSessionPanel({
                   title={`Restart the stopped runtime for ${roleDisplayName(role.roleName)} inside this session.`}
                   type="button"
                 >
-                  Restart Role Runtime
+                  Restart This Runtime
                 </button>
                 {(role.tmuxAttachCommand || role.tmuxCaptureCommand || role.runtimeHandle) ? (
                   <details className="advanced-disclosure">
                     <summary>
                       <div>
                         <strong>Worker Console</strong>
+                        <p>Open or capture the live console for this lane only when deeper debugging is needed.</p>
                       </div>
                       <span className="chevron" aria-hidden="true" />
                     </summary>
@@ -222,6 +223,7 @@ export function RuntimeSessionPanel({
               <summary>
                 <div>
                   <strong>Session Console</strong>
+                  <p>Use this only when you need the shared runtime console for the whole session.</p>
                 </div>
                 <span className="chevron" aria-hidden="true" />
               </summary>
@@ -257,7 +259,8 @@ export function RuntimeSessionPanel({
           type="button"
         >
           <div>
-            <strong>Cleanup And Residue Removal</strong>
+            <strong>Cleanup</strong>
+            <p>Use these only when you need to clear runtime residue or remove a closed task snapshot.</p>
           </div>
           <span className={`chevron${showCleanup ? " expanded" : ""}`} aria-hidden="true" />
         </button>

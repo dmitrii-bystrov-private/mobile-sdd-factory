@@ -35,15 +35,15 @@ export function ArtifactPanel({
     <section className="panel">
       <div className="panel-header">
         <div>
-          <p className="eyebrow">Trace</p>
-          <h3>Artifacts And Events</h3>
+          <p className="eyebrow">Debug</p>
+          <h3>Artifacts And Event Log</h3>
         </div>
       </div>
 
       <div className="grid-two">
         <div className="subpanel">
           <div className="subpanel-head">
-            <strong>Artifacts</strong>
+            <strong>Generated Files</strong>
             <span className="badge badge-muted">{artifacts.length}</span>
           </div>
           <div className="table-list limited-list">
@@ -61,7 +61,7 @@ export function ArtifactPanel({
 
         <div className="subpanel">
           <div className="subpanel-head">
-            <strong>Recent Events</strong>
+            <strong>Event Log</strong>
             <span className="badge badge-muted">{events.length}</span>
           </div>
           <div className="table-list limited-list">
@@ -69,9 +69,9 @@ export function ArtifactPanel({
               <div className="table-row" key={event.id}>
                 <div>
                   <strong>{humanizeEventType(event.event_type)}</strong>
-                  <p>{producerDisplayName(event.producer_type)}</p>
+                  <p>From {producerDisplayName(event.producer_type)}</p>
                 </div>
-                <small>#{event.id}</small>
+                <small>Event {event.id}</small>
               </div>
             ))}
           </div>
