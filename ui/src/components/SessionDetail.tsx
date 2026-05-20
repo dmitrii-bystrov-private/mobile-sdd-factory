@@ -13,7 +13,6 @@ import { SubtaskGraphPanel } from "./SubtaskGraphPanel";
 import { SubtaskProgressPanel } from "./SubtaskProgressPanel";
 import { roleDisplayName } from "../roleDisplay";
 import {
-  sessionStatusDisplayName,
   workflowProfileDisplayName,
 } from "../sessionDisplay";
 import { stageDisplayName } from "../stageDisplay";
@@ -274,9 +273,6 @@ export function SessionDetail({
     bundle.workItems.length > 0 ||
     visibleRoles.some((role) => role.status !== "running");
   const showFollowupContextPanel = bundle.followupContext !== null;
-  const runningRoleCount = activeRoles.length;
-  const standbyRoleCount = standbyRoles.length;
-  const blockedRoleCount = waitingRoles.length;
   const recentEvents = [...bundle.events].slice(-4).reverse();
   const workflowDetailCount = [
     bundle.subtaskProgressSummary !== null && bundle.subtaskProgressSummary.available,
@@ -294,7 +290,7 @@ export function SessionDetail({
           <div className="hero-heading-row">
             <div className="hero-heading-main">
               <h1 className="hero-key">{session.task_key}</h1>
-              {session.task_title ? <p className="hero-title hero-title-inline">{session.task_title}</p> : null}
+              {session.task_title ? <p className="hero-title">{session.task_title}</p> : null}
             </div>
             {session.jira_url ? (
               <a className="hero-link hero-link-button" href={session.jira_url} rel="noreferrer" target="_blank">
@@ -314,22 +310,6 @@ export function SessionDetail({
             <div className="hero-status-item">
               <span>Owner</span>
               <strong>{currentOwner}</strong>
-            </div>
-            <div className="metric-card">
-              <span>Status</span>
-              <strong>{sessionStatusDisplayName(session.status)}</strong>
-            </div>
-          <div className="metric-card">
-            <span>Active</span>
-            <strong>{runningRoleCount}</strong>
-          </div>
-          <div className="metric-card">
-            <span>Waiting</span>
-            <strong>{blockedRoleCount}</strong>
-          </div>
-            <div className="metric-card">
-              <span>Standing By</span>
-              <strong>{standbyRoleCount}</strong>
             </div>
           </div>
         </div>

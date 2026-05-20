@@ -520,15 +520,8 @@ input {
 
 .hero-heading-main {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 14px;
+  gap: var(--space-1);
   min-width: 0;
-}
-
-.hero-title-inline {
-  margin: 0;
-  -webkit-line-clamp: 2;
 }
 
 .hero-heading-row {
@@ -556,7 +549,7 @@ input {
 
 .hero-status-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-top: 18px;
 }
