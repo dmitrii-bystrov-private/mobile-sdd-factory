@@ -48,6 +48,16 @@ if [[ "$branch" == "master" ]]; then
   exit 1
 fi
 
+# Commit uncommitted changes before pushing the branch for MR creation.
+echo "Checking for uncommitted changes in $project_dir..."
+git -C "$project_dir" add -A
+if git -C "$project_dir" diff --cached --quiet; then
+  echo "Nothing to commit."
+else
+  git -C "$project_dir" commit -m "$KEY: $title"
+  echo "Committed: $KEY: $title"
+fi
+
 # Push
 echo "Pushing $branch to origin..."
 git -C "$project_dir" push -u origin "$branch"
