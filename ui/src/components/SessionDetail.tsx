@@ -1,14 +1,8 @@
 import { useState } from "react";
 
-import { FollowupContextPanel } from "./FollowupContextPanel";
 import { InteractiveStatePanel } from "./InteractiveStatePanel";
-import { JiraSubtasksPanel } from "./JiraSubtasksPanel";
 import { OperatorActions } from "./OperatorActions";
-import { PlanningArtifactPanel } from "./PlanningArtifactPanel";
-import { RoleStatusPanel } from "./RoleStatusPanel";
 import { RuntimeSessionPanel } from "./RuntimeSessionPanel";
-import { SubtaskGraphPanel } from "./SubtaskGraphPanel";
-import { SubtaskProgressPanel } from "./SubtaskProgressPanel";
 import { roleDisplayName } from "../roleDisplay";
 import {
   workflowProfileDisplayName,
@@ -201,7 +195,6 @@ export function SessionDetail({
   onRefresh,
 }: SessionDetailProps): JSX.Element {
   const [detailSurface, setDetailSurface] = useState<"workflow" | "runtime">("workflow");
-  const [showWorkflowDetails, setShowWorkflowDetails] = useState(false);
 
   if (session === null || bundle === null) {
     return (
@@ -228,10 +221,6 @@ export function SessionDetail({
     : session.status === "active"
       ? "Awaiting assignment"
       : "Not assigned yet";
-  const showRoleStatusPanel =
-    bundle.workItems.length > 0 ||
-    visibleRoles.some((role) => role.status !== "running");
-  const showFollowupContextPanel = bundle.followupContext !== null;
   const activeRoleIds = new Set(activeRoles.map((role) => role.id));
   const orderedRoles = [...visibleRoles].sort((left, right) => {
     const orderDelta =
@@ -247,13 +236,6 @@ export function SessionDetail({
     orderedRoles.slice(0, firstColumnCount),
     orderedRoles.slice(firstColumnCount),
   ];
-  const workflowDetailCount = [
-    bundle.subtaskProgressSummary !== null && bundle.subtaskProgressSummary.available,
-    bundle.jiraSubtasksSummary !== null,
-    showFollowupContextPanel,
-    bundle.subtaskGraphSummary !== null && bundle.subtaskGraphSummary.available,
-    bundle.planningSummary !== null && session.workflow_profile === "story_full",
-  ].filter(Boolean).length;
 
   return (
     <section className="detail-layout">
@@ -349,46 +331,6 @@ export function SessionDetail({
       />
 
       <InteractiveStatePanel interactiveStateSummary={bundle.interactiveStateSummary} />
-      {workflowDetailCount > 0 ? (
-        <div className="advanced-disclosure">
-          <button
-            className="advanced-disclosure-toggle"
-            onClick={() => setShowWorkflowDetails((current) => !current)}
-            aria-expanded={showWorkflowDetails}
-            type="button"
-          >
-            <div>
-              <strong>Workflow Details</strong>
-            </div>
-            <div className="advanced-disclosure-meta">
-              <small>{workflowDetailCount} detail panels</small>
-              <span className={`chevron${showWorkflowDetails ? " expanded" : ""}`} aria-hidden="true" />
-            </div>
-          </button>
-          {showWorkflowDetails ? (
-            <div className="advanced-disclosure-body runtime-surface-stack">
-              <SubtaskProgressPanel subtaskProgressSummary={bundle.subtaskProgressSummary} />
-              <JiraSubtasksPanel
-                jiraSubtasksSummary={bundle.jiraSubtasksSummary}
-                subtaskGraphSummary={bundle.subtaskGraphSummary}
-                subtaskProgressSummary={bundle.subtaskProgressSummary}
-              />
-
-              {showFollowupContextPanel ? (
-                <FollowupContextPanel followupContext={bundle.followupContext} />
-              ) : null}
-              <SubtaskGraphPanel subtaskGraphSummary={bundle.subtaskGraphSummary} />
-              <PlanningArtifactPanel
-                planningSummary={bundle.planningSummary}
-                workflowProfile={session.workflow_profile}
-              />
-              {showRoleStatusPanel ? (
-                <RoleStatusPanel roles={bundle.roles} workItems={bundle.workItems} />
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
         </>
       ) : null}
 
