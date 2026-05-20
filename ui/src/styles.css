@@ -1286,6 +1286,19 @@ input {
   align-items: start;
 }
 
+.runtime-toast {
+  margin: 0 0 var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(73, 214, 164, 0.12);
+  border: 1px solid rgba(73, 214, 164, 0.28);
+  color: var(--mint);
+  font-size: 0.84rem;
+  line-height: 1;
+}
+
 .table-list.compact .table-row {
   padding: 12px 0;
 }

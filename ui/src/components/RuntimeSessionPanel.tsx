@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { apiClient } from "../api/client";
 import { roleDisplayName } from "../roleDisplay";
@@ -33,6 +33,14 @@ export function RuntimeSessionPanel({
   const [error, setError] = useState<string | null>(null);
   const [debugNotice, setDebugNotice] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!debugNotice) {
+      return undefined;
+    }
+    const timeoutId = window.setTimeout(() => setDebugNotice(null), 2200);
+    return () => window.clearTimeout(timeoutId);
+  }, [debugNotice]);
+
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
     setError(null);
@@ -57,7 +65,7 @@ export function RuntimeSessionPanel({
       await navigator.clipboard.writeText(command);
       setDebugNotice(successMessage);
     } catch {
-      setDebugNotice("Clipboard copy failed.");
+      setDebugNotice("Copy failed");
     }
   }
 
@@ -69,6 +77,7 @@ export function RuntimeSessionPanel({
           <h3>Runtime Controls</h3>
         </div>
       </div>
+      {debugNotice ? <div className="runtime-toast">{debugNotice}</div> : null}
 
       {runtimeStateSummary === null || !runtimeStateSummary.available ? (
         <p className="path-label">Runtime session state is not available.</p>
@@ -190,7 +199,7 @@ export function RuntimeSessionPanel({
                                     onClick={() =>
                                       void copyDebugCommand(
                                         role.tmuxAttachCommand,
-                                        `${roleDisplayName(role.roleName)} attach command copied.`,
+                                        "Command copied",
                                       )
                                     }
                                     type="button"
@@ -204,7 +213,7 @@ export function RuntimeSessionPanel({
                                     onClick={() =>
                                       void copyDebugCommand(
                                         role.tmuxCaptureCommand,
-                                        `${roleDisplayName(role.roleName)} capture command copied.`,
+                                        "Command copied",
                                       )
                                     }
                                     type="button"
@@ -236,7 +245,7 @@ export function RuntimeSessionPanel({
                             onClick={() =>
                               void copyDebugCommand(
                                 runtimeStateSummary.tmuxAttachCommand,
-                                "Session attach command copied.",
+                                "Command copied",
                               )
                             }
                             type="button"
@@ -253,8 +262,6 @@ export function RuntimeSessionPanel({
           })()}
         </>
       )}
-
-      {debugNotice ? <p className="path-label">{debugNotice}</p> : null}
       {error ? <p className="error-banner">{error}</p> : null}
     </section>
   );
