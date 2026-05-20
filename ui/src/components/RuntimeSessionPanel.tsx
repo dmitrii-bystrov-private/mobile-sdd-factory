@@ -31,7 +31,6 @@ export function RuntimeSessionPanel({
 }: RuntimeSessionPanelProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showCleanup, setShowCleanup] = useState(false);
   const [debugNotice, setDebugNotice] = useState<string | null>(null);
 
   async function run(action: () => Promise<unknown>): Promise<void> {
@@ -254,45 +253,6 @@ export function RuntimeSessionPanel({
           })()}
         </>
       )}
-
-      <div className="advanced-disclosure runtime-cleanup-disclosure">
-        <button
-          className="advanced-disclosure-toggle"
-          onClick={() => setShowCleanup((value) => !value)}
-          aria-expanded={showCleanup}
-          type="button"
-        >
-          <div>
-            <strong>Cleanup</strong>
-            <p>Use these only when you need to clear runtime residue or remove a closed task snapshot.</p>
-          </div>
-          <span className={`chevron${showCleanup ? " expanded" : ""}`} aria-hidden="true" />
-        </button>
-        {showCleanup ? (
-          <div className="advanced-disclosure-body">
-            <div className="actions-grid">
-              <button
-                className="action-button"
-                disabled={busy}
-                onClick={() => run(() => apiClient.cleanupTask(session.id, "soft"))}
-                title="Stop runtime and remove task-local runtime residue while keeping the task worktree and snapshot."
-                type="button"
-              >
-                Clean Runtime Residue
-              </button>
-              <button
-                className="action-button"
-                disabled={busy}
-                onClick={() => run(() => apiClient.cleanupTask(session.id, "full"))}
-                title="Remove the full task snapshot and worktree only if the task status allows closed-task cleanup."
-                type="button"
-              >
-                Full Cleanup If Closed
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </div>
 
       {debugNotice ? <p className="path-label">{debugNotice}</p> : null}
       {error ? <p className="error-banner">{error}</p> : null}

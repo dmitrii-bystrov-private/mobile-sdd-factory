@@ -237,6 +237,33 @@ export function OperatorActions({
     });
   }
 
+  const cleanupActions: ActionDefinition[] = [
+    {
+      label: "Clean Runtime Residue",
+      description: "Stop runtime and remove task-local runtime residue while keeping the task worktree and snapshot.",
+      disabled: busy,
+      onClick: () => run(() => apiClient.cleanupTask(session.id, "soft")),
+    },
+    {
+      label: "Full Cleanup If Closed",
+      description: "Remove the full task snapshot and worktree only when closed-task cleanup is allowed.",
+      disabled: busy,
+      danger: true,
+      confirmMessage:
+        "Run full cleanup for this task if Jira status allows it? This can remove the task snapshot and worktree.",
+      onClick: () => run(() => apiClient.cleanupTask(session.id, "full")),
+    },
+    {
+      label: "Force Cleanup",
+      description: "Fully remove task snapshot and runtime residue regardless of Jira status safeguards.",
+      disabled: busy,
+      danger: true,
+      confirmMessage:
+        "Force full cleanup for this task regardless of status? This will remove the task snapshot and worktree.",
+      onClick: () => run(() => apiClient.cleanupTask(session.id, "full", true)),
+    },
+  ];
+
   function renderActionGroup(
     title: string,
     summary: string,
@@ -293,6 +320,12 @@ export function OperatorActions({
         "Recovery",
         "Use these controls only when the normal flow is blocked or needs manual intervention.",
         recoveryActions,
+      )}
+
+      {renderActionGroup(
+        "Cleanup",
+        "Use these only when you need to clear runtime residue or remove local task state.",
+        cleanupActions,
       )}
 
       {canSendRuntimeInput ? (
