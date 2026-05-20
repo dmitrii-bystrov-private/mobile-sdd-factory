@@ -158,6 +158,7 @@ export function OperatorActions({
     needsInteractiveReply;
 
   const dailyActions: ActionDefinition[] = [];
+  const runtimeSessionActions: ActionDefinition[] = [];
   if (canRefreshSnapshot) {
     dailyActions.push({
       label: "Refresh Task Snapshot",
@@ -176,13 +177,13 @@ export function OperatorActions({
   }
   if (runtimeStateSummary?.available) {
     const visibleRuntimeRoles = runtimeStateSummary.roles.filter((role) => role.roleName !== "task-coordinator");
-    dailyActions.push({
+    runtimeSessionActions.push({
       label: "Stop All Live Runtimes",
       description: "Stop every live lane runtime in this session while keeping the task files intact.",
       disabled: busy || visibleRuntimeRoles.every((role) => role.status === "stopped"),
       onClick: () => run(() => apiClient.stopRuntimeSession(session.id)),
     });
-    dailyActions.push({
+    runtimeSessionActions.push({
       label: "Restart All Runtimes",
       description: "Start the stopped runtime session again and relaunch its lane runtimes.",
       disabled: busy || visibleRuntimeRoles.some((role) => role.status !== "stopped"),
@@ -322,11 +323,60 @@ export function OperatorActions({
       </div>
 
       <div className="operator-actions-two-column">
-        {renderActionGroup(
-          "Run Controls",
-          "Use these actions to refresh task state, pause the session, or recover a blocked run.",
-          runControlActions,
-        )}
+        <div className="operator-action-group">
+          <div className="operator-action-inline-heading">
+            <strong>Run Controls</strong>
+            <p className="form-help">
+              Use these actions to refresh task state, pause the session, or recover a blocked run.
+            </p>
+          </div>
+          <div className="operator-actions-toolbar">
+            {runControlActions.map((action) => (
+              <button
+                key={action.label}
+                className={`action-button${action.strong ? " action-button-strong" : ""}${action.danger ? " action-button-danger" : ""}`}
+                disabled={action.disabled}
+                onClick={() => {
+                  if (action.confirmMessage && !window.confirm(action.confirmMessage)) {
+                    return;
+                  }
+                  void action.onClick();
+                }}
+                title={action.description}
+                type="button"
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+          {runtimeSessionActions.length > 0 ? (
+            <div className="operator-action-subgroup">
+              <div className="operator-action-inline-heading">
+                <strong>Runtime Session</strong>
+                <p className="form-help">Use these only when you need to stop or relaunch every live runtime at once.</p>
+              </div>
+              <div className="operator-actions-toolbar">
+                {runtimeSessionActions.map((action) => (
+                  <button
+                    key={action.label}
+                    className="action-button"
+                    disabled={action.disabled}
+                    onClick={() => {
+                      if (action.confirmMessage && !window.confirm(action.confirmMessage)) {
+                        return;
+                      }
+                      void action.onClick();
+                    }}
+                    title={action.description}
+                    type="button"
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
 
         {renderActionGroup(
           "Cleanup",
