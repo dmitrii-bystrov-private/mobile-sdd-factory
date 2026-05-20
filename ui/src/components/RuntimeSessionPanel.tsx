@@ -70,7 +70,7 @@ export function RuntimeSessionPanel({
   }
 
   return (
-    <section className="panel">
+    <section className="panel runtime-panel">
       <div className="panel-header">
         <div>
           <p className="eyebrow">Runtime</p>
