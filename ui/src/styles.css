@@ -106,7 +106,7 @@ input {
 
 .detail-layout {
   display: grid;
-  gap: 26px;
+  gap: var(--space-5);
   align-content: start;
   align-self: start;
 }
@@ -130,14 +130,14 @@ input {
 
 .sidebar-stack {
   display: grid;
-  gap: 18px;
+  gap: var(--space-4);
   align-self: start;
 }
 
 .panel {
   border: 1px solid var(--line);
   border-radius: 24px;
-  padding: 20px;
+  padding: var(--space-4);
   background: var(--surface-panel);
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
@@ -328,7 +328,7 @@ input {
 .stack,
 .table-list {
   display: grid;
-  gap: 12px;
+  gap: var(--space-2);
 }
 
 .session-card-meta {
@@ -482,7 +482,7 @@ input {
 
 .session-card {
   width: 100%;
-  padding: 14px;
+  padding: var(--space-3);
   text-align: left;
 }
 
@@ -527,7 +527,7 @@ input {
 
 .hero-heading-row {
   display: grid;
-  gap: 14px;
+  gap: var(--space-3);
   padding-right: 150px;
 }
 
@@ -553,8 +553,8 @@ input {
 .hero-status-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 18px;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
 }
 
 .hero-status-item,
@@ -604,7 +604,7 @@ input {
 .hero-panel {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 20px;
+  gap: var(--space-4);
   align-items: start;
   background:
     linear-gradient(135deg, rgba(24, 34, 54, 0.96), rgba(17, 23, 36, 0.96)),
@@ -619,7 +619,7 @@ input {
 .actions-grid,
 .progress-grid {
   display: grid;
-  gap: 12px;
+  gap: var(--space-2);
 }
 
 .hero-stats {
@@ -640,7 +640,7 @@ input {
 .subpanel {
   border: 1px solid var(--line);
   border-radius: 18px;
-  padding: 16px;
+  padding: var(--space-3);
   background: var(--surface-muted);
 }
 
@@ -689,13 +689,13 @@ input {
 
 .operator-action-group {
   display: grid;
-  gap: 12px;
-  margin-top: 18px;
+  gap: var(--space-3);
+  margin-top: 0;
 }
 
 .operator-actions-two-column {
   display: grid;
-  gap: 18px;
+  gap: var(--space-4);
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
 }
@@ -706,19 +706,23 @@ input {
 
 .operator-action-inline-heading {
   display: grid;
-  gap: 6px;
+  gap: var(--space-1);
+}
+
+.operator-action-group-wide {
+  margin-top: var(--space-4);
 }
 
 .operator-action-subgroup {
   display: grid;
-  gap: 12px;
-  padding-top: 12px;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
   border-top: 1px solid var(--line);
 }
 
 .operator-actions-toolbar {
   display: grid;
-  gap: 12px;
+  gap: var(--space-2);
   grid-template-columns: minmax(0, 1fr);
 }
 
@@ -947,17 +951,17 @@ input {
 .followup-form,
 .operator-followup-stack {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .followup-form {
-  padding-top: 14px;
+  padding-top: var(--space-3);
   border-top: 1px solid var(--line);
 }
 
 .followup-form-grid {
   display: grid;
-  gap: 14px;
+  gap: var(--space-3);
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -973,8 +977,8 @@ input {
 
 .artifact-card {
   display: grid;
-  gap: 12px;
-  padding: 16px;
+  gap: var(--space-3);
+  padding: var(--space-3);
   border: 1px solid var(--line);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.04);
