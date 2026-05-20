@@ -4357,6 +4357,9 @@ class CoordinatorService:
             producer_id=DOC_HARVEST_ROLE,
             emit_event=False,
         )
+        session, commit_event = self._commit_task_state(session, "doc harvest")
+        if commit_event is not None:
+            return session, commit_event
         session, event = self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
         return session, event
 

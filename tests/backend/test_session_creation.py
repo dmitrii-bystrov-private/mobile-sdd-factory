@@ -5288,6 +5288,13 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("completed", updated_session.status.value)
         self.assertEqual("send_to_test_completed", updated_session.current_stage)
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
+        self.assertEqual(
+            [
+                ("IOS-30021FH", "implementation pass"),
+                ("IOS-30021FH", "doc harvest"),
+            ],
+            self.gitlab_adapter.commit_requests,
+        )
 
     def test_doc_harvest_skipped_not_needed_completes_session_when_policy_enabled(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -5322,6 +5329,13 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("completed", updated_session.status.value)
         self.assertEqual("send_to_test_completed", updated_session.current_stage)
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
+        self.assertEqual(
+            [
+                ("IOS-30021FHE", "implementation pass"),
+                ("IOS-30021FHE", "doc harvest"),
+            ],
+            self.gitlab_adapter.commit_requests,
+        )
 
     def test_doc_harvest_skipped_not_needed_is_rejected_when_policy_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
