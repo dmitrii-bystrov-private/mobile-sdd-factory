@@ -379,6 +379,12 @@ export function SessionsPage(): JSX.Element {
 
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? null;
+  const showBlockingLoading =
+    loading &&
+    surfaceView === "runs" &&
+    selectedSession === null &&
+    bundle === null &&
+    sessions.length === 0;
 
   async function loadSessions(blocking = true): Promise<number | null> {
     if (blocking) {
@@ -751,19 +757,11 @@ export function SessionsPage(): JSX.Element {
             </section>
           ) : null}
         </div>
-        {loading ? (
+        {showBlockingLoading ? (
           <section className="panel panel-empty">
             <p className="eyebrow">Loading</p>
-            <h2>
-              {selectedSession?.task_key
-                ? `Loading ${selectedSession.task_key}`
-                : "Loading workspace"}
-            </h2>
-            <p className="path-label">
-              {selectedSession?.task_key
-                ? "Refreshing the selected session."
-                : "Fetching sessions, defaults, and environment status."}
-            </p>
+            <h2>Loading workspace</h2>
+            <p className="path-label">Fetching sessions, defaults, and environment status.</p>
           </section>
         ) : (
           <section className="detail-layout">
