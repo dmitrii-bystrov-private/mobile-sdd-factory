@@ -1293,12 +1293,13 @@ input {
   z-index: 1000;
   display: inline-flex;
   align-items: center;
-  padding: 8px 12px;
+  padding: 12px 18px;
   border-radius: 999px;
   background: rgba(73, 214, 164, 0.12);
   border: 1px solid rgba(73, 214, 164, 0.28);
   color: var(--mint);
-  font-size: 0.84rem;
+  font-size: 0.96rem;
+  font-weight: 600;
   line-height: 1;
   pointer-events: none;
   white-space: nowrap;
