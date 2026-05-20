@@ -12,8 +12,8 @@ export function BootstrapGuidancePanel({
       <section className="panel">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">Setup</p>
-            <h3>Bootstrap Guidance</h3>
+            <p className="eyebrow">Launch</p>
+            <h3>Local Stack</h3>
           </div>
         </div>
         <p className="path-label">Bootstrap guidance has not been loaded yet.</p>
@@ -27,14 +27,12 @@ export function BootstrapGuidancePanel({
     guidanceSummary.requiredActionCount === 0 && guidanceSummary.optionalActionCount === 0;
 
   return (
-    <section className="panel">
+      <section className="panel">
         <div className="panel-header">
         <div>
-          <p className="eyebrow">Setup</p>
-          <h3>Bootstrap Guidance</h3>
-          <p className="path-label">
-            Use this when the local stack is not ready yet.
-          </p>
+          <p className="eyebrow">Launch</p>
+          <h3>Local Stack</h3>
+          <p className="path-label">{isReady ? "The local stack is already reachable." : "Use this surface only when the local stack needs to be started or repaired."}</p>
         </div>
       </div>
 

@@ -863,6 +863,17 @@ input {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.artifact-card-emphasis {
+  border-color: rgba(255, 93, 45, 0.28);
+  background:
+    linear-gradient(135deg, rgba(255, 93, 45, 0.08), rgba(73, 214, 164, 0.04)),
+    rgba(255, 255, 255, 0.05);
+}
+
+.artifact-card-muted {
+  opacity: 0.82;
+}
+
 .artifact-meta {
   display: flex;
   align-items: flex-start;

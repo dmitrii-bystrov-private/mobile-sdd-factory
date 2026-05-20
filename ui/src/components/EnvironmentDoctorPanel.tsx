@@ -13,7 +13,7 @@ export function EnvironmentDoctorPanel({
         <div className="panel-header">
           <div>
             <p className="eyebrow">Doctor</p>
-            <h3>Environment Health</h3>
+            <h3>Doctor Summary</h3>
           </div>
         </div>
         <p className="path-label">Doctor data has not been loaded yet.</p>
@@ -36,11 +36,11 @@ export function EnvironmentDoctorPanel({
         : "Blocked";
 
   return (
-    <section className="panel">
+      <section className="panel">
         <div className="panel-header">
         <div>
           <p className="eyebrow">Doctor</p>
-          <h3>Environment Health</h3>
+          <h3>Doctor Summary</h3>
           <p className="path-label">
             Check environment blockers here first, before treating a broken run as workflow logic.
           </p>

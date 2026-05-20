@@ -138,7 +138,7 @@ wait_snapshot_contains "${RUNS_SNAPSHOT}" 'heading "New Workflow"'
 HEALTH_REF="$(extract_ref_by_text "${RUNS_SNAPSHOT}" 'button "Health ')"
 playwright-cli click "${HEALTH_REF}" >/dev/null
 wait_snapshot_contains "${HEALTH_SNAPSHOT}" 'heading "Environment Health"'
-grep -q 'heading "Capabilities"' "${HEALTH_SNAPSHOT}"
-grep -q 'heading "Bootstrap Guidance"' "${HEALTH_SNAPSHOT}"
+grep -q 'heading "Doctor Summary"' "${HEALTH_SNAPSHOT}"
+grep -q 'heading "Local Stack"' "${HEALTH_SNAPSHOT}"
 
 echo "UI surface smoke passed."

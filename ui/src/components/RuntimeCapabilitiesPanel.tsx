@@ -35,12 +35,12 @@ export function RuntimeCapabilitiesPanel({
 
   return (
     <section className="panel">
-      <div className="panel-header">
-        <div>
-          <p className="eyebrow">Runtime</p>
-          <h3>Capabilities</h3>
-          <p className="path-label">
-            This surface shows which runners are ready and what defaults new sessions will inherit.
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Runtime</p>
+            <h3>Runner Status</h3>
+            <p className="path-label">
+            See which runners are ready and which one new sessions inherit by default.
           </p>
         </div>
       </div>
@@ -66,7 +66,10 @@ export function RuntimeCapabilitiesPanel({
 
       <div className="artifact-stack">
         {capabilities.runners.map((runner) => (
-          <article className="artifact-card" key={runner.runner}>
+          <article
+            className={`artifact-card${capabilities.defaultRunner === runner.runner ? " artifact-card-emphasis" : ""}${runner.available ? "" : " artifact-card-muted"}`}
+            key={runner.runner}
+          >
             <div className="artifact-meta">
               <span>{runner.available ? "ready" : "missing"}</span>
               <strong>{runner.runner}</strong>
