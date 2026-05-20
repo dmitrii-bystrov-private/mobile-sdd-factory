@@ -672,6 +672,10 @@ input {
   color: var(--gold);
 }
 
+.form-help-success {
+  color: var(--mint);
+}
+
 .runtime-defaults-list {
   display: grid;
   gap: 16px;

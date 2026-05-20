@@ -79,6 +79,9 @@ export function RuntimeCapabilitiesPanel({
                 : "This runner is not currently available in the local environment."}
             </p>
             <div className="inline-pill-row">
+              {capabilities.defaultRunner === runner.runner ? (
+                <span className="inline-pill">default for new sessions</span>
+              ) : null}
               <span className="inline-pill">
                 {runner.supportsCustomModel ? "custom models supported" : "catalog only"}
               </span>

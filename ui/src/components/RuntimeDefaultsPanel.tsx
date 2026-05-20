@@ -93,6 +93,7 @@ export function RuntimeDefaultsPanel({
   const [showRoleDefaults, setShowRoleDefaults] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveNotice, setSaveNotice] = useState<string | null>(null);
 
   const runnerIndex = useMemo(
     () => new Map((runtimeCapabilities?.runners ?? []).map((runner) => [runner.runner, runner])),
@@ -239,6 +240,7 @@ export function RuntimeDefaultsPanel({
     }
     setBusy(true);
     setError(null);
+    setSaveNotice(null);
     try {
       const normalizedDefaultRunner = defaultRunner || null;
       const explicitRoleDefaults = Object.fromEntries(
@@ -293,6 +295,7 @@ export function RuntimeDefaultsPanel({
         knownRoles: saved.known_roles,
         sourcePath: saved.source_path,
       });
+      setSaveNotice("Runtime defaults saved.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save runtime defaults");
     } finally {
@@ -682,6 +685,7 @@ export function RuntimeDefaultsPanel({
         Save Runtime Defaults
       </button>
 
+      {saveNotice ? <p className="form-help form-help-success">{saveNotice}</p> : null}
       {error ? <p className="error-banner">{error}</p> : null}
     </section>
   );

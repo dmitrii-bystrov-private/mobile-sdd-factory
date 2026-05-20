@@ -23,6 +23,8 @@ export function BootstrapGuidancePanel({
 
   const overallLabel =
     guidanceSummary.requiredActionCount === 0 ? "Ready to launch" : "Setup work required";
+  const isReady =
+    guidanceSummary.requiredActionCount === 0 && guidanceSummary.optionalActionCount === 0;
 
   return (
     <section className="panel">
@@ -55,37 +57,48 @@ export function BootstrapGuidancePanel({
         </div>
       </div>
 
-      <div className="inline-summary-card">
-        <div className="inline-summary-header">
-          <strong>Launch the local stack</strong>
+      {isReady ? (
+        <div className="inline-summary-card">
+          <div className="inline-summary-header">
+            <strong>Local stack ready</strong>
+          </div>
+          <p className="form-help">Use the launch command only when you need to restart the stack.</p>
+          <div className="inline-pill-row">
+            <span className="inline-pill">Backend: {guidanceSummary.backendUrl}</span>
+            <span className="inline-pill">UI: {guidanceSummary.uiUrl}</span>
+          </div>
         </div>
-        <p className="form-help bootstrap-command">{guidanceSummary.launchCommand}</p>
-        <div className="inline-pill-row">
-          <span className="inline-pill">Backend: {guidanceSummary.backendUrl}</span>
-          <span className="inline-pill">UI: {guidanceSummary.uiUrl}</span>
+      ) : (
+        <div className="inline-summary-card">
+          <div className="inline-summary-header">
+            <strong>Launch the local stack</strong>
+          </div>
+          <p className="form-help bootstrap-command">{guidanceSummary.launchCommand}</p>
+          <div className="inline-pill-row">
+            <span className="inline-pill">Backend: {guidanceSummary.backendUrl}</span>
+            <span className="inline-pill">UI: {guidanceSummary.uiUrl}</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {[
         { title: "Required actions", items: guidanceSummary.requiredActions },
         { title: "Optional improvements", items: guidanceSummary.optionalActions },
-      ].map(({ title, items }) => (
+      ]
+        .filter(({ items }) => items.length > 0)
+        .map(({ title, items }) => (
           <div className="artifact-stack" key={title}>
             <p className="eyebrow">{title}</p>
-            {items.length > 0 ? (
-              items.map((item) => (
-                <article className="artifact-card" key={item.id}>
-                  <div className="artifact-meta">
-                    <span>{item.status}</span>
-                    <strong>{item.label}</strong>
-                  </div>
-                  <p className="artifact-path">{item.details}</p>
-                  {item.hint ? <p className="path-label">Do next: {item.hint}</p> : null}
-                </article>
-              ))
-            ) : (
-              <p className="path-label">None.</p>
-            )}
+            {items.map((item) => (
+              <article className="artifact-card" key={item.id}>
+                <div className="artifact-meta">
+                  <span>{item.status}</span>
+                  <strong>{item.label}</strong>
+                </div>
+                <p className="artifact-path">{item.details}</p>
+                {item.hint ? <p className="path-label">Do next: {item.hint}</p> : null}
+              </article>
+            ))}
           </div>
         ))}
     </section>
