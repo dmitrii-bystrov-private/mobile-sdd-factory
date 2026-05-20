@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { apiClient } from "../api/client";
 import { roleDisplayName } from "../roleDisplay";
@@ -13,11 +13,17 @@ export function ActiveRuntimeOutputPanel({
   runtimeAvailable,
 }: ActiveRuntimeOutputPanelProps): JSX.Element | null {
   const [loading, setLoading] = useState(false);
+  const [followOutput, setFollowOutput] = useState(true);
   const [activeOutput, setActiveOutput] = useState<{
     available: boolean;
     roleName: string | null;
     content: string;
   } | null>(null);
+  const outputRef = useRef<HTMLPreElement | null>(null);
+
+  useEffect(() => {
+    setFollowOutput(true);
+  }, [sessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +71,27 @@ export function ActiveRuntimeOutputPanel({
     };
   }, [runtimeAvailable, sessionId]);
 
+  useEffect(() => {
+    if (!followOutput) {
+      return;
+    }
+    const element = outputRef.current;
+    if (element === null) {
+      return;
+    }
+    element.scrollTop = element.scrollHeight;
+  }, [activeOutput?.content, followOutput]);
+
+  function handleOutputScroll(): void {
+    const element = outputRef.current;
+    if (element === null) {
+      return;
+    }
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight;
+    setFollowOutput(distanceFromBottom <= 24);
+  }
+
   if (!runtimeAvailable) {
     return null;
   }
@@ -84,7 +111,13 @@ export function ActiveRuntimeOutputPanel({
       {loading ? (
         <p className="path-label">Loading active worker output…</p>
       ) : activeOutput?.available && activeOutput.content.trim().length > 0 ? (
-        <pre className="runtime-output-content">{activeOutput.content}</pre>
+        <pre
+          className="runtime-output-content"
+          onScroll={handleOutputScroll}
+          ref={outputRef}
+        >
+          {activeOutput.content}
+        </pre>
       ) : (
         <p className="path-label">No active worker console output is available right now.</p>
       )}
