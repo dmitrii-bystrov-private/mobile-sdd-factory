@@ -526,9 +526,8 @@ input {
 
 .hero-heading-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
   gap: 14px;
+  padding-right: 150px;
 }
 
 .hero-link {
@@ -545,6 +544,9 @@ input {
   border-radius: 999px;
   background: rgba(255, 131, 92, 0.08);
   white-space: nowrap;
+  position: absolute;
+  top: 0;
+  right: 0;
 }
 
 .hero-status-strip {
@@ -606,6 +608,10 @@ input {
   background:
     linear-gradient(135deg, rgba(24, 34, 54, 0.96), rgba(17, 23, 36, 0.96)),
     linear-gradient(90deg, rgba(255, 93, 45, 0.08), rgba(73, 214, 164, 0.06));
+}
+
+.hero-copy {
+  position: relative;
 }
 
 .grid-two,
@@ -1331,6 +1337,15 @@ input {
   .hero-heading-row,
   .hero-status-strip {
     grid-template-columns: 1fr;
+  }
+
+  .hero-heading-row {
+    padding-right: 0;
+  }
+
+  .hero-link-button {
+    position: static;
+    justify-self: start;
   }
 
   .panel-sidebar {
