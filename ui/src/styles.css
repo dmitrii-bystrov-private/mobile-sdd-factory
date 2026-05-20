@@ -171,6 +171,10 @@ input {
   align-self: start;
 }
 
+.panel-sidebar .panel-header {
+  margin-bottom: var(--space-4);
+}
+
 .sidebar-zone {
   position: relative;
 }
@@ -858,15 +862,15 @@ input {
 
 .session-start-form {
   display: grid;
-  gap: 16px;
+  gap: var(--space-3);
 }
 
 .session-start-actions {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
   position: sticky;
   bottom: 0;
-  padding-top: 16px;
+  padding-top: var(--space-3);
   background: linear-gradient(180deg, rgba(14, 19, 28, 0), rgba(14, 19, 28, 0.96) 26%);
 }
 
@@ -1308,7 +1312,10 @@ input {
 .surface-nav,
 .settings-layout {
   display: grid;
-  gap: 18px;
+}
+
+.surface-nav {
+  gap: var(--space-3);
 }
 
 .settings-layout {
@@ -1321,15 +1328,15 @@ input {
 
 .sidebar-note-stack {
   display: grid;
-  gap: 14px;
+  gap: var(--space-3);
 }
 
 .surface-nav-card {
   width: 100%;
   display: grid;
-  gap: 10px;
+  gap: var(--space-2);
   text-align: left;
-  padding: 18px;
+  padding: var(--space-3);
   min-height: 108px;
   align-content: start;
   border-radius: 18px;
