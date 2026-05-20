@@ -958,15 +958,17 @@ input {
 .scope-summary-item {
   display: grid;
   gap: 6px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  padding: 6px 0 6px 14px;
+  border-left: 2px solid rgba(255, 255, 255, 0.08);
 }
 
 .scope-summary-item strong,
 .scope-summary-item p {
   margin: 0;
+}
+
+.scope-summary-item p {
+  color: var(--ink-soft);
 }
 
 .compact-role-card {

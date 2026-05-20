@@ -87,14 +87,17 @@ const PLANNING_STEP_DEFINITIONS = [
   },
 ] as const;
 
-function streamStateLabel(streamState: "live" | "reconnecting" | "idle"): string {
+function streamStateLabel(
+  streamState: "live" | "reconnecting" | "idle",
+  hasSelectedSession: boolean,
+): string {
   if (streamState === "live") {
     return "Event stream live";
   }
   if (streamState === "reconnecting") {
     return "Event stream reconnecting";
   }
-  return "Event stream idle";
+  return hasSelectedSession ? "Live updates ready" : "No live session";
 }
 
 function streamEventLabel(eventType: string | null, hasSelectedSession: boolean): string {
@@ -627,7 +630,7 @@ export function SessionsPage(): JSX.Element {
         <div className="topbar-actions">
           <div className={`live-chip live-${streamState}`}>
             <span className="live-dot" />
-            <strong>{streamStateLabel(streamState)}</strong>
+            <strong>{streamStateLabel(streamState, selectedSessionId !== null)}</strong>
             <small>
               {lastStreamEventType
                 ? streamEventLabel(lastStreamEventType, selectedSessionId !== null)
@@ -765,28 +768,16 @@ export function SessionsPage(): JSX.Element {
         ) : (
           <section className="detail-layout">
             <div ref={contentTopRef} />
-            <div className="surface-heading">
-              <h2>
-                {surfaceView === "runs"
-                  ? "Workflow Runs"
-                  : surfaceView === "settings"
-                    ? "Project Settings"
-                    : "Environment Health"}
-              </h2>
-              {surfaceView === "runs" && selectedSession ? (
-                <p className="path-label">
-                  Viewing <strong>{selectedSession.task_key}</strong>
-                  {selectedSession.task_title ? ` · ${selectedSession.task_title}` : ""}
-                </p>
-              ) : null}
-              {surfaceView !== "runs" ? (
+            {surfaceView !== "runs" ? (
+              <div className="surface-heading">
+                <h2>{surfaceView === "settings" ? "Project Settings" : "Environment Health"}</h2>
                 <p className="path-label">
                   {surfaceView === "settings"
                     ? "Manage project defaults without mixing them into run execution."
                     : "Check doctor, setup, and runtime readiness before debugging workflow logic."}
                 </p>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
             {surfaceView === "runs" ? (
               <SessionDetail
                 bundle={bundle}
