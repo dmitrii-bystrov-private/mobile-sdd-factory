@@ -331,10 +331,11 @@ input {
   color: var(--ink-strong);
 }
 
+.session-card-meta-primary small + small::before,
 .session-card-meta:not(.session-card-meta-primary) small + small::before {
   content: "•";
   margin-right: 12px;
-  color: var(--ink-soft);
+  color: rgba(232, 237, 243, 0.38);
 }
 
 .session-card-keyline {
@@ -342,16 +343,6 @@ input {
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.session-card-current {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(255, 131, 92, 0.14);
-  color: var(--brand);
-  font-size: 0.72rem;
 }
 
 .session-card-title {
@@ -572,11 +563,10 @@ input {
 
 .session-card.selected {
   background:
-    linear-gradient(135deg, rgba(255, 93, 45, 0.12), rgba(73, 214, 164, 0.06)),
+    linear-gradient(135deg, rgba(255, 93, 45, 0.08), rgba(73, 214, 164, 0.04)),
     var(--surface-strong);
-  box-shadow:
-    inset 4px 0 0 rgba(73, 214, 164, 0.85),
-    0 12px 24px rgba(209, 76, 39, 0.12);
+  border-color: rgba(255, 131, 92, 0.55);
+  box-shadow: 0 10px 20px rgba(209, 76, 39, 0.1);
 }
 
 .hero-panel {
@@ -1184,12 +1174,10 @@ input {
 
 .surface-nav-card.selected {
   background:
-    linear-gradient(135deg, rgba(255, 93, 45, 0.12), rgba(73, 214, 164, 0.08)),
+    linear-gradient(135deg, rgba(255, 93, 45, 0.08), rgba(73, 214, 164, 0.05)),
     var(--surface-muted);
   border-color: rgba(255, 131, 92, 0.45);
-  box-shadow:
-    inset 3px 0 0 var(--brand),
-    0 12px 24px rgba(255, 93, 45, 0.12);
+  box-shadow: 0 10px 20px rgba(255, 93, 45, 0.1);
 }
 
 .surface-nav-card.selected strong {

@@ -38,7 +38,6 @@ export function SessionList({
                 <div className="session-card-top">
                   <div className="session-card-keyline">
                     <strong>{session.task_key}</strong>
-                    {isSelected ? <span className="session-card-current">Selected</span> : null}
                   </div>
                   <span className={`status-pill status-${session.status}`}>
                     {sessionStatusDisplayName(session.status)}
