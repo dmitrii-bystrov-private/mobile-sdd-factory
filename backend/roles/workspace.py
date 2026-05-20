@@ -397,6 +397,8 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Treat this role as a bounded planning verifier: verify the assembled planning package, write the routed result, and exit only when the package is actually clean.",
             "- Start from the proposal, requirements, acceptance criteria, constraints, and `spec/context/feature-overview.md`; use the rest of `spec/context/*` selectively when checking planning coherence.",
+            "- Do not treat a missing `spec/spec_verification.md` as a blocker before the verification pass completes; that file is your output when the package is clean.",
+            "- Treat `spec/context/documentation.md`, `implementation-patterns.md`, `preconditions.md`, and `relevant-code.md` as optional supporting inputs unless a specific planning claim depends on them.",
             "- Fix non-blocking issues autonomously. If critical blockers remain, summarize them clearly, ask the operator direct live questions, and continue verification after answers arrive.",
             "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than re-checking the planning package.",
         ]

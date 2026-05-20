@@ -6156,6 +6156,18 @@ class CoordinatorService:
         target_path = spec_root / filename
         if explicit_markdown:
             content = explicit_markdown.rstrip() + "\n"
+        elif target_path.is_file():
+            existing_content = target_path.read_text().strip()
+            if existing_content:
+                content = existing_content.rstrip() + "\n"
+            else:
+                lines = [f"# {title}", ""]
+                for heading, body in sections:
+                    normalized = body.strip()
+                    if not normalized:
+                        continue
+                    lines.extend([f"## {heading}", "", normalized, ""])
+                content = "\n".join(lines).rstrip() + "\n"
         else:
             lines = [f"# {title}", ""]
             for heading, body in sections:

@@ -129,6 +129,8 @@ def role_runtime_rules(role_name: str) -> str:
             "Role-specific rules:\n"
             "- Treat this role as a bounded planning verifier for one story session.\n"
             "- Fix non-blocking planning issues autonomously inside the spec package when you can do so confidently.\n"
+            "- Do not require `spec/spec_verification.md` to exist before verification starts; that file is the verification result you produce when the planning package is clean.\n"
+            "- Treat `spec/context/documentation.md`, `implementation-patterns.md`, `preconditions.md`, and `relevant-code.md` as optional context inputs. Their absence alone is not a blocker unless a specific planning claim cannot be verified without them.\n"
             "- If critical blockers remain, stop the planning flow, summarize the blockers clearly, and ask the operator direct follow-up questions in the live session instead of guessing.\n"
             "- Use `failed` output when blocker resolution from the operator is required; after the operator replies, continue verification in the same live session.\n"
             "- Use `completed` output only when the planning package is ready for the next story-spec step.\n\n"

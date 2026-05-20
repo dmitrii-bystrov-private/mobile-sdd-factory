@@ -127,6 +127,21 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("durable implementation guide", text)
         self.assertIn("architecture-sensitive decisions", text)
 
+    def test_full_prompt_restores_spec_verifier_optional_input_contract(self) -> None:
+        text = role_handoff_prompt(
+            role_name="spec-verifier-worker",
+            instruction="Verify the assembled planning package for IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "spec_verification_requested",
+                "work_item_id": 9,
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("Do not require `spec/spec_verification.md` to exist before verification starts", text)
+        self.assertIn("Their absence alone is not a blocker", text)
+
     def test_full_prompt_restores_task_decomposer_self_contained_plan_contract(self) -> None:
         text = role_handoff_prompt(
             role_name="task-decomposer-worker",

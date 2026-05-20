@@ -3613,6 +3613,35 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue((spec_root / "spec_verification.md").is_file())
         self.assertTrue((spec_root / "story_spec.md").is_file())
 
+    def test_proposal_completion_preserves_existing_written_markdown(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30006PRESERVE",
+            workflow_profile="story_full",
+            policy={"requirements_clarification_mode": "autonomous"},
+        )
+        self.coordinator.prepare_task_session("IOS-30006PRESERVE")
+        spec_root = Path(self.temp_dir.name) / "IOS-30006PRESERVE" / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        proposal_path = spec_root / "proposal.md"
+        rich_markdown = (
+            "# Proposal\n\n"
+            "## Problem\n\n"
+            "Detailed grounded problem statement.\n\n"
+            "## Proposed Approach\n\n"
+            "Detailed implementation-shaping proposal.\n"
+        )
+        proposal_path.write_text(rich_markdown)
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "compact summary only"},
+        )
+
+        self.assertEqual("requirements_requested", updated_session.current_stage)
+        self.assertEqual("requirements_requested", followup_event.event_type)
+        self.assertEqual(rich_markdown, proposal_path.read_text())
+
     def test_collect_role_output_records_runtime_output_artifact(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30007")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
