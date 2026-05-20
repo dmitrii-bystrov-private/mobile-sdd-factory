@@ -130,14 +130,14 @@ fi
 
 SETTINGS_REF="$(extract_ref_by_text "${RUNS_SNAPSHOT}" 'button "Settings ')"
 playwright-cli click "${SETTINGS_REF}" >/dev/null
-wait_snapshot_contains "${SETTINGS_SNAPSHOT}" 'heading "Project Settings"'
+wait_snapshot_contains "${SETTINGS_SNAPSHOT}" 'heading "Runtime Defaults"'
 grep -q 'heading "Runtime Defaults"' "${SETTINGS_SNAPSHOT}"
 
 playwright-cli goto "${UI_URL}" >/dev/null
 wait_snapshot_contains "${RUNS_SNAPSHOT}" 'heading "New Workflow"'
 HEALTH_REF="$(extract_ref_by_text "${RUNS_SNAPSHOT}" 'button "Health ')"
 playwright-cli click "${HEALTH_REF}" >/dev/null
-wait_snapshot_contains "${HEALTH_SNAPSHOT}" 'heading "Environment Health"'
+wait_snapshot_contains "${HEALTH_SNAPSHOT}" 'heading "Doctor Summary"'
 grep -q 'heading "Doctor Summary"' "${HEALTH_SNAPSHOT}"
 grep -q 'heading "Local Stack"' "${HEALTH_SNAPSHOT}"
 

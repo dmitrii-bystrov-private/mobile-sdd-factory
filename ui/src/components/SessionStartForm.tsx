@@ -34,12 +34,6 @@ const REQUIREMENTS_CLARIFICATION_LABELS: Record<RequirementsClarificationMode, s
   "ask-selectively": "Ask selectively",
   autonomous: "Stay autonomous",
 };
-const WORKFLOW_PROFILE_DESCRIPTIONS: Record<WorkflowProfile, string> = {
-  oneshot: "Direct implementation flow for straightforward tasks.",
-  bug_full: "Bug workflow with testing and verification controls.",
-  story_full: "Story workflow with planning, subtasking, and clarification controls.",
-};
-
 type DraftPolicy = {
   test_policy: SessionPolicyValue;
   self_review_policy: SessionPolicyValue;
@@ -333,9 +327,9 @@ export function SessionStartForm({
             value={taskKey}
           />
         </label>
-        <p className={`form-help${hasTaskKeyInput && !isTaskKeyValid ? " form-help-error" : ""}`}>
-          Use a Jira key like IOS-1234 or ANDR-5678.
-        </p>
+        {hasTaskKeyInput && !isTaskKeyValid ? (
+          <p className="form-help form-help-error">Use a Jira key like IOS-1234 or ANDR-5678.</p>
+        ) : null}
 
         <label className="form-field">
           <span>Workflow Profile</span>
@@ -350,22 +344,6 @@ export function SessionStartForm({
           </select>
         </label>
 
-        <div className="inline-summary-card">
-          <div className="inline-summary-header">
-            <strong>{workflowProfileDisplayName(workflowProfile)}</strong>
-          </div>
-          <p className="form-help">{WORKFLOW_PROFILE_DESCRIPTIONS[workflowProfile]}</p>
-          <div className="inline-pill-row">
-            <span className="inline-pill" title="Controls whether the self-review lane is skipped, auto-started, or required for this run.">Self-review {policy.self_review_policy}</span>
-            <span className="inline-pill" title="Controls whether the Boy Scout lane is skipped, auto-started, or required for this run.">Boy Scout {policy.boy_scout_policy}</span>
-            <span className="inline-pill" title="Controls whether documentation capture is skipped, auto-started, or required for this run.">Doc Harvest {policy.doc_harvest_policy}</span>
-            {showTestPolicy ? <span className="inline-pill" title="Controls whether the test lane is skipped, auto-started, or required for this run.">Tests {policy.test_policy}</span> : null}
-            {showRequirementsClarificationMode ? (
-              <span className="inline-pill" title="Controls how readily the workflow asks for clarification before implementation or planning decisions.">Clarification {policy.requirements_clarification_mode}</span>
-            ) : null}
-          </div>
-        </div>
-
         <div className="advanced-disclosure">
           <button
             className="advanced-disclosure-toggle"
@@ -377,7 +355,9 @@ export function SessionStartForm({
               <strong>Workflow Policies</strong>
               <p>Change optional lanes and clarification behavior for this run only.</p>
             </div>
-            <span className={`chevron${showPolicyTuning ? " expanded" : ""}`} aria-hidden="true" />
+            <div className="advanced-disclosure-meta">
+              <span className={`chevron${showPolicyTuning ? " expanded" : ""}`} aria-hidden="true" />
+            </div>
           </button>
           {showPolicyTuning ? (
             <div className="advanced-disclosure-body">
@@ -489,7 +469,6 @@ export function SessionStartForm({
                 <p>Override runner, model, or effort for specific lanes in this run.</p>
               </div>
               <div className="advanced-disclosure-meta">
-                <small>{effectiveRoleNames.length} lane profiles</small>
                 <span className={`chevron${showAdvancedRoleConfig ? " expanded" : ""}`} aria-hidden="true" />
               </div>
             </button>

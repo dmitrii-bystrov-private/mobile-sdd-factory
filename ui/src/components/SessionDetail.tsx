@@ -245,8 +245,6 @@ export function SessionDetail({
     );
   }
 
-  const blockerSummary = bundle.interactiveStateSummary?.summary;
-  const currentStage = stageDisplayName(session.current_stage);
   const visibleRoles = bundle.roles.filter((role) => role.role_name !== "task-coordinator");
   const ownedRoleNames = new Set(
     bundle.workItems
@@ -272,38 +270,6 @@ export function SessionDetail({
   const hasAssignedOwner = session.current_owner !== null;
   const betweenLiveHandoffs =
     session.status === "active" && activeRoles.length === 0 && standbyRoles.length > 0;
-  const currentFocusTitle =
-    session.status === "waiting_for_operator"
-      ? "Operator attention needed"
-      : session.status === "active"
-        ? activeRoles.length > 0
-          ? `${currentStage} in progress`
-          : hasAssignedOwner
-            ? `${currentStage} is queued`
-            : betweenLiveHandoffs
-              ? "Awaiting next handoff"
-              : "Preparing next lane"
-        : session.status === "paused"
-          ? "Session is paused"
-          : session.status === "completed"
-            ? "Session is complete"
-            : "Session state";
-  const currentFocusBody =
-    session.status === "waiting_for_operator"
-        ? blockerSummary ?? "The run is blocked and needs operator input before it can continue."
-      : session.status === "active"
-        ? activeRoles.length > 0
-          ? `${currentOwner} is driving the live lane now.`
-          : betweenLiveHandoffs
-            ? "The workflow is between handoffs. Live runtimes are ready for the next stage to activate."
-            : hasAssignedOwner
-              ? `${currentOwner} owns the stage, but no lane is actively executing yet.`
-              : "The run is active, but the next lane has not been assigned yet."
-        : session.status === "paused"
-          ? "The run is paused until the external blocker is cleared."
-          : session.status === "completed"
-            ? "The main flow has completed. Use follow-up actions only if new MR, QA, or snapshot updates arrive."
-            : "Review the current stage and decide the next operator action.";
   const showRoleStatusPanel =
     bundle.workItems.length > 0 ||
     visibleRoles.some((role) => role.status !== "running");
@@ -326,15 +292,15 @@ export function SessionDetail({
         <div className="hero-copy">
           <p className="eyebrow">Current Session</p>
           <div className="hero-heading-row">
-            <h1>{session.task_key}</h1>
+            <div className="hero-heading-main">
+              <h1>{session.task_key}</h1>
+              {session.task_title ? <p className="hero-title hero-title-inline">{session.task_title}</p> : null}
+            </div>
             {session.jira_url ? (
               <a className="hero-link hero-link-button" href={session.jira_url} rel="noreferrer" target="_blank">
                 Open in Jira
               </a>
             ) : null}
-          </div>
-          <div className="hero-task-card">
-            {session.task_title ? <p className="hero-title">{session.task_title}</p> : null}
           </div>
           <div className="hero-status-strip">
             <div className="hero-status-item">
@@ -349,9 +315,6 @@ export function SessionDetail({
               <span>Owner</span>
               <strong>{currentOwner}</strong>
             </div>
-          </div>
-        </div>
-        <div className="hero-stats">
             <div className="metric-card">
               <span>Status</span>
               <strong>{sessionStatusDisplayName(session.status)}</strong>
@@ -364,9 +327,10 @@ export function SessionDetail({
             <span>Waiting</span>
             <strong>{blockedRoleCount}</strong>
           </div>
-          <div className="metric-card">
-            <span>Standing By</span>
-            <strong>{standbyRoleCount}</strong>
+            <div className="metric-card">
+              <span>Standing By</span>
+              <strong>{standbyRoleCount}</strong>
+            </div>
           </div>
         </div>
       </div>
@@ -391,46 +355,11 @@ export function SessionDetail({
       {detailSurface === "workflow" ? (
         <>
       {session.workflow_profile === "story_full" ? (
-        <div className="grid-two">
-          <section className="subpanel">
-            <div className="subpanel-head">
-              <strong>Current Focus</strong>
-              <span className={`status-pill status-${session.status}`}>
-                {sessionStatusDisplayName(session.status)}
-              </span>
-            </div>
-            <div className="stack-tight">
-              <strong>{currentFocusTitle}</strong>
-              <p>{currentFocusBody}</p>
-              <div className="inline-pill-row">
-                <span className="inline-pill">stage: {currentStage}</span>
-                <span className="inline-pill">owner: {currentOwner}</span>
-              </div>
-            </div>
-          </section>
-          <PlanningSummaryPanel
-            planningSummary={bundle.planningSummary}
-            workflowProfile={session.workflow_profile}
-          />
-        </div>
-      ) : (
-        <section className="subpanel">
-          <div className="subpanel-head">
-            <strong>Current Focus</strong>
-            <span className={`status-pill status-${session.status}`}>
-              {sessionStatusDisplayName(session.status)}
-            </span>
-          </div>
-          <div className="stack-tight">
-            <strong>{currentFocusTitle}</strong>
-            <p>{currentFocusBody}</p>
-            <div className="inline-pill-row">
-              <span className="inline-pill">stage: {currentStage}</span>
-              <span className="inline-pill">owner: {currentOwner}</span>
-            </div>
-          </div>
-        </section>
-      )}
+        <PlanningSummaryPanel
+          planningSummary={bundle.planningSummary}
+          workflowProfile={session.workflow_profile}
+        />
+      ) : null}
 
       <section className="panel">
           <div className="panel-header">

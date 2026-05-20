@@ -766,16 +766,6 @@ export function SessionsPage(): JSX.Element {
         ) : (
           <section className="detail-layout">
             <div ref={contentTopRef} />
-            {surfaceView !== "runs" ? (
-              <div className="surface-heading">
-                <h2>{surfaceView === "settings" ? "Project Settings" : "Environment Health"}</h2>
-                <p className="path-label">
-                  {surfaceView === "settings"
-                    ? "Manage project defaults without mixing them into run execution."
-                    : "Check doctor, setup, and runtime readiness before debugging workflow logic."}
-                </p>
-              </div>
-            ) : null}
             {surfaceView === "runs" ? (
               <SessionDetail
                 bundle={bundle}
