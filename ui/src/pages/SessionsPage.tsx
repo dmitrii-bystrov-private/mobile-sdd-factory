@@ -99,7 +99,7 @@ function streamStateLabel(streamState: "live" | "reconnecting" | "idle"): string
 
 function streamEventLabel(eventType: string | null): string {
   if (!eventType) {
-    return "Waiting for session activity";
+    return "No session activity yet";
   }
   return eventType
     .split("_")
@@ -601,7 +601,7 @@ export function SessionsPage(): JSX.Element {
           <p className="eyebrow">SDD Factory</p>
           <h1>Operator Console</h1>
           <p className="topbar-summary">
-            Run tasks, inspect sessions, and manage project defaults.
+            Track active work and manage project defaults.
           </p>
         </div>
         <div className="topbar-actions">
@@ -611,7 +611,7 @@ export function SessionsPage(): JSX.Element {
             <small>
               {lastStreamEventType
                 ? streamEventLabel(lastStreamEventType)
-                : "Waiting for session activity"}
+                : "No session activity yet"}
             </small>
           </div>
           <button
