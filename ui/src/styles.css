@@ -994,6 +994,7 @@ input {
 
 .completed-followup-link {
   justify-self: start;
+  margin-top: var(--space-1);
 }
 
 .completed-followup-preview {
