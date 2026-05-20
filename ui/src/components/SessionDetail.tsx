@@ -349,6 +349,12 @@ export function SessionDetail({
       </div>
 
       <>
+      <InteractiveStatePanel
+        interactiveStateSummary={bundle.interactiveStateSummary}
+        onRefresh={onRefresh}
+        sessionId={session.id}
+      />
+
       <section className="panel">
           <div className="panel-header">
             <div>
@@ -490,8 +496,6 @@ export function SessionDetail({
         runtimeStateSummary={bundle.runtimeStateSummary}
         session={session}
       />
-
-      <InteractiveStatePanel interactiveStateSummary={bundle.interactiveStateSummary} />
       </>
     </section>
   );

@@ -34,7 +34,6 @@ export function OperatorActions({
   const [mrId, setMrId] = useState("");
   const [qaComment, setQaComment] = useState("");
   const [boyScoutSkipReason, setBoyScoutSkipReason] = useState("");
-  const [runtimeInput, setRuntimeInput] = useState("");
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
@@ -96,19 +95,6 @@ export function OperatorActions({
     });
   }
 
-  async function handleRuntimeInput(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const normalizedInput = runtimeInput.trim();
-    if (normalizedInput.length === 0) {
-      setError("Runtime input is required");
-      return;
-    }
-    await run(async () => {
-      await apiClient.sendRuntimeInput(session.id, normalizedInput);
-      setRuntimeInput("");
-    });
-  }
-
   const canOpenFollowup = session.status === "completed";
   const canRefreshSnapshot =
     session.status === "active" ||
@@ -154,9 +140,6 @@ export function OperatorActions({
     interactiveStateSummary?.sourceReason !== "boy_scout_findings" &&
     !hasStageSpecificDeliveryRetry &&
     !requiresRuntimeReactivation;
-  const canSendRuntimeInput =
-    needsInteractiveReply;
-
   const dailyActions: ActionDefinition[] = [];
   const runtimeSessionActions: ActionDefinition[] = [];
   if (canRefreshSnapshot) {
@@ -372,37 +355,6 @@ export function OperatorActions({
               </button>
             ))}
           </div>
-        </div>
-      ) : null}
-
-      {canSendRuntimeInput ? (
-        <div className="operator-followup-stack">
-          <div className="operator-followup-copy">
-            <p className="eyebrow">Interactive Recovery</p>
-            <h4>Runtime Input</h4>
-          </div>
-
-          <form className="followup-form" onSubmit={(event) => void handleRuntimeInput(event)}>
-            <label className="form-field">
-              <span>Runtime Input</span>
-              <textarea
-                className="text-area-input"
-                disabled={busy || !canSendRuntimeInput}
-                onChange={(event) => setRuntimeInput(event.target.value)}
-                placeholder="Examples: 1 or another direct reply required by the live agent session."
-                rows={3}
-                value={runtimeInput}
-              />
-            </label>
-              <button
-                className="action-button"
-                disabled={busy || !canSendRuntimeInput}
-                title="Send a direct reply into the live runtime session after the agent asked the operator for input."
-                type="submit"
-            >
-              Send Runtime Input
-            </button>
-          </form>
         </div>
       ) : null}
 

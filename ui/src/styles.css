@@ -949,6 +949,39 @@ input {
   border-top: 1px solid var(--line);
 }
 
+.interactive-question-stack {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.interactive-question-summary,
+.interactive-question-card p {
+  margin: 0;
+}
+
+.interactive-question-summary {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.interactive-question-card {
+  padding: var(--space-3);
+  border: 1px solid rgba(255, 93, 45, 0.18);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 93, 45, 0.08), rgba(255, 255, 255, 0.03)),
+    rgba(255, 255, 255, 0.04);
+}
+
+.interactive-question-card p {
+  line-height: 1.6;
+}
+
+.interactive-reply-form {
+  gap: var(--space-3);
+}
+
 .followup-form-grid {
   display: grid;
   gap: var(--space-3);
