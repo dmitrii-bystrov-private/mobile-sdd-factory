@@ -89,12 +89,12 @@ const PLANNING_STEP_DEFINITIONS = [
 
 function streamStateLabel(streamState: "live" | "reconnecting" | "idle"): string {
   if (streamState === "live") {
-    return "Live updates connected";
+    return "Live updates";
   }
   if (streamState === "reconnecting") {
-    return "Reconnecting live updates";
+    return "Reconnecting";
   }
-  return "Live updates idle";
+  return "Standing by";
 }
 
 function streamEventLabel(eventType: string | null): string {
@@ -643,7 +643,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Workflow Runs</strong>
-                <p>Create runs and manage active sessions.</p>
+                <p>Create runs, switch sessions, and handle operator actions.</p>
               </button>
               <button
                 className={`surface-nav-card ${surfaceView === "settings" ? "selected" : ""}`}
@@ -651,7 +651,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Settings</strong>
-                <p>Manage project defaults.</p>
+                <p>Manage project defaults, policies, and runtime baselines.</p>
               </button>
               <button
                 className={`surface-nav-card ${surfaceView === "health" ? "selected" : ""}`}
@@ -659,7 +659,7 @@ export function SessionsPage(): JSX.Element {
                 type="button"
               >
                 <strong>Health</strong>
-                <p>Check setup and runtime readiness.</p>
+                <p>Check setup, tooling, and runtime readiness.</p>
               </button>
             </div>
           </section>
