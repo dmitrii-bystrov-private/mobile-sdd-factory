@@ -467,9 +467,9 @@ export function SessionDetail({
               {deliveryFailure.details ?? "No stderr details were captured for this failure."}
             </pre>
           </div>
-          <div className="completed-followup-actions">
+          <div className="completed-followup-actions completed-followup-actions-separated">
             <button
-              className="action-button action-button-strong"
+              className="action-button"
               disabled={deliveryRetryBusy}
               onClick={() => void retryDeliveryStep()}
               type="button"

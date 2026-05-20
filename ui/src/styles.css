@@ -996,6 +996,10 @@ input {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.completed-followup-actions-separated {
+  margin-top: var(--space-2);
+}
+
 .completed-followup-link {
   top: var(--space-4);
   right: var(--space-4);
