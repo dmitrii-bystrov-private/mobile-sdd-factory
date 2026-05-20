@@ -5534,6 +5534,60 @@ class CoordinatorService:
             "roles": role_summaries,
         }
 
+    def get_active_runtime_output_summary(self, session_id: int) -> dict:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} not found")
+
+        roles = self.role_repository.list_for_session(session_id)
+        candidate_roles: list[Role] = []
+
+        if session.current_owner is not None:
+            current_owner_role = self.role_repository.get_by_name(session_id, session.current_owner)
+            if current_owner_role is not None:
+                candidate_roles.append(current_owner_role)
+
+        owned_role_ids = {
+            item.owner_role_id
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.owner_role_id is not None and item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+        }
+        candidate_roles.extend(
+            role
+            for role in roles
+            if role.id in owned_role_ids and role not in candidate_roles
+        )
+        candidate_roles.extend(
+            role
+            for role in roles
+            if role.status == RoleStatus.RUNNING and role not in candidate_roles
+        )
+
+        active_role = next(
+            (role for role in candidate_roles if role.runtime_handle is not None and role.status == RoleStatus.RUNNING),
+            None,
+        )
+        if active_role is None:
+            return {
+                "available": False,
+                "role_name": None,
+                "runtime_handle": None,
+                "content": "",
+            }
+
+        runtime_role = RuntimeRoleHandle(
+            role_id=active_role.runtime_handle,
+            session_id=self._runtime_session_handle_for_session(session).session_id,
+            backend_name=active_role.runtime_backend,
+        )
+        content = self.session_backend.capture_output_snapshot(runtime_role)
+        return {
+            "available": True,
+            "role_name": active_role.role_name,
+            "runtime_handle": active_role.runtime_handle,
+            "content": content,
+        }
+
     def stop_runtime_role(self, session_id: int, role_name: str) -> tuple[Session, Event]:
         session = self.session_repository.get_by_id(session_id)
         if session is None:

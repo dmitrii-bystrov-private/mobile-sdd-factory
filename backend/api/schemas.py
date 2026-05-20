@@ -156,6 +156,13 @@ class RuntimeSessionStateResponse(BaseModel):
     roles: list[RuntimeRoleStateResponse]
 
 
+class ActiveRuntimeOutputResponse(BaseModel):
+    available: bool
+    role_name: str | None = None
+    runtime_handle: str | None = None
+    content: str = ""
+
+
 class EnvironmentDoctorCheckResponse(BaseModel):
     id: str
     category: str

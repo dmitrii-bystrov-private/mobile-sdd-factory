@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from backend.api.schemas import (
+    ActiveRuntimeOutputResponse,
     CreateSessionRequest,
     CreateSessionResponse,
     InteractiveStateSummaryResponse,
@@ -205,6 +206,18 @@ def get_runtime_state(
     except IntakeError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return RuntimeSessionStateResponse(**summary)
+
+
+@router.get("/{session_id}/active-runtime-output", response_model=ActiveRuntimeOutputResponse)
+def get_active_runtime_output(
+    session_id: int,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> ActiveRuntimeOutputResponse:
+    try:
+        summary = dependencies.coordinator_service.get_active_runtime_output_summary(session_id)
+    except IntakeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return ActiveRuntimeOutputResponse(**summary)
 
 
 @router.post("/prepare", response_model=PrepareSessionResponse, include_in_schema=False)

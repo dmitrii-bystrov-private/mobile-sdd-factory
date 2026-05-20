@@ -210,6 +210,19 @@ class TmuxSessionBackend(SessionBackend):
             chunks.append(RuntimeOutputChunk(role_id=role.role_id, text=marker_text))
         return chunks
 
+    def capture_output_snapshot(self, role: RuntimeRoleHandle) -> str:
+        if self._effective_mode == "recording":
+            return "".join(self.pending_outputs.get(role.role_id, []))
+
+        socket_path = self._socket_path(role.session_id)
+        result = self._tmux(socket_path, "capture-pane", "-p", "-t", role.role_id)
+        if result.returncode != 0:
+            error_text = (result.stderr or result.stdout or "").lower()
+            if "can't find window" in error_text or "can't find pane" in error_text:
+                return ""
+            raise RuntimeError(result.stderr or result.stdout or "Failed to capture tmux output")
+        return result.stdout
+
     def is_role_alive(self, role: RuntimeRoleHandle) -> bool:
         if self._effective_mode == "tmux":
             socket_path = self._socket_path(role.session_id)

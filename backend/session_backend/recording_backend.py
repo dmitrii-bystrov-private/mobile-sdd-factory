@@ -43,6 +43,9 @@ class RecordingSessionBackend(SessionBackend):
         outputs = self.pending_outputs.pop(role.role_id, [])
         return [RuntimeOutputChunk(role_id=role.role_id, text=text) for text in outputs]
 
+    def capture_output_snapshot(self, role: RuntimeRoleHandle) -> str:
+        return "".join(self.pending_outputs.get(role.role_id, []))
+
     def is_role_alive(self, role: RuntimeRoleHandle) -> bool:
         return role.role_id in self.spawn_commands
 

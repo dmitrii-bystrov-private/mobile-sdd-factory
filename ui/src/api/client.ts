@@ -241,6 +241,15 @@ export const apiClient = {
     return request(`/sessions/${sessionId}/runtime-state`);
   },
 
+  getActiveRuntimeOutput(sessionId: number): Promise<{
+    available: boolean;
+    role_name: string | null;
+    runtime_handle: string | null;
+    content: string;
+  }> {
+    return request(`/sessions/${sessionId}/active-runtime-output`);
+  },
+
   getEnvironmentDoctor(): Promise<{
     overall_status: string;
     repo_root: string;

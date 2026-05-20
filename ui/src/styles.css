@@ -1284,6 +1284,24 @@ input {
   padding: var(--space-3);
 }
 
+.runtime-output-panel {
+  align-content: start;
+}
+
+.runtime-output-content {
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(7, 11, 18, 0.92);
+  color: #d9e2ee;
+  font: 0.84rem/1.5 "IBM Plex Mono", "SFMono-Regular", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 360px;
+  overflow: auto;
+}
+
 .runtime-session-actions {
   gap: var(--space-3);
 }

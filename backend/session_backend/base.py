@@ -34,6 +34,10 @@ class SessionBackend(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def capture_output_snapshot(self, role: RuntimeRoleHandle) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
     def is_role_alive(self, role: RuntimeRoleHandle) -> bool:
         raise NotImplementedError
 
