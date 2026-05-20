@@ -199,7 +199,7 @@ export function RuntimeSessionPanel({
                                     onClick={() =>
                                       void copyDebugCommand(
                                         role.tmuxAttachCommand,
-                                        "Command copied",
+                                        `${roleDisplayName(role.roleName)} console command copied`,
                                       )
                                     }
                                     type="button"
@@ -213,7 +213,7 @@ export function RuntimeSessionPanel({
                                     onClick={() =>
                                       void copyDebugCommand(
                                         role.tmuxCaptureCommand,
-                                        "Command copied",
+                                        `${roleDisplayName(role.roleName)} output command copied`,
                                       )
                                     }
                                     type="button"
@@ -245,7 +245,7 @@ export function RuntimeSessionPanel({
                             onClick={() =>
                               void copyDebugCommand(
                                 runtimeStateSummary.tmuxAttachCommand,
-                                "Command copied",
+                                "Session console command copied",
                               )
                             }
                             type="button"

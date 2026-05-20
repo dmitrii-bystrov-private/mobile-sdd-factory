@@ -1246,10 +1246,6 @@ input {
   gap: var(--space-4);
 }
 
-.runtime-panel {
-  position: relative;
-}
-
 .runtime-controls-stack {
   display: grid;
   gap: var(--space-4);
@@ -1290,10 +1286,11 @@ input {
 }
 
 .runtime-toast {
-  position: absolute;
+  position: fixed;
   top: 18px;
-  right: 18px;
-  z-index: 2;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
   display: inline-flex;
   align-items: center;
   padding: 8px 12px;
@@ -1304,7 +1301,9 @@ input {
   font-size: 0.84rem;
   line-height: 1;
   pointer-events: none;
-  box-shadow: 0 10px 24px rgba(4, 10, 18, 0.28);
+  white-space: nowrap;
+  box-shadow: 0 12px 28px rgba(4, 10, 18, 0.32);
+  backdrop-filter: blur(10px);
 }
 
 .table-list.compact .table-row {
