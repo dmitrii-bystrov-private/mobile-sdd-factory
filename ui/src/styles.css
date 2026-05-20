@@ -639,13 +639,13 @@ input {
 
 .runtime-defaults-list {
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .runtime-default-card {
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 14px;
+  padding: 16px;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--surface-muted);
@@ -781,7 +781,7 @@ input {
 
 .advanced-disclosure-body {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
@@ -799,8 +799,46 @@ input {
 
 .followup-form-grid {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.artifact-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.artifact-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.artifact-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.artifact-meta span {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.artifact-meta strong,
+.artifact-path {
+  margin: 0;
+}
+
+.artifact-path {
+  color: var(--ink-soft);
+  line-height: 1.5;
 }
 
 .operator-followup-copy h4,
@@ -939,6 +977,10 @@ input {
   gap: 18px;
 }
 
+.compact-grid {
+  gap: 14px;
+}
+
 .sidebar-note-stack {
   display: grid;
   gap: 14px;
@@ -978,6 +1020,10 @@ input {
 .runtime-surface-stack {
   display: grid;
   gap: 18px;
+}
+
+.table-list.compact .table-row {
+  padding: 12px 0;
 }
 
 .surface-nav-card:hover,
