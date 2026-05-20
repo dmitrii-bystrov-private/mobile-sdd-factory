@@ -735,6 +735,16 @@ input {
   gap: var(--space-4);
 }
 
+.settings-surface-stack {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.settings-profile-stack {
+  display: grid;
+  gap: var(--space-3);
+}
+
 .runtime-default-card {
   display: grid;
   gap: var(--space-3);
@@ -783,6 +793,12 @@ input {
 }
 
 .inline-pill-row + .form-help {
+  margin-top: var(--space-1);
+}
+
+.settings-save-stack {
+  display: grid;
+  gap: var(--space-2);
   margin-top: var(--space-1);
 }
 

@@ -332,50 +332,53 @@ export function RuntimeDefaultsPanel({
         Set the default runner and workflow policies for new sessions.
       </p>
 
-      <div className="runtime-default-card">
-        <div className="inline-summary-header">
-          <strong>Project Baseline</strong>
-          <span>{loadedRuntimeDefaults.knownRoles.length} lanes</span>
-        </div>
-        <p className="form-help">Session-specific lane overrides stay in Workflow Runs.</p>
-        <label className="form-field">
-          <span>Default Runner</span>
-          <select
-            className="select-input"
-            disabled={busy}
-            onChange={(event) => handleDefaultRunnerChange(event.target.value)}
-            value={defaultRunner}
-          >
-            {loadedRuntimeCapabilities.availableRunners.map((runner) => (
-              <option key={runner} value={runner}>
-                {runner}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="runtime-defaults-list">
-        <div className="inline-pill-row">
-          {(["oneshot", "bug_full", "story_full"] as const).map((profile) => (
-            <button
-              key={profile}
-              className={`inline-pill inline-pill-button ${policyProfileView === profile ? "selected" : ""}`}
-              onClick={() => setPolicyProfileView(profile)}
-              title={WORKFLOW_PROFILE_DESCRIPTIONS[profile]}
-              type="button"
+      <div className="settings-surface-stack">
+        <div className="runtime-default-card">
+          <div className="inline-summary-header">
+            <strong>Project Baseline</strong>
+            <span>{loadedRuntimeDefaults.knownRoles.length} lanes</span>
+          </div>
+          <p className="form-help">Session-specific lane overrides stay in Workflow Runs.</p>
+          <label className="form-field">
+            <span>Default Runner</span>
+            <select
+              className="select-input"
+              disabled={busy}
+              onChange={(event) => handleDefaultRunnerChange(event.target.value)}
+              value={defaultRunner}
             >
-              {workflowProfileDisplayName(profile)}
-            </button>
-          ))}
+              {loadedRuntimeCapabilities.availableRunners.map((runner) => (
+                <option key={runner} value={runner}>
+                  {runner}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
-        <p className="form-help">{WORKFLOW_PROFILE_DESCRIPTIONS[policyProfileView]}</p>
 
-        {policyProfileView === "oneshot" ? (
-            <div className="runtime-default-card">
-              <div className="inline-summary-header">
-                <strong>{workflowProfileDisplayName("oneshot")}</strong>
-              </div>
+        <div className="runtime-defaults-list">
+          <div className="settings-profile-stack">
+            <div className="inline-pill-row">
+              {(["oneshot", "bug_full", "story_full"] as const).map((profile) => (
+                <button
+                  key={profile}
+                  className={`inline-pill inline-pill-button ${policyProfileView === profile ? "selected" : ""}`}
+                  onClick={() => setPolicyProfileView(profile)}
+                  title={WORKFLOW_PROFILE_DESCRIPTIONS[profile]}
+                  type="button"
+                >
+                  {workflowProfileDisplayName(profile)}
+                </button>
+              ))}
+            </div>
+            <p className="form-help">{WORKFLOW_PROFILE_DESCRIPTIONS[policyProfileView]}</p>
+          </div>
+
+          {policyProfileView === "oneshot" ? (
+              <div className="runtime-default-card">
+                <div className="inline-summary-header">
+                  <strong>{workflowProfileDisplayName("oneshot")}</strong>
+                </div>
             <div className="followup-form-grid">
               <label className="form-field">
                 <span>Self Review</span>
@@ -432,14 +435,14 @@ export function RuntimeDefaultsPanel({
                 ))}
               </select>
             </label>
-          </div>
-        ) : null}
+            </div>
+          ) : null}
 
-        {policyProfileView === "bug_full" ? (
-            <div className="runtime-default-card">
-              <div className="inline-summary-header">
-                <strong>{workflowProfileDisplayName("bug_full")}</strong>
-              </div>
+          {policyProfileView === "bug_full" ? (
+              <div className="runtime-default-card">
+                <div className="inline-summary-header">
+                  <strong>{workflowProfileDisplayName("bug_full")}</strong>
+                </div>
             <div className="followup-form-grid">
               <label className="form-field">
                 <span>Test Policy</span>
@@ -516,14 +519,14 @@ export function RuntimeDefaultsPanel({
                 </select>
               </label>
             </div>
-          </div>
-        ) : null}
+            </div>
+          ) : null}
 
-        {policyProfileView === "story_full" ? (
-            <div className="runtime-default-card">
-              <div className="inline-summary-header">
-                <strong>{workflowProfileDisplayName("story_full")}</strong>
-              </div>
+          {policyProfileView === "story_full" ? (
+              <div className="runtime-default-card">
+                <div className="inline-summary-header">
+                  <strong>{workflowProfileDisplayName("story_full")}</strong>
+                </div>
             <div className="followup-form-grid">
               <label className="form-field">
                 <span>Self Review</span>
@@ -604,108 +607,111 @@ export function RuntimeDefaultsPanel({
                 </select>
               </label>
             </div>
-          </div>
-        ) : null}
-      </div>
+            </div>
+          ) : null}
+        </div>
 
-      <div className="advanced-disclosure">
-        <button
-          className="advanced-disclosure-toggle"
-          onClick={() => setShowRoleDefaults((current) => !current)}
-          aria-expanded={showRoleDefaults}
-          type="button"
-        >
-          <div>
-            <strong>Lane Runtime Overrides</strong>
-            <p>
-              Override runner, model, or effort for specific lanes when a workflow needs different execution settings than the project baseline.
-            </p>
-          </div>
-          <div className="advanced-disclosure-meta">
-            <small>{runtimeDefaults?.knownRoles.length ?? 0} lane profiles</small>
-            <span className={`chevron${showRoleDefaults ? " expanded" : ""}`} aria-hidden="true" />
-          </div>
-        </button>
-        {showRoleDefaults ? (
-          <div className="advanced-disclosure-body runtime-defaults-list">
-            {runtimeDefaults?.knownRoles.map((roleName) => {
-              const draft = roleDefaults[roleName];
-              const runnerCapability = runnerIndex.get(draft?.runner ?? "");
-              const models = runnerCapability?.models ?? [];
-              const modelCapability = models.find((item) => item.id === draft?.model);
-              const efforts = modelCapability?.supportedEfforts ?? [];
-              return (
-                <div key={roleName} className="runtime-default-card">
-                  <div className="inline-summary-header">
-                    <strong>{roleDisplayName(roleName)}</strong>
-                    <span>{draft?.runner ?? "runner?"}</span>
-                  </div>
-                  <div className="followup-form-grid">
+        <div className="advanced-disclosure">
+          <button
+            className="advanced-disclosure-toggle"
+            onClick={() => setShowRoleDefaults((current) => !current)}
+            aria-expanded={showRoleDefaults}
+            type="button"
+          >
+            <div>
+              <strong>Lane Runtime Overrides</strong>
+              <p>
+                Override runner, model, or effort for specific lanes when a workflow needs different execution settings than the project baseline.
+              </p>
+            </div>
+            <div className="advanced-disclosure-meta">
+              <small>{runtimeDefaults?.knownRoles.length ?? 0} lane profiles</small>
+              <span className={`chevron${showRoleDefaults ? " expanded" : ""}`} aria-hidden="true" />
+            </div>
+          </button>
+          {showRoleDefaults ? (
+            <div className="advanced-disclosure-body runtime-defaults-list">
+              {runtimeDefaults?.knownRoles.map((roleName) => {
+                const draft = roleDefaults[roleName];
+                const runnerCapability = runnerIndex.get(draft?.runner ?? "");
+                const models = runnerCapability?.models ?? [];
+                const modelCapability = models.find((item) => item.id === draft?.model);
+                const efforts = modelCapability?.supportedEfforts ?? [];
+                return (
+                  <div key={roleName} className="runtime-default-card">
+                    <div className="inline-summary-header">
+                      <strong>{roleDisplayName(roleName)}</strong>
+                      <span>{draft?.runner ?? "runner?"}</span>
+                    </div>
+                    <div className="followup-form-grid">
+                      <label className="form-field">
+                        <span>Runner</span>
+                        <select
+                          className="select-input"
+                          disabled={busy || runtimeCapabilities === null}
+                          onChange={(event) => updateRoleDefault(roleName, { runner: event.target.value })}
+                          value={draft?.runner ?? ""}
+                        >
+                          {(runtimeCapabilities?.availableRunners ?? []).map((runner) => (
+                            <option key={runner} value={runner}>
+                              {runner}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="form-field">
+                        <span>Model</span>
+                        <select
+                          className="select-input"
+                          disabled={busy}
+                          onChange={(event) => updateRoleDefault(roleName, { model: event.target.value })}
+                          value={draft?.model ?? ""}
+                        >
+                          {models.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
                     <label className="form-field">
-                      <span>Runner</span>
-                      <select
-                        className="select-input"
-                        disabled={busy || runtimeCapabilities === null}
-                        onChange={(event) => updateRoleDefault(roleName, { runner: event.target.value })}
-                        value={draft?.runner ?? ""}
-                      >
-                        {(runtimeCapabilities?.availableRunners ?? []).map((runner) => (
-                          <option key={runner} value={runner}>
-                            {runner}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="form-field">
-                      <span>Model</span>
+                      <span>Effort</span>
                       <select
                         className="select-input"
                         disabled={busy}
-                        onChange={(event) => updateRoleDefault(roleName, { model: event.target.value })}
-                        value={draft?.model ?? ""}
+                        onChange={(event) => updateRoleDefault(roleName, { effort: event.target.value })}
+                        value={draft?.effort ?? ""}
                       >
-                        {models.map((model) => (
-                          <option key={model.id} value={model.id}>
-                            {model.label}
+                        {efforts.map((effort) => (
+                          <option key={effort} value={effort}>
+                            {effort}
                           </option>
                         ))}
                       </select>
                     </label>
                   </div>
-                  <label className="form-field">
-                    <span>Effort</span>
-                    <select
-                      className="select-input"
-                      disabled={busy}
-                      onChange={(event) => updateRoleDefault(roleName, { effort: event.target.value })}
-                      value={draft?.effort ?? ""}
-                    >
-                      {efforts.map((effort) => (
-                        <option key={effort} value={effort}>
-                          {effort}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="settings-save-stack">
+          <button
+            className="action-button action-button-strong"
+            disabled={busy || runtimeDefaults === null}
+            onClick={() => void handleSave()}
+            title="Save these runtime and policy defaults for future sessions in this project."
+            type="button"
+          >
+            Save Runtime Defaults
+          </button>
+
+          {saveNotice ? <p className="form-help form-help-success">{saveNotice}</p> : null}
+          {error ? <p className="error-banner">{error}</p> : null}
+        </div>
       </div>
-
-      <button
-        className="action-button action-button-strong"
-        disabled={busy || runtimeDefaults === null}
-        onClick={() => void handleSave()}
-        title="Save these runtime and policy defaults for future sessions in this project."
-        type="button"
-      >
-        Save Runtime Defaults
-      </button>
-
-      {saveNotice ? <p className="form-help form-help-success">{saveNotice}</p> : null}
-      {error ? <p className="error-banner">{error}</p> : null}
     </section>
   );
 }
