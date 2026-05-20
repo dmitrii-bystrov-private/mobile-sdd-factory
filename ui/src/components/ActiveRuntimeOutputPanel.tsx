@@ -8,6 +8,17 @@ type ActiveRuntimeOutputPanelProps = {
   runtimeAvailable: boolean;
 };
 
+function trimTrailingLines(content: string, count: number): string {
+  if (count <= 0) {
+    return content;
+  }
+  const lines = content.split("\n");
+  if (lines.length <= count) {
+    return "";
+  }
+  return lines.slice(0, -count).join("\n");
+}
+
 export function ActiveRuntimeOutputPanel({
   sessionId,
   runtimeAvailable,
@@ -92,6 +103,8 @@ export function ActiveRuntimeOutputPanel({
     setFollowOutput(distanceFromBottom <= 24);
   }
 
+  const visibleContent = activeOutput ? trimTrailingLines(activeOutput.content, 4) : "";
+
   if (!runtimeAvailable) {
     return null;
   }
@@ -110,13 +123,13 @@ export function ActiveRuntimeOutputPanel({
 
       {loading ? (
         <p className="path-label">Loading active worker output…</p>
-      ) : activeOutput?.available && activeOutput.content.trim().length > 0 ? (
+      ) : activeOutput?.available && visibleContent.trim().length > 0 ? (
         <pre
           className="runtime-output-content"
           onScroll={handleOutputScroll}
           ref={outputRef}
         >
-          {activeOutput.content}
+          {visibleContent}
         </pre>
       ) : (
         <p className="path-label">No active worker console output is available right now.</p>
