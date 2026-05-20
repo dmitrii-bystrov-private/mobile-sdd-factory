@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { ActiveRuntimeOutputPanel } from "./ActiveRuntimeOutputPanel";
 import { InteractiveStatePanel } from "./InteractiveStatePanel";
 import { OperatorActions } from "./OperatorActions";
 import { RuntimeSessionPanel } from "./RuntimeSessionPanel";
@@ -323,6 +324,11 @@ export function SessionDetail({
         </div>
 
       </section>
+
+      <ActiveRuntimeOutputPanel
+        runtimeAvailable={bundle.runtimeStateSummary?.available === true}
+        sessionId={session.id}
+      />
 
       <OperatorActions
         interactiveStateSummary={bundle.interactiveStateSummary}

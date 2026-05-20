@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { apiClient } from "../api/client";
 import { roleDisplayName } from "../roleDisplay";
@@ -32,49 +32,7 @@ export function RuntimeSessionPanel({
 }: RuntimeSessionPanelProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [outputLoading, setOutputLoading] = useState(false);
-  const [activeOutput, setActiveOutput] = useState<{
-    available: boolean;
-    roleName: string | null;
-    content: string;
-  } | null>(null);
   const { showToast } = useToast();
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadActiveOutput(): Promise<void> {
-      if (runtimeStateSummary === null || !runtimeStateSummary.available) {
-        setActiveOutput(null);
-        return;
-      }
-      setOutputLoading(true);
-      try {
-        const response = await apiClient.getActiveRuntimeOutput(session.id);
-        if (cancelled) {
-          return;
-        }
-        setActiveOutput({
-          available: response.available,
-          roleName: response.role_name,
-          content: response.content,
-        });
-      } catch {
-        if (!cancelled) {
-          setActiveOutput(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setOutputLoading(false);
-        }
-      }
-    }
-
-    void loadActiveOutput();
-    return () => {
-      cancelled = true;
-    };
-  }, [runtimeStateSummary, session.id]);
 
   async function run(action: () => Promise<unknown>): Promise<void> {
     setBusy(true);
@@ -176,22 +134,6 @@ export function RuntimeSessionPanel({
                     >
                       Refresh Runtime View
                     </button>
-                  </div>
-
-                  <div className="subpanel runtime-output-panel">
-                    <div className="subpanel-head">
-                      <strong>Active Worker Console</strong>
-                      {activeOutput?.roleName ? (
-                        <span className="badge badge-muted">{roleDisplayName(activeOutput.roleName)}</span>
-                      ) : null}
-                    </div>
-                    {outputLoading ? (
-                      <p className="path-label">Loading active worker output…</p>
-                    ) : activeOutput?.available && activeOutput.content.trim().length > 0 ? (
-                      <pre className="runtime-output-content">{activeOutput.content}</pre>
-                    ) : (
-                      <p className="path-label">No active worker console output is available right now.</p>
-                    )}
                   </div>
 
                   <div className="artifact-stack runtime-role-stack">
