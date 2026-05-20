@@ -73,6 +73,51 @@ const CLARIFICATION_MODE_DESCRIPTIONS: Record<RequirementsClarificationMode, str
   autonomous: "Carry the story forward without clarification unless the flow hard-blocks.",
 };
 
+function roleFlowOrder(roleName: string, workflowProfile: WorkflowProfile): number {
+  const oneshotOrder = [
+    "implementer",
+    "code-reviewer",
+    "verification-coordinator",
+    "code-scout",
+    "doc-harvest-worker",
+    "mr-comments-analyst-worker",
+  ];
+  const bugFullOrder = [
+    "implementer",
+    "bug-fixer",
+    "code-reviewer",
+    "verification-coordinator",
+    "code-scout",
+    "doc-harvest-worker",
+    "mr-comments-analyst-worker",
+  ];
+  const storyFullOrder = [
+    "proposal-context-worker",
+    "requirements-clarifier-worker",
+    "acceptance-criteria-worker",
+    "constraints-worker",
+    "spec-verifier-worker",
+    "story-spec-worker",
+    "task-decomposer-worker",
+    "implementer",
+    "code-reviewer",
+    "verification-coordinator",
+    "code-scout",
+    "doc-harvest-worker",
+    "mr-comments-analyst-worker",
+  ];
+
+  const orderedRoles =
+    workflowProfile === "story_full"
+      ? storyFullOrder
+      : workflowProfile === "bug_full"
+        ? bugFullOrder
+        : oneshotOrder;
+
+  const index = orderedRoles.indexOf(roleName);
+  return index === -1 ? orderedRoles.length + 1 : index;
+}
+
 function defaultPolicyDefaults(): DraftPolicyDefaults {
   return {
     test_policy: "enabled",
@@ -126,6 +171,17 @@ export function RuntimeDefaultsPanel({
 
   const loadedRuntimeDefaults = runtimeDefaults;
   const loadedRuntimeCapabilities = runtimeCapabilities;
+  const sortedKnownRoles = useMemo(
+    () =>
+      [...loadedRuntimeDefaults.knownRoles].sort((left, right) => {
+        const orderDelta = roleFlowOrder(left, policyProfileView) - roleFlowOrder(right, policyProfileView);
+        if (orderDelta !== 0) {
+          return orderDelta;
+        }
+        return left.localeCompare(right);
+      }),
+    [loadedRuntimeDefaults.knownRoles, policyProfileView],
+  );
 
   function inheritedRoleDefault(
     roleName: string,
@@ -583,7 +639,7 @@ export function RuntimeDefaultsPanel({
           </button>
           {showRoleDefaults ? (
             <div className="advanced-disclosure-body runtime-defaults-list">
-              {runtimeDefaults?.knownRoles.map((roleName) => {
+              {sortedKnownRoles.map((roleName) => {
                 const draft = roleDefaults[roleName];
                 const runnerCapability = runnerIndex.get(draft?.runner ?? "");
                 const models = runnerCapability?.models ?? [];

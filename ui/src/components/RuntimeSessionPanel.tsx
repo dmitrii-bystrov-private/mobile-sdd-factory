@@ -12,6 +12,51 @@ type RuntimeSessionPanelProps = {
   onRefresh: () => Promise<void>;
 };
 
+function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_profile"]): number {
+  const oneshotOrder = [
+    "implementer",
+    "code-reviewer",
+    "verification-coordinator",
+    "code-scout",
+    "doc-harvest-worker",
+    "mr-comments-analyst-worker",
+  ];
+  const bugFullOrder = [
+    "implementer",
+    "bug-fixer",
+    "code-reviewer",
+    "verification-coordinator",
+    "code-scout",
+    "doc-harvest-worker",
+    "mr-comments-analyst-worker",
+  ];
+  const storyFullOrder = [
+    "proposal-context-worker",
+    "requirements-clarifier-worker",
+    "acceptance-criteria-worker",
+    "constraints-worker",
+    "spec-verifier-worker",
+    "story-spec-worker",
+    "task-decomposer-worker",
+    "implementer",
+    "code-reviewer",
+    "verification-coordinator",
+    "code-scout",
+    "doc-harvest-worker",
+    "mr-comments-analyst-worker",
+  ];
+
+  const orderedRoles =
+    workflowProfile === "story_full"
+      ? storyFullOrder
+      : workflowProfile === "bug_full"
+        ? bugFullOrder
+        : oneshotOrder;
+
+  const index = orderedRoles.indexOf(roleName);
+  return index === -1 ? orderedRoles.length + 1 : index;
+}
+
 function runtimeRoleStatusLabel(status: string): string {
   switch (status) {
     case "running":
@@ -77,6 +122,15 @@ export function RuntimeSessionPanel({
         <>
           {(() => {
             const visibleRoles = runtimeStateSummary.roles.filter((role) => role.roleName !== "task-coordinator");
+            const sortedRoles = [...visibleRoles].sort((left, right) => {
+              const orderDelta =
+                roleFlowOrder(left.roleName, session.workflow_profile) -
+                roleFlowOrder(right.roleName, session.workflow_profile);
+              if (orderDelta !== 0) {
+                return orderDelta;
+              }
+              return left.roleName.localeCompare(right.roleName);
+            });
             return (
               <>
                 <div className="runtime-controls-stack">
@@ -137,7 +191,7 @@ export function RuntimeSessionPanel({
                   </div>
 
                   <div className="artifact-stack runtime-role-stack">
-                    {visibleRoles.map((role) => (
+                    {sortedRoles.map((role) => (
                       <article className="artifact-card runtime-role-card" key={role.roleName}>
                         <div className="artifact-meta">
                           <span>{runtimeRoleStatusLabel(role.status)}</span>
