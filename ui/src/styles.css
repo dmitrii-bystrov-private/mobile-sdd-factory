@@ -1095,32 +1095,20 @@ input {
     rgba(255, 255, 255, 0.04);
 }
 
-.workflow-pulse-header {
-  display: grid;
-  gap: 8px;
-  align-content: start;
-}
-
 .progress-card-title,
 .progress-card-body {
   margin: 0;
 }
 
 .workflow-pulse-role-name {
-  font-size: 1.02rem;
-  font-weight: 700;
-  letter-spacing: -0.015em;
+  font-size: 0.98rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 
-.workflow-pulse-state {
-  justify-self: start;
-}
-
-.workflow-pulse-card .status-pill.workflow-pulse-state {
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+.workflow-pulse-card .status-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
 }
 
 .progress-card-title {

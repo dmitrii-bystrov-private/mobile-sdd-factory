@@ -323,11 +323,9 @@ export function SessionDetail({
                     className={`progress-card workflow-pulse-card${isActive ? " workflow-pulse-card-active" : ""}`}
                     key={`worker-${role.id}`}
                   >
-                    <div className="workflow-pulse-header">
+                    <div className="subpanel-head">
                       <strong className="workflow-pulse-role-name">{roleDisplayName(role.role_name)}</strong>
-                      <span
-                        className={`status-pill workflow-pulse-state status-${role.status === "running" ? "running" : role.status}`}
-                      >
+                      <span className={`status-pill status-${role.status === "running" ? "running" : role.status}`}>
                         {workerStateLabel(role, activeRoleIds)}
                       </span>
                     </div>
