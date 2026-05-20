@@ -274,6 +274,11 @@ input {
   box-shadow: 0 0 0 6px rgba(196, 135, 31, 0.12);
 }
 
+.live-idle .live-dot {
+  background: rgba(214, 221, 228, 0.5);
+  box-shadow: 0 0 0 6px rgba(177, 189, 201, 0.08);
+}
+
 .badge-muted {
   background: rgba(255, 255, 255, 0.08);
   color: var(--ink-soft);
@@ -1021,6 +1026,18 @@ input {
   background: linear-gradient(135deg, var(--brand), var(--brand-deep));
   color: white;
   border-color: transparent;
+}
+
+.action-button-subtle {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-soft);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+.action-button-subtle:hover:not(:disabled) {
+  color: var(--ink-strong);
+  background: rgba(255, 255, 255, 0.07);
 }
 
 .operator-actions-grid .action-button-strong {

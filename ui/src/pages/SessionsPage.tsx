@@ -97,9 +97,9 @@ function streamStateLabel(streamState: "live" | "reconnecting" | "idle"): string
   return "Event stream idle";
 }
 
-function streamEventLabel(eventType: string | null): string {
+function streamEventLabel(eventType: string | null, hasSelectedSession: boolean): string {
   if (!eventType) {
-    return "No session activity yet";
+    return hasSelectedSession ? "Listening for live updates" : "Select a session to start live updates";
   }
   return eventType
     .split("_")
@@ -610,12 +610,12 @@ export function SessionsPage(): JSX.Element {
             <strong>{streamStateLabel(streamState)}</strong>
             <small>
               {lastStreamEventType
-                ? streamEventLabel(lastStreamEventType)
-                : "No session activity yet"}
+                ? streamEventLabel(lastStreamEventType, selectedSessionId !== null)
+                : streamEventLabel(null, selectedSessionId !== null)}
             </small>
           </div>
           <button
-            className="action-button"
+            className="action-button action-button-subtle"
             onClick={() => void refreshSelected()}
             title="Reload the session list and the currently selected session surface."
             type="button"
