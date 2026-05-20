@@ -1,6 +1,5 @@
 import { useState } from "react";
 
-import { ArtifactPanel } from "./ArtifactPanel";
 import { FollowupContextPanel } from "./FollowupContextPanel";
 import { InteractiveStatePanel } from "./InteractiveStatePanel";
 import { JiraSubtasksPanel } from "./JiraSubtasksPanel";
@@ -16,7 +15,7 @@ import {
   workflowProfileDisplayName,
 } from "../sessionDisplay";
 import { stageDisplayName } from "../stageDisplay";
-import type { EventItem, Role, Session, SessionBundle, WorkItem } from "../types";
+import type { Role, Session, SessionBundle, WorkItem } from "../types";
 
 type SessionDetailProps = {
   session: Session | null;
@@ -30,100 +29,6 @@ function humanizeEventType(value: string): string {
     .filter((part) => part.length > 0)
     .map((part) => part[0].toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-function producerDisplayName(value: string): string {
-  if (value === "coordinator") {
-    return "Coordinator";
-  }
-  if (value === "role") {
-    return "Role Runtime";
-  }
-  if (value === "operator") {
-    return "Operator";
-  }
-  return humanizeEventType(value);
-}
-
-function eventContextLabel(event: EventItem): string {
-  switch (event.event_type) {
-    case "task_started":
-      return "Coordinator opened the workflow.";
-    case "task_prepared":
-      return "Coordinator refreshed the task snapshot.";
-    case "role_input_dispatched":
-      return "Live runtime received a new handoff.";
-    case "implementation_requested":
-      return "Implementation lane was queued.";
-    case "self_review_requested":
-      return "Self-review lane was queued.";
-    case "self_review_correction_requested":
-      return "Self-review corrections were queued.";
-    case "verification_requested":
-      return "Verification lane was queued.";
-    case "verification_correction_requested":
-      return "Verification corrections were queued.";
-    case "boy_scout_requested":
-      return "Boy Scout lane was queued.";
-    case "mr_handoff_completed":
-      return "Delivery moved to merge request handoff.";
-    case "send_to_test_completed":
-      return "Delivery moved to test handoff.";
-    case "task_completed":
-      return "Coordinator marked the run complete.";
-    default:
-      return producerDisplayName(event.producer_type);
-  }
-}
-
-function relativeTimeLabel(value: string): string | null {
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) {
-    return null;
-  }
-  const diffMs = timestamp - Date.now();
-  const diffMinutes = Math.round(diffMs / 60000);
-  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-  if (Math.abs(diffMinutes) < 60) {
-    return rtf.format(diffMinutes, "minute");
-  }
-  const diffHours = Math.round(diffMinutes / 60);
-  if (Math.abs(diffHours) < 24) {
-    return rtf.format(diffHours, "hour");
-  }
-  const diffDays = Math.round(diffHours / 24);
-  return rtf.format(diffDays, "day");
-}
-
-function eventSummary(event: EventItem): string {
-  switch (event.event_type) {
-    case "task_started":
-      return "Run started";
-    case "task_prepared":
-      return "Task snapshot prepared";
-    case "role_input_dispatched":
-      return "Worker started";
-    case "implementation_requested":
-      return "Implementation lane requested";
-    case "self_review_requested":
-      return "Self-review requested";
-    case "self_review_correction_requested":
-      return "Self-review corrections requested";
-    case "boy_scout_requested":
-      return "Boy Scout pass requested";
-    case "verification_requested":
-      return "Verification requested";
-    case "verification_correction_requested":
-      return "Verification corrections requested";
-    case "mr_handoff_completed":
-      return "MR handoff completed";
-    case "send_to_test_completed":
-      return "Sent to test";
-    case "task_completed":
-      return "Task completed";
-    default:
-      return humanizeEventType(event.event_type);
-  }
 }
 
 function workTypeSummary(workType: string): string {
@@ -273,7 +178,6 @@ export function SessionDetail({
     bundle.workItems.length > 0 ||
     visibleRoles.some((role) => role.status !== "running");
   const showFollowupContextPanel = bundle.followupContext !== null;
-  const recentEvents = [...bundle.events].slice(-4).reverse();
   const workflowDetailCount = [
     bundle.subtaskProgressSummary !== null && bundle.subtaskProgressSummary.available,
     bundle.jiraSubtasksSummary !== null,
@@ -431,30 +335,6 @@ export function SessionDetail({
           ) : null}
         </div>
 
-        <div className="subpanel session-updates-panel">
-          <div className="subpanel-head">
-            <strong>Latest Activity</strong>
-            <span className="badge badge-muted">{recentEvents.length}</span>
-          </div>
-          {recentEvents.length > 0 ? (
-            <div className="table-list limited-list">
-              {recentEvents.map((event) => {
-                const timestampLabel = relativeTimeLabel(event.created_at);
-                return (
-                  <div className="table-row" key={`recent-${event.id}`}>
-                    <div>
-                      <strong>{eventSummary(event)}</strong>
-                      <p>{eventContextLabel(event)}</p>
-                    </div>
-                    {timestampLabel ? <small>{timestampLabel}</small> : null}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="path-label">No activity has been recorded yet.</p>
-          )}
-        </div>
       </section>
 
       <OperatorActions
@@ -521,7 +401,6 @@ export function SessionDetail({
             runtimeStateSummary={bundle.runtimeStateSummary}
             session={session}
           />
-          <ArtifactPanel artifacts={bundle.artifacts} events={bundle.events} />
         </div>
       </section>
       ) : null}
