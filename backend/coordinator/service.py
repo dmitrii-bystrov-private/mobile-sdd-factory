@@ -5016,7 +5016,9 @@ class CoordinatorService:
 
         work_item = self._find_active_work_item_for_role(session.id, role.id)
         if work_item is None:
-            return False
+            work_item = self._reconcile_missing_subtask_assignment(session, role)
+            if work_item is None:
+                return False
 
         if self._has_dispatch_event(
             session_id=session.id,
@@ -5053,6 +5055,34 @@ class CoordinatorService:
             },
         )
         return True
+
+    def _reconcile_missing_subtask_assignment(
+        self,
+        session: Session,
+        role: Role,
+    ) -> WorkItem | None:
+        if session.current_stage != "subtask_implementation_requested":
+            return None
+        if role.role_name != IMPLEMENTER_ROLE:
+            return None
+
+        next_item = next(
+            (
+                item
+                for item in self.work_item_repository.list_for_session(session.id)
+                if item.work_type == "subtask_implementation"
+                and item.status == WorkItemStatus.UNASSIGNED
+            ),
+            None,
+        )
+        if next_item is None:
+            return None
+
+        return self.work_item_repository.update_assignment(
+            next_item.id,
+            owner_role_id=role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
 
     def _find_active_work_item_for_role(
         self,

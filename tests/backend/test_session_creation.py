@@ -10,6 +10,7 @@ from backend import session_policy as session_policy_module
 from backend.coordinator.intake import IntakeError
 from backend.coordinator.service import CoordinatorService
 from backend.models.enums import RoleStatus, SessionStatus
+from backend.models.work_item import WorkItemStatus
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
     BUG_FIXER_ROLE,
@@ -3191,6 +3192,92 @@ class SessionCreationTests(unittest.TestCase):
                 for item in work_items
             )
         )
+
+    def test_reconcile_session_dispatch_assigns_next_unassigned_subtask_when_owner_has_no_active_item(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004RECONCILESUB",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004RECONCILESUB")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Context prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="requirements_completed",
+            payload={"summary": "Requirements clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="acceptance_criteria_completed",
+            payload={"summary": "Acceptance prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning verified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="story_spec_completed",
+            payload={"summary": "Split into focused subtasks"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload=decomposition_payload("Execution chunks prepared"),
+        )
+        self.write_statuses_file(
+            "IOS-30004RECONCILESUB",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004RECONCILESUB | Story | Parent story | In Progress |
+| IOS-30080 | Sub-task | Add data source | To Do |
+| IOS-30081 | Sub-task | Wire view state | To Do |
+""",
+        )
+        self.coordinator.start_subtask_graph(session.id)
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        work_items = self.work_item_repository.list_for_session(session.id)
+        assigned_item = next(
+            item
+            for item in work_items
+            if item.work_type == "subtask_implementation" and item.status.value == "assigned"
+        )
+        self.work_item_repository.update_status(assigned_item.id, WorkItemStatus.COMPLETED)
+        broken_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        broken_session = self.session_repository.update_status(broken_session.id, SessionStatus.ACTIVE)
+
+        reconciled = self.coordinator._reconcile_session_dispatch(broken_session)
+        work_items = self.work_item_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertTrue(reconciled)
+        self.assertTrue(
+            any(
+                item.work_type == "subtask_implementation"
+                and item.status.value == "assigned"
+                and "IOS-30081" in item.title
+                and item.owner_role_id == implementer_role.id
+                for item in work_items
+            )
+        )
+        self.assertTrue(any(item.event_type == "session_dispatch_reconciled" for item in events))
 
     def test_verification_failed_moves_session_back_to_implementer(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")
