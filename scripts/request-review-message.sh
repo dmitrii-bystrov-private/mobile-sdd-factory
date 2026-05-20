@@ -113,10 +113,9 @@ fi
 web_url="${web_url%/}"
 echo "${web_url}/diffs"
 
+stats=""
 source_branch="$(printf '%s' "$mr_json" | jq -r '.source_branch // empty')"
 target_branch="$(printf '%s' "$mr_json" | jq -r '.target_branch // "master"')"
-
-stats=""
 if [ -n "$source_branch" ]; then
   (cd "$project_dir" && git fetch --quiet origin "$target_branch" "$source_branch" 2>/dev/null) || true
   stat_line="$(cd "$project_dir" && git diff --stat "origin/$target_branch...origin/$source_branch" 2>/dev/null | tail -1)"
