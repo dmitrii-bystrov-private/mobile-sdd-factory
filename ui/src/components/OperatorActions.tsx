@@ -263,6 +263,8 @@ export function OperatorActions({
     },
   ];
 
+  const runControlActions: ActionDefinition[] = [...dailyActions, ...recoveryActions];
+
   function renderActionGroup(
     title: string,
     summary: string,
@@ -311,14 +313,8 @@ export function OperatorActions({
 
       {renderActionGroup(
         "Run Controls",
-        "Use these actions to refresh task state and keep the current workflow aligned.",
-        dailyActions,
-      )}
-
-      {renderActionGroup(
-        "Recovery",
-        "Use these controls only when the normal flow is blocked or needs manual intervention.",
-        recoveryActions,
+        "Use these actions to refresh task state, pause the session, or recover a blocked run.",
+        runControlActions,
       )}
 
       {renderActionGroup(
