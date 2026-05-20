@@ -51,6 +51,7 @@ try:
     from backend.api.routes_operator import refresh_subtask_state
     from backend.api.routes_operator import restart_runtime_role
     from backend.api.routes_operator import restart_runtime_session
+    from backend.api.routes_operator import review_message_preview
     from backend.api.routes_operator import stop_runtime_role
     from backend.api.routes_operator import stop_runtime_session
     from backend.api.routes_operator import send_to_test
@@ -71,6 +72,7 @@ try:
         PauseSessionRequest,
         RefreshSnapshotRequest,
         RefreshSubtaskStateRequest,
+        ReviewMessagePreviewRequest,
         ReopenFromQaRequest,
         RedirectSessionRequest,
         ResumeSessionRequest,
@@ -3408,6 +3410,36 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("qa_reopen_requested", response.followup_event_type)
         self.assertEqual("active", response.session.status)
         self.assertEqual("qa_reopen_requested", response.session.current_stage)
+
+    def test_review_message_preview_route_uses_request_review_script(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014REVIEW"),
+            dependencies=self.dependencies,
+        )
+        with patch("backend.api.routes_operator.CommandRunner.run") as mocked_run:
+            mocked_run.return_value = CommandResult(
+                command=["bash", "scripts/request-review-message.sh", "ios", "2942"],
+                returncode=0,
+                stdout=(
+                    "IOS-40014REVIEW: Improve runtime recovery flow\n"
+                    "https://gitlab.example.com/project/-/merge_requests/2942/diffs\n"
+                    "7 files +120 −18\n"
+                ),
+                stderr="",
+            )
+
+            response = review_message_preview(
+                ReviewMessagePreviewRequest(
+                    session_id=prepare_response.session.id,
+                    mr_id="2942",
+                ),
+                dependencies=self.dependencies,
+            )
+
+        self.assertTrue(response.available)
+        self.assertEqual("ios", response.platform)
+        self.assertEqual("2942", response.mr_id)
+        self.assertIn("IOS-40014REVIEW: Improve runtime recovery flow", response.text)
 
     def test_followup_completion_after_qa_reopen_returns_to_verification(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

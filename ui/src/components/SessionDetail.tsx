@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { apiClient } from "../api/client";
 import { ActiveRuntimeOutputPanel } from "./ActiveRuntimeOutputPanel";
+import { CompletedFollowupPanel } from "./CompletedFollowupPanel";
 import { InteractiveStatePanel } from "./InteractiveStatePanel";
 import { OperatorActions } from "./OperatorActions";
 import { useToast } from "./ToastProvider";
@@ -353,6 +354,13 @@ export function SessionDetail({
         interactiveStateSummary={bundle.interactiveStateSummary}
         onRefresh={onRefresh}
         sessionId={session.id}
+      />
+
+      <CompletedFollowupPanel
+        artifacts={bundle.artifacts}
+        events={bundle.events}
+        onRefresh={onRefresh}
+        session={session}
       />
 
       <section className="panel">

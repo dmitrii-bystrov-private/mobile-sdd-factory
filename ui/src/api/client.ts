@@ -476,6 +476,24 @@ export const apiClient = {
     });
   },
 
+  getReviewMessagePreview(
+    sessionId: number,
+    mrId: string,
+  ): Promise<{
+    available: boolean;
+    platform: string;
+    mr_id: string;
+    text: string;
+  }> {
+    return request("/operator/review-message-preview", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        mr_id: mrId,
+      }),
+    });
+  },
+
   reopenFromQa(
     sessionId: number,
     commentText: string,

@@ -28,11 +28,6 @@ export function OperatorActions({
 }: OperatorActionsProps): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [mrPlatform, setMrPlatform] = useState<"ios" | "android">(
-    session.task_key.startsWith("ANDR-") ? "android" : "ios",
-  );
-  const [mrId, setMrId] = useState("");
-  const [qaComment, setQaComment] = useState("");
   const [boyScoutSkipReason, setBoyScoutSkipReason] = useState("");
 
   async function run(action: () => Promise<unknown>): Promise<void> {
@@ -46,32 +41,6 @@ export function OperatorActions({
     } finally {
       setBusy(false);
     }
-  }
-
-  async function handleMrIngest(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const normalizedMrId = mrId.trim();
-    if (normalizedMrId.length === 0) {
-      setError("MR id is required");
-      return;
-    }
-    await run(async () => {
-      await apiClient.ingestMrComments(session.id, mrPlatform, normalizedMrId);
-      setMrId("");
-    });
-  }
-
-  async function handleQaReopen(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const normalizedComment = qaComment.trim();
-    if (normalizedComment.length === 0) {
-      setError("QA follow-up comment is required");
-      return;
-    }
-    await run(async () => {
-      await apiClient.reopenFromQa(session.id, normalizedComment);
-      setQaComment("");
-    });
   }
 
   async function handleBoyScoutSkip(event: React.FormEvent<HTMLFormElement>): Promise<void> {
@@ -95,7 +64,6 @@ export function OperatorActions({
     });
   }
 
-  const canOpenFollowup = session.status === "completed";
   const canRefreshSnapshot =
     session.status === "active" ||
     (session.status === "completed" &&
@@ -411,72 +379,6 @@ export function OperatorActions({
               </button>
             </form>
           ) : null}
-        </div>
-      ) : null}
-
-      {canOpenFollowup ? (
-        <div className="operator-followup-stack">
-          <div className="operator-followup-copy">
-            <p className="eyebrow">Follow-up Intake</p>
-            <h4>Reopen Completed Session</h4>
-          </div>
-
-          <form className="followup-form" onSubmit={(event) => void handleMrIngest(event)}>
-            <div className="followup-form-grid">
-              <label className="form-field">
-                <span>MR Platform</span>
-                <select
-                  className="select-input"
-                  disabled={busy || !canOpenFollowup}
-                  onChange={(event) => setMrPlatform(event.target.value as "ios" | "android")}
-                  value={mrPlatform}
-                >
-                  <option value="ios">ios</option>
-                  <option value="android">android</option>
-                </select>
-              </label>
-              <label className="form-field">
-                <span>MR Id</span>
-                <input
-                  className="text-input"
-                  disabled={busy || !canOpenFollowup}
-                  onChange={(event) => setMrId(event.target.value)}
-                  placeholder="2942"
-                  value={mrId}
-                />
-              </label>
-            </div>
-            <button
-              className="action-button"
-              disabled={busy || !canOpenFollowup}
-              title="Pull unresolved merge request comments into the completed session and reopen the follow-up flow."
-              type="submit"
-            >
-              Ingest MR Comments
-            </button>
-          </form>
-
-          <form className="followup-form" onSubmit={(event) => void handleQaReopen(event)}>
-            <label className="form-field">
-              <span>QA Follow-up Comment</span>
-              <textarea
-                className="text-area-input"
-                disabled={busy || !canOpenFollowup}
-                onChange={(event) => setQaComment(event.target.value)}
-                placeholder="QA: still broken on edge case"
-                rows={4}
-                value={qaComment}
-              />
-            </label>
-            <button
-              className="action-button"
-              disabled={busy || !canOpenFollowup}
-              title="Reopen the completed session from a QA comment so the follow-up execution flow can resume."
-              type="submit"
-            >
-              Reopen From QA
-            </button>
-          </form>
         </div>
       ) : null}
 

@@ -34,6 +34,8 @@ from backend.api.schemas import (
     CreateMrResponse,
     IngestMrCommentsRequest,
     IngestMrCommentsResponse,
+    ReviewMessagePreviewRequest,
+    ReviewMessagePreviewResponse,
     ReopenFromQaRequest,
     ReopenFromQaResponse,
     RedirectSessionRequest,
@@ -66,6 +68,7 @@ from backend.api.schemas import (
 )
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
+from backend.tools.command_runner import CommandRunner
 from backend.runtime_defaults import load_runtime_defaults, save_runtime_defaults
 from factory.doctor.bootstrap_guidance import build_bootstrap_guidance
 from factory.doctor.environment_doctor import build_report
@@ -87,6 +90,10 @@ def _repo_root_from_dependencies(dependencies: AppDependencies) -> Path:
     if coordinator.role_workspace_manager is not None:
         return coordinator.role_workspace_manager.repo_root
     return Path(__file__).resolve().parents[2]
+
+
+def _platform_for_task_key(task_key: str) -> str:
+    return "android" if task_key.startswith("ANDR-") else "ios"
 
 
 @router.get("/environment-doctor", response_model=EnvironmentDoctorResponse)
@@ -168,6 +175,37 @@ def update_runtime_defaults(
         policy_defaults=payload.policy_defaults,
     )
     return RuntimeDefaultsResponse(**defaults)
+
+
+@router.post("/review-message-preview", response_model=ReviewMessagePreviewResponse)
+def review_message_preview(
+    payload: ReviewMessagePreviewRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> ReviewMessagePreviewResponse:
+    session = dependencies.session_repository.get_by_id(payload.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session {payload.session_id} not found")
+
+    normalized_mr_id = payload.mr_id.strip()
+    if not normalized_mr_id:
+        raise HTTPException(status_code=400, detail="MR id is required")
+
+    repo_root = _repo_root_from_dependencies(dependencies)
+    platform = _platform_for_task_key(session.task_key)
+    result = CommandRunner().run(
+        ["bash", "scripts/request-review-message.sh", platform, normalized_mr_id],
+        cwd=repo_root,
+    )
+    if not result.ok:
+        detail = result.stderr.strip() or result.stdout.strip() or "Failed to build review message preview"
+        raise HTTPException(status_code=400, detail=detail)
+
+    return ReviewMessagePreviewResponse(
+        available=True,
+        platform=platform,
+        mr_id=normalized_mr_id,
+        text=result.stdout.strip(),
+    )
 
 
 @router.post("/pause-session", response_model=PauseSessionResponse)

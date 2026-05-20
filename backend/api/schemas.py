@@ -515,6 +515,18 @@ class IngestMrCommentsResponse(BaseModel):
     discussion_count: int
 
 
+class ReviewMessagePreviewRequest(BaseModel):
+    session_id: int
+    mr_id: str
+
+
+class ReviewMessagePreviewResponse(BaseModel):
+    available: bool
+    platform: str
+    mr_id: str
+    text: str
+
+
 class CreateMrRequest(BaseModel):
     session_id: int
 

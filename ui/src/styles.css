@@ -981,6 +981,50 @@ input {
   border-top: 0;
 }
 
+.completed-followup-stack {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.completed-followup-actions {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.completed-followup-preview {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.completed-followup-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.completed-followup-preview-head strong,
+.completed-followup-preview-body {
+  margin: 0;
+}
+
+.completed-followup-preview-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink-soft);
+  font: inherit;
+  line-height: 1.6;
+}
+
+.action-button-ghost {
+  background: rgba(255, 255, 255, 0.04);
+}
+
 .followup-form-grid {
   display: grid;
   gap: var(--space-3);
