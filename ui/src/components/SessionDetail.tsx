@@ -187,8 +187,20 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
   return index === -1 ? orderedRoles.length + 1 : index;
 }
 
-function workerStateLabel(role: Role, activeRoleIds: Set<number>): string {
+function workerStateLabel(
+  role: Role,
+  activeRoleIds: Set<number>,
+  session: Session,
+  bundle: SessionBundle,
+): string {
   if (activeRoleIds.has(role.id)) {
+    if (
+      session.status === "waiting_for_operator" &&
+      bundle.interactiveStateSummary?.available &&
+      bundle.interactiveStateSummary.roleName === role.role_name
+    ) {
+      return "Waiting for operator";
+    }
     return "Active";
   }
   if (role.status === "running") {
@@ -226,7 +238,11 @@ export function SessionDetail({
   }
 
   const visibleRoles = bundle.roles.filter((role) => role.role_name !== "task-coordinator");
-  const ownedRoleNames = new Set(
+  const interactiveOwnerRoleName =
+    session.status === "waiting_for_operator" && bundle.interactiveStateSummary?.available
+      ? bundle.interactiveStateSummary.roleName
+      : null;
+  const ownedRoleIds = new Set(
     bundle.workItems
       .filter((item) => item.status === "active" || item.status === "pending")
       .map((item) => item.owner_role_id),
@@ -234,10 +250,16 @@ export function SessionDetail({
   const activeRoles = visibleRoles.filter(
     (role) =>
       role.status === "running" &&
-      (session.current_owner === role.role_name || ownedRoleNames.has(role.id)),
+      (
+        session.current_owner === role.role_name ||
+        interactiveOwnerRoleName === role.role_name ||
+        ownedRoleIds.has(role.id)
+      ),
   );
   const currentOwner = session.current_owner
     ? roleDisplayName(session.current_owner)
+    : interactiveOwnerRoleName
+      ? roleDisplayName(interactiveOwnerRoleName)
     : session.status === "active"
       ? "Awaiting assignment"
       : "Not assigned yet";
@@ -356,7 +378,7 @@ export function SessionDetail({
                     <div className="subpanel-head">
                       <strong className="workflow-pulse-role-name">{roleDisplayName(role.role_name)}</strong>
                       <span className={`status-pill status-${role.status === "running" ? "running" : role.status}`}>
-                        {workerStateLabel(role, activeRoleIds)}
+                        {workerStateLabel(role, activeRoleIds, session, bundle)}
                       </span>
                     </div>
                     <p className="progress-card-title">{summary.title}</p>
