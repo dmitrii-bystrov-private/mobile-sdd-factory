@@ -1117,13 +1117,15 @@ input {
 .workflow-pulse-runtime {
   color: var(--ink-soft);
   font-size: 0.84rem;
+  min-width: 0;
 }
 
-.workflow-pulse-card-footer {
-  display: flex;
-  justify-content: flex-end;
+.workflow-pulse-runtime-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--space-2);
   margin-top: auto;
-  padding-top: var(--space-2);
 }
 
 .workflow-pulse-menu-anchor {

@@ -380,11 +380,11 @@ export function SessionDetail({
                       </span>
                     </div>
                     <p className="progress-card-title">{summary.title}</p>
-                    <p className="progress-card-body workflow-pulse-runtime">
-                      {runtimeConfigSummary(role.role_name, session)}
-                    </p>
-                    {hasWorkerActions ? (
-                      <div className="workflow-pulse-card-footer">
+                    <div className="workflow-pulse-runtime-row">
+                      <p className="progress-card-body workflow-pulse-runtime">
+                        {runtimeConfigSummary(role.role_name, session)}
+                      </p>
+                      {hasWorkerActions ? (
                         <div className="workflow-pulse-menu-anchor">
                           <button
                             aria-expanded={menuOpen}
@@ -465,8 +465,8 @@ export function SessionDetail({
                             </div>
                           ) : null}
                         </div>
-                      </div>
-                    ) : null}
+                      ) : null}
+                    </div>
                   </article>
                 );
               })}
