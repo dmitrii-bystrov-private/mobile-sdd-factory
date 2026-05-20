@@ -359,6 +359,7 @@ export function SessionsPage(): JSX.Element {
   const [bundle, setBundle] = useState<SessionBundle | null>(null);
   const [surfaceView, setSurfaceView] = useState<SurfaceView>("runs");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
   const [doctorSummary, setDoctorSummary] = useState<EnvironmentDoctorSummary | null>(null);
@@ -375,8 +376,10 @@ export function SessionsPage(): JSX.Element {
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? null;
 
-  async function loadSessions(): Promise<number | null> {
-    setLoading(true);
+  async function loadSessions(blocking = true): Promise<number | null> {
+    if (blocking) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const sessionResponse = await apiClient.listSessions();
@@ -475,7 +478,9 @@ export function SessionsPage(): JSX.Element {
       setError(err instanceof Error ? err.message : "Failed to load sessions");
       return null;
     } finally {
-      setLoading(false);
+      if (blocking) {
+        setLoading(false);
+      }
     }
   }
 
@@ -524,11 +529,16 @@ export function SessionsPage(): JSX.Element {
   }
 
   async function refreshSelected(): Promise<void> {
-    const nextSelectedId = await loadSessions();
-    if (nextSelectedId !== null) {
-      await loadBundle(nextSelectedId);
-    } else {
-      setBundle(null);
+    setRefreshing(true);
+    try {
+      const nextSelectedId = await loadSessions(false);
+      if (nextSelectedId !== null) {
+        await loadBundle(nextSelectedId);
+      } else {
+        setBundle(null);
+      }
+    } finally {
+      setRefreshing(false);
     }
   }
 
@@ -616,11 +626,12 @@ export function SessionsPage(): JSX.Element {
           </div>
           <button
             className="action-button action-button-subtle"
+            disabled={refreshing}
             onClick={() => void refreshSelected()}
             title="Reload the session list and the currently selected session surface."
             type="button"
           >
-            Refresh
+            {refreshing ? "Refreshing…" : "Refresh"}
           </button>
         </div>
       </header>
