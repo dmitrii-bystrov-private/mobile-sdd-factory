@@ -611,7 +611,7 @@ export function SessionsPage(): JSX.Element {
           <p className="eyebrow">Constellation</p>
           <h1>Agent Runtime</h1>
           <p className="topbar-summary">
-            Track active work and manage project defaults.
+            Keep every star aligned through the long run.
           </p>
         </div>
         <div className="topbar-actions">
