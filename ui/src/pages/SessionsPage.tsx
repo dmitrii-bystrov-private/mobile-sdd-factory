@@ -761,13 +761,13 @@ export function SessionsPage(): JSX.Element {
                     ? "Project Settings"
                     : "Environment Health"}
               </h2>
-              <p className="path-label">
-                {surfaceView === "runs"
-                  ? "Switch runs, inspect the selected session, and handle operator actions."
-                  : surfaceView === "settings"
+              {surfaceView !== "runs" ? (
+                <p className="path-label">
+                  {surfaceView === "settings"
                     ? "Manage project defaults without mixing them into run execution."
                     : "Check doctor, setup, and runtime readiness before debugging workflow logic."}
-              </p>
+                </p>
+              ) : null}
             </div>
             {surfaceView === "runs" ? (
               <SessionDetail

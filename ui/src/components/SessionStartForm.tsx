@@ -337,7 +337,6 @@ export function SessionStartForm({
         <div className="inline-summary-card">
           <div className="inline-summary-header">
             <strong>{workflowProfileDisplayName(workflowProfile)}</strong>
-            <span>{effectiveRoleNames.length} workers</span>
           </div>
           <div className="inline-pill-row">
             <span className="inline-pill">Self-review {policy.self_review_policy}</span>
