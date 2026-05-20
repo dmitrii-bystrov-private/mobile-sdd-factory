@@ -1101,9 +1101,9 @@ input {
 }
 
 .workflow-pulse-role-name {
-  font-size: 0.98rem;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-size: 0.96rem;
+  font-weight: 500;
+  letter-spacing: 0;
 }
 
 .workflow-pulse-card .status-pill {
