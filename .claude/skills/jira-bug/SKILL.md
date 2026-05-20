@@ -148,13 +148,13 @@ On subtask success, immediately launch the next without pausing.
 
 After all subtasks complete, run `/send-to-test <KEY>` to transition the parent bug to **Ready for test**. Then proceed to Step 6.5 (self-review).
 
-## Step 6 — Commit and send to test
+## Step 6 — Send to test
 
 ```bash
-bash scripts/commit-and-resolve.sh <KEY>
+bash scripts/send-to-test.sh <KEY>
 ```
 
-Commits all changes with message `<KEY>: <title>` and transitions the bug to **Ready for test**.
+Transitions the bug to **Ready for test** after MR handoff has already committed and pushed the changes.
 
 Skip this step when coming from Step 5.5 — the parent was already transitioned there.
 

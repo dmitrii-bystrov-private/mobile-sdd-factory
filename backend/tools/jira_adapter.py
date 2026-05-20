@@ -70,4 +70,4 @@ class JiraAdapter:
         )
 
     def send_to_test(self, task_key: str) -> CommandResult:
-        return self.runner.run(["bash", "scripts/commit-and-resolve.sh", task_key], cwd=self.repo_root)
+        return self.runner.run(["bash", "scripts/send-to-test.sh", task_key], cwd=self.repo_root)

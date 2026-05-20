@@ -1,6 +1,6 @@
 ---
 description: >
-  Commit uncommitted changes and transition a Jira task to Ready for test.
+  Transition a Jira task to Ready for test after MR handoff has already committed and pushed changes.
   TRIGGER when the user asks to send/submit/move a task to testing, QA, or test.
   Examples: "send to test", "submit to QA", "move to QA", "ready for testing".
   DO NOT TRIGGER for general task questions or code changes unrelated to QA handoff.
@@ -14,12 +14,12 @@ This skill defines the deprecated slash-command send-to-test surface. In the cur
 
 Parse `<KEY>` from `$ARGUMENTS`. If missing, ask for it.
 
-## Step 2 — Run commit-and-resolve
+## Step 2 — Run send-to-test
 
 ```bash
-bash scripts/commit-and-resolve.sh <KEY>
+bash scripts/send-to-test.sh <KEY>
 ```
 
 The script:
-1. Commits all uncommitted changes with message `<KEY>: <TASK-TITLE>` (title fetched from Jira).
-2. Transitions the task to **Ready for test**.
+1. Transitions the task to **Ready for test**.
+2. Does not create any git commit; MR handoff owns commit + push.

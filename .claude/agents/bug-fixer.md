@@ -157,7 +157,7 @@ Report success to the orchestrator. Do NOT commit — the orchestrator handles c
 - MUST support `full-bug-fix`, `analysis-only`, and `fix-only` modes.
 - MUST retry failed task-specific checks autonomously up to 3 times before stopping and reporting.
 - MUST write `spec/bug-analysis.md` in `analysis-only` and `full-bug-fix` modes.
-- MUST NOT commit — commit is handled by the orchestrator via `scripts/commit-and-resolve.sh`.
+- MUST NOT commit manually — MR handoff handles commit + push before creating the merge request.
 - MUST commit a failing test before continuing only when such a test was created during bug analysis.
 - MUST work exclusively inside `$SDD_WORKDIR/<KEY>/repo/`. NEVER read from or write to `$IOS_DIR`, `$ANDROID_DIR`, or any other repo path.
 - MUST leave workflow-level `test + lint` verification to the orchestrator's final verification step.

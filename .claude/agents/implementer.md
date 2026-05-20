@@ -85,7 +85,7 @@ Before reporting completion to the orchestrator, verify ALL of the following:
 
 **Do NOT hand off to the orchestrator until the implementation itself is complete.**
 
-Do NOT commit — the orchestrator calls `commit-and-resolve.sh` after handoff.
+Do NOT commit manually — MR handoff commits and pushes before creating the merge request.
 
 Always end your final message with a mandatory status block — even if all checks passed on the first attempt:
 

@@ -226,20 +226,19 @@ bash scripts/create-mr.sh <TASK-KEY>
 
 Requires `SDD_WORKDIR`, plus `IOS_DIR` or `ANDROID_DIR` when no worktree exists.
 
-#### `commit-and-resolve.sh`
+#### `send-to-test.sh`
 
-Commits all uncommitted changes in the task worktree and transitions the task to the appropriate status:
+Transitions the task to the appropriate testing-ready Jira status without creating a git commit:
 
 ```bash
-bash scripts/commit-and-resolve.sh <TASK-KEY>
+bash scripts/send-to-test.sh <TASK-KEY>
 ```
 
-- Commit message format: `<KEY>: <TASK-TITLE>` (title fetched from Jira).
-- Subtask (non-bug) → **Resolved**; everything else → **Ready for test**.
+- MR handoff is responsible for committing and pushing changes before this step.
+- Non-bug tasks transition to **Ready for test**.
 - If the task is in **To Do**, transitions through **In Progress** first.
-- If there is nothing to commit, skips the commit and proceeds to the transition.
 
-Requires `SDD_WORKDIR` to be set.
+Requires `acli` and `jq`.
 
 #### `fetch-mr-comments.sh`
 

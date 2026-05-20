@@ -344,7 +344,7 @@ The repo also exposes direct shell entry points for automation and debugging:
 - `bash scripts/run-test.sh <KEY>` / `run-lint.sh <KEY>` — platform-aware wrappers used by the current workflow-level verification gate
 - `bash scripts/run-build.sh <KEY>` — legacy wrapper kept for manual use; no longer part of the default workflow gate
 - `bash scripts/create-mr.sh <KEY>` — push the task branch and open a GitLab MR
-- `bash scripts/commit-and-resolve.sh <KEY>` — commit local changes and transition Jira status
+- `bash scripts/send-to-test.sh <KEY>` — transition Jira status to testing-ready after MR handoff
 - `bash scripts/create-issue.sh ...` / `create-subtask.sh ...` / `create-subtasks-batch.sh ...` — Jira creation helpers
 - `bash scripts/fetch-mr-comments.sh <ios|android> <mr_iid>` — export unresolved MR discussions as Markdown
 - `bash scripts/get-mr-jira-key.sh <ios|android> <mr_iid>` — extract the Jira key from an MR title or description
