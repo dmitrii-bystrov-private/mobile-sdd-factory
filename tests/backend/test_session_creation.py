@@ -346,6 +346,43 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(task_root.exists())
         self.assertIsNone(self.session_repository.get_by_id(session.id))
 
+    def test_cleanup_task_smart_uses_soft_for_open_tasks(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30000SMARTOPEN",
+            workflow_profile="oneshot",
+            policy={},
+        )
+        task_root = Path(self.temp_dir.name) / "IOS-30000SMARTOPEN"
+        runtime_dir = task_root / "runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+
+        result = self.coordinator.cleanup_task(session.id, cleanup_mode="smart")
+
+        self.assertTrue(result["cleaned"])
+        self.assertFalse(result["deleted_session"])
+        self.assertEqual("soft", result["cleanup_mode"])
+        self.assertTrue(task_root.exists())
+        self.assertFalse(runtime_dir.exists())
+
+    def test_cleanup_task_smart_uses_full_for_closed_tasks(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30000SMARTCLOSED",
+            workflow_profile="oneshot",
+            policy={},
+        )
+        self.jira_adapter.status_by_task["IOS-30000SMARTCLOSED"] = "Resolved"
+        task_root = Path(self.temp_dir.name) / "IOS-30000SMARTCLOSED"
+        repo_dir = task_root / "repo"
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        (repo_dir / "placeholder.txt").write_text("x")
+
+        result = self.coordinator.cleanup_task(session.id, cleanup_mode="smart")
+
+        self.assertTrue(result["cleaned"])
+        self.assertTrue(result["deleted_session"])
+        self.assertEqual("full", result["cleanup_mode"])
+        self.assertFalse(task_root.exists())
+
     def test_cleanup_task_removes_claude_project_session_directory(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30000CLAUDE",

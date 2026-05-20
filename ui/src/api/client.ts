@@ -429,7 +429,7 @@ export const apiClient = {
 
   cleanupTask(
     sessionId: number,
-    cleanupMode: "soft" | "full",
+    cleanupMode: "soft" | "full" | "smart",
     force = false,
   ): Promise<{
     cleaned: boolean;

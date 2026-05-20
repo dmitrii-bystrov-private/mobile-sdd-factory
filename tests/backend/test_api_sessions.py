@@ -411,6 +411,44 @@ class SessionApiTests(unittest.TestCase):
                 dependencies=self.dependencies,
             )
 
+    def test_cleanup_task_route_smart_uses_soft_for_open_tasks(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40102", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        self.jira_adapter.status_by_task["IOS-40102"] = "In Progress"
+        runtime_dir = Path(self.temp_dir.name) / "IOS-40102" / "runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+
+        response = cleanup_task(
+            CleanupTaskRequest(session_id=create_response.session.id, cleanup_mode="smart"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.cleaned)
+        self.assertFalse(response.deleted_session)
+        self.assertEqual("soft", response.cleanup_mode)
+        self.assertFalse(runtime_dir.exists())
+
+    def test_cleanup_task_route_smart_uses_full_for_closed_tasks(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40103", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        self.jira_adapter.status_by_task["IOS-40103"] = "Resolved"
+        task_root = Path(self.temp_dir.name) / "IOS-40103"
+        task_root.mkdir(parents=True, exist_ok=True)
+
+        response = cleanup_task(
+            CleanupTaskRequest(session_id=create_response.session.id, cleanup_mode="smart"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.cleaned)
+        self.assertTrue(response.deleted_session)
+        self.assertEqual("full", response.cleanup_mode)
+        self.assertFalse(task_root.exists())
+
     def test_create_session_route_creates_role_workspaces(self) -> None:
         response = create_session(
             CreateSessionRequest(task_key="IOS-40000W", workflow_profile="oneshot"),

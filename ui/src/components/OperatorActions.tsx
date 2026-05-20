@@ -239,18 +239,13 @@ export function OperatorActions({
 
   const cleanupActions: ActionDefinition[] = [
     {
-      label: "Clean Runtime Residue",
-      description: "Stop runtime and remove task-local runtime residue while keeping the task worktree and snapshot.",
-      disabled: busy,
-      onClick: () => run(() => apiClient.cleanupTask(session.id, "soft")),
-    },
-    {
-      label: "Full Cleanup If Closed",
-      description: "Remove the full task snapshot and worktree only when closed-task cleanup is allowed.",
+      label: "Soft Cleanup",
+      description:
+        "Safely clean this task: keep local state for open work, but fully clean closed tasks when Jira status allows it.",
       disabled: busy,
       confirmMessage:
-        "Run full cleanup for this task if Jira status allows it? This can remove the task snapshot and worktree.",
-      onClick: () => run(() => apiClient.cleanupTask(session.id, "full")),
+        "Run safe cleanup for this task? Open tasks keep their local state, while closed tasks are cleaned fully.",
+      onClick: () => run(() => apiClient.cleanupTask(session.id, "smart")),
     },
     {
       label: "Force Cleanup",

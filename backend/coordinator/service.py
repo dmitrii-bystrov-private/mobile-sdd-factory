@@ -5710,14 +5710,17 @@ class CoordinatorService:
         force: bool = False,
     ) -> dict:
         session = self._get_session_or_raise(session_id)
-        if cleanup_mode not in {"soft", "full"}:
+        if cleanup_mode not in {"soft", "full", "smart"}:
             raise IntakeError(f"Unsupported cleanup mode: {cleanup_mode}")
 
         jira_status = self._get_jira_status_name(session.task_key)
         full_cleanup_allowed = (
             jira_status is not None and jira_status.strip().lower() in _CLOSED_JIRA_STATUSES
         )
-        if cleanup_mode == "full" and not force and not full_cleanup_allowed:
+        effective_cleanup_mode = "full" if cleanup_mode == "smart" and full_cleanup_allowed else cleanup_mode
+        if effective_cleanup_mode == "smart":
+            effective_cleanup_mode = "soft"
+        if effective_cleanup_mode == "full" and not force and not full_cleanup_allowed:
             raise IntakeError(
                 f"Full cleanup requires a closed Jira status; current status is {jira_status or 'unknown'}"
             )
@@ -5728,7 +5731,7 @@ class CoordinatorService:
         removed_paths.extend(self._remove_runner_private_residue(session.task_key))
 
         deleted_session = False
-        if cleanup_mode == "full":
+        if effective_cleanup_mode == "full":
             removed_paths.extend(self._remove_task_artifacts(session.task_key))
             removed_paths.extend(self._remove_task_worktree_and_directory(session.task_key))
             self.session_repository.delete(session.id)
@@ -5741,7 +5744,7 @@ class CoordinatorService:
                 producer_type="operator",
                 payload={
                     "task_key": refreshed.task_key,
-                    "cleanup_mode": cleanup_mode,
+                    "cleanup_mode": effective_cleanup_mode,
                     "removed_paths": removed_paths,
                 },
             )
@@ -5749,7 +5752,7 @@ class CoordinatorService:
         return {
             "cleaned": True,
             "deleted_session": deleted_session,
-            "cleanup_mode": cleanup_mode,
+            "cleanup_mode": effective_cleanup_mode,
             "task_key": session.task_key,
             "jira_status": jira_status,
             "full_cleanup_allowed": full_cleanup_allowed,
