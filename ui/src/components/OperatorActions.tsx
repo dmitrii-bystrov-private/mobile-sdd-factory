@@ -349,6 +349,11 @@ export function OperatorActions({
               </button>
             ))}
           </div>
+          {renderActionGroup(
+            "Cleanup",
+            "Use these only when you need to clear runtime residue or remove local task state.",
+            cleanupActions,
+          )}
           {runtimeSessionActions.length > 0 ? (
             <div className="operator-action-subgroup">
               <div className="operator-action-inline-heading">
@@ -377,12 +382,6 @@ export function OperatorActions({
             </div>
           ) : null}
         </div>
-
-        {renderActionGroup(
-          "Cleanup",
-          "Use these only when you need to clear runtime residue or remove local task state.",
-          cleanupActions,
-        )}
       </div>
 
       {canSendRuntimeInput ? (
