@@ -83,7 +83,7 @@ export function SessionStartForm({
   runtimeCapabilities,
   runtimeDefaults,
 }: SessionStartFormProps): JSX.Element {
-  const { showActivity, clearActivity } = useToast();
+  const { showToast, showActivity, clearActivity } = useToast();
   const [taskKey, setTaskKey] = useState("");
   const [workflowProfile, setWorkflowProfile] = useState<WorkflowProfile>("oneshot");
   const [policy, setPolicy] = useState<DraftPolicy>(defaultDraftPolicy());
@@ -277,7 +277,9 @@ export function SessionStartForm({
       setRoleConfig({});
       previousPrefillRef.current = {};
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to start session");
+      const message = err instanceof Error ? err.message : "Failed to start session";
+      setError(message);
+      showToast(message, "error");
     } finally {
       clearActivity();
       setBusy(false);

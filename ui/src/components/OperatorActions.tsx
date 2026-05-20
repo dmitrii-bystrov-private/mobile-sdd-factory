@@ -27,7 +27,7 @@ export function OperatorActions({
   runtimeStateSummary,
   onRefresh,
 }: OperatorActionsProps): JSX.Element {
-  const { showActivity, clearActivity } = useToast();
+  const { showActivity, clearActivity, showToast } = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [boyScoutSkipReason, setBoyScoutSkipReason] = useState("");
@@ -42,7 +42,9 @@ export function OperatorActions({
       await action();
       await onRefresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown request error");
+      const message = err instanceof Error ? err.message : "Unknown request error";
+      setError(message);
+      showToast(message, "error");
     } finally {
       if (activityLabel) {
         clearActivity();
@@ -178,7 +180,7 @@ export function OperatorActions({
       label: "Create Jira Subtasks",
       description: "Retry Jira subtask materialization after the automatic story setup failed before execution could start.",
       disabled: busy,
-      onClick: () => run(() => apiClient.createSubtasksFromPlan(session.id)),
+      onClick: () => run(() => apiClient.createSubtasksFromPlan(session.id), "Creating Jira subtasks…"),
     });
   }
   if (canStartSubtaskGraph) {
@@ -187,7 +189,7 @@ export function OperatorActions({
       description: "Force story subtask execution from a recovery checkpoint when Jira subtasks already exist and only graph dispatch remains.",
       disabled: busy,
       strong: true,
-      onClick: () => run(() => apiClient.startSubtaskGraph(session.id)),
+      onClick: () => run(() => apiClient.startSubtaskGraph(session.id), "Starting subtask graph…"),
     });
   }
   if (canCreateMr) {
@@ -196,7 +198,7 @@ export function OperatorActions({
       description: "Manually rerun MR handoff only after automatic delivery failed at the merge request creation step.",
       disabled: busy,
       strong: true,
-      onClick: () => run(() => apiClient.createMr(session.id)),
+      onClick: () => run(() => apiClient.createMr(session.id), "Retrying MR handoff…"),
     });
   }
   if (canSendToTest) {
@@ -205,7 +207,7 @@ export function OperatorActions({
       description: "Manually rerun send-to-test only after automatic delivery failed after MR handoff completed.",
       disabled: busy,
       strong: true,
-      onClick: () => run(() => apiClient.sendToTest(session.id)),
+      onClick: () => run(() => apiClient.sendToTest(session.id), "Retrying send to test…"),
     });
   }
 

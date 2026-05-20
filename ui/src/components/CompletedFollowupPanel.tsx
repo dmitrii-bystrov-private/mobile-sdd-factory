@@ -45,7 +45,7 @@ export function CompletedFollowupPanel({
   events,
   onRefresh,
 }: CompletedFollowupPanelProps): JSX.Element | null {
-  const { showToast } = useToast();
+  const { showToast, showActivity, clearActivity } = useToast();
   const mrUrl = useMemo(() => latestMrUrl(artifacts, events), [artifacts, events]);
   const inferredMrId = useMemo(() => mrIdFromUrl(mrUrl), [mrUrl]);
   const platform = inferPlatform(session.task_key);
@@ -87,15 +87,23 @@ export function CompletedFollowupPanel({
     };
   }, [inferredMrId, session.id]);
 
-  async function run(action: () => Promise<void>): Promise<void> {
+  async function run(action: () => Promise<void>, activityLabel?: string): Promise<void> {
     setBusy(true);
     setError(null);
+    if (activityLabel) {
+      showActivity(activityLabel);
+    }
     try {
       await action();
       await onRefresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown request error");
+      const message = err instanceof Error ? err.message : "Unknown request error";
+      setError(message);
+      showToast(message, "error");
     } finally {
+      if (activityLabel) {
+        clearActivity();
+      }
       setBusy(false);
     }
   }
@@ -115,17 +123,18 @@ export function CompletedFollowupPanel({
   async function handleIngestMrComments(): Promise<void> {
     if (inferredMrId.length === 0) {
       setError("MR data is not available for this session yet");
+      showToast("MR data is not available for this session yet", "error");
       return;
     }
     await run(async () => {
       await apiClient.ingestMrComments(session.id, platform, inferredMrId);
-    });
+    }, "Processing MR comments…");
   }
 
   async function handleRefreshSnapshot(): Promise<void> {
     await run(async () => {
       await apiClient.refreshSnapshot(session.id);
-    });
+    }, "Refreshing snapshot and resuming subtasks…");
   }
 
   if (session.status !== "completed") {
