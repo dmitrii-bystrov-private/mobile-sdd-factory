@@ -493,6 +493,10 @@ input {
   color: var(--ink-soft);
 }
 
+.panel > .path-label {
+  margin: 0 0 18px;
+}
+
 .hero-title {
   margin: 0;
   font-size: 1.05rem;
@@ -723,20 +727,25 @@ input {
 
 .runtime-defaults-list {
   display: grid;
-  gap: 20px;
+  gap: 24px;
+  margin-top: 4px;
+}
+
+.runtime-defaults-list > .form-help {
+  margin-top: 4px;
 }
 
 .runtime-default-card {
   display: grid;
-  gap: 14px;
-  padding: 16px;
+  gap: 16px;
+  padding: 18px;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--surface-muted);
 }
 
 .runtime-default-card > .form-field {
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .runtime-default-card strong {
@@ -771,6 +780,10 @@ input {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.inline-pill-row + .form-help {
+  margin-top: 6px;
 }
 
 .inline-pill {
@@ -808,8 +821,8 @@ input {
 
 .advanced-disclosure {
   display: grid;
-  gap: 14px;
-  padding: 16px;
+  gap: 16px;
+  padding: 18px;
   border-radius: 18px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.03);
@@ -879,8 +892,8 @@ input {
 
 .advanced-disclosure-body {
   display: grid;
-  gap: 14px;
-  padding-top: 12px;
+  gap: 16px;
+  padding-top: 14px;
   border-top: 1px solid var(--line);
 }
 
@@ -903,6 +916,7 @@ input {
 
 .panel-sidebar .followup-form-grid {
   grid-template-columns: 1fr;
+  gap: 16px;
 }
 
 .artifact-stack {
@@ -979,13 +993,14 @@ input {
 
 .scope-summary-list {
   display: grid;
-  gap: 12px;
+  gap: 16px;
+  margin-top: 6px;
 }
 
 .scope-summary-item {
   display: grid;
-  gap: 6px;
-  padding: 6px 0 6px 14px;
+  gap: 8px;
+  padding: 10px 0 10px 16px;
   border-left: 2px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -1147,8 +1162,13 @@ input {
   gap: 18px;
 }
 
+.settings-layout {
+  gap: 22px;
+}
+
 .compact-grid {
-  gap: 14px;
+  gap: 16px;
+  margin-top: 4px;
 }
 
 .sidebar-note-stack {
@@ -1241,6 +1261,17 @@ input {
 
 .advanced-disclosure summary::-webkit-details-marker {
   display: none;
+}
+
+.compact-grid + .inline-summary-card,
+.compact-grid + .advanced-disclosure,
+.compact-grid + .artifact-stack,
+.inline-summary-card + .artifact-stack,
+.inline-summary-card + .advanced-disclosure,
+.artifact-stack + .advanced-disclosure,
+.advanced-disclosure + .advanced-disclosure,
+.advanced-disclosure + .action-button {
+  margin-top: 8px;
 }
 
 .table-row {
