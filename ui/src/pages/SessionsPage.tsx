@@ -687,23 +687,18 @@ export function SessionsPage(): JSX.Element {
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">Settings Scope</p>
-                  <h2>Project Defaults</h2>
+                  <h2>Settings Guide</h2>
                 </div>
               </div>
-              <div className="sidebar-note-stack">
-                <div className="inline-summary-card">
-                  <div className="inline-summary-header">
-                    <strong>Project-wide defaults</strong>
-                  </div>
-                  <p className="form-help">New sessions inherit these defaults automatically.</p>
+              <div className="scope-summary-list">
+                <div className="scope-summary-item">
+                  <strong>Project defaults</strong>
+                  <p>New sessions inherit these workflow policies automatically.</p>
                 </div>
                 {runtimeDefaultsSummary ? (
-                  <div className="inline-summary-card">
-                    <div className="inline-summary-header">
-                      <strong>Configured roles</strong>
-                      <span>{runtimeDefaultsSummary.knownRoles.length} roles</span>
-                    </div>
-                    <p className="form-help">Session-specific overrides stay in Workflow Runs.</p>
+                  <div className="scope-summary-item">
+                    <strong>Lane profiles</strong>
+                    <p>{runtimeDefaultsSummary.knownRoles.length} runtime lane profiles are available for override when needed.</p>
                   </div>
                 ) : null}
               </div>
@@ -714,22 +709,18 @@ export function SessionsPage(): JSX.Element {
               <div className="panel-header">
                 <div>
                   <p className="eyebrow">Health Scope</p>
-                  <h2>Environment Status</h2>
+                  <h2>Health Guide</h2>
                 </div>
               </div>
-              <div className="sidebar-note-stack">
-                  <div className="inline-summary-card">
-                    <div className="inline-summary-header">
-                      <strong>Doctor</strong>
-                    </div>
-                    <p className="form-help">Check environment health before debugging a run.</p>
+              <div className="scope-summary-list">
+                <div className="scope-summary-item">
+                  <strong>Doctor</strong>
+                  <p>Check environment health before debugging a workflow issue.</p>
                 </div>
                 {bootstrapGuidanceSummary ? (
-                  <div className="inline-summary-card">
-                    <div className="inline-summary-header">
-                      <strong>Setup</strong>
-                    </div>
-                    <p className="form-help">{bootstrapGuidanceSummary.nextStep}</p>
+                  <div className="scope-summary-item">
+                    <strong>Launch</strong>
+                    <p>{bootstrapGuidanceSummary.nextStep}</p>
                   </div>
                 ) : null}
               </div>

@@ -925,6 +925,25 @@ input {
   gap: 14px;
 }
 
+.scope-summary-list {
+  display: grid;
+  gap: 12px;
+}
+
+.scope-summary-item {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.scope-summary-item strong,
+.scope-summary-item p {
+  margin: 0;
+}
+
 .compact-role-card {
   display: grid;
   gap: 6px;
