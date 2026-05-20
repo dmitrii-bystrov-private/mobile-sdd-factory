@@ -351,6 +351,7 @@ export function RuntimeDefaultsPanel({
               key={profile}
               className={`inline-pill inline-pill-button ${policyProfileView === profile ? "selected" : ""}`}
               onClick={() => setPolicyProfileView(profile)}
+              title={WORKFLOW_PROFILE_DESCRIPTIONS[profile]}
               type="button"
             >
               {workflowProfileDisplayName(profile)}

@@ -356,12 +356,12 @@ export function SessionStartForm({
           </div>
           <p className="form-help">{WORKFLOW_PROFILE_DESCRIPTIONS[workflowProfile]}</p>
           <div className="inline-pill-row">
-            <span className="inline-pill">Self-review {policy.self_review_policy}</span>
-            <span className="inline-pill">Boy Scout {policy.boy_scout_policy}</span>
-            <span className="inline-pill">Doc Harvest {policy.doc_harvest_policy}</span>
-            {showTestPolicy ? <span className="inline-pill">Tests {policy.test_policy}</span> : null}
+            <span className="inline-pill" title="Controls whether the self-review lane is skipped, auto-started, or required for this run.">Self-review {policy.self_review_policy}</span>
+            <span className="inline-pill" title="Controls whether the Boy Scout lane is skipped, auto-started, or required for this run.">Boy Scout {policy.boy_scout_policy}</span>
+            <span className="inline-pill" title="Controls whether documentation capture is skipped, auto-started, or required for this run.">Doc Harvest {policy.doc_harvest_policy}</span>
+            {showTestPolicy ? <span className="inline-pill" title="Controls whether the test lane is skipped, auto-started, or required for this run.">Tests {policy.test_policy}</span> : null}
             {showRequirementsClarificationMode ? (
-              <span className="inline-pill">Clarification {policy.requirements_clarification_mode}</span>
+              <span className="inline-pill" title="Controls how readily the workflow asks for clarification before implementation or planning decisions.">Clarification {policy.requirements_clarification_mode}</span>
             ) : null}
           </div>
         </div>
