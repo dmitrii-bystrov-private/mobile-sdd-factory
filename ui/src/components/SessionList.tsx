@@ -44,11 +44,7 @@ export function SessionList({
                     {sessionStatusDisplayName(session.status)}
                   </span>
                 </div>
-                {session.task_title ? (
-                  <p className="session-card-title">{session.task_title}</p>
-                ) : (
-                  <p className="session-card-title">{workflowProfileDisplayName(session.workflow_profile)}</p>
-                )}
+                {session.task_title ? <p className="session-card-title">{session.task_title}</p> : null}
                 <div className="session-card-meta">
                   <small>{workflowProfileDisplayName(session.workflow_profile)}</small>
                   <small>{stageDisplayName(session.current_stage)}</small>

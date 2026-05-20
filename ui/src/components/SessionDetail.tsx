@@ -52,6 +52,8 @@ function eventSummary(event: EventItem): string {
       return "Run started";
     case "task_prepared":
       return "Task snapshot prepared";
+    case "role_input_dispatched":
+      return "Worker started";
     case "implementation_requested":
       return "Implementation lane requested";
     case "self_review_requested":
@@ -186,7 +188,7 @@ export function SessionDetail({
     session.status === "waiting_for_operator"
       ? "Operator attention needed"
       : session.status === "active"
-        ? "Work is in progress"
+        ? `${currentStage} in progress`
         : session.status === "paused"
           ? "Session is paused"
           : session.status === "completed"
@@ -374,17 +376,16 @@ export function SessionDetail({
               <span className="badge badge-muted">{standbyRoles.length}</span>
             </div>
             {standbyRoles.length > 0 ? (
-              <div className="progress-card-stack">
+              <div className="compact-role-list">
                 {standbyRoles.map((role) => {
                   const summary = laneSummary(role, bundle.workItems, session);
                   return (
-                    <article className="progress-card" key={`standby-${role.id}`}>
+                    <article className="compact-role-card" key={`standby-${role.id}`}>
                       <div className="subpanel-head">
                         <strong>{roleDisplayName(role.role_name)}</strong>
                         <span className="status-pill status-running">Standing by</span>
                       </div>
-                      <p className="progress-card-title">{summary.title}</p>
-                      <p className="progress-card-body">{summary.body}</p>
+                      <p className="progress-card-body">{summary.title}</p>
                     </article>
                   );
                 })}

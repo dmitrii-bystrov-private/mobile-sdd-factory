@@ -810,10 +810,20 @@ input {
 }
 
 .progress-card-stack,
+.compact-role-list,
 .session-updates-panel,
 .stack-tight {
   display: grid;
   gap: 12px;
+}
+
+.compact-role-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .progress-card {
