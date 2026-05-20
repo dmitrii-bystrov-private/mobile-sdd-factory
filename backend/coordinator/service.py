@@ -3546,6 +3546,13 @@ class CoordinatorService:
         session, commit_event = self._commit_task_state(session, subtask_context)
         if commit_event is not None:
             return session, commit_event
+        if parsed_subtask["key"] is not None:
+            session, transition_event = self._complete_subtask_in_jira(
+                session=session,
+                subtask_key=parsed_subtask["key"],
+            )
+            if transition_event is not None:
+                return session, transition_event
         refreshed_subtasks, _refresh_ok = self._refresh_subtask_snapshot(session)
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         if implementer_role is None:
@@ -3617,6 +3624,90 @@ class CoordinatorService:
             source_event=source_event,
             completed_work_type="subtask_implementation",
         )
+
+    def _complete_subtask_in_jira(
+        self,
+        *,
+        session: Session,
+        subtask_key: str,
+    ) -> tuple[Session, Event | None]:
+        if self.jira_adapter is None or self.artifacts_root is None:
+            return session, None
+
+        result = self.jira_adapter.complete_subtask(subtask_key)
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "subtask-transition",
+            f"{subtask_key}.stdout.log",
+            result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "subtask-transition",
+            f"{subtask_key}.stderr.log",
+            result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="subtask-transition",
+            artifact_type="subtask_transition_stdout",
+            path=str(stdout_path),
+            metadata={
+                "task_key": session.task_key,
+                "subtask_key": subtask_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="subtask-transition",
+            artifact_type="subtask_transition_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "subtask_key": subtask_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+
+        if not result.ok:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="subtask_implementation_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="subtask_transition_failed",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "subtask_key": subtask_key,
+                    "returncode": result.returncode,
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                },
+            )
+            return session, event
+
+        self._append_event(
+            session_id=session.id,
+            event_type="subtask_transition_completed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "subtask_key": subtask_key,
+                "returncode": result.returncode,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, None
 
     def _handle_implementation_completed(
         self,

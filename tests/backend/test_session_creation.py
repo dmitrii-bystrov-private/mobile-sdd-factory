@@ -75,6 +75,7 @@ class FakeJiraAdapter:
     def __init__(self) -> None:
         self.status_by_task: dict[str, str] = {}
         self.created_issue_counter = 0
+        self.completed_subtasks: list[str] = []
 
     def resolve_parent(self, task_key: str) -> CommandResult:
         return CommandResult(
@@ -106,6 +107,16 @@ class FakeJiraAdapter:
             command=["create_subtasks", task_key, str(plan_dir)],
             returncode=0,
             stdout="Created subtasks:\n01    IOS-90001     Build data source\n",
+            stderr="",
+        )
+
+    def complete_subtask(self, task_key: str) -> CommandResult:
+        self.completed_subtasks.append(task_key)
+        self.status_by_task[task_key] = "Ready for test"
+        return CommandResult(
+            command=["complete_subtask", task_key],
+            returncode=0,
+            stdout=f"Done: {task_key} -> Ready for test\n",
             stderr="",
         )
 
@@ -2829,6 +2840,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("subtask_implementation_requested", followup_event.event_type)
         self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
         self.assertEqual([("IOS-30004SUBTASK", "subtask IOS-30020")], self.gitlab_adapter.commit_requests)
+        self.assertEqual(["IOS-30020"], self.jira_adapter.completed_subtasks)
         self.assertEqual(
             ["assigned", "completed", "completed", "completed", "completed", "completed", "completed", "completed", "completed"],
             sorted(item.status.value for item in work_items),
@@ -2849,6 +2861,7 @@ class SessionCreationTests(unittest.TestCase):
             ],
             self.gitlab_adapter.commit_requests,
         )
+        self.assertEqual(["IOS-30020", "IOS-30021"], self.jira_adapter.completed_subtasks)
 
     def test_subtask_completion_refreshes_snapshot_and_rewrites_graph(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -2942,6 +2955,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(
             any(event.event_type == "subtask_snapshot_refreshed" for event in events)
         )
+        self.assertEqual(["IOS-30030"], self.jira_adapter.completed_subtasks)
 
     def test_subtask_completion_uses_refreshed_snapshot_as_remaining_source_of_truth(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -3030,6 +3044,65 @@ class SessionCreationTests(unittest.TestCase):
                 ]
             ),
         )
+        self.assertEqual(["IOS-30040"], self.jira_adapter.completed_subtasks)
+
+    def test_subtask_completion_transition_failure_escalates_for_operator(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004SUBFAIL",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004SUBFAIL")
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            self.coordinator.handle_operator_event(
+                session_id=session.id,
+                event_type=event_type,
+                payload={"summary": "prepared"},
+            )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload=decomposition_payload("Execution chunks prepared"),
+        )
+        self.write_statuses_file(
+            "IOS-30004SUBFAIL",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004SUBFAIL | Story | Parent story | In Progress |
+| IOS-30095 | Sub-task | Add data source | To Do |
+""",
+        )
+        self.coordinator.start_subtask_graph(session.id)
+        original_complete_subtask = self.jira_adapter.complete_subtask
+        self.jira_adapter.complete_subtask = lambda task_key: CommandResult(
+            command=["complete_subtask", task_key],
+            returncode=1,
+            stdout="",
+            stderr="transition failed\n",
+        )
+
+        failed_session, failed_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="subtask_completed",
+            payload={"summary": "Subtask implemented"},
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("subtask_transition_failed", failed_event.event_type)
+        self.assertEqual("subtask_implementation_requested", failed_session.current_stage)
+        self.assertEqual("waiting_for_operator", failed_session.status.value)
+        self.assertTrue(any(item.artifact_type == "subtask_transition_stdout" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "subtask_transition_stderr" for item in artifacts))
+        self.jira_adapter.complete_subtask = original_complete_subtask
 
     def test_refresh_snapshot_reopens_completed_story_into_subtask_execution(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

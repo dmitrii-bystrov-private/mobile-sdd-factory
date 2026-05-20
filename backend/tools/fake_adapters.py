@@ -13,6 +13,7 @@ class FakeJiraAdapter:
         self.repo_root = repo_root
         self.status_by_task: dict[str, str] = {}
         self.created_issue_counter = 0
+        self.completed_subtasks: list[str] = []
 
     def resolve_parent(self, task_key: str) -> CommandResult:
         return CommandResult(
@@ -48,6 +49,16 @@ class FakeJiraAdapter:
                 "01    IOS-90001     Build data source\n"
                 "02    IOS-90002     Wire presentation layer\n"
             ),
+            stderr="",
+        )
+
+    def complete_subtask(self, task_key: str) -> CommandResult:
+        self.completed_subtasks.append(task_key)
+        self.status_by_task[task_key] = "Ready for test"
+        return CommandResult(
+            command=["fake_complete_subtask", task_key],
+            returncode=0,
+            stdout=f"Done: {task_key} -> Ready for test\n",
             stderr="",
         )
 

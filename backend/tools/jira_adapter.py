@@ -46,6 +46,9 @@ class JiraAdapter:
             cwd=self.repo_root,
         )
 
+    def complete_subtask(self, task_key: str) -> CommandResult:
+        return self.runner.run(["bash", "scripts/complete-subtask.sh", task_key], cwd=self.repo_root)
+
     def create_issue(
         self,
         project: str,
