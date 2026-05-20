@@ -485,6 +485,7 @@ export function SessionDetail({
       <OperatorActions
         interactiveStateSummary={bundle.interactiveStateSummary}
         onRefresh={onRefresh}
+        runtimeStateSummary={bundle.runtimeStateSummary}
         session={session}
       />
 

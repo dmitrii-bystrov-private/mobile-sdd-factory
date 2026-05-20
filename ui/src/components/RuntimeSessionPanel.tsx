@@ -160,36 +160,6 @@ export function RuntimeSessionPanel({
                     </div>
                   ) : null}
 
-                  <div className="actions-grid runtime-session-actions">
-                    <button
-                      className="action-button"
-                      disabled={busy || visibleRoles.every((role) => role.status === "stopped")}
-                      onClick={() => run(() => apiClient.stopRuntimeSession(session.id))}
-                      title="Stop every live lane runtime in this session while keeping the task files intact."
-                      type="button"
-                    >
-                      Stop All Live Runtimes
-                    </button>
-                    <button
-                      className="action-button"
-                      disabled={busy || visibleRoles.some((role) => role.status !== "stopped")}
-                      onClick={() => run(() => apiClient.restartRuntimeSession(session.id))}
-                      title="Start the stopped runtime session again and relaunch its lane runtimes."
-                      type="button"
-                    >
-                      Restart All Runtimes
-                    </button>
-                    <button
-                      className="action-button"
-                      disabled={busy}
-                      onClick={() => run(() => onRefresh())}
-                      title="Refresh the runtime state surface without changing the workflow."
-                      type="button"
-                    >
-                      Refresh Runtime View
-                    </button>
-                  </div>
-
                   <div className="artifact-stack runtime-role-stack">
                     {sortedRoles.map((role) => (
                       <article className="artifact-card runtime-role-card" key={role.roleName}>

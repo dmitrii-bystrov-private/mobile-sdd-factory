@@ -1,11 +1,12 @@
 import { useState } from "react";
 
 import { apiClient } from "../api/client";
-import type { InteractiveStateSummary, Session } from "../types";
+import type { InteractiveStateSummary, RuntimeSessionStateSummary, Session } from "../types";
 
 type OperatorActionsProps = {
   session: Session;
   interactiveStateSummary: InteractiveStateSummary | null;
+  runtimeStateSummary: RuntimeSessionStateSummary | null;
   onRefresh: () => Promise<void>;
 };
 
@@ -22,6 +23,7 @@ type ActionDefinition = {
 export function OperatorActions({
   session,
   interactiveStateSummary,
+  runtimeStateSummary,
   onRefresh,
 }: OperatorActionsProps): JSX.Element {
   const [busy, setBusy] = useState(false);
@@ -170,6 +172,21 @@ export function OperatorActions({
       description: "Refresh Jira subtask state and reconcile the remaining story execution queue around the currently active subtask.",
       disabled: busy,
       onClick: () => run(() => apiClient.refreshSubtaskState(session.id)),
+    });
+  }
+  if (runtimeStateSummary?.available) {
+    const visibleRuntimeRoles = runtimeStateSummary.roles.filter((role) => role.roleName !== "task-coordinator");
+    dailyActions.push({
+      label: "Stop All Live Runtimes",
+      description: "Stop every live lane runtime in this session while keeping the task files intact.",
+      disabled: busy || visibleRuntimeRoles.every((role) => role.status === "stopped"),
+      onClick: () => run(() => apiClient.stopRuntimeSession(session.id)),
+    });
+    dailyActions.push({
+      label: "Restart All Runtimes",
+      description: "Start the stopped runtime session again and relaunch its lane runtimes.",
+      disabled: busy || visibleRuntimeRoles.some((role) => role.status !== "stopped"),
+      onClick: () => run(() => apiClient.restartRuntimeSession(session.id)),
     });
   }
 
