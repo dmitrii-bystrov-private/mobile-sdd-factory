@@ -126,6 +126,8 @@ if [ -n "$source_branch" ]; then
     stats="${BASH_REMATCH[1]} files +${BASH_REMATCH[2]} $(printf '\xe2\x88\x92')0"
   elif [[ "$stat_line" =~ ([0-9]+)\ file.*,\ ([0-9]+)\ deletion ]]; then
     stats="${BASH_REMATCH[1]} files +0 $(printf '\xe2\x88\x92')${BASH_REMATCH[2]}"
+  else
+    stats="0 files +0 $(printf '\xe2\x88\x92')0"
   fi
 fi
 
