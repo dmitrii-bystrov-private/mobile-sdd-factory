@@ -16,6 +16,8 @@ type SessionStartFormProps = {
   runtimeDefaults: RuntimeDefaultsSummary | null;
 };
 
+const TASK_KEY_PATTERN = /^(IOS|ANDR)-\d+$/i;
+
 const POLICY_OPTIONS: SessionPolicyValue[] = ["disabled", "enabled", "required"];
 const REQUIREMENTS_CLARIFICATION_OPTIONS: RequirementsClarificationMode[] = [
   "ask-a-lot",
@@ -87,6 +89,8 @@ export function SessionStartForm({
   const showTestPolicy = workflowProfile === "bug_full";
   const showRequirementsClarificationMode = workflowProfile === "story_full";
   const normalizedTaskKey = taskKey.trim().toUpperCase();
+  const hasTaskKeyInput = normalizedTaskKey.length > 0;
+  const isTaskKeyValid = !hasTaskKeyInput || TASK_KEY_PATTERN.test(normalizedTaskKey);
 
   const payload = useMemo(() => {
     const basePolicy = {
@@ -242,6 +246,10 @@ export function SessionStartForm({
       setError("Task key is required");
       return;
     }
+    if (!TASK_KEY_PATTERN.test(normalizedTaskKey)) {
+      setError("Use a Jira key like IOS-1234 or ANDR-5678");
+      return;
+    }
 
     setBusy(true);
     setError(null);
@@ -320,6 +328,9 @@ export function SessionStartForm({
             value={taskKey}
           />
         </label>
+        <p className={`form-help${hasTaskKeyInput && !isTaskKeyValid ? " form-help-error" : ""}`}>
+          Use a Jira key like `IOS-1234` or `ANDR-5678`.
+        </p>
 
         <label className="form-field">
           <span>Workflow Profile</span>
@@ -544,7 +555,7 @@ export function SessionStartForm({
 
         <button
           className="action-button action-button-strong"
-          disabled={busy || normalizedTaskKey.length === 0}
+          disabled={busy || normalizedTaskKey.length === 0 || !isTaskKeyValid}
           title="Create the task session, prepare the snapshot, and route the first workflow step automatically."
           type="submit"
         >

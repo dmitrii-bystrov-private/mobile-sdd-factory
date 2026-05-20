@@ -94,6 +94,37 @@ function workTypeSummary(workType: string): string {
   }
 }
 
+function standbyExpectation(roleName: string, workflowProfile: Session["workflow_profile"]): string {
+  switch (roleName) {
+    case "verification-coordinator":
+      return "Waiting for verification handoff.";
+    case "code-reviewer":
+      return "Waiting for self-review handoff.";
+    case "code-scout":
+      return "Waiting for Boy Scout handoff.";
+    case "doc-harvest-worker":
+      return "Waiting for doc-harvest handoff.";
+    case "mr-comments-analyst-worker":
+      return "Waiting for MR follow-up input.";
+    case "bug-fixer":
+      return "Waiting for bug-fix handoff.";
+    case "proposal-context-worker":
+    case "requirements-clarifier-worker":
+    case "acceptance-criteria-worker":
+    case "constraints-worker":
+    case "spec-verifier-worker":
+    case "story-spec-worker":
+    case "task-decomposer-worker":
+      return "Waiting for story-planning handoff.";
+    case "implementer":
+      return workflowProfile === "story_full"
+        ? "Waiting for subtask execution handoff."
+        : "Waiting for the next coding handoff.";
+    default:
+      return "Waiting for the next handoff.";
+  }
+}
+
 function laneSummary(
   role: Role,
   workItems: WorkItem[],
@@ -121,8 +152,8 @@ function laneSummary(
   switch (role.status) {
     case "running":
       return {
-        title: "Standing by",
-        body: "This lane is live, but no work has been handed to it yet.",
+        title: standbyExpectation(role.role_name, session.workflow_profile),
+        body: "This lane is live and ready for the next handoff.",
       };
     case "waiting":
       return {

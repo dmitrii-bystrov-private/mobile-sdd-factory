@@ -668,6 +668,10 @@ input {
   line-height: 1.4;
 }
 
+.form-help-error {
+  color: var(--gold);
+}
+
 .runtime-defaults-list {
   display: grid;
   gap: 16px;

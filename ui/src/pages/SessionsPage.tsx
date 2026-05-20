@@ -89,12 +89,12 @@ const PLANNING_STEP_DEFINITIONS = [
 
 function streamStateLabel(streamState: "live" | "reconnecting" | "idle"): string {
   if (streamState === "live") {
-    return "Live updates";
+    return "Event stream live";
   }
   if (streamState === "reconnecting") {
-    return "Reconnecting";
+    return "Event stream reconnecting";
   }
-  return "Standing by";
+  return "Event stream idle";
 }
 
 function streamEventLabel(eventType: string | null): string {
