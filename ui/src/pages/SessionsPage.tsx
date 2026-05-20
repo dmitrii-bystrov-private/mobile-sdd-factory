@@ -699,56 +699,10 @@ export function SessionsPage(): JSX.Element {
             </>
           ) : null}
           {surfaceView === "settings" ? (
-            <section className="panel panel-sidebar sidebar-zone">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Settings Scope</p>
-                  <h2>Settings Guide</h2>
-                </div>
-              </div>
-              <div className="scope-summary-list">
-                <div className="scope-summary-item">
-                  <strong>Project defaults</strong>
-                  <p>
-                    {runtimeDefaultsSummary
-                      ? "New sessions inherit these defaults automatically."
-                      : "Runtime defaults are still loading."}
-                  </p>
-                </div>
-                {runtimeDefaultsSummary ? (
-                  <div className="scope-summary-item">
-                    <strong>Lane profiles</strong>
-                    <p>{runtimeDefaultsSummary.knownRoles.length} lane profiles can be overridden when a workflow needs custom runtime settings.</p>
-                  </div>
-                ) : null}
-              </div>
-            </section>
+            <div />
           ) : null}
           {surfaceView === "health" ? (
-            <section className="panel panel-sidebar sidebar-zone">
-              <div className="panel-header">
-                <div>
-                  <p className="eyebrow">Health Scope</p>
-                  <h2>Health Guide</h2>
-                </div>
-              </div>
-              <div className="scope-summary-list">
-                <div className="scope-summary-item">
-                  <strong>Doctor</strong>
-                  <p>
-                    {doctorSummary
-                      ? "Check environment health before debugging a workflow issue."
-                      : "Environment status is still loading."}
-                  </p>
-                </div>
-                {bootstrapGuidanceSummary ? (
-                  <div className="scope-summary-item">
-                    <strong>Launch</strong>
-                    <p>{bootstrapGuidanceSummary.nextStep}</p>
-                  </div>
-                ) : null}
-              </div>
-            </section>
+            <div />
           ) : null}
         </div>
         <section className="detail-layout" ref={contentTopRef}>
