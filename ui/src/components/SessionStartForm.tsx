@@ -334,7 +334,7 @@ export function SessionStartForm({
           />
         </label>
         <p className={`form-help${hasTaskKeyInput && !isTaskKeyValid ? " form-help-error" : ""}`}>
-          Use a Jira key like `IOS-1234` or `ANDR-5678`.
+          Use a Jira key like IOS-1234 or ANDR-5678.
         </p>
 
         <label className="form-field">

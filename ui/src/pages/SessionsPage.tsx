@@ -693,12 +693,12 @@ export function SessionsPage(): JSX.Element {
               <div className="scope-summary-list">
                 <div className="scope-summary-item">
                   <strong>Project defaults</strong>
-                  <p>New sessions inherit these workflow policies automatically.</p>
+                  <p>New sessions inherit these defaults automatically.</p>
                 </div>
                 {runtimeDefaultsSummary ? (
                   <div className="scope-summary-item">
                     <strong>Lane profiles</strong>
-                    <p>{runtimeDefaultsSummary.knownRoles.length} runtime lane profiles are available for override when needed.</p>
+                    <p>{runtimeDefaultsSummary.knownRoles.length} lane profiles can be overridden when a workflow needs custom runtime settings.</p>
                   </div>
                 ) : null}
               </div>

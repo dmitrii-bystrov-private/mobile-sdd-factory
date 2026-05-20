@@ -318,14 +318,15 @@ export function RuntimeDefaultsPanel({
       </div>
 
       <p className="path-label">
-        Set project defaults for new sessions. Lane-specific runtime overrides stay in advanced settings.
+        Set the default runner and workflow policies for new sessions.
       </p>
 
       <div className="runtime-default-card">
         <div className="inline-summary-header">
           <strong>Project Baseline</strong>
-          <span>{runtimeDefaults?.knownRoles.length ?? 0} known roles</span>
+          <span>{runtimeDefaults?.knownRoles.length ?? 0} lanes</span>
         </div>
+        <p className="form-help">Session-specific lane overrides stay in Workflow Runs.</p>
         <label className="form-field">
           <span>Default Runner</span>
           <select
@@ -603,7 +604,7 @@ export function RuntimeDefaultsPanel({
           type="button"
         >
           <div>
-            <strong>Advanced Role Overrides</strong>
+            <strong>Lane Runtime Overrides</strong>
             <p>
               Override runner, model, or effort for specific lanes when a workflow needs different execution settings than the project baseline.
             </p>
