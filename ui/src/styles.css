@@ -44,7 +44,7 @@ input {
 }
 
 .app-shell {
-  padding: 28px;
+  padding: 30px;
 }
 
 .topbar {
@@ -52,7 +52,7 @@ input {
   justify-content: space-between;
   align-items: flex-start;
   gap: 24px;
-  margin-bottom: 28px;
+  margin-bottom: 32px;
 }
 
 .topbar-actions {
@@ -100,12 +100,12 @@ input {
 
 .detail-layout {
   display: grid;
-  gap: 24px;
+  gap: 26px;
 }
 
 .surface-heading {
   display: grid;
-  gap: 6px;
+  gap: 8px;
 }
 
 .surface-heading h2 {
@@ -121,14 +121,14 @@ input {
 
 .sidebar-stack {
   display: grid;
-  gap: 16px;
+  gap: 18px;
   align-self: start;
 }
 
 .panel {
   border: 1px solid var(--line);
   border-radius: 24px;
-  padding: 18px;
+  padding: 20px;
   background: var(--surface-panel);
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
@@ -178,7 +178,7 @@ input {
 }
 
 .panel-header {
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .badge,
@@ -631,7 +631,7 @@ input {
 }
 
 .form-help {
-  margin: -6px 0 0;
+  margin: 0;
   color: var(--ink-soft);
   font-size: 0.84rem;
   line-height: 1.4;
@@ -639,7 +639,7 @@ input {
 
 .runtime-defaults-list {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .runtime-default-card {
@@ -657,8 +657,8 @@ input {
 
 .inline-summary-card {
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  gap: 12px;
+  padding: 16px;
   border-radius: 18px;
   border: 1px solid var(--line);
   background:
@@ -706,13 +706,13 @@ input {
 
 .session-start-form {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .advanced-disclosure {
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 14px;
+  padding: 16px;
   border-radius: 18px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.03);
@@ -782,7 +782,7 @@ input {
 .advanced-disclosure-body {
   display: grid;
   gap: 12px;
-  padding-top: 8px;
+  padding-top: 12px;
   border-top: 1px solid var(--line);
 }
 
@@ -793,7 +793,7 @@ input {
 }
 
 .followup-form {
-  padding-top: 12px;
+  padding-top: 14px;
   border-top: 1px solid var(--line);
 }
 
@@ -814,13 +814,13 @@ input {
 .session-updates-panel,
 .stack-tight {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .compact-role-card {
   display: grid;
   gap: 6px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border-radius: 16px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.03);
@@ -936,20 +936,20 @@ input {
 .surface-nav,
 .settings-layout {
   display: grid;
-  gap: 16px;
+  gap: 18px;
 }
 
 .sidebar-note-stack {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .surface-nav-card {
   width: 100%;
   display: grid;
-  gap: 8px;
+  gap: 10px;
   text-align: left;
-  padding: 16px;
+  padding: 18px;
   min-height: 108px;
   align-content: start;
   border-radius: 18px;
@@ -977,7 +977,7 @@ input {
 
 .runtime-surface-stack {
   display: grid;
-  gap: 16px;
+  gap: 18px;
 }
 
 .surface-nav-card:hover,
@@ -1018,7 +1018,7 @@ input {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 0;
+  padding: 14px 0;
   border-top: 1px solid var(--line);
 }
 
@@ -1030,7 +1030,7 @@ input {
 .limited-list {
   max-height: 320px;
   overflow: auto;
-  padding-right: 4px;
+  padding-right: 6px;
 }
 
 .queue-list {
@@ -1061,26 +1061,6 @@ input {
 
   .panel-sidebar {
     order: 2;
-  }
-}
-
-@media (max-width: 720px) {
-  .app-shell {
-    padding: 18px;
-  }
-
-  .topbar,
-  .topbar-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .hero-stats,
-  .grid-two,
-  .actions-grid,
-  .followup-form-grid,
-  .factory-state-grid {
-    grid-template-columns: 1fr;
   }
 }
 
