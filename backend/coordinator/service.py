@@ -1826,9 +1826,8 @@ class CoordinatorService:
         if not result_path.is_file():
             return None
         raw_text = result_path.read_text()
-        try:
-            parsed = json.loads(raw_text)
-        except json.JSONDecodeError:
+        parsed = self._parse_role_result_json(raw_text)
+        if parsed is None:
             return None
         if not isinstance(parsed, dict):
             return None
@@ -1857,6 +1856,54 @@ class CoordinatorService:
         )
         result_path.unlink(missing_ok=True)
         return output_type, output_payload
+
+    def _parse_role_result_json(self, raw_text: str) -> dict[str, object] | None:
+        try:
+            parsed = json.loads(raw_text)
+        except json.JSONDecodeError:
+            repaired_text = self._escape_raw_control_chars_in_json_strings(raw_text)
+            try:
+                parsed = json.loads(repaired_text)
+            except json.JSONDecodeError:
+                return None
+        if not isinstance(parsed, dict):
+            return None
+        return parsed
+
+    def _escape_raw_control_chars_in_json_strings(self, raw_text: str) -> str:
+        result: list[str] = []
+        in_string = False
+        escape = False
+        for char in raw_text:
+            if in_string:
+                if escape:
+                    result.append(char)
+                    escape = False
+                    continue
+                if char == "\\":
+                    result.append(char)
+                    escape = True
+                    continue
+                if char == '"':
+                    result.append(char)
+                    in_string = False
+                    continue
+                if char == "\n":
+                    result.append("\\n")
+                    continue
+                if char == "\r":
+                    result.append("\\r")
+                    continue
+                if char == "\t":
+                    result.append("\\t")
+                    continue
+                result.append(char)
+                continue
+            result.append(char)
+            if char == '"':
+                in_string = True
+                escape = False
+        return "".join(result)
 
     def _handle_collected_role_output(
         self,
