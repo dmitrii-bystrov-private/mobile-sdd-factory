@@ -1009,6 +1009,9 @@ input {
   display: grid;
   gap: 14px;
   align-content: start;
+}
+
+.progress-grid > .subpanel {
   height: 100%;
 }
 
