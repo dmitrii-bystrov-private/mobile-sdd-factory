@@ -191,6 +191,17 @@ class FakeSnapshotAdapter:
 class FakeGitLabAdapter:
     def __init__(self, repo_root: Path) -> None:
         self.repo_root = repo_root
+        self.commit_requests: list[tuple[str, str | None]] = []
+
+    def commit_task_state(self, task_key: str, context: str | None = None) -> CommandResult:
+        self.commit_requests.append((task_key, context))
+        suffix = f" ({context})" if context else ""
+        return CommandResult(
+            command=["fake_commit_task_state", task_key, context or ""],
+            returncode=0,
+            stdout=f"Committed: {task_key}{suffix}\n",
+            stderr="",
+        )
 
     def create_mr(self, task_key: str) -> CommandResult:
         return CommandResult(

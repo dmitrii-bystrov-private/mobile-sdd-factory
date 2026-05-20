@@ -2,7 +2,7 @@
 # Usage: bash scripts/send-to-test.sh <TASK-KEY>
 #
 # Transitions the task to the appropriate testing-ready status without creating
-# a git commit. MR handoff is responsible for committing and pushing changes.
+# a git commit. Workflow checkpoint commits should already exist before this step.
 #
 # Required env: none
 # Required CLI: acli, jq

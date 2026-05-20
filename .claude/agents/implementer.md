@@ -85,7 +85,7 @@ Before reporting completion to the orchestrator, verify ALL of the following:
 
 **Do NOT hand off to the orchestrator until the implementation itself is complete.**
 
-Do NOT commit manually — MR handoff commits and pushes before creating the merge request.
+Do NOT commit manually — the orchestrator creates workflow checkpoint commits and handles MR delivery later.
 
 Always end your final message with a mandatory status block — even if all checks passed on the first attempt:
 

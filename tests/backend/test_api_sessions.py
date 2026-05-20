@@ -212,6 +212,18 @@ class FakeSnapshotAdapter:
 
 
 class FakeGitLabAdapter:
+    def __init__(self) -> None:
+        self.commit_requests: list[tuple[str, str | None]] = []
+
+    def commit_task_state(self, task_key: str, context: str | None = None) -> "CommandResult":
+        self.commit_requests.append((task_key, context))
+        return CommandResult(
+            ["commit_task_state", task_key, context or ""],
+            0,
+            f"Committed: {task_key}\n",
+            "",
+        )
+
     def create_mr(self, task_key: str) -> "CommandResult":
         return CommandResult(
             ["create_mr", task_key],
@@ -1073,7 +1085,7 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertEqual("verification_requested", inject_response.followup_event_type)
         self.assertEqual("verification_requested", inject_response.session.current_stage)
-        self.assertEqual(7, len(events_response.items))
+        self.assertEqual(8, len(events_response.items))
         self.assertEqual(2, len(work_items_response.items))
 
     def test_bug_analysis_completed_event_returns_implementation_handoff(self) -> None:
@@ -2001,7 +2013,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("send_to_test_completed", response.followup_event_type)
         self.assertEqual("send_to_test_completed", response.session.current_stage)
         self.assertEqual("completed", response.session.status)
-        self.assertEqual(11, len(events_response.items))
+        self.assertEqual(12, len(events_response.items))
         verification_report = Path(self.temp_dir.name) / "IOS-40005" / "spec" / "final-verification.md"
         self.assertTrue(verification_report.exists())
         self.assertIn("PASS", verification_report.read_text())
@@ -2029,7 +2041,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("implementation_completed", response.mapped_event_type)
         self.assertEqual("verification_requested", response.followup_event_type)
         self.assertEqual("verification_requested", response.session.current_stage)
-        self.assertEqual(7, len(events_response.items))
+        self.assertEqual(8, len(events_response.items))
 
     def test_artifact_detail_route_returns_content_and_metadata(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

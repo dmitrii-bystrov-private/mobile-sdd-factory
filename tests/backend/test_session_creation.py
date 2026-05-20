@@ -157,6 +157,18 @@ class FakeSnapshotAdapter:
 
 
 class FakeGitLabAdapter:
+    def __init__(self) -> None:
+        self.commit_requests: list[tuple[str, str | None]] = []
+
+    def commit_task_state(self, task_key: str, context: str | None = None) -> CommandResult:
+        self.commit_requests.append((task_key, context))
+        return CommandResult(
+            command=["commit_task_state", task_key, context or ""],
+            returncode=0,
+            stdout=f"Committed: {task_key}\n",
+            stderr="",
+        )
+
     def create_mr(self, task_key: str) -> CommandResult:
         return CommandResult(
             command=["create_mr", task_key],
@@ -1393,6 +1405,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
         self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual([("IOS-30003", "implementation pass")], self.gitlab_adapter.commit_requests)
         self.assertEqual(
             ["completed", "assigned"],
             [work_items[0].status.value, work_items[1].status.value],
@@ -1404,6 +1417,7 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "implementation_requested",
                 "implementation_completed",
+                "git_commit_completed",
                 "role_input_dispatched",
                 "verification_requested",
             ],
@@ -2725,6 +2739,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual("subtask_implementation_requested", followup_event.event_type)
         self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual([("IOS-30004SUBTASK", "subtask IOS-30020")], self.gitlab_adapter.commit_requests)
         self.assertEqual(
             ["assigned", "completed", "completed", "completed", "completed", "completed", "completed", "completed", "completed"],
             sorted(item.status.value for item in work_items),
@@ -2738,6 +2753,13 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual("verification_requested", final_followup.event_type)
         self.assertEqual("verification_requested", final_session.current_stage)
+        self.assertEqual(
+            [
+                ("IOS-30004SUBTASK", "subtask IOS-30020"),
+                ("IOS-30004SUBTASK", "subtask IOS-30021"),
+            ],
+            self.gitlab_adapter.commit_requests,
+        )
 
     def test_subtask_completion_refreshes_snapshot_and_rewrites_graph(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -3124,6 +3146,7 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "implementation_requested",
                 "implementation_completed",
+                "git_commit_completed",
                 "role_input_dispatched",
                 "verification_requested",
                 "verification_failed",
@@ -3365,6 +3388,7 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "implementation_requested",
                 "implementation_completed",
+                "git_commit_completed",
                 "role_input_dispatched",
                 "verification_requested",
                 "verification_passed",
@@ -3423,6 +3447,7 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_dispatched",
                 "implementation_requested",
                 "implementation_completed",
+                "git_commit_completed",
                 "role_input_dispatched",
                 "verification_requested",
             ],
@@ -5353,6 +5378,13 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
         self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual(
+            [
+                ("IOS-30022", "implementation pass"),
+                ("IOS-30022", "follow-up pass"),
+            ],
+            self.gitlab_adapter.commit_requests,
+        )
 
     def test_resume_session_reactivates_escalated_work_item(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30019")

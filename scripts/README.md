@@ -234,7 +234,7 @@ Transitions the task to the appropriate testing-ready Jira status without creati
 bash scripts/send-to-test.sh <TASK-KEY>
 ```
 
-- MR handoff is responsible for committing and pushing changes before this step.
+- Workflow checkpoint commits should already exist before this step; this script only performs the Jira transition.
 - Non-bug tasks transition to **Ready for test**.
 - If the task is in **To Do**, transitions through **In Progress** first.
 

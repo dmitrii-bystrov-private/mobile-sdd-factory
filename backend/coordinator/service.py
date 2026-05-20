@@ -3426,6 +3426,15 @@ class CoordinatorService:
             raise IntakeError("No active subtask implementation work item found for the session")
 
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        parsed_subtask = self._parse_subtask_work_item_title(active_item.title)
+        subtask_context = (
+            f"subtask {parsed_subtask['key']}"
+            if parsed_subtask["key"] is not None
+            else "subtask implementation"
+        )
+        session, commit_event = self._commit_task_state(session, subtask_context)
+        if commit_event is not None:
+            return session, commit_event
         refreshed_subtasks, _refresh_ok = self._refresh_subtask_snapshot(session)
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         if implementer_role is None:
@@ -3507,6 +3516,12 @@ class CoordinatorService:
         if active_item is None:
             raise IntakeError("No active coding work item found for the session")
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        session, commit_event = self._commit_task_state(
+            session,
+            self._commit_context_for_work_type(active_item.work_type),
+        )
+        if commit_event is not None:
+            return session, commit_event
         if active_item.work_type == "boy_scout_correction":
             return self._enqueue_verification(session=session, source_event=source_event)
         if active_item.work_type == "self_review_correction":
@@ -3537,6 +3552,101 @@ class CoordinatorService:
             session=session,
             source_event=source_event,
         )
+
+    def _commit_context_for_work_type(self, work_type: str) -> str:
+        if work_type == "implementation":
+            return "implementation pass"
+        if work_type == "followup_implementation":
+            return "follow-up pass"
+        if work_type == "self_review_correction":
+            return "self-review fixes"
+        if work_type == "boy_scout_correction":
+            return "boy-scout fixes"
+        if work_type == "verification_correction":
+            return "verification fixes"
+        return work_type.replace("_", " ")
+
+    def _commit_task_state(
+        self,
+        session: Session,
+        context: str | None,
+    ) -> tuple[Session, Event | None]:
+        if self.gitlab_adapter is None or self.artifacts_root is None:
+            return session, None
+
+        result = self.gitlab_adapter.commit_task_state(session.task_key, context=context)
+        context_slug = re.sub(r"[^a-z0-9]+", "-", (context or "checkpoint").lower()).strip("-") or "checkpoint"
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "commit-task-state",
+            f"{context_slug}.stdout.log",
+            result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "commit-task-state",
+            f"{context_slug}.stderr.log",
+            result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="commit-task-state",
+            artifact_type="commit_task_state_stdout",
+            path=str(stdout_path),
+            metadata={
+                "task_key": session.task_key,
+                "context": context,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="commit-task-state",
+            artifact_type="commit_task_state_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "context": context,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        if not result.ok:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage=session.current_stage,
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="git_commit_failed",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "context": context,
+                    "returncode": result.returncode,
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                },
+            )
+            return session, event
+
+        self._append_event(
+            session_id=session.id,
+            event_type="git_commit_completed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "context": context,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, None
 
     def _enqueue_self_review(
         self,

@@ -154,7 +154,7 @@ After all subtasks complete, run `/send-to-test <KEY>` to transition the parent 
 bash scripts/send-to-test.sh <KEY>
 ```
 
-Transitions the bug to **Ready for test** after MR handoff has already committed and pushed the changes.
+Transitions the bug to **Ready for test** after the workflow has already committed progress and completed MR handoff.
 
 Skip this step when coming from Step 5.5 — the parent was already transitioned there.
 
