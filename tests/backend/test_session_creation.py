@@ -2573,6 +2573,88 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("completed", decomposition_item.status.value)
         self.assertFalse(plan_dir.exists())
 
+    def test_task_decomposition_completed_accepts_legacy_plan_artifacts_payload(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003PLANARTIFACTS",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003PLANARTIFACTS")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Scope clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="requirements_completed",
+            payload={"summary": "Requirements clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="acceptance_criteria_completed",
+            payload={"summary": "Acceptance prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="constraints_completed",
+            payload={"summary": "Constraints prepared"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning verified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="story_spec_completed",
+            payload={"summary": "Need explicit decomposition package"},
+        )
+        self.write_statuses_file(
+            "IOS-30003PLANARTIFACTS",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30003PLANARTIFACTS | Story | Parent story | In Progress |
+| IOS-30051 | Sub-task | Build data source | To Do |
+""",
+        )
+
+        plan_dir = Path(self.temp_dir.name) / "IOS-30003PLANARTIFACTS" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n"
+            "| # | Task | Depends on | Status |\n"
+            "|---|------|------------|--------|\n"
+            "| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
+        )
+        (plan_dir / "01-build-data-source.md").write_text(
+            "# Build data source\n\n"
+            "## What to implement\n"
+            "Create the feature data source.\n"
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload={
+                "summary": "Legacy decomposition artifacts prepared",
+                "artifacts": [
+                    "plan/index.md",
+                    "plan/01-build-data-source.md",
+                ],
+            },
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        decomposition_item = next(item for item in work_items if item.work_type == "task_decomposition")
+
+        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("completed", decomposition_item.status.value)
+        self.assertFalse(plan_dir.exists())
+
     def test_create_subtasks_from_plan_records_batch_artifacts(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003SUBBATCH",

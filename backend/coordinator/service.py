@@ -6674,6 +6674,8 @@ class CoordinatorService:
 
         legacy_paths = payload.get("paths")
         if not isinstance(legacy_paths, list) or not legacy_paths:
+            legacy_paths = payload.get("artifacts")
+        if not isinstance(legacy_paths, list) or not legacy_paths:
             if not plan_index_markdown:
                 raise IntakeError("Task decomposition must include plan_index_markdown")
             raise IntakeError("Task decomposition must include non-empty plan_task_files")
