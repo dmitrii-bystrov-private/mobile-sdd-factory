@@ -3298,17 +3298,39 @@ class CoordinatorService:
             raise IntakeError("No active task decomposition work item found for the session")
 
         active_item = decomposition_items[0]
-        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
-        self._stop_on_demand_role(session, TASK_DECOMPOSER_WORKER_ROLE)
-
         summary = str(source_event.payload.get("summary") or "").strip()
         task_breakdown = str(source_event.payload.get("task_breakdown") or "").strip()
-        plan_index_markdown = str(source_event.payload.get("plan_index_markdown") or "").strip()
-        raw_plan_task_files = source_event.payload.get("plan_task_files") or []
-        if not plan_index_markdown:
-            raise IntakeError("Task decomposition must include plan_index_markdown")
-        if not isinstance(raw_plan_task_files, list) or not raw_plan_task_files:
-            raise IntakeError("Task decomposition must include non-empty plan_task_files")
+        try:
+            plan_index_markdown, raw_plan_task_files = self._normalize_task_decomposition_plan_package(
+                session=session,
+                payload=source_event.payload,
+            )
+        except IntakeError as exc:
+            self._stop_on_demand_role(session, TASK_DECOMPOSER_WORKER_ROLE)
+            self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="task_decomposition_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="session_escalated_to_operator",
+                producer_type="coordinator",
+                payload={
+                    "reason": "task_decomposition_package_invalid",
+                    "role_name": TASK_DECOMPOSER_WORKER_ROLE,
+                    "work_item_id": active_item.id,
+                    "summary": summary or "task decomposition package is invalid",
+                    "details": str(exc),
+                    "current_stage": session.current_stage,
+                },
+            )
+            return session, event
+
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, TASK_DECOMPOSER_WORKER_ROLE)
         decomposition_artifact: Artifact | None = None
         if self.artifacts_root is not None:
             artifact_path = write_text_artifact(
@@ -6460,6 +6482,79 @@ class CoordinatorService:
                 "task_files": normalized_task_files,
             },
         )
+
+    def _normalize_task_decomposition_plan_package(
+        self,
+        *,
+        session: Session,
+        payload: dict[str, object],
+    ) -> tuple[str, list[dict[str, str]]]:
+        plan_index_markdown = str(payload.get("plan_index_markdown") or "").strip()
+        raw_plan_task_files = payload.get("plan_task_files")
+        if plan_index_markdown and isinstance(raw_plan_task_files, list) and raw_plan_task_files:
+            return plan_index_markdown, raw_plan_task_files
+
+        if self.workdir_root is None:
+            raise IntakeError("Coordinator is missing workdir root")
+
+        legacy_paths = payload.get("paths")
+        if not isinstance(legacy_paths, list) or not legacy_paths:
+            if not plan_index_markdown:
+                raise IntakeError("Task decomposition must include plan_index_markdown")
+            raise IntakeError("Task decomposition must include non-empty plan_task_files")
+
+        plan_dir = self.workdir_root / session.task_key / "plan"
+        if not plan_dir.is_dir():
+            raise IntakeError(f"Temporary plan package is missing for session {session.task_key}")
+
+        index_path = plan_dir / "index.md"
+        if not index_path.is_file():
+            raise IntakeError("Task decomposition legacy package is missing plan/index.md")
+        if not plan_index_markdown:
+            plan_index_markdown = index_path.read_text().strip()
+        if not plan_index_markdown:
+            raise IntakeError("Task decomposition legacy package contains an empty plan/index.md")
+
+        normalized_task_files: list[dict[str, str]] = []
+        for item in legacy_paths:
+            relative_path = str(item or "").strip()
+            if not relative_path:
+                continue
+            candidate = Path(relative_path)
+            filename = candidate.name
+            if filename == "index.md" or not filename.endswith(".md"):
+                continue
+            file_path = plan_dir / filename
+            if not file_path.is_file():
+                raise IntakeError(f"Task decomposition legacy package is missing {candidate.as_posix()}")
+            content = file_path.read_text().strip()
+            if not content:
+                raise IntakeError(f"Task decomposition legacy package contains an empty {candidate.as_posix()}")
+            normalized_task_files.append(
+                {
+                    "filename": filename,
+                    "content": content,
+                }
+            )
+
+        if not normalized_task_files:
+            for file_path in sorted(plan_dir.glob("*.md")):
+                if file_path.name == "index.md":
+                    continue
+                content = file_path.read_text().strip()
+                if not content:
+                    continue
+                normalized_task_files.append(
+                    {
+                        "filename": file_path.name,
+                        "content": content,
+                    }
+                )
+
+        if not normalized_task_files:
+            raise IntakeError("Task decomposition legacy package must contain at least one task markdown file")
+
+        return plan_index_markdown, normalized_task_files
 
     def _cleanup_temporary_plan_package(self, session: Session) -> None:
         if self.workdir_root is None:
