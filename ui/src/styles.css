@@ -109,7 +109,7 @@ input {
 .surface-heading {
   display: grid;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 16px;
 }
 
 .surface-heading h2 {
@@ -213,7 +213,12 @@ input {
 }
 
 .panel-header {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+}
+
+.panel-header > div {
+  display: grid;
+  gap: 8px;
 }
 
 .badge,
@@ -323,8 +328,8 @@ input {
 .session-card-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 12px;
-  margin-top: 10px;
+  gap: 10px 12px;
+  margin-top: 12px;
 }
 
 .session-card-meta-primary {
@@ -346,7 +351,7 @@ input {
 }
 
 .session-card-title {
-  margin-top: 10px;
+  margin-top: 12px;
   line-height: 1.4;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -475,14 +480,14 @@ input {
 .session-card small,
 .subpanel p,
 .path-label {
-  margin: 4px 0 0;
+  margin: 6px 0 0;
   color: var(--ink-soft);
 }
 
 .hero-task-card {
   display: grid;
   gap: 6px;
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .hero-title {
@@ -525,7 +530,7 @@ input {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 16px;
+  margin-top: 18px;
 }
 
 .hero-status-item {
@@ -696,7 +701,7 @@ input {
 
 .runtime-defaults-list {
   display: grid;
-  gap: 16px;
+  gap: 20px;
 }
 
 .runtime-default-card {
@@ -709,7 +714,7 @@ input {
 }
 
 .runtime-default-card > .form-field {
-  margin-top: 4px;
+  margin-top: 8px;
 }
 
 .runtime-default-card strong {
@@ -767,7 +772,7 @@ input {
 
 .session-start-form {
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .session-start-actions {
@@ -775,7 +780,7 @@ input {
   gap: 12px;
   position: sticky;
   bottom: 0;
-  padding-top: 10px;
+  padding-top: 16px;
   background: linear-gradient(180deg, rgba(14, 19, 28, 0), rgba(14, 19, 28, 0.96) 26%);
 }
 
@@ -937,7 +942,7 @@ input {
 .session-updates-panel,
 .stack-tight {
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .scope-summary-list {
@@ -972,7 +977,7 @@ input {
 
 .progress-card {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   padding: 12px;
   border-radius: 18px;
   border: 1px solid var(--line);
@@ -1015,7 +1020,7 @@ input {
 
 .form-field {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .form-field span {
@@ -1154,6 +1159,7 @@ input {
   flex-wrap: wrap;
   gap: 10px;
   align-self: start;
+  margin: 2px 0 4px;
 }
 
 .runtime-surface-stack {
@@ -1209,7 +1215,7 @@ input {
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 0;
+  padding: 16px 0;
   border-top: 1px solid var(--line);
 }
 
