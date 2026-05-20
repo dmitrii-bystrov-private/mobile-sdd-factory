@@ -179,7 +179,6 @@ export function OperatorActions({
       label: "Pause Session",
       description: "Pause the current workflow so no new automated steps start until you explicitly resume it.",
       disabled: busy,
-      danger: true,
       confirmMessage:
         "Pause this session? The coordinator will stop advancing it until you resume it.",
       onClick: () => run(() => apiClient.pauseSession(session.id)),
