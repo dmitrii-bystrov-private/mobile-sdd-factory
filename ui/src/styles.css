@@ -548,25 +548,6 @@ input {
   margin-top: var(--space-4);
 }
 
-.hero-trace {
-  display: grid;
-  gap: var(--space-2);
-  margin-top: var(--space-4);
-  padding: 12px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 14px;
-  background: rgba(10, 15, 24, 0.18);
-  min-width: 0;
-}
-
-.hero-trace-label {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 0.76rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
 .hero-trace-list {
   display: grid;
   gap: 8px;
@@ -588,6 +569,21 @@ input {
   color: var(--ink-soft);
   font-size: 0.77rem;
   letter-spacing: 0.02em;
+}
+
+.orchestrator-trace-panel {
+  margin-top: 0;
+}
+
+.orchestrator-trace-body {
+  min-width: 0;
+}
+
+.orchestrator-trace-scroll {
+  max-height: 360px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
 }
 
 .hero-status-item,

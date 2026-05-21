@@ -241,8 +241,7 @@ function buildOrchestratorTrace(
   workItems: WorkItem[],
 ): OrchestratorTraceItem[] {
   const workItemsById = new Map(workItems.map((item) => [item.id, item]));
-  return [...events]
-    .reverse()
+  return events
     .filter((event) => event.producer_type === "coordinator")
     .map((event) => {
       const message = orchestratorTraceMessage(event, workItemsById);
@@ -255,8 +254,7 @@ function buildOrchestratorTrace(
         message,
       };
     })
-    .filter((item): item is OrchestratorTraceItem => item !== null)
-    .slice(0, 6);
+    .filter((item): item is OrchestratorTraceItem => item !== null);
 }
 
 function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_profile"]): number {
@@ -340,6 +338,7 @@ export function SessionDetail({
   bundle,
   onRefresh,
 }: SessionDetailProps): JSX.Element {
+  const [showOrchestratorTrace, setShowOrchestratorTrace] = useState(false);
   const [workerMenuRoleName, setWorkerMenuRoleName] = useState<string | null>(null);
   const [workerActionBusyRoleName, setWorkerActionBusyRoleName] = useState<string | null>(null);
   const [workerActionError, setWorkerActionError] = useState<string | null>(null);
@@ -551,23 +550,44 @@ export function SessionDetail({
               <strong>{currentOwner}</strong>
             </div>
           </div>
-          {orchestratorTrace.length > 0 ? (
-            <div className="hero-trace">
-              <p className="hero-trace-label">Orchestrator Trace</p>
-              <div className="hero-trace-list">
-                {orchestratorTrace.map((item) => (
-                  <p className="hero-trace-item" key={`orchestrator-trace-${item.eventId}`}>
-                    {formatTraceTime(item.createdAt) ? (
-                      <span className="hero-trace-time">{formatTraceTime(item.createdAt)}</span>
-                    ) : null}
-                    {item.message}
-                  </p>
-                ))}
+        </div>
+      </div>
+
+      {orchestratorTrace.length > 0 ? (
+        <div className="advanced-disclosure orchestrator-trace-panel">
+          <button
+            className="advanced-disclosure-toggle"
+            onClick={() => setShowOrchestratorTrace((value) => !value)}
+            aria-expanded={showOrchestratorTrace}
+            type="button"
+          >
+            <div>
+              <strong>Orchestrator Trace</strong>
+              <p>Expand to inspect the full orchestration history for this session.</p>
+            </div>
+            <div className="advanced-disclosure-meta">
+              <small>{orchestratorTrace.length} steps</small>
+              <span className={`chevron${showOrchestratorTrace ? " expanded" : ""}`} aria-hidden="true" />
+            </div>
+          </button>
+          {showOrchestratorTrace ? (
+            <div className="advanced-disclosure-body orchestrator-trace-body">
+              <div className="orchestrator-trace-scroll">
+                <div className="hero-trace-list">
+                  {orchestratorTrace.map((item) => (
+                    <p className="hero-trace-item" key={`orchestrator-trace-${item.eventId}`}>
+                      {formatTraceTime(item.createdAt) ? (
+                        <span className="hero-trace-time">{formatTraceTime(item.createdAt)}</span>
+                      ) : null}
+                      {item.message}
+                    </p>
+                  ))}
+                </div>
               </div>
             </div>
           ) : null}
         </div>
-      </div>
+      ) : null}
 
       <>
       <InteractiveStatePanel
