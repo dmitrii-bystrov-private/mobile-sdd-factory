@@ -5599,15 +5599,22 @@ class CoordinatorService:
         if self.workdir_root is None:
             return {}
         context_root = self.workdir_root / task_key / "spec" / "context"
-        return {
-            "proposal_path": str(self.workdir_root / task_key / "spec" / "proposal.md"),
+        payload: dict[str, str | int | None] = {
             "context_directory_path": str(context_root),
-            "feature_overview_path": str(context_root / "feature-overview.md"),
-            "relevant_code_path": str(context_root / "relevant-code.md"),
-            "documentation_path": str(context_root / "documentation.md"),
-            "implementation_patterns_path": str(context_root / "implementation-patterns.md"),
-            "preconditions_path": str(context_root / "preconditions.md"),
         }
+
+        candidate_paths = {
+            "proposal_path": self.workdir_root / task_key / "spec" / "proposal.md",
+            "feature_overview_path": context_root / "feature-overview.md",
+            "relevant_code_path": context_root / "relevant-code.md",
+            "documentation_path": context_root / "documentation.md",
+            "implementation_patterns_path": context_root / "implementation-patterns.md",
+            "preconditions_path": context_root / "preconditions.md",
+        }
+        for key, candidate in candidate_paths.items():
+            if candidate.is_file():
+                payload[key] = str(candidate)
+        return payload
 
     def _find_operator_pending_work_item(self, session_id: int) -> WorkItem | None:
         for item in self.work_item_repository.list_for_session(session_id):

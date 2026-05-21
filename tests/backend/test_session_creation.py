@@ -1858,8 +1858,11 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Key context findings: Reuse existing presenter flow", sent_inputs[0])
         self.assertIn("Context package available under `spec/context/`", sent_inputs[0])
         self.assertEqual("ask-a-lot", hydration["requirements_clarification_mode"])
-        self.assertTrue(hydration["feature_overview_path"].endswith("spec/context/feature-overview.md"))
+        self.assertNotIn("feature_overview_path", hydration)
         self.assertTrue(hydration["proposal_path"].endswith("spec/proposal.md"))
+        self.assertNotIn("documentation_path", hydration)
+        self.assertNotIn("implementation_patterns_path", hydration)
+        self.assertNotIn("preconditions_path", hydration)
 
     def test_proposal_context_completed_syncs_context_outputs_from_role_workspace(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -1888,6 +1891,48 @@ class SessionCreationTests(unittest.TestCase):
         synced_feature_overview = Path(self.temp_dir.name) / session.task_key / "spec" / "context" / "feature-overview.md"
         self.assertTrue(synced_feature_overview.is_file())
         self.assertEqual("# Feature Overview\n\nGrounded context.\n", synced_feature_overview.read_text())
+
+    def test_requirements_hydration_includes_only_existing_story_context_files(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003CTXSEL",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003CTXSEL")
+        proposal_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            PROPOSAL_CONTEXT_WORKER_ROLE,
+        )
+        feature_overview = proposal_workspace / "spec" / "context" / "feature-overview.md"
+        relevant_code = proposal_workspace / "spec" / "context" / "relevant-code.md"
+        feature_overview.parent.mkdir(parents=True, exist_ok=True)
+        feature_overview.write_text("# Feature Overview\n\nGrounded context.\n")
+        relevant_code.write_text("# Relevant Code\n\nGrounded code context.\n")
+
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={
+                "summary": "Scope clarified",
+                "outputs": [
+                    "spec/proposal.md",
+                    "spec/context/feature-overview.md",
+                    "spec/context/relevant-code.md",
+                    "RESULT.json",
+                ],
+            },
+        )
+        requirements_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        hydration = json.loads((requirements_workspace / "HYDRATION.json").read_text())
+
+        self.assertTrue(hydration["feature_overview_path"].endswith("spec/context/feature-overview.md"))
+        self.assertTrue(hydration["relevant_code_path"].endswith("spec/context/relevant-code.md"))
+        self.assertNotIn("documentation_path", hydration)
+        self.assertNotIn("implementation_patterns_path", hydration)
+        self.assertNotIn("preconditions_path", hydration)
 
     def test_requirements_completed_moves_story_session_to_acceptance_criteria(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
