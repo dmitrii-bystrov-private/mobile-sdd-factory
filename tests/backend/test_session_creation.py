@@ -4493,44 +4493,14 @@ class SessionCreationTests(unittest.TestCase):
             workflow_profile="story_full",
             policy={"self_review_policy": "disabled"},
         )
-        self.coordinator.prepare_task_session("IOS-30009ESUB")
-        for event_type in (
-            "proposal_context_completed",
-            "requirements_completed",
-            "acceptance_criteria_completed",
-            "constraints_completed",
-            "spec_verification_completed",
-            "story_spec_completed",
-        ):
-            self.coordinator.handle_operator_event(
-                session_id=session.id,
-                event_type=event_type,
-                payload={"summary": "prepared"},
-            )
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="task_decomposition_completed",
-            payload=decomposition_payload("Execution chunks prepared"),
-        )
-        self.write_statuses_file(
-            "IOS-30009ESUB",
-            """# Statuses
-
-| Key | Type | Title | Status |
-| --- | --- | --- | --- |
-| IOS-30009ESUB | Story | Parent story | In Progress |
-| IOS-30090 | Sub-task | First chunk | To Do |
-| IOS-30091 | Sub-task | Second chunk | To Do |
-""",
-        )
-        self.coordinator.start_subtask_graph(session.id)
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         assert implementer_role is not None
-        work_items = self.work_item_repository.list_for_session(session.id)
-        first_item = next(
-            item
-            for item in work_items
-            if item.work_type == "subtask_implementation" and item.status.value == "assigned"
+        first_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-30090: First chunk",
+            owner_role_id=implementer_role.id,
+            priority=100,
         )
         self.work_item_repository.update_status(first_item.id, WorkItemStatus.COMPLETED)
         stale_session = self.session_repository.update_stage_and_owner(
@@ -4561,6 +4531,71 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, chunk_count)
         self.assertEqual("role_output_collected", event.event_type)
         self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
+
+    def test_collect_role_output_ignores_stale_subtask_implementer_result_for_assigned_but_undispatched_next_subtask(
+        self,
+    ) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009ESUB2",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        first_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-30092: First chunk",
+            owner_role_id=implementer_role.id,
+            priority=100,
+        )
+        second_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-30093: Second chunk",
+            owner_role_id=None,
+            priority=99,
+            status=WorkItemStatus.UNASSIGNED,
+        )
+        self.work_item_repository.update_status(first_item.id, WorkItemStatus.COMPLETED)
+        self.work_item_repository.update_assignment(
+            second_item.id,
+            owner_role_id=first_item.owner_role_id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        stale_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        self.session_repository.update_status(stale_session.id, SessionStatus.ACTIVE)
+        result_path = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            IMPLEMENTER_ROLE,
+        ) / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {"summary": "late stale subtask implementer result"},
+                }
+            )
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        refreshed_items = self.work_item_repository.list_for_session(session.id)
+        refreshed_second_item = next(item for item in refreshed_items if item.id == second_item.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual("assigned", refreshed_second_item.status.value)
+        self.assertFalse(any(item.event_type == "subtask_completed" for item in events))
         self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
 
     def test_poll_session_output_ignores_stale_implementer_runtime_marker_after_handoff_to_reviewer(self) -> None:

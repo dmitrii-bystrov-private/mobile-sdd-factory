@@ -1974,7 +1974,7 @@ class CoordinatorService:
             role_name == IMPLEMENTER_ROLE
             and output_type == "completed"
             and session.current_stage == "subtask_implementation_requested"
-            and self._find_active_primary_coding_work_item(session) is None
+            and self._active_subtask_completion_dispatch_missing(session)
         ):
             return True
         if (
@@ -2008,6 +2008,16 @@ class CoordinatorService:
         ):
             return True
         return False
+
+    def _active_subtask_completion_dispatch_missing(self, session: Session) -> bool:
+        active_item = self._find_active_primary_coding_work_item(session)
+        if active_item is None:
+            return True
+        return not self._has_dispatch_event(
+            session.id,
+            active_item.id,
+            "subtask_implementation_requested",
+        )
 
     def run_loop_once(self) -> tuple[Event | None, int, int]:
         active_sessions = self.session_repository.list_by_status(SessionStatus.ACTIVE)
