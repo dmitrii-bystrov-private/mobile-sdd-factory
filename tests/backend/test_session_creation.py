@@ -1724,7 +1724,7 @@ class SessionCreationTests(unittest.TestCase):
             bug_fixer_inputs[-1],
         )
         self.assertIn("Continue from your existing bug-fixer role context", bug_fixer_inputs[-1])
-        self.assertIn('"bug_analysis_report_path"', bug_fixer_inputs[-1])
+        self.assertNotIn('"bug_analysis_report_path"', bug_fixer_inputs[-1])
         self.assertIn('"bug_mode": "fix-only"', bug_fixer_inputs[-1])
         self.assertIn("In `fix-only` mode, read the saved `spec/bug-analysis.md` first", bug_fixer_inputs[-1])
 
@@ -1933,6 +1933,70 @@ class SessionCreationTests(unittest.TestCase):
         self.assertNotIn("documentation_path", hydration)
         self.assertNotIn("implementation_patterns_path", hydration)
         self.assertNotIn("preconditions_path", hydration)
+
+    def test_bug_fixer_followup_hydration_omits_missing_optional_input_paths(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003BUGHYD",
+            workflow_profile="bug_full",
+            policy=None,
+        )
+        bug_fixer_role = self.role_repository.get_by_name(session.id, BUG_FIXER_ROLE)
+        assert bug_fixer_role is not None
+
+        hydration = self.coordinator._sanitize_dispatch_hydration(  # type: ignore[attr-defined]
+            self.coordinator._default_extra_hydration_for_dispatch(  # type: ignore[attr-defined]
+                session,
+                bug_fixer_role,
+                "mr_followup_requested",
+            )
+        )
+
+        self.assertEqual("fix-only", hydration["bug_mode"])
+        self.assertNotIn("bug_analysis_report_path", hydration)
+        self.assertNotIn("followup_comments_path", hydration)
+        self.assertNotIn("followup_plan_index_path", hydration)
+        self.assertNotIn("followup_plan_directory_path", hydration)
+
+    def test_mr_comments_analysis_hydration_keeps_plan_targets_but_omits_missing_comments_artifact(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003MRPLAN",
+            workflow_profile="bug_full",
+            policy=None,
+        )
+        bug_fixer_role = self.role_repository.get_by_name(session.id, BUG_FIXER_ROLE)
+        assert bug_fixer_role is not None
+
+        hydration = self.coordinator._sanitize_dispatch_hydration(  # type: ignore[attr-defined]
+            self.coordinator._default_extra_hydration_for_dispatch(  # type: ignore[attr-defined]
+                session,
+                bug_fixer_role,
+                "mr_comments_analysis_requested",
+            )
+        )
+
+        self.assertNotIn("followup_comments_path", hydration)
+        self.assertTrue(str(hydration["followup_plan_index_path"]).endswith("/plan/index.md"))
+        self.assertTrue(str(hydration["followup_plan_directory_path"]).endswith("/plan"))
+
+    def test_boy_scout_dispatch_omits_missing_diff_input_path(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003SCOUTPATH",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30003SCOUTPATH")
+        updated_session, implementation_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(scout_role.runtime_handle)
+
+        self.assertEqual("boy_scout_requested", updated_session.current_stage)
+        self.assertEqual("boy_scout_requested", implementation_event.event_type)
+        self.assertNotIn('"diff_path"', sent_inputs[-1])
+        self.assertIn('"findings_path"', sent_inputs[-1])
 
     def test_requirements_completed_moves_story_session_to_acceptance_criteria(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
