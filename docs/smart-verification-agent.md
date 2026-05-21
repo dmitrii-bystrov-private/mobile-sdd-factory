@@ -457,6 +457,39 @@ Expected outcome:
 - a task with red tests or red lint should be corrected inside the orchestration loop
 - MR creation should remain downstream of a genuinely green verification outcome
 
+## Role Boundary Tightening
+
+This work should also tighten execution rules for non-verifier roles.
+
+Observed risk:
+
+- `implementer` sometimes runs build or verification-style commands autonomously
+- this duplicates verifier responsibility
+- it wastes time and muddies responsibility boundaries
+- it can hide orchestration bugs because verification work happens outside the intended lane
+
+Required rule:
+
+- workflow-level build / test / lint authority should belong to the verification lane only
+
+Implications:
+
+- `implementer` should not run broad build, test, or lint commands unless the routed task explicitly requires a narrow task-local check
+- `bug-fixer` should follow the same rule
+- other planning/review/support roles should not opportunistically execute heavy verification commands
+
+Prompt and contract tightening should cover:
+
+- `backend/roles/prompts.py`
+- `backend/roles/workspace.py`
+- any role-specific guidance that currently leaves room for autonomous broad verification
+
+Expected outcome:
+
+- `implementer` focuses on code changes and narrowly scoped local checks only when explicitly justified
+- workflow-level confidence comes from the verifier lane, not from ad hoc agent behavior
+- orchestration semantics become clearer because verification responsibility is not leaking across roles
+
 ## Recommendation
 
 Do not implement this as:
