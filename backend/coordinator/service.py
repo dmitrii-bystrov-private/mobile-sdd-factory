@@ -1835,25 +1835,47 @@ class CoordinatorService:
     ) -> tuple[str, dict] | None:
         if self.role_workspace_manager is None:
             return None
-        result_path = self.role_workspace_manager.role_directory(session.task_key, role.role_name) / "RESULT.json"
-        if not result_path.is_file():
-            return None
-        raw_text = result_path.read_text()
-        parsed = self._parse_role_result_json(raw_text)
-        if parsed is None:
-            return None
-        if not isinstance(parsed, dict):
-            return None
-        output_type = parsed.get("output_type")
-        output_payload = parsed.get("payload")
-        if not isinstance(output_type, str) or not isinstance(output_payload, dict):
+        candidate_paths = [
+            self.role_workspace_manager.role_directory(session.task_key, role.role_name) / "RESULT.json",
+        ]
+        if self.workdir_root is not None:
+            candidate_paths.append(self.workdir_root / session.task_key / "RESULT.json")
+
+        result_path: Path | None = None
+        output_type: str | None = None
+        output_payload: dict | None = None
+        parsed_payload: dict[str, object] | None = None
+        active_work_item = self._find_active_work_item_for_role(session.id, role.id)
+
+        for candidate in candidate_paths:
+            if not candidate.is_file():
+                continue
+            raw_text = candidate.read_text()
+            parsed = self._parse_role_result_json(raw_text)
+            if parsed is None or not isinstance(parsed, dict):
+                continue
+            candidate_output_type = parsed.get("output_type")
+            candidate_output_payload = parsed.get("payload")
+            if not isinstance(candidate_output_type, str) or not isinstance(candidate_output_payload, dict):
+                continue
+            if active_work_item is not None:
+                payload_work_item_id = candidate_output_payload.get("work_item_id")
+                if payload_work_item_id != active_work_item.id:
+                    continue
+            result_path = candidate
+            output_type = candidate_output_type
+            output_payload = candidate_output_payload
+            parsed_payload = parsed
+            break
+
+        if result_path is None or output_type is None or output_payload is None or parsed_payload is None:
             return None
         artifact_path = write_text_artifact(
             self.artifacts_root,
             session.task_key,
             f"role-result-{role.role_name}",
             "RESULT.json",
-            json.dumps(parsed, indent=2, sort_keys=True),
+            json.dumps(parsed_payload, indent=2, sort_keys=True),
         )
         self.artifact_repository.create(
             session_id=session.id,

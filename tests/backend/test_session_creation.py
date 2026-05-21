@@ -4366,6 +4366,41 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(artifact.artifact_type == "role_result_json" for artifact in artifacts))
         self.assertTrue(any(artifact.artifact_type == "role_result_json" for artifact in artifacts))
 
+    def test_poll_session_output_consumes_task_root_result_json_for_active_role(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30008BROOT")
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
+        task_root = Path(self.temp_dir.name) / session.task_key
+        result_path = task_root / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {
+                        "work_item_id": active_item.id,
+                        "summary": "done from task root",
+                    },
+                }
+            )
+        )
+
+        updated_session, event, role_count, chunk_count = self.coordinator.poll_session_output(
+            session_id=session.id,
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(session.id, updated_session.id)
+        self.assertEqual("session_output_polled", event.event_type)
+        self.assertEqual(3, role_count)
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(any(artifact.artifact_type == "role_result_json" for artifact in artifacts))
+
     def test_prepare_task_session_materializes_hydration_json_in_role_workspace(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30008C")
         role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
