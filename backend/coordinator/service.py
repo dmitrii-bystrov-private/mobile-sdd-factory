@@ -1096,7 +1096,6 @@ class CoordinatorService:
             current_owner=None,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
-        self._stop_and_clear_runtime_handles(session)
         event = self._append_event(
             session_id=session.id,
             event_type="send_to_test_completed",
@@ -4244,7 +4243,6 @@ class CoordinatorService:
             },
         )
         if self.gitlab_adapter is None or self.jira_adapter is None:
-            self._stop_and_clear_runtime_handles(session)
             return session, completed_event
         session, mr_event, _mr_url = self.create_mr_handoff(session.id)
         if mr_event.event_type != "mr_handoff_completed":

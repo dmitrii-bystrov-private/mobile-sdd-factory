@@ -5687,6 +5687,24 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "send_to_test_stderr" for item in artifacts))
         self.assertTrue(any(item.event_type == "send_to_test_completed" for item in events))
 
+    def test_send_to_test_handoff_keeps_runtime_roles_alive_after_completion(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021CKEEP")
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="mr_handoff_completed",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+
+        updated_session, event = self.coordinator.send_to_test_handoff(session_id=session.id)
+        roles = self.role_repository.list_for_session(session.id)
+
+        self.assertEqual("completed", updated_session.status.value)
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertEqual("send_to_test_completed", event.event_type)
+        self.assertTrue(any(role.status.value == "running" for role in roles))
+        self.assertTrue(any(role.runtime_handle for role in roles if role.status.value == "running"))
+
     def test_send_to_test_handoff_requires_mr_handoff_stage(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021D")
         completed_session = self.session_repository.update_stage_and_owner(
