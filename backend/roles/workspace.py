@@ -182,22 +182,11 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Acceptance criteria input: `{task_snapshot_root}/spec/acceptance_criteria.md`",
             "- Constraints input: `{task_snapshot_root}/spec/constraints.md`",
             "- Planning verification input: `{task_snapshot_root}/spec/spec_verification.md`",
-            "- Story spec input: `{task_snapshot_root}/spec/story_spec.md`",
             "- Decomposition target: `{task_snapshot_root}/spec/decomposition.md`",
             "- Task repo worktree: `{task_repo_root}`",
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-        ]
-    if role_name == "story-spec-worker":
-        return [
-            "- Task repo worktree: `{task_repo_root}`",
-            "- Task snapshot metadata: `{task_snapshot_root}`",
-            "- Task-local runtime root: `{task_runtime_root}`",
-            "- Task-local temp root: `{task_tmp_root}`",
-            "- Task artifacts and planning outputs: `{task_artifacts_root}`",
-            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-            "- Completion boundary: stop after producing the routed planning/spec result for this task session.",
         ]
     return [
         "- Task snapshot metadata: `{task_snapshot_root}`",
@@ -287,12 +276,6 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You execute one bounded task-decomposition task for one story session.",
             "- Produce the routed decomposition result and then stop; you do not remain the owner of later implementation or verification work.",
             "- You should not assume persistence across unrelated tasks or later execution rounds.",
-        ]
-    if role_name == "story-spec-worker":
-        return [
-            "- You execute one bounded story-spec preparation task for one task session.",
-            "- Produce the routed planning/spec result and then stop; you do not remain the owner of later implementation work.",
-            "- You should not assume persistence across unrelated tasks or later implementation rounds.",
         ]
     return [
         "- You operate only on coordinator-routed work for one task session.",
@@ -400,24 +383,17 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Do not treat a missing `spec/spec_verification.md` as a blocker before the verification pass completes; that file is your output when the package is clean.",
             "- Treat `spec/context/documentation.md`, `implementation-patterns.md`, `preconditions.md`, and `relevant-code.md` as optional supporting inputs unless a specific planning claim depends on them.",
             "- Fix non-blocking issues autonomously. If critical blockers remain, summarize them clearly, ask the operator direct live questions, and continue verification after answers arrive.",
-            "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than re-checking the planning package.",
+            "- Keep the output compact and downstream-oriented so decomposition can start from a verified planning package instead of rediscovering planning gaps.",
         ]
     if role_name == "task-decomposer-worker":
         return [
             "- Treat this role as a bounded one-shot worker: prepare task decomposition, write the routed result, and exit.",
-            "- Start from the verified planning package, final story spec, and `spec/context/feature-overview.md`; use `relevant-code.md` and `implementation-patterns.md` when they materially affect task boundaries.",
+            "- Start from the verified planning package and `spec/context/feature-overview.md`; use `relevant-code.md` and `implementation-patterns.md` when they materially affect task boundaries.",
             "- Write the decomposition package directly into `plan/` inside your role workspace: `plan/index.md` plus self-contained Markdown task files for each task.",
             "- Keep ordering in filenames like `plan/NN-*.md`, but do not prefix the human-facing task titles or Markdown headings with `Task 01`, `Task 02`, and similar numbering.",
             "- Keep the routed output minimal: return a concise summary only after the `plan/` package is fully written.",
             "- Make every task file self-contained: copy relevant acceptance criteria, constraints, exact repo file paths, and validation steps into the task instead of pointing back to spec files.",
             "- Keep the output compact and downstream-oriented so execution can start from an explicit decomposition instead of implicit planning assumptions.",
-        ]
-    if role_name == "story-spec-worker":
-        return [
-            "- Treat this role as a bounded one-shot worker: assemble the final implementation-shaping story spec, produce the routed spec result, and exit.",
-            "- Read `spec/context/feature-overview.md` first when it exists and pull in other `spec/context/*` files only when they materially sharpen the final story spec.",
-            "- Turn the verified planning package into a durable implementation guide that captures scope, approach, and architecture-sensitive decisions clearly enough for decomposition and coding.",
-            "- Do not retain ownership after the planning/spec result is produced.",
         ]
     return [
         "- Stay within the routed task scope and use coordinator instructions as the active payload.",

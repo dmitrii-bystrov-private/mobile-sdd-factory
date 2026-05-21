@@ -39,7 +39,6 @@ from backend.roles.contracts import (
     SPEC_VERIFIER_WORKER_ROLE,
     TASK_DECOMPOSER_WORKER_ROLE,
     IMPLEMENTER_ROLE,
-    STORY_SPEC_WORKER_ROLE,
     VERIFICATION_COORDINATOR_ROLE,
 )
 from backend.session_backend.base import SessionBackend
@@ -64,7 +63,6 @@ _STORY_PLANNING_WORK_TYPE_BY_STAGE = {
     "acceptance_criteria_requested": "acceptance_criteria",
     "constraints_requested": "constraints",
     "spec_verification_requested": "spec_verification",
-    "story_spec_requested": "story_spec",
     "task_decomposition_requested": "task_decomposition",
 }
 _STORY_PLANNING_ROLES = {
@@ -73,7 +71,6 @@ _STORY_PLANNING_ROLES = {
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
     CONSTRAINTS_WORKER_ROLE,
     SPEC_VERIFIER_WORKER_ROLE,
-    STORY_SPEC_WORKER_ROLE,
     TASK_DECOMPOSER_WORKER_ROLE,
 }
 
@@ -547,9 +544,6 @@ class CoordinatorService:
             return session, followup_event
         if event_type == "spec_verification_completed":
             session, followup_event = self._handle_spec_verification_completed(session, accepted_event)
-            return session, followup_event
-        if event_type == "story_spec_completed":
-            session, followup_event = self._handle_story_spec_completed(session, accepted_event)
             return session, followup_event
         if event_type == "task_decomposition_completed":
             session, followup_event = self._handle_task_decomposition_completed(session, accepted_event)
@@ -1718,8 +1712,6 @@ class CoordinatorService:
             session, followup_event = self._handle_constraints_completed(session, accepted_event)
         elif mapped_event_type == "spec_verification_completed":
             session, followup_event = self._handle_spec_verification_completed(session, accepted_event)
-        elif mapped_event_type == "story_spec_completed":
-            session, followup_event = self._handle_story_spec_completed(session, accepted_event)
         elif mapped_event_type == "task_decomposition_completed":
             session, followup_event = self._handle_task_decomposition_completed(session, accepted_event)
         elif mapped_event_type == "subtask_completed":
@@ -2722,53 +2714,6 @@ class CoordinatorService:
             },
         )
 
-    def _enqueue_story_spec(
-        self,
-        session: Session,
-        source_event: Event,
-        additional_context: str | None = None,
-    ) -> Event:
-        story_spec_role = self._ensure_on_demand_role(session, STORY_SPEC_WORKER_ROLE)
-
-        work_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="story_spec",
-            title=f"Story planning and spec for {session.task_key}",
-            owner_role_id=story_spec_role.id,
-            source_event_id=source_event.id,
-            priority=104,
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="story_spec_requested",
-            current_owner=STORY_SPEC_WORKER_ROLE,
-        )
-        instruction = (
-            f"Prepare the final implementation-shaping story spec for {session.task_key} before coding. "
-            "Turn the verified planning package into a durable implementation guide that clarifies intended scope, key constraints, implementation approach, "
-            "and architecture-sensitive decisions that should guide decomposition and coding."
-        )
-        if additional_context:
-            instruction = f"{instruction}\n\n{additional_context}"
-        self._dispatch_role_work(
-            session=session,
-            role=story_spec_role,
-            work_item=work_item,
-            stage_name="story_spec_requested",
-            instruction=instruction,
-        )
-        return self._append_event(
-            session_id=session.id,
-            event_type="story_spec_requested",
-            producer_type="coordinator",
-            payload={
-                "task_key": session.task_key,
-                "role_name": STORY_SPEC_WORKER_ROLE,
-                "work_item_id": work_item.id,
-                "current_stage": session.current_stage,
-            },
-        )
-
     def _enqueue_proposal_context(
         self,
         session: Session,
@@ -2791,7 +2736,7 @@ class CoordinatorService:
             current_owner=PROPOSAL_CONTEXT_WORKER_ROLE,
         )
         instruction = (
-            f"Produce the proposal and context package for story {session.task_key} before requirements and final story spec. "
+            f"Produce the proposal and context package for story {session.task_key} before downstream planning and decomposition. "
             "Write or refresh `spec/proposal.md`, always write `spec/context/feature-overview.md`, "
             "write the other `spec/context/*` files only when they contain grounded task-specific findings, "
             "and synthesize the key problem statement, conflicts or clarifications from the snapshot, and the smallest useful project/context findings for later story roles."
@@ -2842,7 +2787,7 @@ class CoordinatorService:
         clarification_mode = self._requirements_clarification_mode(session.policy)
         instruction = (
             f"Clarify the implementation requirements for story {session.task_key}. "
-            "Resolve assumptions, edge cases, and out-of-scope boundaries so the later story-spec step can focus on implementation structure.\n"
+            "Resolve assumptions, edge cases, and out-of-scope boundaries so task decomposition can focus on concrete implementation work.\n"
             f"Clarification mode for this session: {clarification_mode}."
         )
         if additional_context:
@@ -2893,7 +2838,7 @@ class CoordinatorService:
         instruction = (
             f"Prepare explicit acceptance criteria for story {session.task_key}. "
             "Use independently testable WHEN-THEN-SHALL criteria, cover happy paths, edge cases, and error scenarios from the clarified requirements, "
-            "and ensure every meaningful clarified requirement decision is covered before the final story-spec step."
+            "and ensure every meaningful clarified requirement decision is covered before task decomposition."
         )
         if additional_context:
             instruction = f"{instruction}\n\n{additional_context}"
@@ -2940,7 +2885,7 @@ class CoordinatorService:
         instruction = (
             f"Prepare grounded implementation constraints for story {session.task_key}. "
             "Use `spec/context/project.md` as architectural ground truth, cite it instead of restating generic conventions, "
-            "and surface task-specific MUST, MUST NOT, and SHOULD constraints that should guide the final story-spec step."
+            "and surface task-specific MUST, MUST NOT, and SHOULD constraints that should guide task decomposition and coding."
         )
         if additional_context:
             instruction = f"{instruction}\n\n{additional_context}"
@@ -2985,7 +2930,7 @@ class CoordinatorService:
             current_owner=SPEC_VERIFIER_WORKER_ROLE,
         )
         instruction = (
-            f"Verify the assembled planning package for story {session.task_key} before the final story-spec step. "
+            f"Verify the assembled planning package for story {session.task_key} before task decomposition. "
             "Check for contradictions, missing implementation-shaping details, or planning gaps that should be surfaced before coding starts."
         )
         if additional_context:
@@ -3472,56 +3417,6 @@ class CoordinatorService:
             context_lines.append(f"Planning verification summary: {summary}")
         if verified_focus:
             context_lines.append(f"Verified focus: {verified_focus}")
-        additional_context = "\n".join(context_lines) if context_lines else None
-
-        event = self._enqueue_story_spec(
-            session=session,
-            source_event=source_event,
-            additional_context=additional_context,
-        )
-        session = self._get_session_or_raise(session.id)
-        return session, event
-
-    def _handle_story_spec_completed(
-        self,
-        session: Session,
-        source_event: Event,
-    ) -> tuple[Session, Event]:
-        spec_items = [
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "story_spec" and item.status != WorkItemStatus.COMPLETED
-        ]
-        if not spec_items:
-            raise IntakeError("No active story spec work item found for the session")
-
-        active_item = spec_items[0]
-        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
-        self._stop_on_demand_role(session, STORY_SPEC_WORKER_ROLE)
-        self._sync_role_workspace_outputs_to_task_snapshot(
-            session=session,
-            role_name=STORY_SPEC_WORKER_ROLE,
-            outputs=source_event.payload.get("outputs"),
-        )
-        self._materialize_story_spec_file(
-            session=session,
-            filename="story_spec.md",
-            artifact_type="story_spec_markdown",
-            title="Story Spec",
-            explicit_markdown=str(source_event.payload.get("story_spec_markdown") or "").strip(),
-            sections=[
-                ("Summary", str(source_event.payload.get("summary") or "").strip()),
-                ("Key Constraints", str(source_event.payload.get("constraints") or "").strip()),
-            ],
-        )
-
-        summary = str(source_event.payload.get("summary") or "").strip()
-        constraints = str(source_event.payload.get("constraints") or "").strip()
-        context_lines: list[str] = []
-        if summary:
-            context_lines.append(f"Story spec summary: {summary}")
-        if constraints:
-            context_lines.append(f"Key constraints: {constraints}")
         additional_context = "\n".join(context_lines) if context_lines else None
 
         event = self._enqueue_task_decomposition(
@@ -4962,8 +4857,6 @@ class CoordinatorService:
         if role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE} and output_type == "completed":
             if session.current_stage == "bug_analysis_requested":
                 return "bug_analysis_completed"
-            if session.current_stage == "story_spec_requested":
-                return "story_spec_completed"
             if session.current_stage == "subtask_implementation_requested":
                 return "subtask_completed"
             if session.current_stage in {
@@ -5027,9 +4920,6 @@ class CoordinatorService:
                 return "spec_verification_completed"
             if output_type == "failed":
                 return "spec_verification_blocked"
-        if role_name == STORY_SPEC_WORKER_ROLE and session.current_stage == "story_spec_requested":
-            if output_type in {"passed", "completed"}:
-                return "story_spec_completed"
         if role_name == TASK_DECOMPOSER_WORKER_ROLE and session.current_stage == "task_decomposition_requested":
             if output_type in {"passed", "completed"}:
                 return "task_decomposition_completed"
@@ -5404,7 +5294,6 @@ class CoordinatorService:
             return None
         if active_item.work_type not in {
             "bug_analysis",
-            "story_spec",
             "subtask_implementation",
             "implementation",
             "self_review_correction",
@@ -5477,7 +5366,6 @@ class CoordinatorService:
                 ACCEPTANCE_CRITERIA_WORKER_ROLE,
                 CONSTRAINTS_WORKER_ROLE,
                 SPEC_VERIFIER_WORKER_ROLE,
-                STORY_SPEC_WORKER_ROLE,
                 TASK_DECOMPOSER_WORKER_ROLE,
             }:
                 return story_payload
@@ -5762,13 +5650,13 @@ class CoordinatorService:
                 "Read `description.md` and `comments.md`, treat comments as the fresher source when they conflict, "
                 "resolve explicit local file references from the snapshot, use Notion MCP for `notion.so` links when needed, "
                 "treat other external links as operator-provided context references, "
-                "and extract the compact problem statement, key clarifications, and the smallest useful project/context findings for the later story-spec step."
+                "and extract the compact problem statement, key clarifications, and the smallest useful project/context findings for later planning and decomposition."
             )
         if stage_name == "requirements_requested":
             clarification_mode = self._requirements_clarification_mode(session_policy)
             return (
                 f"Clarify the implementation requirements for story {task_key}. "
-                "Resolve assumptions, edge cases, and out-of-scope boundaries before the final story-spec step. "
+                "Resolve assumptions, edge cases, and out-of-scope boundaries before task decomposition. "
                 f"Clarification mode: {clarification_mode}. "
                 "If critical ambiguity remains, ask the operator directly in the live session instead of guessing."
             )
@@ -5793,24 +5681,18 @@ class CoordinatorService:
             return (
                 f"Prepare explicit acceptance criteria for story {task_key}. "
                 "Use independently testable WHEN-THEN-SHALL criteria, cover happy paths, edge cases, and error scenarios from the clarified requirements, "
-                "and ensure every meaningful clarified requirement decision is covered before the final story-spec step."
+                "and ensure every meaningful clarified requirement decision is covered before task decomposition."
             )
         if stage_name == "constraints_requested":
             return (
                 f"Prepare grounded implementation constraints for story {task_key}. "
                 "Use `spec/context/project.md` as architectural ground truth, cite it instead of restating generic conventions, "
-                "and surface task-specific MUST, MUST NOT, and SHOULD constraints before the final story-spec step."
+                "and surface task-specific MUST, MUST NOT, and SHOULD constraints before task decomposition."
             )
         if stage_name == "spec_verification_requested":
             return (
                 f"Verify the assembled planning package for story {task_key}. "
-                "Check for contradictions, missing implementation-shaping details, and planning gaps before the final story-spec step."
-            )
-        if stage_name == "story_spec_requested":
-            return (
-                f"Prepare the final implementation-shaping story spec for {task_key} before coding. "
-                "Turn the verified planning package into a durable implementation guide that clarifies intended scope, key constraints, implementation approach, "
-                "and architecture-sensitive decisions that should guide decomposition and coding."
+                "Check for contradictions, missing implementation-shaping details, and planning gaps before task decomposition."
             )
         if stage_name == "task_decomposition_requested":
             return (
@@ -5901,7 +5783,6 @@ class CoordinatorService:
                 ACCEPTANCE_CRITERIA_WORKER_ROLE,
                 CONSTRAINTS_WORKER_ROLE,
                 SPEC_VERIFIER_WORKER_ROLE,
-                STORY_SPEC_WORKER_ROLE,
                 TASK_DECOMPOSER_WORKER_ROLE,
             ):
                 if role_name not in role_names:
@@ -5943,7 +5824,6 @@ class CoordinatorService:
             "acceptance_criteria_requested": "acceptance_criteria",
             "constraints_requested": "constraints",
             "spec_verification_requested": "spec_verification",
-            "story_spec_requested": "story_spec",
             "task_decomposition_requested": "task_decomposition",
             "subtask_implementation_requested": "subtask_implementation",
             "implementation_requested": "implementation",

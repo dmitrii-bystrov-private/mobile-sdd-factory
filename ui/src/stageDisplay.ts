@@ -7,7 +7,6 @@ const STAGE_LABELS: Record<string, string> = {
   acceptance_criteria_requested: "Acceptance Criteria",
   constraints_requested: "Constraints",
   spec_verification_requested: "Spec Verification",
-  story_spec_requested: "Story Spec",
   task_decomposition_requested: "Task Decomposition",
   implementation_requested: "Implementation",
   subtask_creation_requested: "Subtask Creation",

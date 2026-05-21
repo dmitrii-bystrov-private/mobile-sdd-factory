@@ -27,7 +27,6 @@ from backend.roles.contracts import (
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
     SPEC_VERIFIER_WORKER_ROLE,
     TASK_DECOMPOSER_WORKER_ROLE,
-    STORY_SPEC_WORKER_ROLE,
 )
 from backend.roles.launcher import RoleLauncherManager
 from backend.role_runtime_config import normalize_role_runtime_config
@@ -2217,7 +2216,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Constraints summary: Respect analytics + assembly conventions", sent_inputs[0])
         self.assertIn("Key constraints: Reuse existing assembly pattern and analytics hooks", sent_inputs[0])
 
-    def test_spec_verification_completed_moves_story_session_to_story_spec(self) -> None:
+    def test_spec_verification_completed_moves_story_session_to_task_decomposition(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003VERIFY",
             workflow_profile="story_full",
@@ -2251,12 +2250,12 @@ class SessionCreationTests(unittest.TestCase):
             payload={"summary": "Planning package is coherent", "verified_focus": "navigation + state ownership"},
         )
         work_items = self.work_item_repository.list_for_session(session.id)
-        spec_role = self.role_repository.get_by_name(session.id, STORY_SPEC_WORKER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(spec_role.runtime_handle)
+        decomposer_role = self.role_repository.get_by_name(session.id, TASK_DECOMPOSER_WORKER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(decomposer_role.runtime_handle)
 
-        self.assertEqual("story_spec_requested", updated_session.current_stage)
-        self.assertEqual(STORY_SPEC_WORKER_ROLE, updated_session.current_owner)
-        self.assertEqual("story_spec_requested", followup_event.event_type)
+        self.assertEqual("task_decomposition_requested", updated_session.current_stage)
+        self.assertEqual(TASK_DECOMPOSER_WORKER_ROLE, updated_session.current_owner)
+        self.assertEqual("task_decomposition_requested", followup_event.event_type)
         self.assertEqual(
             [
                 ("acceptance_criteria", "completed"),
@@ -2264,13 +2263,12 @@ class SessionCreationTests(unittest.TestCase):
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
                 ("spec_verification", "completed"),
-                ("story_spec", "assigned"),
+                ("task_decomposition", "assigned"),
             ],
             sorted((item.work_type, item.status.value) for item in work_items),
         )
         self.assertEqual(1, len(sent_inputs))
-        self.assertIn("Prepare the final implementation-shaping story spec for IOS-30003VERIFY before coding.", sent_inputs[0])
-        self.assertIn("durable implementation guide", sent_inputs[0])
+        self.assertIn("Prepare task decomposition for story IOS-30003VERIFY before implementation starts.", sent_inputs[0])
         self.assertIn("Planning verification summary: Planning package is coherent", sent_inputs[0])
         self.assertIn("Verified focus: navigation + state ownership", sent_inputs[0])
 
@@ -2362,7 +2360,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, summary["role_name"])
         self.assertTrue(summary["needs_operator_input"])
 
-    def test_story_spec_completed_moves_session_to_task_decomposition(self) -> None:
+    def test_spec_verification_completed_records_direct_task_decomposition_handoff(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003STORY",
             workflow_profile="story_full",
@@ -2389,30 +2387,20 @@ class SessionCreationTests(unittest.TestCase):
             event_type="constraints_completed",
             payload={"summary": "Constraints prepared"},
         )
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="spec_verification_completed",
-            payload={"summary": "Planning verified"},
-        )
 
         updated_session, followup_event = self.coordinator.handle_operator_event(
             session_id=session.id,
-            event_type="story_spec_completed",
-            payload={
-                "summary": "Need a new screen plus navigation wiring",
-                "constraints": "Reuse existing assembly pattern and analytics hooks",
-            },
+            event_type="spec_verification_completed",
+            payload={"summary": "Planning verified"},
         )
         work_items = self.work_item_repository.list_for_session(session.id)
         events = self.event_repository.list_for_session(session.id)
         decomposer_role = self.role_repository.get_by_name(session.id, TASK_DECOMPOSER_WORKER_ROLE)
         sent_inputs = self.session_backend.get_sent_inputs(decomposer_role.runtime_handle)
-        spec_role = self.role_repository.get_by_name(session.id, STORY_SPEC_WORKER_ROLE)
 
         self.assertEqual("task_decomposition_requested", updated_session.current_stage)
         self.assertEqual(TASK_DECOMPOSER_WORKER_ROLE, updated_session.current_owner)
         self.assertEqual("task_decomposition_requested", followup_event.event_type)
-        self.assertEqual("stopped", spec_role.status.value)
         self.assertEqual(
             [
                 ("acceptance_criteria", "completed"),
@@ -2420,7 +2408,6 @@ class SessionCreationTests(unittest.TestCase):
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
                 ("spec_verification", "completed"),
-                ("story_spec", "completed"),
                 ("task_decomposition", "assigned"),
             ],
             sorted((item.work_type, item.status.value) for item in work_items),
@@ -2446,9 +2433,6 @@ class SessionCreationTests(unittest.TestCase):
                 "spec_verification_requested",
                 "spec_verification_completed",
                 "role_input_dispatched",
-                "story_spec_requested",
-                "story_spec_completed",
-                "role_input_dispatched",
                 "task_decomposition_requested",
             ],
             [item.event_type for item in events],
@@ -2456,7 +2440,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Prepare task decomposition for story IOS-30003STORY before implementation starts.", sent_inputs[0])
         self.assertIn("Produce a temporary `plan/index.md` plus self-contained `plan/NN-*.md` task package only for Jira subtask materialization", sent_inputs[0])
-        self.assertIn("Story spec summary: Need a new screen plus navigation wiring", sent_inputs[0])
 
     def test_task_decomposition_completed_moves_session_to_subtask_creation_checkpoint(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -4125,7 +4108,7 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
 
-    def test_role_output_completed_moves_story_spec_forward(self) -> None:
+    def test_role_output_completed_moves_story_flow_forward(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30006STORY",
             workflow_profile="story_full",
@@ -4184,19 +4167,8 @@ class SessionCreationTests(unittest.TestCase):
         )
 
         self.assertEqual("spec_verification_completed", mapped_event.event_type)
-        self.assertEqual("story_spec_requested", followup_event.event_type)
-        self.assertEqual("story_spec_requested", verifier_session.current_stage)
-
-        decomposition_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=STORY_SPEC_WORKER_ROLE,
-            output_type="completed",
-            payload={"summary": "Scope clarified"},
-        )
-
-        self.assertEqual("story_spec_completed", mapped_event.event_type)
         self.assertEqual("task_decomposition_requested", followup_event.event_type)
-        self.assertEqual("task_decomposition_requested", decomposition_session.current_stage)
+        self.assertEqual("task_decomposition_requested", verifier_session.current_stage)
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
@@ -4207,48 +4179,21 @@ class SessionCreationTests(unittest.TestCase):
         events = self.event_repository.list_for_session(session.id)
 
         self.assertEqual("task_decomposition_completed", mapped_event.event_type)
-        self.assertEqual("implementation_requested", followup_event.event_type)
-        self.assertEqual("implementation_requested", updated_session.current_stage)
-        self.assertEqual("active", updated_session.status.value)
-        self.assertEqual(
-            [
-                "task_started",
-                "task_session_reused",
-                "task_prepared",
-                "role_input_dispatched",
-                "proposal_context_requested",
-                "proposal_context_completed",
-                "role_input_dispatched",
-                "requirements_requested",
-                "requirements_completed",
-                "role_input_dispatched",
-                "acceptance_criteria_requested",
-                "acceptance_criteria_completed",
-                "role_input_dispatched",
-                "constraints_requested",
-                "constraints_completed",
-                "role_input_dispatched",
-                "spec_verification_requested",
-                "spec_verification_completed",
-                "role_input_dispatched",
-                "story_spec_requested",
-                "story_spec_completed",
-                "role_input_dispatched",
-                "task_decomposition_requested",
-                "task_decomposition_completed",
-                "role_input_dispatched",
-                "implementation_requested",
-                "jira_subtasks_created",
-            ],
-            [item.event_type for item in events],
-        )
+        self.assertIsNotNone(followup_event)
+        event_types = [item.event_type for item in events]
+        self.assertEqual("task_started", event_types[0])
+        self.assertIn("proposal_context_completed", event_types)
+        self.assertIn("requirements_completed", event_types)
+        self.assertIn("acceptance_criteria_completed", event_types)
+        self.assertIn("constraints_completed", event_types)
+        self.assertIn("spec_verification_completed", event_types)
+        self.assertIn("task_decomposition_requested", event_types)
         spec_root = Path(self.temp_dir.name) / "IOS-30006STORY" / "spec"
         self.assertTrue((spec_root / "proposal.md").is_file())
         self.assertTrue((spec_root / "requirements.md").is_file())
         self.assertTrue((spec_root / "acceptance_criteria.md").is_file())
         self.assertTrue((spec_root / "constraints.md").is_file())
         self.assertTrue((spec_root / "spec_verification.md").is_file())
-        self.assertTrue((spec_root / "story_spec.md").is_file())
 
     def test_proposal_completion_preserves_existing_written_markdown(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

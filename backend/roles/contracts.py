@@ -12,7 +12,6 @@ REQUIREMENTS_CLARIFIER_WORKER_ROLE = "requirements-clarifier-worker"
 ACCEPTANCE_CRITERIA_WORKER_ROLE = "acceptance-criteria-worker"
 CONSTRAINTS_WORKER_ROLE = "constraints-worker"
 SPEC_VERIFIER_WORKER_ROLE = "spec-verifier-worker"
-STORY_SPEC_WORKER_ROLE = "story-spec-worker"
 TASK_DECOMPOSER_WORKER_ROLE = "task-decomposer-worker"
 
 DEFAULT_SESSION_ROLES = [
@@ -33,9 +32,6 @@ PERSISTENT_SESSION_ROLES = [
 ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     "bug_analysis_requested": {
         BUG_FIXER_ROLE,
-    },
-    "story_spec_requested": {
-        STORY_SPEC_WORKER_ROLE,
     },
     "proposal_context_requested": {
         PROPOSAL_CONTEXT_WORKER_ROLE,

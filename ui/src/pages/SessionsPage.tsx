@@ -74,11 +74,6 @@ const PLANNING_STEP_DEFINITIONS = [
     completedEventType: "spec_verification_completed",
   },
   {
-    stageName: "story_spec_requested",
-    label: "Story Spec",
-    completedEventType: "story_spec_completed",
-  },
-  {
     stageName: "task_decomposition_requested",
     label: "Task Decomposition",
     completedEventType: "task_decomposition_completed",

@@ -155,7 +155,6 @@ export function SessionStartForm({
         "acceptance-criteria-worker",
         "constraints-worker",
         "spec-verifier-worker",
-        "story-spec-worker",
         "task-decomposer-worker",
       );
     }

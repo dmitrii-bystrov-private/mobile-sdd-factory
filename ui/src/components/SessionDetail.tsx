@@ -70,7 +70,6 @@ function standbyExpectation(roleName: string, workflowProfile: Session["workflow
     case "acceptance-criteria-worker":
     case "constraints-worker":
     case "spec-verifier-worker":
-    case "story-spec-worker":
     case "task-decomposer-worker":
       return "Waiting for story-planning handoff.";
     case "implementer":
@@ -281,7 +280,6 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
     "acceptance-criteria-worker",
     "constraints-worker",
     "spec-verifier-worker",
-    "story-spec-worker",
     "task-decomposer-worker",
     "implementer",
     "code-reviewer",

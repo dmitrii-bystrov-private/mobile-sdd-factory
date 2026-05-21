@@ -29,8 +29,6 @@ const STREAM_EVENT_TYPES = [
   "acceptance_criteria_requested",
   "constraints_requested",
   "spec_verification_requested",
-  "story_spec_requested",
-  "story_spec_completed",
   "task_decomposition_requested",
   "snapshot_refreshed_by_operator",
   "snapshot_refresh_failed_by_operator",

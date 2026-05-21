@@ -88,7 +88,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Treat this role as a bounded worker for one story session: clarify requirements, ask live follow-up questions when needed, then write the routed result and exit.\n"
             "- Start from `spec/proposal.md` plus `spec/context/feature-overview.md`; pull in other `spec/context/*` files selectively when they materially help resolve an ambiguity.\n"
             "- When critical ambiguities remain, ask the operator directly in the live session instead of making a risky assumption, then continue from the same session after the operator replies.\n"
-            "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than unresolved requirements.\n\n"
+            "- Keep the output compact and downstream-oriented so later decomposition can focus on implementation rather than unresolved requirements.\n\n"
         )
     if role_name == "acceptance-criteria-worker":
         return (
@@ -97,7 +97,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Start from `spec/proposal.md`, clarified requirements, and `spec/context/feature-overview.md`; read other `spec/context/*` files only when they help clarify behavior coverage.\n"
             "- Write criteria in explicit WHEN-THEN-SHALL form, keep each criterion independently testable, and cover happy paths, edge cases, and error scenarios from the clarified requirements.\n"
             "- Ensure every meaningful decision in the clarified requirements is covered by at least one acceptance criterion before you finish.\n"
-            "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than behavioral coverage gaps.\n\n"
+            "- Keep the output compact and downstream-oriented so later decomposition can focus on implementation rather than behavioral coverage gaps.\n\n"
         )
     if role_name == "constraints-worker":
         return (
@@ -106,15 +106,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Start from the proposal, clarified requirements, acceptance criteria, and `spec/context/feature-overview.md`; use `implementation-patterns.md`, `documentation.md`, and `preconditions.md` when they materially shape constraints.\n"
             "- Treat `spec/context/project.md` as the architectural ground truth, cite it instead of restating generic conventions, and keep constraints task-specific and grounded.\n"
             "- Express constraints as imperative MUST, MUST NOT, and SHOULD statements across architectural, performance, security, and platform-specific categories when they are applicable.\n"
-            "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than rediscovering constraints.\n\n"
-        )
-    if role_name == "story-spec-worker":
-        return (
-            "Role-specific rules:\n"
-            "- Treat this role as a bounded one-shot worker: assemble the final implementation-shaping story spec, write the routed result, and exit.\n"
-            "- Synthesize proposal, requirements, acceptance criteria, constraints, and verified planning findings into a durable implementation guide rather than another compact summary.\n"
-            "- Clarify intended scope, implementation approach, architecture-sensitive decisions, and repo-facing change shape so later decomposition and implementation do not have to rediscover them.\n"
-            "- Keep the output grounded, implementation-oriented, and precise enough that the decomposer can derive self-contained execution tasks from it.\n\n"
+            "- Keep the output compact and downstream-oriented so later decomposition can focus on implementation rather than rediscovering constraints.\n\n"
         )
     if role_name == "task-decomposer-worker":
         return (
@@ -133,7 +125,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Treat `spec/context/documentation.md`, `implementation-patterns.md`, `preconditions.md`, and `relevant-code.md` as optional context inputs. Their absence alone is not a blocker unless a specific planning claim cannot be verified without them.\n"
             "- If critical blockers remain, stop the planning flow, summarize the blockers clearly, and ask the operator direct follow-up questions in the live session instead of guessing.\n"
             "- Use `failed` output when blocker resolution from the operator is required; after the operator replies, continue verification in the same live session.\n"
-            "- Use `completed` output only when the planning package is ready for the next story-spec step.\n\n"
+            "- Use `completed` output only when the planning package is ready for task decomposition.\n\n"
         )
     if role_name == "verification-coordinator":
         return (

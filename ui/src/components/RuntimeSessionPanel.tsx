@@ -36,7 +36,6 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
     "acceptance-criteria-worker",
     "constraints-worker",
     "spec-verifier-worker",
-    "story-spec-worker",
     "task-decomposer-worker",
     "implementer",
     "code-reviewer",

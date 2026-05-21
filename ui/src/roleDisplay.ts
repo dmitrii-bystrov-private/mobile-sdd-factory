@@ -19,7 +19,6 @@ const ROLE_LABELS: Record<string, string> = {
   "constraints-definer": "Constraints",
   "spec-verifier-worker": "Spec Verifier",
   "spec-verifier": "Spec Verifier",
-  "story-spec-worker": "Story Spec",
   "task-decomposer-worker": "Task Decomposer",
   "task-decomposer": "Task Decomposer",
 };

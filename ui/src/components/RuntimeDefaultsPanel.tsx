@@ -97,7 +97,6 @@ function roleFlowOrder(roleName: string, workflowProfile: WorkflowProfile): numb
     "acceptance-criteria-worker",
     "constraints-worker",
     "spec-verifier-worker",
-    "story-spec-worker",
     "task-decomposer-worker",
     "implementer",
     "code-reviewer",

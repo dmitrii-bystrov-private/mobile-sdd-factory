@@ -130,21 +130,21 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("MUST, MUST NOT, and SHOULD", text)
         self.assertIn("task-specific and grounded", text)
 
-    def test_full_prompt_restores_story_spec_implementation_guide_contract(self) -> None:
+    def test_full_prompt_restores_task_decomposer_contract(self) -> None:
         text = role_handoff_prompt(
-            role_name="story-spec-worker",
-            instruction="Prepare the final implementation-shaping story spec for IOS-123 before coding.",
+            role_name="task-decomposer-worker",
+            instruction="Prepare task decomposition for story IOS-123 before implementation starts.",
             hydration_payload={
                 "task_key": "IOS-123",
-                "current_stage": "story_spec_requested",
+                "current_stage": "task_decomposition_requested",
                 "work_item_id": 6,
             },
             prompt_mode="full",
         )
 
-        self.assertIn("final implementation-shaping story spec", text)
-        self.assertIn("durable implementation guide", text)
-        self.assertIn("architecture-sensitive decisions", text)
+        self.assertIn("decompose the verified story package into execution tasks", text)
+        self.assertIn("plan/index.md", text)
+        self.assertIn("self-contained", text)
 
     def test_full_prompt_restores_spec_verifier_optional_input_contract(self) -> None:
         text = role_handoff_prompt(

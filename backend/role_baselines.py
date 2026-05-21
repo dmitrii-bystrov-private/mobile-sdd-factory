@@ -35,7 +35,6 @@ ROLE_BASELINES: tuple[RoleBaseline, ...] = (
     RoleBaseline("acceptance-criteria-worker", "sonnet", "medium", [], _BASELINE_SOURCE),
     RoleBaseline("constraints-worker", "sonnet", "high", [], _BASELINE_SOURCE),
     RoleBaseline("spec-verifier-worker", "opus", "high", [], _BASELINE_SOURCE),
-    RoleBaseline("story-spec-worker", "sonnet", "medium", [], _BASELINE_SOURCE),
     RoleBaseline("task-decomposer-worker", "sonnet", "high", [], _BASELINE_SOURCE),
 )
 

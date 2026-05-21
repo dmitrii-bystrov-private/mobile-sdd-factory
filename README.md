@@ -113,7 +113,6 @@ The current pipeline is composed of specialized long-running or on-demand roles:
 | `acceptance-criteria-worker` | Writes testable acceptance criteria. |
 | `constraints-worker` | Defines technical and architectural constraints. |
 | `spec-verifier-worker` | Checks planning artifacts for blockers and can stop the flow for blocker resolution. |
-| `story-spec-worker` | Produces the final implementation-shaping story spec. |
 | `task-decomposer-worker` | Produces `plan/index.md` and the self-contained task package for execution. |
 | `bug-fixer` | Analyzes bug root cause and implements the fix. |
 | `implementer` | Executes the current implementation or correction pass against the task-local repo. |
