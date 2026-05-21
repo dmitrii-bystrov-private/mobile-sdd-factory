@@ -4333,6 +4333,37 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertFalse(result_path.exists())
+
+    def test_poll_session_output_consumes_result_json_with_extra_trailing_brace(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30008BTAIL")
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            "implementer",
+        )
+        result_path = role_workspace / "RESULT.json"
+        result_path.write_text(
+            '{"output_type":"completed","payload":'
+            + json.dumps({"work_item_id": active_item.id, "summary": "done from file"})
+            + "}}\n"
+        )
+
+        updated_session, event, role_count, chunk_count = self.coordinator.poll_session_output(
+            session_id=session.id,
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(session.id, updated_session.id)
+        self.assertEqual("session_output_polled", event.event_type)
+        self.assertEqual(3, role_count)
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(any(artifact.artifact_type == "role_result_json" for artifact in artifacts))
         self.assertTrue(any(artifact.artifact_type == "role_result_json" for artifact in artifacts))
 
     def test_prepare_task_session_materializes_hydration_json_in_role_workspace(self) -> None:

@@ -1878,7 +1878,14 @@ class CoordinatorService:
             try:
                 parsed = json.loads(repaired_text)
             except json.JSONDecodeError:
-                return None
+                decoder = json.JSONDecoder()
+                try:
+                    parsed, end = decoder.raw_decode(repaired_text.lstrip())
+                except json.JSONDecodeError:
+                    return None
+                trailing = repaired_text.lstrip()[end:].strip()
+                if trailing and any(char != "}" for char in trailing):
+                    return None
         if not isinstance(parsed, dict):
             return None
         return parsed
