@@ -2976,6 +2976,26 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stderr" for item in artifacts))
         self.assertEqual(0, event.payload["snapshot_refresh_exit_code"])
 
+    def test_extract_created_subtask_keys_deduplicates_repeated_stdout_entries(self) -> None:
+        stdout = (
+            "Creating subtask 01: Build typed cache registry core\n"
+            "  Created: IOS-12675\n"
+            "Creating subtask 02: Wire typed cache registry usage\n"
+            "  Created: IOS-12676\n"
+            "Creating subtask 03: Remove legacy cache access paths\n"
+            "  Created: IOS-12677\n"
+            "\n"
+            "Created subtasks:\n"
+            "01    IOS-12675     Build typed cache registry core\n"
+            "02    IOS-12676     Wire typed cache registry usage\n"
+            "03    IOS-12677     Remove legacy cache access paths\n"
+        )
+
+        self.assertEqual(
+            ["IOS-12675", "IOS-12676", "IOS-12677"],
+            self.coordinator._extract_created_subtask_keys(stdout),
+        )
+
     def test_create_subtasks_from_plan_auto_starts_subtask_graph_from_active_implementation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003SUBAUTO",

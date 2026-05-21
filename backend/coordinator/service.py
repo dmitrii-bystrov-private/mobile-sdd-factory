@@ -6926,13 +6926,15 @@ class CoordinatorService:
 
     def _extract_created_subtask_keys(self, stdout: str) -> list[str]:
         keys: list[str] = []
+        seen: set[str] = set()
         for line in stdout.splitlines():
             parts = line.split()
             if len(parts) >= 2 and "-" in parts[1]:
                 candidate = parts[1].strip()
                 prefix, _, suffix = candidate.partition("-")
-                if prefix.isalpha() and suffix.isdigit():
+                if prefix.isalpha() and suffix.isdigit() and candidate not in seen:
                     keys.append(candidate)
+                    seen.add(candidate)
         return keys
 
     def _parse_boy_scout_findings(self, session: Session) -> list[dict[str, object]]:
