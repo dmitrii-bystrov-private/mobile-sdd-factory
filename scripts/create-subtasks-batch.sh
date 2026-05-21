@@ -88,7 +88,9 @@ else
   while IFS= read -r task_file; do
     [[ -n "$task_file" ]] || continue
     TASK_FILES+=("$PLAN_DIR/${task_file#./}")
-  done < <(grep -oE '\(\./[^)]+\.md\)' "$INDEX_FILE" | tr -d '()')
+  done < <(
+    perl -ne 'while (/`((?:\.\/|plan\/)[^`\n]+\.md)`/g) { print "$1\n" }' "$INDEX_FILE"
+  )
 fi
 
 if [[ ${#TASK_FILES[@]} -eq 0 ]]; then
