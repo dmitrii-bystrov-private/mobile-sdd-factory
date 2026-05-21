@@ -729,13 +729,6 @@ export function SessionDetail({
         sessionId={session.id}
       />
 
-      <OperatorActions
-        interactiveStateSummary={bundle.interactiveStateSummary}
-        onRefresh={onRefresh}
-        runtimeStateSummary={bundle.runtimeStateSummary}
-        session={session}
-      />
-
       {orchestratorTrace.length > 0 ? (
         <div className="advanced-disclosure orchestrator-trace-panel">
           <button
@@ -768,6 +761,13 @@ export function SessionDetail({
           ) : null}
         </div>
       ) : null}
+
+      <OperatorActions
+        interactiveStateSummary={bundle.interactiveStateSummary}
+        onRefresh={onRefresh}
+        runtimeStateSummary={bundle.runtimeStateSummary}
+        session={session}
+      />
       </>
     </section>
   );
