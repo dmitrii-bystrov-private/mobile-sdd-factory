@@ -336,6 +336,7 @@ export function SessionDetail({
   bundle,
   onRefresh,
 }: SessionDetailProps): JSX.Element {
+  const [activeRuntimeRoleName, setActiveRuntimeRoleName] = useState<string | null>(null);
   const [showOrchestratorTrace, setShowOrchestratorTrace] = useState(false);
   const [workerMenuRoleName, setWorkerMenuRoleName] = useState<string | null>(null);
   const [workerActionBusyRoleName, setWorkerActionBusyRoleName] = useState<string | null>(null);
@@ -343,6 +344,44 @@ export function SessionDetail({
   const [deliveryFailure, setDeliveryFailure] = useState<DeliveryFailureState>(null);
   const [deliveryRetryBusy, setDeliveryRetryBusy] = useState(false);
   const { showToast, showActivity, clearActivity } = useToast();
+  const sessionId = session?.id ?? null;
+
+  useEffect(() => {
+    if (sessionId === null || bundle === null || bundle.runtimeStateSummary?.available !== true) {
+      setActiveRuntimeRoleName(null);
+      return;
+    }
+    const activeSessionId = sessionId;
+
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    async function loadActiveRuntimeRole(): Promise<void> {
+      try {
+        const response = await apiClient.getActiveRuntimeOutput(activeSessionId);
+        if (cancelled) {
+          return;
+        }
+        setActiveRuntimeRoleName(response.available ? response.role_name : null);
+      } catch {
+        if (!cancelled) {
+          setActiveRuntimeRoleName(null);
+        }
+      }
+    }
+
+    void loadActiveRuntimeRole();
+    intervalId = setInterval(() => {
+      void loadActiveRuntimeRole();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      if (intervalId !== null) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [bundle, sessionId]);
 
   useEffect(() => {
     if (session === null || bundle === null) {
@@ -431,6 +470,7 @@ export function SessionDetail({
     (role) =>
       role.status === "running" &&
       (
+        activeRuntimeRoleName === role.role_name ||
         session.current_owner === role.role_name ||
         interactiveOwnerRoleName === role.role_name ||
         ownedRoleIds.has(role.id)
@@ -438,9 +478,11 @@ export function SessionDetail({
   );
   const currentOwner = session.current_owner
     ? roleDisplayName(session.current_owner)
+    : activeRuntimeRoleName
+      ? roleDisplayName(activeRuntimeRoleName)
     : interactiveOwnerRoleName
       ? roleDisplayName(interactiveOwnerRoleName)
-    : session.status === "active"
+      : session.status === "active"
       ? "Awaiting assignment"
       : "Not assigned yet";
   const activeRoleIds = new Set(activeRoles.map((role) => role.id));
