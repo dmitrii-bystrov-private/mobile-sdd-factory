@@ -5172,6 +5172,8 @@ class CoordinatorService:
         if session.status == SessionStatus.WAITING_FOR_OPERATOR and session.current_owner is None:
             return session
         active_work_item = self._find_active_work_item_for_role(session.id, role.id)
+        if active_work_item is None and session.current_owner != role.role_name:
+            return session
         if active_work_item is not None:
             self.work_item_repository.update_status(
                 active_work_item.id,

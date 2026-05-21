@@ -5123,6 +5123,42 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "runtime_error_json" for item in artifacts))
 
+    def test_collect_role_output_ignores_stale_error_from_non_owner_role_without_active_work(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30014C")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        verifier_role = self.role_repository.get_by_name(session.id, "verification-coordinator")
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_requested",
+            current_owner="verification-coordinator",
+        )
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"late error","details":"stale worker tail"}',
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        events = self.event_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+        self.assertTrue(any(item.event_type == "role_runtime_error_reported" for item in events))
+        self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertTrue(any(item.artifact_type == "runtime_error_json" for item in artifacts))
+
     def test_event_bus_receives_published_session_events(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30015")
         self.coordinator.handle_role_output(
