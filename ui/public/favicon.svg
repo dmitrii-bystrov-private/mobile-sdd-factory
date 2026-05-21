@@ -1,5 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="16" fill="#101827"/>
-  <path d="M18 22h28v6H24v8h18v6H24v12h-6V22Z" fill="#FF835C"/>
-  <circle cx="46" cy="42" r="6" fill="#49D6A4"/>
+  <rect width="64" height="64" rx="16" fill="#0F172A"/>
+  <path
+    d="M19 20L30 14L44 20L47 32L41 45L28 50L17 42L15 29L19 20Z"
+    stroke="#5EEAD4"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="3"
+    opacity="0.9"
+  />
+  <path
+    d="M30 14L28 50M19 20L41 45M44 20L17 42"
+    stroke="#F97316"
+    stroke-linecap="round"
+    stroke-width="2.5"
+    opacity="0.8"
+  />
+  <circle cx="30" cy="14" r="4" fill="#F8FAFC"/>
+  <circle cx="44" cy="20" r="3.5" fill="#5EEAD4"/>
+  <circle cx="47" cy="32" r="3.5" fill="#F97316"/>
+  <circle cx="41" cy="45" r="3.5" fill="#5EEAD4"/>
+  <circle cx="28" cy="50" r="4" fill="#F8FAFC"/>
+  <circle cx="17" cy="42" r="3.5" fill="#5EEAD4"/>
+  <circle cx="15" cy="29" r="3.5" fill="#F97316"/>
+  <circle cx="19" cy="20" r="3.5" fill="#5EEAD4"/>
 </svg>
