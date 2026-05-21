@@ -8,6 +8,17 @@ from backend.config import load_config
 
 
 class ConfigTests(unittest.TestCase):
+    def test_load_config_defaults_database_path_under_effective_workdir(self) -> None:
+        env = {
+            "SDD_WORKDIR": "/tmp/constellation-external-workdir",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            config = load_config()
+        self.assertEqual(
+            "/tmp/constellation-external-workdir/factory.sqlite3",
+            str(config.database_path),
+        )
+
     def test_load_config_rejects_non_tmux_runtime_for_application_mode(self) -> None:
         env = {
             "SDD_FACTORY_RUNTIME_BACKEND": "recording",

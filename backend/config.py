@@ -31,7 +31,7 @@ def load_config() -> AppConfig:
     default_workdir_root = repo_root / "workdir"
     workdir_root = Path(os.environ.get("SDD_WORKDIR", default_workdir_root))
     database_path = Path(
-        os.environ.get("SDD_FACTORY_DB_PATH", default_workdir_root / "factory.sqlite3")
+        os.environ.get("SDD_FACTORY_DB_PATH", workdir_root / "factory.sqlite3")
     )
     use_fake_adapters = os.environ.get("SDD_FACTORY_USE_FAKE_ADAPTERS", "false").lower() in {
         "1",
