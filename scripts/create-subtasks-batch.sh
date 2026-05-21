@@ -93,7 +93,7 @@ else
     TASK_FILES+=("$PLAN_DIR/$normalized_task_file")
   done < <(
     perl -ne '
-      while (/\[[^\]]*\]\(((?:\.\/|plan\/)[^)\\n]+\.md)\)/g) { print "$1\n" }
+      while (/\[[^\]]*\]\(((?:\.\/|plan\/)[^)\n]+\.md)\)/g) { print "$1\n" }
       while (/`((?:\.\/|plan\/)[^`\n]+\.md)`/g) { print "$1\n" }
     ' "$INDEX_FILE" | awk "!seen[\$0]++"
   )
