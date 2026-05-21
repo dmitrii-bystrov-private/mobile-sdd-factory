@@ -58,6 +58,24 @@ from backend.tools.snapshot_adapter import SnapshotAdapter
 _CLOSED_JIRA_STATUSES = {"resolved", "done", "closed", "cancelled"}
 _TASK_KEY_PATTERN = re.compile(r"^[A-Z]+-\d+$")
 _EXPLICIT_URL_PATTERN = re.compile(r"https?://[^\s)>\]]+")
+_STORY_PLANNING_WORK_TYPE_BY_STAGE = {
+    "proposal_context_requested": "proposal_context",
+    "requirements_requested": "requirements",
+    "acceptance_criteria_requested": "acceptance_criteria",
+    "constraints_requested": "constraints",
+    "spec_verification_requested": "spec_verification",
+    "story_spec_requested": "story_spec",
+    "task_decomposition_requested": "task_decomposition",
+}
+_STORY_PLANNING_ROLES = {
+    PROPOSAL_CONTEXT_WORKER_ROLE,
+    REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+    ACCEPTANCE_CRITERIA_WORKER_ROLE,
+    CONSTRAINTS_WORKER_ROLE,
+    SPEC_VERIFIER_WORKER_ROLE,
+    STORY_SPEC_WORKER_ROLE,
+    TASK_DECOMPOSER_WORKER_ROLE,
+}
 
 
 @dataclass
@@ -1668,6 +1686,7 @@ class CoordinatorService:
             session=session,
             role_name=role_name,
             output_type=output_type,
+            payload=payload,
         )
         accepted_event = self._append_event(
             session_id=session_id,
@@ -1687,6 +1706,8 @@ class CoordinatorService:
             session, followup_event = self._handle_mr_comments_analysis_completed(session, accepted_event)
         elif mapped_event_type == "requirements_completed":
             session, followup_event = self._handle_requirements_completed(session, accepted_event)
+        elif mapped_event_type == "story_planning_blocked":
+            session, followup_event = self._handle_story_planning_blocked(session, accepted_event)
         elif mapped_event_type == "boy_scout_completed":
             session, followup_event = self._handle_boy_scout_completed(session, accepted_event)
         elif mapped_event_type == "doc_harvest_completed":
@@ -3084,6 +3105,11 @@ class CoordinatorService:
         active_item = proposal_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, PROPOSAL_CONTEXT_WORKER_ROLE)
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=PROPOSAL_CONTEXT_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
         self._materialize_story_spec_file(
             session=session,
             filename="proposal.md",
@@ -3206,6 +3232,11 @@ class CoordinatorService:
         active_item = requirements_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, REQUIREMENTS_CLARIFIER_WORKER_ROLE)
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
         self._materialize_story_spec_file(
             session=session,
             filename="requirements.md",
@@ -3235,6 +3266,72 @@ class CoordinatorService:
         session = self._get_session_or_raise(session.id)
         return session, event
 
+    def _handle_story_planning_blocked(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        work_type = _STORY_PLANNING_WORK_TYPE_BY_STAGE.get(session.current_stage)
+        if work_type is None:
+            raise IntakeError(f"Stage {session.current_stage} is not a story planning stage")
+
+        planning_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == work_type and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not planning_items:
+            raise IntakeError(f"No active {work_type} work item found for the session")
+
+        active_item = planning_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=source_event.producer_id,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        if source_event.producer_id in _STORY_PLANNING_ROLES:
+            self._sync_role_workspace_outputs_to_task_snapshot(
+                session=session,
+                role_name=source_event.producer_id,
+                outputs=source_event.payload.get("outputs"),
+            )
+
+        summary = str(source_event.payload.get("summary") or "").strip() or f"{work_type} requires operator input"
+        detail_lines: list[str] = []
+        for key, label in (
+            ("failures", "Failures"),
+            ("missing_inputs", "Missing inputs"),
+            ("pending_decisions", "Pending decisions"),
+        ):
+            value = source_event.payload.get(key)
+            if isinstance(value, list):
+                rendered = [str(item).strip() for item in value if str(item).strip()]
+                if rendered:
+                    detail_lines.append(f"{label}:")
+                    detail_lines.extend(f"- {item}" for item in rendered)
+        next_step = str(source_event.payload.get("next_step") or "").strip()
+        if next_step:
+            detail_lines.append(f"Next step: {next_step}")
+        details = "\n".join(detail_lines).strip()
+
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": f"{work_type}_blocked",
+                "role_name": source_event.producer_id,
+                "work_item_id": active_item.id,
+                "summary": summary,
+                "details": details,
+                "needs_operator_input": True,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
     def _handle_acceptance_criteria_completed(
         self,
         session: Session,
@@ -3251,6 +3348,11 @@ class CoordinatorService:
         active_item = acceptance_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, ACCEPTANCE_CRITERIA_WORKER_ROLE)
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=ACCEPTANCE_CRITERIA_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
         self._materialize_story_spec_file(
             session=session,
             filename="acceptance_criteria.md",
@@ -3296,6 +3398,11 @@ class CoordinatorService:
         active_item = constraint_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, CONSTRAINTS_WORKER_ROLE)
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=CONSTRAINTS_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
         self._materialize_story_spec_file(
             session=session,
             filename="constraints.md",
@@ -3341,6 +3448,11 @@ class CoordinatorService:
         active_item = verification_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, SPEC_VERIFIER_WORKER_ROLE)
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=SPEC_VERIFIER_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
         self._materialize_story_spec_file(
             session=session,
             filename="spec_verification.md",
@@ -3386,6 +3498,11 @@ class CoordinatorService:
         active_item = spec_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, STORY_SPEC_WORKER_ROLE)
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=STORY_SPEC_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
         self._materialize_story_spec_file(
             session=session,
             filename="story_spec.md",
@@ -3431,6 +3548,11 @@ class CoordinatorService:
         active_item = decomposition_items[0]
         summary = str(source_event.payload.get("summary") or "").strip()
         task_breakdown = str(source_event.payload.get("task_breakdown") or "").strip()
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=TASK_DECOMPOSER_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
         try:
             plan_index_markdown, raw_plan_task_files = self._normalize_task_decomposition_plan_package(
                 session=session,
@@ -4823,7 +4945,20 @@ class CoordinatorService:
         session: Session,
         role_name: str,
         output_type: str,
+        payload: dict,
     ) -> str:
+        if (
+            role_name in _STORY_PLANNING_ROLES
+            and session.current_stage in _STORY_PLANNING_WORK_TYPE_BY_STAGE
+            and (
+                output_type == "failed"
+                or (
+                    output_type in {"passed", "completed"}
+                    and bool(payload.get("needs_operator_input") is True)
+                )
+            )
+        ):
+            return "story_planning_blocked"
         if role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE} and output_type == "completed":
             if session.current_stage == "bug_analysis_requested":
                 return "bug_analysis_completed"
@@ -6489,6 +6624,37 @@ class CoordinatorService:
                 "source_path": str(target_path),
             },
         )
+
+    def _sync_role_workspace_outputs_to_task_snapshot(
+        self,
+        *,
+        session: Session,
+        role_name: str,
+        outputs: object,
+    ) -> None:
+        if self.role_workspace_manager is None or self.workdir_root is None:
+            return
+        if not isinstance(outputs, list):
+            return
+
+        workspace_root = self.role_workspace_manager.role_directory(session.task_key, role_name)
+        task_root = self.workdir_root / session.task_key
+        for raw_output in outputs:
+            relative_path = str(raw_output).strip()
+            if not relative_path or relative_path == "RESULT.json":
+                continue
+            candidate = Path(relative_path)
+            if candidate.is_absolute():
+                continue
+            normalized = Path(*[part for part in candidate.parts if part not in {"", "."}])
+            if any(part == ".." for part in normalized.parts):
+                continue
+            source_path = workspace_root / normalized
+            if not source_path.is_file():
+                continue
+            target_path = task_root / normalized
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_path, target_path)
 
     def _materialize_final_verification_file(
         self,

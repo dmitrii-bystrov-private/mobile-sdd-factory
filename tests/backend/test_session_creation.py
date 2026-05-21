@@ -1861,6 +1861,34 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(hydration["feature_overview_path"].endswith("spec/context/feature-overview.md"))
         self.assertTrue(hydration["proposal_path"].endswith("spec/proposal.md"))
 
+    def test_proposal_context_completed_syncs_context_outputs_from_role_workspace(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003CTX",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003CTX")
+        proposal_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            PROPOSAL_CONTEXT_WORKER_ROLE,
+        )
+        feature_overview = proposal_workspace / "spec" / "context" / "feature-overview.md"
+        feature_overview.parent.mkdir(parents=True, exist_ok=True)
+        feature_overview.write_text("# Feature Overview\n\nGrounded context.\n")
+
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={
+                "summary": "Scope clarified",
+                "outputs": ["spec/proposal.md", "spec/context/feature-overview.md", "RESULT.json"],
+            },
+        )
+
+        synced_feature_overview = Path(self.temp_dir.name) / session.task_key / "spec" / "context" / "feature-overview.md"
+        self.assertTrue(synced_feature_overview.is_file())
+        self.assertEqual("# Feature Overview\n\nGrounded context.\n", synced_feature_overview.read_text())
+
     def test_requirements_completed_moves_story_session_to_acceptance_criteria(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003REQ",
@@ -1899,6 +1927,90 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("WHEN-THEN-SHALL criteria", sent_inputs[0])
         self.assertIn("Requirements summary: Requirements clarified", sent_inputs[0])
         self.assertIn("Explicit assumptions: Reuse existing screen state", sent_inputs[0])
+
+    def test_requirements_completed_with_operator_input_parks_story_session(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003REQPARK",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003REQPARK")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Scope clarified"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+            output_type="completed",
+            payload={
+                "summary": "Requirements clarification needs operator confirmation.",
+                "needs_operator_input": True,
+                "pending_decisions": ["Pick the public API shape."],
+            },
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("story_planning_blocked", mapped_event.event_type)
+        self.assertIsNotNone(followup_event)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertEqual("requirements_requested", updated_session.current_stage)
+        self.assertEqual(REQUIREMENTS_CLARIFIER_WORKER_ROLE, updated_session.current_owner)
+        self.assertEqual(
+            [
+                ("proposal_context", "completed"),
+                ("requirements", "waiting_for_operator"),
+            ],
+            sorted((item.work_type, item.status.value) for item in work_items),
+        )
+
+    def test_acceptance_criteria_failed_parks_story_session(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003ACCPARK",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003ACCPARK")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Scope clarified"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="requirements_completed",
+            payload={"summary": "Requirements clarified"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=ACCEPTANCE_CRITERIA_WORKER_ROLE,
+            output_type="failed",
+            payload={
+                "summary": "Acceptance criteria blocked by missing requirement decisions.",
+                "needs_operator_input": True,
+                "failures": ["Requirements clarification is explicitly blocked."],
+            },
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("story_planning_blocked", mapped_event.event_type)
+        self.assertIsNotNone(followup_event)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertEqual("acceptance_criteria_requested", updated_session.current_stage)
+        self.assertEqual(ACCEPTANCE_CRITERIA_WORKER_ROLE, updated_session.current_owner)
+        self.assertEqual(
+            [
+                ("acceptance_criteria", "waiting_for_operator"),
+                ("proposal_context", "completed"),
+                ("requirements", "completed"),
+            ],
+            sorted((item.work_type, item.status.value) for item in work_items),
+        )
 
     def test_acceptance_criteria_completed_moves_story_session_to_constraints(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
