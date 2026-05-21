@@ -1486,7 +1486,7 @@ class CoordinatorService:
                 session.id,
                 "task_decomposition_markdown",
             )
-            if unresolved and subtasks is not None and decomposition_artifact is not None:
+            if unresolved and subtasks is not None:
                 implementation_item = self.work_item_repository.create(
                     session_id=session.id,
                     work_type="implementation",
@@ -1645,8 +1645,6 @@ class CoordinatorService:
             session.id,
             "task_decomposition_markdown",
         )
-        if decomposition_artifact is None:
-            raise IntakeError("Task decomposition artifact is missing for subtask graph start")
 
         subtasks = self._read_snapshot_subtasks_or_raise(session.task_key)
         unresolved = unresolved_subtasks(subtasks)
@@ -2356,7 +2354,6 @@ class CoordinatorService:
         )
         if (
             work_item.work_type == "implementation"
-            and decomposition_artifact is not None
             and subtasks is not None
             and unresolved_subtasks(subtasks)
         ):
@@ -3563,7 +3560,7 @@ class CoordinatorService:
         source_event: Event,
         subtasks: list,
         initial_work_item: WorkItem,
-        decomposition_artifact: Artifact,
+        decomposition_artifact: Artifact | None = None,
     ) -> Event:
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         if implementer_role is None:
@@ -3609,19 +3606,21 @@ class CoordinatorService:
                 "Focus only on this subtask scope before moving to the next one."
             ),
         )
+        payload = {
+            "task_key": session.task_key,
+            "role_name": IMPLEMENTER_ROLE,
+            "work_item_id": active_item.id,
+            "current_stage": session.current_stage,
+            "subtask_key": first_subtask.key,
+            "remaining_subtask_count": len(unresolved),
+        }
+        if decomposition_artifact is not None:
+            payload["decomposition_artifact_id"] = decomposition_artifact.id
         return self._append_event(
             session_id=session.id,
             event_type="subtask_implementation_requested",
             producer_type="coordinator",
-            payload={
-                "task_key": session.task_key,
-                "role_name": IMPLEMENTER_ROLE,
-                "work_item_id": active_item.id,
-                "current_stage": session.current_stage,
-                "subtask_key": first_subtask.key,
-                "remaining_subtask_count": len(unresolved),
-                "decomposition_artifact_id": decomposition_artifact.id,
-            },
+            payload=payload,
         )
 
     def _start_subtask_graph_flow(
@@ -3630,19 +3629,21 @@ class CoordinatorService:
         producer_type: str,
         subtasks: list,
         initial_work_item: WorkItem,
-        decomposition_artifact: Artifact,
+        decomposition_artifact: Artifact | None = None,
     ) -> tuple[Event, Event]:
         unresolved = unresolved_subtasks(subtasks)
         self._record_subtask_statuses_artifact(session, subtasks)
+        payload = {
+            "subtask_count": len(subtasks),
+            "unresolved_count": len(unresolved),
+        }
+        if decomposition_artifact is not None:
+            payload["decomposition_artifact_id"] = decomposition_artifact.id
         event = self._append_event(
             session_id=session.id,
             event_type="subtask_graph_requested",
             producer_type=producer_type,
-            payload={
-                "subtask_count": len(subtasks),
-                "unresolved_count": len(unresolved),
-                "decomposition_artifact_id": decomposition_artifact.id,
-            },
+            payload=payload,
         )
         followup_event = self._enqueue_subtask_graph(
             session=session,
