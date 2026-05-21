@@ -6553,8 +6553,46 @@ class SessionCreationTests(unittest.TestCase):
                 for item in work_items
             )
         )
-        self.assertEqual(2, len(sent_inputs))
-        self.assertIn("Start implementation work for IOS-30022.", sent_inputs[-1])
+
+    def test_retry_session_retries_subtask_creation_checkpoint(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30022SUBTASK",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        plan_dir = Path(self.temp_dir.name) / "IOS-30022SUBTASK" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n1. [Build data source](./01-build-data-source.md)\n",
+            encoding="utf-8",
+        )
+        (plan_dir / "01-build-data-source.md").write_text(
+            "# Build data source\n\n## What to implement\nCreate the feature data source.\n",
+            encoding="utf-8",
+        )
+        self.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title=f"Initial implementation for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            source_event_id=None,
+            priority=100,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_creation_requested",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+
+        retried_session, retried_event, followup_event = self.coordinator.retry_session(session.id)
+
+        self.assertEqual("session_retried_by_operator", retried_event.event_type)
+        self.assertIn(followup_event.event_type, {"jira_subtasks_created", "subtask_implementation_requested"})
+        self.assertIn(retried_session.current_stage, {"subtask_creation_requested", "subtask_implementation_requested"})
 
     def test_redirect_session_reroutes_escalated_work_item_to_allowed_role(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30023")

@@ -2501,6 +2501,9 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
             },
         )
+        if session.current_stage == "subtask_creation_requested":
+            session, batch_event, followup_event = self.create_subtasks_from_plan(session.id)
+            return session, retried_event, followup_event or batch_event
         instruction = self._stage_instruction(
             session.current_stage,
             session.task_key,

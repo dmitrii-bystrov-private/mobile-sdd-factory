@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 try:
     from backend.models.enums import SessionStatus
+    from backend.models.work_item import WorkItemStatus
     from backend import session_policy as session_policy_module
     from backend.api.sse import SessionEventBus
     from backend.api.routes_sessions import (
@@ -3537,6 +3538,49 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("implementer", response.session.current_owner)
         self.assertEqual(2, len(work_items_response.items))
         self.assertTrue(any(item.title.startswith("Retry: ") for item in work_items_response.items))
+
+    def test_retry_session_route_retries_subtask_creation_checkpoint(self) -> None:
+        session, _, _ = self.dependencies.coordinator_service.create_task_session(
+            "IOS-40015SUBTASK",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(session.id, "implementer")
+        assert implementer_role is not None
+        plan_dir = Path(self.temp_dir.name) / "IOS-40015SUBTASK" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n1. [Build data source](./01-build-data-source.md)\n",
+            encoding="utf-8",
+        )
+        (plan_dir / "01-build-data-source.md").write_text(
+            "# Build data source\n\n## What to implement\nCreate the feature data source.\n",
+            encoding="utf-8",
+        )
+        self.dependencies.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title=f"Initial implementation for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            source_event_id=None,
+            priority=100,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        self.dependencies.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_creation_requested",
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+
+        response = retry_session(
+            RetrySessionRequest(session_id=session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.retried)
+        self.assertEqual("session_retried_by_operator", response.event_type)
+        self.assertIn(response.followup_event_type, {"jira_subtasks_created", "subtask_implementation_requested"})
 
     def test_redirect_session_route_reroutes_escalated_work_to_allowed_target_role(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
