@@ -87,7 +87,10 @@ if [[ ${#SELECTED_TASK_FILES[@]} -gt 0 ]]; then
 else
   while IFS= read -r task_file; do
     [[ -n "$task_file" ]] || continue
-    TASK_FILES+=("$PLAN_DIR/${task_file#./}")
+    normalized_task_file="${task_file#./}"
+    normalized_task_file="${normalized_task_file#plan/}"
+    [[ "$normalized_task_file" == "index.md" ]] && continue
+    TASK_FILES+=("$PLAN_DIR/$normalized_task_file")
   done < <(
     perl -ne 'while (/`((?:\.\/|plan\/)[^`\n]+\.md)`/g) { print "$1\n" }' "$INDEX_FILE"
   )
