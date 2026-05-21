@@ -468,7 +468,7 @@ def build_role_agents_md(
             "- Use coordinator hydration and routed work instructions as the current task payload.",
             "- Treat this file as durable role context; treat routed handoff prompts as per-work instructions.",
             "- For terminal outcomes, write `RESULT.json` in the current directory with a JSON object shaped like `{\\\"output_type\\\":\\\"completed\\\",\\\"payload\\\":{...}}` before you finish the turn.",
-            "- When `HYDRATION.json` includes `work_item_id`, echo that same `work_item_id` back inside the terminal payload. When it also includes `subtask_key`, echo that same `subtask_key` back unchanged too.",
+            "- When the routed hydration payload includes `work_item_id`, echo that same `work_item_id` back inside the terminal payload. When it also includes `subtask_key`, echo that same `subtask_key` back unchanged too.",
             "- You may emit `SDD_PROGRESS` for intermediate updates and `SDD_ERROR` when operator visibility is required.",
             "- If you also emit terminal completion text directly, use the exact `SDD_OUTPUT: {...}` format described by the coordinator.",
             "",

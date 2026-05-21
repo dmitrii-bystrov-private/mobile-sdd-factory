@@ -158,7 +158,7 @@ def role_handoff_prompt(
         return (
             "Read AGENTS.md/CLAUDE.md in the current directory now and use it as the primary durable role contract for this session.\n"
             "Do not rebuild your role from scratch outside that file unless the coordinator explicitly tells you to.\n\n"
-            "Read `HYDRATION.json` in the current directory for machine-readable per-round context before acting.\n\n"
+            "If you need the exact machine-readable per-round context or routed IDs, consult `HYDRATION.json` in the current directory.\n\n"
             "Current routed work:\n"
             f"{instruction}\n\n"
         )
@@ -167,7 +167,7 @@ def role_handoff_prompt(
             "Continue from your existing AGENTS.md-based role context in this persistent task session.\n"
             "Use the new routed work below without reinitializing your full role definition from scratch.\n\n"
             "If the same routed work was already in progress before an interruption, resume and finish that unfinished work now instead of restarting the analysis from zero.\n\n"
-            "Refresh your per-round machine-readable context from `HYDRATION.json` in the current directory before acting.\n\n"
+            "If you need the exact machine-readable per-round context or routed IDs, refresh them from `HYDRATION.json` in the current directory.\n\n"
             "Current routed work:\n"
             f"{instruction}\n\n"
         )
@@ -199,8 +199,8 @@ def role_handoff_prompt(
         'SDD_ERROR: {"summary":"short error summary","details":"optional detail","needs_operator_input":false}\n\n'
         "Required terminal outcome path:\n"
         "- Write `RESULT.json` in the current directory using the same JSON object you would place after `SDD_OUTPUT:` before you finish the turn.\n"
-        "- Always copy `work_item_id` from `HYDRATION.json` into the terminal payload unchanged when it is present.\n"
-        "- If `HYDRATION.json` includes `subtask_key`, copy that `subtask_key` into the terminal payload unchanged as well.\n"
+        "- Always copy `work_item_id` from the hydration payload below into the terminal payload unchanged when it is present.\n"
+        "- If the hydration payload below includes `subtask_key`, copy that `subtask_key` into the terminal payload unchanged as well.\n"
         "- For example: `{\"output_type\":\"completed\",\"payload\":{\"work_item_id\":123,\"summary\":\"short result\"}}`\n"
         "- Subtask example: `{\"output_type\":\"completed\",\"payload\":{\"work_item_id\":123,\"subtask_key\":\"IOS-12345\",\"summary\":\"short result\"}}`\n"
         "- Use `failed` plus `failures` when verification/correction output must report failures.\n\n"

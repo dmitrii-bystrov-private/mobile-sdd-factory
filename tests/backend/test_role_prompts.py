@@ -19,7 +19,7 @@ class RolePromptTests(unittest.TestCase):
         )
 
         self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now", text)
-        self.assertIn("Read `HYDRATION.json` in the current directory", text)
+        self.assertIn("If you need the exact machine-readable per-round context or routed IDs", text)
         self.assertIn("Current routed work:\nStart implementation work for IOS-123.", text)
         self.assertNotIn("You are a persistent SDD Factory role.", text)
         self.assertNotIn("Role-specific rules:", text)
@@ -41,7 +41,7 @@ class RolePromptTests(unittest.TestCase):
 
         self.assertIn("Continue from your existing AGENTS.md-based role context", text)
         self.assertIn("resume and finish that unfinished work now", text)
-        self.assertIn("Refresh your per-round machine-readable context from `HYDRATION.json`", text)
+        self.assertIn("If you need the exact machine-readable per-round context or routed IDs", text)
         self.assertIn("Run deterministic verification for IOS-123.", text)
         self.assertNotIn("You are a persistent SDD Factory role.", text)
         self.assertNotIn("Role-specific rules:", text)
@@ -78,8 +78,8 @@ class RolePromptTests(unittest.TestCase):
             prompt_mode="full",
         )
 
-        self.assertIn("Always copy `work_item_id` from `HYDRATION.json`", text)
-        self.assertIn("If `HYDRATION.json` includes `subtask_key`", text)
+        self.assertIn("Always copy `work_item_id` from the hydration payload below", text)
+        self.assertIn("If the hydration payload below includes `subtask_key`", text)
         self.assertIn('{"output_type":"completed","payload":{"work_item_id":123,"subtask_key":"IOS-12345","summary":"short result"}}', text)
 
     def test_full_prompt_restores_proposal_context_fetch_and_conflict_rules(self) -> None:
