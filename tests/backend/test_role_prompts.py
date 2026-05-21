@@ -62,6 +62,8 @@ class RolePromptTests(unittest.TestCase):
 
         self.assertIn("Always write or refresh `spec/final-verification.md`", text)
         self.assertIn("failed checks and their relevant command output", text)
+        self.assertIn('bash scripts/run-test.sh "$SDD_FACTORY_TASK_KEY"', text)
+        self.assertIn('bash scripts/run-lint.sh "$SDD_FACTORY_TASK_KEY"', text)
 
     def test_full_prompt_restores_proposal_context_fetch_and_conflict_rules(self) -> None:
         text = role_handoff_prompt(

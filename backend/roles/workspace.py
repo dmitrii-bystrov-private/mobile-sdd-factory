@@ -326,7 +326,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
     if role_name == "verification-coordinator":
         return [
             "- Run only deterministic verification work for the routed task session.",
-            "- Treat `run-test.sh` and `run-lint.sh` as the workflow-level verification gate; do not run `run-build.sh` here.",
+            "- Treat `run-test.sh` and `run-lint.sh` as the workflow-level verification gate. Always run them with the current task key, for example `bash scripts/run-test.sh \"$SDD_FACTORY_TASK_KEY\"` and `bash scripts/run-lint.sh \"$SDD_FACTORY_TASK_KEY\"`; do not run `run-build.sh` here.",
             "- Always treat each verification round as a fresh deterministic gate and refresh the verification evidence.",
             "- Always write or refresh `spec/final-verification.md` for the current round; on failure include the failed checks and their relevant command output.",
             "- Keep the role evidence-first: summarize failures, but do not attempt fixes.",
