@@ -1912,6 +1912,26 @@ class CoordinatorService:
         output_type: str,
         output_payload: dict,
     ) -> Session | None:
+        output_mismatch = self._stale_role_output_mismatch(
+            session=session,
+            role_name=role.role_name,
+            output_type=output_type,
+            output_payload=output_payload,
+        )
+        if output_mismatch is not None:
+            self._append_event(
+                session_id=session.id,
+                event_type="stale_role_output_ignored",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "output_type": output_type,
+                    "current_stage": session.current_stage,
+                    "current_owner": session.current_owner,
+                    **output_mismatch,
+                },
+            )
+            return None
         if self._should_ignore_stale_role_output(
             session=session,
             role_name=role.role_name,
@@ -2008,6 +2028,45 @@ class CoordinatorService:
         ):
             return True
         return False
+
+    def _stale_role_output_mismatch(
+        self,
+        *,
+        session: Session,
+        role_name: str,
+        output_type: str,
+        output_payload: dict,
+    ) -> dict[str, str | int | None] | None:
+        if (
+            role_name != IMPLEMENTER_ROLE
+            or output_type != "completed"
+            or session.current_stage != "subtask_implementation_requested"
+        ):
+            return None
+
+        active_item = self._find_active_primary_coding_work_item(session)
+        if active_item is None:
+            return None
+
+        expected_subtask_key = self._parse_subtask_work_item_title(active_item.title)["key"]
+        payload_work_item_id = output_payload.get("work_item_id")
+        payload_subtask_key = output_payload.get("subtask_key")
+        normalized_payload_subtask_key = (
+            payload_subtask_key.strip()
+            if isinstance(payload_subtask_key, str)
+            else None
+        )
+
+        if payload_work_item_id == active_item.id and normalized_payload_subtask_key == expected_subtask_key:
+            return None
+
+        return {
+            "reason": "address_mismatch",
+            "expected_work_item_id": active_item.id,
+            "payload_work_item_id": payload_work_item_id if isinstance(payload_work_item_id, int) else None,
+            "expected_subtask_key": expected_subtask_key,
+            "payload_subtask_key": normalized_payload_subtask_key,
+        }
 
     def _active_subtask_completion_dispatch_missing(self, session: Session) -> bool:
         active_item = self._find_active_primary_coding_work_item(session)
@@ -7127,6 +7186,8 @@ class CoordinatorService:
             role,
             stage_name,
         )
+        if work_item.work_type == "subtask_implementation" and "subtask_key" not in merged_hydration:
+            merged_hydration["subtask_key"] = self._parse_subtask_work_item_title(work_item.title)["key"]
         if extra_hydration:
             merged_hydration.update(extra_hydration)
         prompt_mode = self._prompt_mode_for_dispatch(session, role)

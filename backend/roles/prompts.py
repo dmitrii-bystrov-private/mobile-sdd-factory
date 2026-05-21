@@ -199,7 +199,10 @@ def role_handoff_prompt(
         'SDD_ERROR: {"summary":"short error summary","details":"optional detail","needs_operator_input":false}\n\n'
         "Required terminal outcome path:\n"
         "- Write `RESULT.json` in the current directory using the same JSON object you would place after `SDD_OUTPUT:` before you finish the turn.\n"
-        "- For example: `{\"output_type\":\"completed\",\"payload\":{\"summary\":\"short result\"}}`\n"
+        "- Always copy `work_item_id` from `HYDRATION.json` into the terminal payload unchanged when it is present.\n"
+        "- If `HYDRATION.json` includes `subtask_key`, copy that `subtask_key` into the terminal payload unchanged as well.\n"
+        "- For example: `{\"output_type\":\"completed\",\"payload\":{\"work_item_id\":123,\"summary\":\"short result\"}}`\n"
+        "- Subtask example: `{\"output_type\":\"completed\",\"payload\":{\"work_item_id\":123,\"subtask_key\":\"IOS-12345\",\"summary\":\"short result\"}}`\n"
         "- Use `failed` plus `failures` when verification/correction output must report failures.\n\n"
         "If you also echo the terminal outcome in the transcript, emit one line in this exact form:\n"
         'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"short result"}}\n'

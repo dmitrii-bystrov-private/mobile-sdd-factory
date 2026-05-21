@@ -65,6 +65,23 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn('bash scripts/run-test.sh "$SDD_FACTORY_TASK_KEY"', text)
         self.assertIn('bash scripts/run-lint.sh "$SDD_FACTORY_TASK_KEY"', text)
 
+    def test_full_prompt_requires_addressed_terminal_payload_for_subtasks(self) -> None:
+        text = role_handoff_prompt(
+            role_name="implementer",
+            instruction="Implement subtask IOS-55555 for parent task IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "subtask_implementation_requested",
+                "work_item_id": 42,
+                "subtask_key": "IOS-55555",
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("Always copy `work_item_id` from `HYDRATION.json`", text)
+        self.assertIn("If `HYDRATION.json` includes `subtask_key`", text)
+        self.assertIn('{"output_type":"completed","payload":{"work_item_id":123,"subtask_key":"IOS-12345","summary":"short result"}}', text)
+
     def test_full_prompt_restores_proposal_context_fetch_and_conflict_rules(self) -> None:
         text = role_handoff_prompt(
             role_name="proposal-context-worker",

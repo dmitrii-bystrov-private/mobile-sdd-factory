@@ -4598,6 +4598,152 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(any(item.event_type == "subtask_completed" for item in events))
         self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
 
+    def test_collect_role_output_ignores_subtask_completion_with_mismatched_address(
+        self,
+    ) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009ESUB3",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        active_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-30094: First chunk",
+            owner_role_id=implementer_role.id,
+            priority=100,
+        )
+        active_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        self.session_repository.update_status(active_session.id, SessionStatus.ACTIVE)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            producer_type="coordinator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": active_item.id,
+                "stage_name": "subtask_implementation_requested",
+                "hydration_version": 1,
+                "prompt_mode": "live_continuation",
+            },
+        )
+        result_path = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            IMPLEMENTER_ROLE,
+        ) / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {
+                        "work_item_id": active_item.id + 1,
+                        "subtask_key": "IOS-30095",
+                        "summary": "mismatched addressed subtask result",
+                    },
+                }
+            )
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        refreshed_item = self.work_item_repository.get_by_id(active_item.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual("assigned", refreshed_item.status.value)
+        self.assertFalse(any(item.event_type == "subtask_completed" for item in events))
+        stale_events = [item for item in events if item.event_type == "stale_role_output_ignored"]
+        self.assertTrue(stale_events)
+        self.assertEqual("address_mismatch", stale_events[-1].payload["reason"])
+
+    def test_collect_role_output_accepts_subtask_completion_with_matching_address(
+        self,
+    ) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009ESUB4",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        active_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-30096: First chunk",
+            owner_role_id=implementer_role.id,
+            priority=100,
+        )
+        next_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-30097: Second chunk",
+            owner_role_id=None,
+            priority=99,
+            status=WorkItemStatus.UNASSIGNED,
+        )
+        active_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        self.session_repository.update_status(active_session.id, SessionStatus.ACTIVE)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            producer_type="coordinator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": active_item.id,
+                "stage_name": "subtask_implementation_requested",
+                "hydration_version": 1,
+                "prompt_mode": "live_continuation",
+            },
+        )
+        result_path = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            IMPLEMENTER_ROLE,
+        ) / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {
+                        "work_item_id": active_item.id,
+                        "subtask_key": "IOS-30096",
+                        "summary": "matched addressed subtask result",
+                    },
+                }
+            )
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        refreshed_active = self.work_item_repository.get_by_id(active_item.id)
+        refreshed_next = self.work_item_repository.get_by_id(next_item.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual("completed", refreshed_active.status.value)
+        self.assertEqual("assigned", refreshed_next.status.value)
+        self.assertTrue(any(item.event_type == "subtask_completed" for item in events))
+        self.assertTrue(any(item.event_type == "subtask_transition_completed" for item in events))
+        self.assertEqual(["IOS-30096"], self.jira_adapter.completed_subtasks)
+        self.assertEqual([("IOS-30009ESUB4", "subtask IOS-30096")], self.gitlab_adapter.commit_requests)
+
     def test_poll_session_output_ignores_stale_implementer_runtime_marker_after_handoff_to_reviewer(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009G",
