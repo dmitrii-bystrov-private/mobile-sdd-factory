@@ -1638,6 +1638,40 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("role_input_dispatched", dispatch_event.event_type)
         self.assertIn("blocked_review_cycle", sent_inputs[-1])
 
+    def test_failed_self_review_with_blocked_cycle_summary_maps_to_blocked(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RBLOCKSUMMARY",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RBLOCKSUMMARY")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="failed",
+            payload={
+                "summary": "blocked_review_cycle",
+                "failures": [
+                    "No new findings beyond the already reported issue; the review loop is no longer converging."
+                ],
+            },
+        )
+
+        self.assertEqual("self_review_blocked", mapped_event.event_type)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("self_review_requested", updated_session.current_stage)
+
     def test_second_self_review_dispatch_includes_previous_review_report_paths(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003R2",
@@ -4021,6 +4055,29 @@ class SessionCreationTests(unittest.TestCase):
         assert dispatch_event is not None
         self.assertEqual("role_input_dispatched", dispatch_event.event_type)
         self.assertIn("blocked_verification_cycle", sent_inputs[-1])
+
+    def test_failed_verification_with_blocked_cycle_summary_maps_to_blocked(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VBLOCKSUMMARY")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="verification-coordinator",
+            output_type="failed",
+            payload={
+                "summary": "blocked_verification_cycle",
+                "failures": ["The verification loop is no longer converging."],
+            },
+        )
+
+        self.assertEqual("verification_blocked", mapped_event.event_type)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("verification_requested", updated_session.current_stage)
 
     def test_verification_correction_reenters_verification_without_reopening_optional_quality_lanes(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

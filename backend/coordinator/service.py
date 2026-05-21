@@ -4875,6 +4875,7 @@ class CoordinatorService:
         output_type: str,
         payload: dict,
     ) -> str:
+        normalized_summary = str(payload.get("summary") or "").strip()
         if (
             role_name in _STORY_PLANNING_ROLES
             and session.current_stage in _STORY_PLANNING_WORK_TYPE_BY_STAGE
@@ -4904,6 +4905,8 @@ class CoordinatorService:
         if role_name == VERIFICATION_COORDINATOR_ROLE:
             if output_type in {"passed", "completed"} and session.current_stage == "verification_requested":
                 return "verification_passed"
+            if normalized_summary == "blocked_verification_cycle" and session.current_stage == "verification_requested":
+                return "verification_blocked"
             if output_type == "failed" and session.current_stage == "verification_requested":
                 return "verification_failed"
             if output_type == "blocked_verification_cycle" and session.current_stage == "verification_requested":
@@ -4915,6 +4918,8 @@ class CoordinatorService:
                 if self._optional_lane_policy_mode(session.policy, "self_review_policy") != "enabled":
                     raise IntakeError("Self review cannot be skipped when self_review_policy is required")
                 return "self_review_passed"
+            if normalized_summary == "blocked_review_cycle":
+                return "self_review_blocked"
             if output_type == "failed":
                 return "self_review_issues_found"
             if output_type == "blocked_review_cycle":
