@@ -426,6 +426,37 @@ Likely code changes will concentrate around:
 - new helper scripts
   - likely platform-specific prepare/build/test helpers
 
+## Orchestration Audit Required
+
+This initiative should explicitly include an orchestration audit for verification failure handling.
+
+Observed risk:
+
+- tasks with failing tests can still progress to MR handoff
+- failures then surface only in CI instead of being corrected inside the task session
+
+This is a workflow bug, not only a verifier-quality issue.
+
+The audit should confirm:
+
+- verification failure always blocks delivery progression
+- failing verification cannot silently transition into MR handoff
+- correction loops are re-entered deterministically after failed verification
+- session state, work items, and runtime dispatch stay aligned after verification failure
+- no stale or malformed verifier output can be misclassified as `verification_passed`
+
+Specific repo areas to inspect during implementation:
+
+- `backend/coordinator/service.py`
+- verification event mapping and acceptance logic
+- delivery gating before `mr_handoff_completed`
+- retry / resume / reopen semantics after failed verification
+
+Expected outcome:
+
+- a task with red tests or red lint should be corrected inside the orchestration loop
+- MR creation should remain downstream of a genuinely green verification outcome
+
 ## Recommendation
 
 Do not implement this as:
