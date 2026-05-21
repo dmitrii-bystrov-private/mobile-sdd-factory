@@ -553,42 +553,6 @@ export function SessionDetail({
         </div>
       </div>
 
-      {orchestratorTrace.length > 0 ? (
-        <div className="advanced-disclosure orchestrator-trace-panel">
-          <button
-            className="advanced-disclosure-toggle"
-            onClick={() => setShowOrchestratorTrace((value) => !value)}
-            aria-expanded={showOrchestratorTrace}
-            type="button"
-          >
-            <div>
-              <strong>Orchestrator Trace</strong>
-              <p>Expand to inspect the full orchestration history for this session.</p>
-            </div>
-            <div className="advanced-disclosure-meta">
-              <small>{orchestratorTrace.length} steps</small>
-              <span className={`chevron${showOrchestratorTrace ? " expanded" : ""}`} aria-hidden="true" />
-            </div>
-          </button>
-          {showOrchestratorTrace ? (
-            <div className="advanced-disclosure-body orchestrator-trace-body">
-              <div className="orchestrator-trace-scroll">
-                <div className="hero-trace-list">
-                  {orchestratorTrace.map((item) => (
-                    <p className="hero-trace-item" key={`orchestrator-trace-${item.eventId}`}>
-                      {formatTraceTime(item.createdAt) ? (
-                        <span className="hero-trace-time">{formatTraceTime(item.createdAt)}</span>
-                      ) : null}
-                      {item.message}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
       <>
       <InteractiveStatePanel
         interactiveStateSummary={bundle.interactiveStateSummary}
@@ -771,6 +735,39 @@ export function SessionDetail({
         runtimeStateSummary={bundle.runtimeStateSummary}
         session={session}
       />
+
+      {orchestratorTrace.length > 0 ? (
+        <div className="advanced-disclosure orchestrator-trace-panel">
+          <button
+            className="advanced-disclosure-toggle"
+            onClick={() => setShowOrchestratorTrace((value) => !value)}
+            aria-expanded={showOrchestratorTrace}
+            type="button"
+          >
+            <div>
+              <strong>Orchestrator Trace</strong>
+              <p>Expand to inspect the full orchestration history for this session.</p>
+            </div>
+            <span className={`chevron${showOrchestratorTrace ? " expanded" : ""}`} aria-hidden="true" />
+          </button>
+          {showOrchestratorTrace ? (
+            <div className="advanced-disclosure-body orchestrator-trace-body">
+              <div className="orchestrator-trace-scroll">
+                <div className="hero-trace-list">
+                  {orchestratorTrace.map((item) => (
+                    <p className="hero-trace-item" key={`orchestrator-trace-${item.eventId}`}>
+                      {formatTraceTime(item.createdAt) ? (
+                        <span className="hero-trace-time">{formatTraceTime(item.createdAt)}</span>
+                      ) : null}
+                      {item.message}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       </>
     </section>
   );
