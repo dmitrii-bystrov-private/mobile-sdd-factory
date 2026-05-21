@@ -85,14 +85,10 @@ if [[ ${#SELECTED_TASK_FILES[@]} -gt 0 ]]; then
     fi
   done
 else
-  declare -a INDEX_TASK_FILES=()
   while IFS= read -r task_file; do
     [[ -n "$task_file" ]] || continue
-    INDEX_TASK_FILES+=("$task_file")
-  done < <(grep -oE '\(\./[^)]+\.md\)' "$INDEX_FILE" | tr -d '()')
-  for task_file in "${INDEX_TASK_FILES[@]}"; do
     TASK_FILES+=("$PLAN_DIR/${task_file#./}")
-  done
+  done < <(grep -oE '\(\./[^)]+\.md\)' "$INDEX_FILE" | tr -d '()')
 fi
 
 if [[ ${#TASK_FILES[@]} -eq 0 ]]; then
