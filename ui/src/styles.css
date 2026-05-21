@@ -141,6 +141,7 @@ input {
   background: var(--surface-panel);
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
+  min-width: 0;
 }
 
 .workspace-panel {
@@ -1511,6 +1512,7 @@ input {
 
 .runtime-output-panel {
   align-content: start;
+  min-width: 0;
 }
 
 .runtime-output-content {
@@ -1522,8 +1524,10 @@ input {
   color: #d9e2ee;
   font: 0.84rem/1.5 "IBM Plex Mono", "SFMono-Regular", monospace;
   white-space: pre;
+  max-width: 100%;
   max-height: 540px;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
 }
 
 .runtime-session-actions {
