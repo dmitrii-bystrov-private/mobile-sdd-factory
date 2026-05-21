@@ -74,10 +74,13 @@ class RolePromptTests(unittest.TestCase):
                 "current_stage": "subtask_implementation_requested",
                 "work_item_id": 42,
                 "subtask_key": "IOS-55555",
+                "result_path": "/tmp/roles/implementer/RESULT.json",
             },
             prompt_mode="full",
         )
 
+        self.assertIn("Write `RESULT.json` exactly to `/tmp/roles/implementer/RESULT.json`", text)
+        self.assertIn("Do not place `RESULT.json` in the task root", text)
         self.assertIn("Always copy `work_item_id` from the hydration payload below", text)
         self.assertIn("If the hydration payload below includes `subtask_key`", text)
         self.assertIn('{"output_type":"completed","payload":{"work_item_id":123,"subtask_key":"IOS-12345","summary":"short result"}}', text)

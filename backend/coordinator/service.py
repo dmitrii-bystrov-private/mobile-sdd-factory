@@ -7326,6 +7326,8 @@ class CoordinatorService:
             merged_hydration.update(extra_hydration)
         merged_hydration = self._sanitize_dispatch_hydration(merged_hydration)
         prompt_mode = self._prompt_mode_for_dispatch(session, role)
+        workspace = self.role_workspace_manager.ensure_role_workspace(session.task_key, role.role_name)
+        merged_hydration["result_path"] = str(workspace.directory / "RESULT.json")
         hydration = build_role_hydration(
             role_name=role.role_name,
             task_key=session.task_key,
@@ -7346,7 +7348,6 @@ class CoordinatorService:
             f"{role.role_name}.hydration.json",
             json.dumps(hydration, indent=2, sort_keys=True),
         )
-        workspace = self.role_workspace_manager.ensure_role_workspace(session.task_key, role.role_name)
         workspace_hydration_path = workspace.directory / "HYDRATION.json"
         workspace_hydration_path.write_text(json.dumps(hydration, indent=2, sort_keys=True))
         prompt_path = write_text_artifact(

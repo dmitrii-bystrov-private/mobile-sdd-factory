@@ -146,6 +146,8 @@ def role_handoff_prompt(
     hydration_payload: dict[str, str | int | None],
     prompt_mode: str = "full",
 ) -> str:
+    result_path = hydration_payload.get("result_path")
+    result_path_text = str(result_path).strip() if isinstance(result_path, str) else "RESULT.json"
     if prompt_mode == "live_bootstrap":
         return (
             "Read AGENTS.md/CLAUDE.md in the current directory now and use it as the primary durable role contract for this session.\n"
@@ -190,7 +192,8 @@ def role_handoff_prompt(
         "- Set `needs_operator_input: false` for runtime/tooling failures, missing diagnostics, MCP/network blockers, or other cases that need recovery rather than a direct reply.\n"
         'SDD_ERROR: {"summary":"short error summary","details":"optional detail","needs_operator_input":false}\n\n'
         "Required terminal outcome path:\n"
-        "- Write `RESULT.json` in the current directory using the same JSON object you would place after `SDD_OUTPUT:` before you finish the turn.\n"
+        f"- Write `RESULT.json` exactly to `{result_path_text}` using the same JSON object you would place after `SDD_OUTPUT:` before you finish the turn.\n"
+        "- Do not place `RESULT.json` in the task root, `spec/`, `plan/`, or any directory other than the exact terminal result target above.\n"
         "- Always copy `work_item_id` from the hydration payload below into the terminal payload unchanged when it is present.\n"
         "- If the hydration payload below includes `subtask_key`, copy that `subtask_key` into the terminal payload unchanged as well.\n"
         "- For example: `{\"output_type\":\"completed\",\"payload\":{\"work_item_id\":123,\"summary\":\"short result\"}}`\n"

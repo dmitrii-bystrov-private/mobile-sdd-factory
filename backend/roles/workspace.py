@@ -406,6 +406,7 @@ def build_role_agents_md(
     task_key: str,
     repo_root: Path,
     workdir_root: Path,
+    role_directory: Path,
 ) -> str:
     relevant_paths = [
         line.format(
@@ -443,7 +444,8 @@ def build_role_agents_md(
             "- Re-read this file after context compaction or if role boundaries become unclear.",
             "- Use coordinator hydration and routed work instructions as the current task payload.",
             "- Treat this file as durable role context; treat routed handoff prompts as per-work instructions.",
-            "- For terminal outcomes, write `RESULT.json` in the current directory with a JSON object shaped like `{\\\"output_type\\\":\\\"completed\\\",\\\"payload\\\":{...}}` before you finish the turn.",
+            f"- For terminal outcomes, write `RESULT.json` exactly to `{role_directory / 'RESULT.json'}` with a JSON object shaped like `{{\\\"output_type\\\":\\\"completed\\\",\\\"payload\\\":{{...}}}}` before you finish the turn.",
+            "- Do not place `RESULT.json` in the task root, `spec/`, `plan/`, or any directory other than that exact terminal result target.",
             "- When the routed hydration payload includes `work_item_id`, echo that same `work_item_id` back inside the terminal payload. When it also includes `subtask_key`, echo that same `subtask_key` back unchanged too.",
             "- You may emit `SDD_PROGRESS` for intermediate updates and `SDD_ERROR` when operator visibility is required.",
             "- If you also emit terminal completion text directly, use the exact `SDD_OUTPUT: {...}` format described by the coordinator.",
@@ -480,6 +482,7 @@ class RoleWorkspaceManager:
                 task_key=task_key,
                 repo_root=self.repo_root,
                 workdir_root=self.workdir_root,
+                role_directory=directory,
             )
         )
 
