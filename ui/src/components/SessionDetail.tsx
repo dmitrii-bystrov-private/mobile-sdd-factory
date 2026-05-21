@@ -11,6 +11,7 @@ import {
   workflowProfileDisplayName,
 } from "../sessionDisplay";
 import { stageDisplayName } from "../stageDisplay";
+import type { EventItem } from "../types";
 import type { Role, Session, SessionBundle, WorkItem } from "../types";
 
 type SessionDetailProps = {
@@ -147,6 +148,115 @@ function runtimeConfigSummary(roleName: string, session: Session): string {
     return parts.join(" · ");
   }
   return "Runtime defaults";
+}
+
+type OrchestratorTraceItem = {
+  eventId: number;
+  createdAt: string;
+  message: string;
+};
+
+function formatTraceTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function orchestratorTraceMessage(
+  event: EventItem,
+  workItemsById: Map<number, WorkItem>,
+): string | null {
+  const payload = event.payload;
+  switch (event.event_type) {
+    case "role_input_dispatched": {
+      const roleName =
+        typeof payload.role_name === "string" ? roleDisplayName(payload.role_name) : "worker";
+      const workItemId =
+        typeof payload.work_item_id === "number" ? payload.work_item_id : null;
+      const workItem = workItemId !== null ? workItemsById.get(workItemId) ?? null : null;
+      return workItem
+        ? `Dispatched ${roleName}: ${workItem.title}.`
+        : `Dispatched ${roleName} to the next routed step.`;
+    }
+    case "git_commit_completed":
+      return typeof payload.context === "string"
+        ? `Created checkpoint commit for ${payload.context}.`
+        : "Created a workflow checkpoint commit.";
+    case "subtask_transition_completed":
+      return typeof payload.subtask_key === "string"
+        ? `Moved ${payload.subtask_key} to Ready for test.`
+        : "Moved the completed subtask to Ready for test.";
+    case "subtask_snapshot_refreshed":
+      return typeof payload.unresolved_count === "number"
+        ? `Refreshed Jira subtasks snapshot. ${payload.unresolved_count} unresolved subtasks remain.`
+        : "Refreshed the Jira subtasks snapshot.";
+    case "jira_subtasks_created": {
+      const keys = Array.isArray(payload.created_subtask_keys)
+        ? payload.created_subtask_keys.filter((value): value is string => typeof value === "string")
+        : [];
+      return keys.length > 0
+        ? `Created Jira subtasks: ${keys.join(", ")}.`
+        : "Created Jira subtasks from the decomposition plan.";
+    }
+    case "subtask_graph_requested":
+      return typeof payload.unresolved_count === "number"
+        ? `Started subtask execution graph with ${payload.unresolved_count} unresolved subtasks.`
+        : "Started the subtask execution graph.";
+    case "self_review_requested":
+      return "Handed the task off to self-review.";
+    case "boy_scout_requested":
+      return "Handed the task off to Boy Scout review.";
+    case "verification_requested":
+      return "Handed the task off to verification.";
+    case "doc_harvest_requested":
+      return "Handed the task off to doc harvest.";
+    case "mr_handoff_completed":
+      return "Completed merge request handoff.";
+    case "send_to_test_completed":
+      return "Moved the task to Ready for test.";
+    case "session_dispatch_reconciled": {
+      const roleName =
+        typeof payload.role_name === "string" ? roleDisplayName(payload.role_name) : "worker";
+      return `Reconciled dispatch and re-sent work to ${roleName}.`;
+    }
+    case "runtime_role_auto_recovery_attempted": {
+      const roleName =
+        typeof payload.role_name === "string" ? roleDisplayName(payload.role_name) : "worker";
+      return `Recovered the ${roleName} runtime after it stopped unexpectedly.`;
+    }
+    case "snapshot_refreshed_by_operator":
+      return "Refreshed the task snapshot from Jira.";
+    default:
+      return null;
+  }
+}
+
+function buildOrchestratorTrace(
+  events: EventItem[],
+  workItems: WorkItem[],
+): OrchestratorTraceItem[] {
+  const workItemsById = new Map(workItems.map((item) => [item.id, item]));
+  return [...events]
+    .reverse()
+    .filter((event) => event.producer_type === "coordinator")
+    .map((event) => {
+      const message = orchestratorTraceMessage(event, workItemsById);
+      if (message === null) {
+        return null;
+      }
+      return {
+        eventId: event.id,
+        createdAt: event.created_at,
+        message,
+      };
+    })
+    .filter((item): item is OrchestratorTraceItem => item !== null)
+    .slice(0, 6);
 }
 
 function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_profile"]): number {
@@ -354,6 +464,7 @@ export function SessionDetail({
   const runtimeRoleIndex = new Map(
     (bundle.runtimeStateSummary?.roles ?? []).map((role) => [role.roleName, role]),
   );
+  const orchestratorTrace = buildOrchestratorTrace(bundle.events, bundle.workItems);
 
   async function runWorkerAction(
     roleName: string,
@@ -440,6 +551,21 @@ export function SessionDetail({
               <strong>{currentOwner}</strong>
             </div>
           </div>
+          {orchestratorTrace.length > 0 ? (
+            <div className="hero-trace">
+              <p className="hero-trace-label">Orchestrator Trace</p>
+              <div className="hero-trace-list">
+                {orchestratorTrace.map((item) => (
+                  <p className="hero-trace-item" key={`orchestrator-trace-${item.eventId}`}>
+                    {formatTraceTime(item.createdAt) ? (
+                      <span className="hero-trace-time">{formatTraceTime(item.createdAt)}</span>
+                    ) : null}
+                    {item.message}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
