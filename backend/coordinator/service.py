@@ -4995,32 +4995,15 @@ class CoordinatorService:
         for chunk in chunks:
             for marker_type, payload in self._extract_output_markers(chunk.text):
                 if marker_type == "output":
-                    output_type = payload.get("output_type")
-                    output_payload = payload.get("payload", {})
-                    if not isinstance(output_type, str) or not isinstance(output_payload, dict):
-                        continue
-                    if self._should_ignore_stale_role_output(
-                        session=current_session,
-                        role_name=role.role_name,
-                        output_type=output_type,
-                    ):
-                        self._append_event(
-                            session_id=current_session.id,
-                            event_type="stale_role_output_ignored",
-                            producer_type="coordinator",
-                            payload={
-                                "role_name": role.role_name,
-                                "output_type": output_type,
-                                "current_stage": current_session.current_stage,
-                                "current_owner": current_session.current_owner,
-                            },
-                        )
-                        continue
-                    current_session, _, _ = self.handle_role_output(
+                    self._append_event(
                         session_id=current_session.id,
-                        role_name=role.role_name,
-                        output_type=output_type,
-                        payload=output_payload,
+                        event_type="runtime_terminal_output_echo_ignored",
+                        producer_type="coordinator",
+                        payload={
+                            "role_name": role.role_name,
+                            "current_stage": current_session.current_stage,
+                            "current_owner": current_session.current_owner,
+                        },
                     )
                     continue
                 self._record_runtime_marker_artifact(

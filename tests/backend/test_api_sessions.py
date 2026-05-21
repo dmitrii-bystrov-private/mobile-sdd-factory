@@ -2103,18 +2103,13 @@ class SessionApiTests(unittest.TestCase):
             PrepareSessionRequest(task_key="IOS-40008"),
             dependencies=self.dependencies,
         )
-        active_item = next(
-            item
-            for item in self.dependencies.work_item_repository.list_for_session(prepare_response.session.id)
-            if item.work_type == "implementation" and item.status.value == "assigned"
-        )
         implementer_role = self.dependencies.role_repository.get_by_name(
             prepare_response.session.id,
             "implementer",
         )
         self.dependencies.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            f'SDD_OUTPUT: {{"output_type":"completed","payload":{{"work_item_id":{active_item.id},"summary":"done"}}}}',
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"work_item_id":123,"summary":"done"}}',
         )
 
         response = collect_role_output(
@@ -2132,8 +2127,9 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(response.collected)
         self.assertEqual(1, response.chunk_count)
         self.assertEqual("role_output_collected", response.event_type)
-        self.assertTrue(any(item.event_type == "implementation_completed" for item in events_response.items))
-        self.assertTrue(any(item.event_type == "verification_requested" for item in events_response.items))
+        self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertTrue(any(item.event_type == "runtime_terminal_output_echo_ignored" for item in events_response.items))
+        self.assertFalse(any(item.event_type == "implementation_completed" for item in events_response.items))
 
     def test_collect_role_output_route_consumes_result_json(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

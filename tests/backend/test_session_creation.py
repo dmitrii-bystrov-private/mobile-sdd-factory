@@ -4226,14 +4226,9 @@ class SessionCreationTests(unittest.TestCase):
     def test_collect_role_output_normalizes_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
-        active_item = next(
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "implementation" and item.status.value == "assigned"
-        )
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            f'SDD_OUTPUT: {{"output_type":"completed","payload":{{"work_item_id":{active_item.id},"summary":"done"}}}}',
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"work_item_id":123,"summary":"done"}}',
         )
 
         updated_session, event, chunk_count = self.coordinator.collect_role_output(
@@ -4244,23 +4239,18 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(1, chunk_count)
         self.assertEqual("role_output_collected", event.event_type)
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertTrue(any(item.event_type == "implementation_completed" for item in events))
-        self.assertTrue(any(item.event_type == "verification_requested" for item in events))
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertTrue(any(item.event_type == "runtime_terminal_output_echo_ignored" for item in events))
+        self.assertFalse(any(item.event_type == "implementation_completed" for item in events))
 
     def test_collect_role_output_normalizes_wrapped_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009WRAP")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
-        active_item = next(
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "implementation" and item.status.value == "assigned"
-        )
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
             '\n'.join(
                 [
-                    f'• SDD_OUTPUT: {{"output_type":"completed","payload":{{"work_item_id":{active_item.id},"task_key":"IOS-ACCEPT-REAL-',
+                    '• SDD_OUTPUT: {"output_type":"completed","payload":{"work_item_id":123,"task_key":"IOS-ACCEPT-REAL-',
                     '  CODEX-TWO-ROUND-847B2H6Q","result":"Applied requested acceptance change",',
                     '  "changes":["repo/placeholder_change.txt"]}}',
                 ]
@@ -4275,9 +4265,9 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(1, chunk_count)
         self.assertEqual("role_output_collected", event.event_type)
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertTrue(any(item.event_type == "implementation_completed" for item in events))
-        self.assertTrue(any(item.event_type == "verification_requested" for item in events))
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertTrue(any(item.event_type == "runtime_terminal_output_echo_ignored" for item in events))
+        self.assertFalse(any(item.event_type == "implementation_completed" for item in events))
 
     def test_collect_role_output_consumes_result_json_from_role_workspace(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009B")
