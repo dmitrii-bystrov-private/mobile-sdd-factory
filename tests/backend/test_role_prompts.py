@@ -101,6 +101,40 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("use Notion MCP for `notion.so` links", text)
         self.assertIn("treat non-Notion external links as operator-provided context references", text)
 
+    def test_full_prompt_restores_task_snapshot_path_resolution_rules(self) -> None:
+        text = role_handoff_prompt(
+            role_name="implementer",
+            instruction="Implement IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "implementation_requested",
+                "work_item_id": 10,
+                "result_path": "/tmp/roles/implementer/RESULT.json",
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("Treat paths written as `spec/...`, `review/...`, or `plan/...` as paths under the task snapshot metadata root", text)
+        self.assertIn("When the hydration payload below includes explicit absolute `*_path` fields", text)
+
+    def test_full_prompt_restores_code_scout_absolute_path_rules(self) -> None:
+        text = role_handoff_prompt(
+            role_name="code-scout",
+            instruction="Run a Boy Scout pass for IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "boy_scout_requested",
+                "work_item_id": 11,
+                "diff_path": "/tmp/IOS-123/spec/diff.md",
+                "findings_path": "/tmp/IOS-123/spec/findings.md",
+                "result_path": "/tmp/roles/code-scout/RESULT.json",
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("Start from the routed diff input when it is provided as an absolute path", text)
+        self.assertIn("write them to the routed findings target when it is provided as an absolute path", text)
+
     def test_full_prompt_restores_acceptance_criteria_format_contract(self) -> None:
         text = role_handoff_prompt(
             role_name="acceptance-criteria-worker",

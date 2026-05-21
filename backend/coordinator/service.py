@@ -4838,8 +4838,8 @@ class CoordinatorService:
             stage_name="boy_scout_requested",
             instruction=(
                 f"Run a Boy Scout maintainability pass for {session.task_key}. "
-                "Start from `spec/diff.md`, inspect only the highest-signal changed files, "
-                "write `spec/findings.md` only when real maintainability findings exist, "
+                "Start from the routed diff input, inspect only the highest-signal changed files, "
+                "write the routed findings target only when real maintainability findings exist, "
                 "and otherwise return a clean result."
             ),
             extra_hydration={
@@ -5705,15 +5705,15 @@ class CoordinatorService:
             if policy_mode == "required":
                 return (
                     f"Run a Boy Scout maintainability pass for {task_key}. "
-                    "Start from `spec/diff.md`, inspect only the highest-signal changed files, "
-                    "write `spec/findings.md` only when real maintainability findings exist, "
+                    "Start from the routed diff input, inspect only the highest-signal changed files, "
+                    "write the routed findings target only when real maintainability findings exist, "
                     "and otherwise report a clean result. "
                     "This Boy Scout lane is required for this session, so do not emit skipped_not_needed."
                 )
             return (
                 f"Run a Boy Scout maintainability pass for {task_key}. "
-                "Start from `spec/diff.md`, inspect only the highest-signal changed files, "
-                "write `spec/findings.md` only when real maintainability findings exist, "
+                "Start from the routed diff input, inspect only the highest-signal changed files, "
+                "write the routed findings target only when real maintainability findings exist, "
                 "and otherwise report a clean result. "
                 "Emit skipped_not_needed when the change surface is too weak to justify a meaningful maintainability pass."
             )

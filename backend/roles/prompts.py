@@ -49,9 +49,9 @@ def role_runtime_rules(role_name: str) -> str:
         return (
             "Role-specific rules:\n"
             "- Treat this role as a bounded one-shot worker: run a Boy Scout pass, write the routed result, and exit.\n"
-            "- Start from `spec/diff.md` and inspect only the most promising changed files for maintainability signals.\n"
+            "- Start from the routed diff input when it is provided as an absolute path; otherwise resolve `spec/diff.md` relative to the task snapshot metadata root from AGENTS.md, not relative to the current role workspace.\n"
             "- If signals are weak or no real maintainability issues are found, report a clean result and stop.\n"
-            "- If real maintainability findings exist, write them to `spec/findings.md`, summarize them compactly, and stop without modifying product code.\n\n"
+            "- If real maintainability findings exist, write them to the routed findings target when it is provided as an absolute path; otherwise resolve `spec/findings.md` relative to the task snapshot metadata root from AGENTS.md.\n\n"
         )
     if role_name == "mr-comments-analyst-worker":
         return (
@@ -191,6 +191,9 @@ def role_handoff_prompt(
         "- Set `needs_operator_input: true` only when you are explicitly waiting for a direct operator reply in this same live session.\n"
         "- Set `needs_operator_input: false` for runtime/tooling failures, missing diagnostics, MCP/network blockers, or other cases that need recovery rather than a direct reply.\n"
         'SDD_ERROR: {"summary":"short error summary","details":"optional detail","needs_operator_input":false}\n\n'
+        "Path resolution rules:\n"
+        "- Treat paths written as `spec/...`, `review/...`, or `plan/...` as paths under the task snapshot metadata root from AGENTS.md, not as paths relative to the current role workspace.\n"
+        "- When the hydration payload below includes explicit absolute `*_path` fields, prefer those exact paths over reconstructing task paths yourself.\n\n"
         "Required terminal outcome path:\n"
         f"- Write `RESULT.json` exactly to `{result_path_text}` using the same JSON object you would place after `SDD_OUTPUT:` before you finish the turn.\n"
         "- Do not place `RESULT.json` in the task root, `spec/`, `plan/`, or any directory other than the exact terminal result target above.\n"

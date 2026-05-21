@@ -444,6 +444,8 @@ def build_role_agents_md(
             "- Re-read this file after context compaction or if role boundaries become unclear.",
             "- Use coordinator hydration and routed work instructions as the current task payload.",
             "- Treat this file as durable role context; treat routed handoff prompts as per-work instructions.",
+            "- Paths written as `spec/...`, `review/...`, or `plan/...` refer to the task snapshot metadata root listed above, not to this role workspace current directory.",
+            "- When hydration or the relevant-path list provides explicit absolute `*_path` values, use those exact paths directly instead of reconstructing task paths relative to the current directory.",
             f"- For terminal outcomes, write `RESULT.json` exactly to `{role_directory / 'RESULT.json'}` with a JSON object shaped like `{{\\\"output_type\\\":\\\"completed\\\",\\\"payload\\\":{{...}}}}` before you finish the turn.",
             "- Do not place `RESULT.json` in the task root, `spec/`, `plan/`, or any directory other than that exact terminal result target.",
             "- When the routed hydration payload includes `work_item_id`, echo that same `work_item_id` back inside the terminal payload. When it also includes `subtask_key`, echo that same `subtask_key` back unchanged too.",
