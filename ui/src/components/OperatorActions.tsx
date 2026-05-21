@@ -99,9 +99,12 @@ export function OperatorActions({
     ["implementation_requested", "subtask_implementation_requested"].includes(session.current_stage);
   const canCreateSubtasksFromPlan =
     session.workflow_profile === "story_full" &&
-    session.status === "waiting_for_operator" &&
     session.current_stage === "subtask_creation_requested" &&
-    interactiveStateSummary?.sourceReason === "subtask_creation_failed";
+    (
+      interactiveStateSummary?.sourceReason === "subtask_creation_failed" ||
+      session.status === "active" ||
+      session.status === "waiting_for_operator"
+    );
   const hasStageSpecificDeliveryRetry =
     session.current_stage === "mr_handoff_failed" ||
     session.current_stage === "send_to_test_failed";
@@ -116,6 +119,8 @@ export function OperatorActions({
     session.status === "waiting_for_operator" &&
     !needsInteractiveReply &&
     interactiveStateSummary?.sourceReason !== "boy_scout_findings" &&
+    interactiveStateSummary?.sourceReason !== "subtask_creation_failed" &&
+    session.current_stage !== "subtask_creation_requested" &&
     !hasStageSpecificDeliveryRetry &&
     !requiresRuntimeReactivation;
   const dailyActions: ActionDefinition[] = [];
