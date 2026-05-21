@@ -86,7 +86,10 @@ if [[ ${#SELECTED_TASK_FILES[@]} -gt 0 ]]; then
   done
 else
   declare -a INDEX_TASK_FILES=()
-  mapfile -t INDEX_TASK_FILES < <(grep -oE '\(\./[^)]+\.md\)' "$INDEX_FILE" | tr -d '()') || true
+  while IFS= read -r task_file; do
+    [[ -n "$task_file" ]] || continue
+    INDEX_TASK_FILES+=("$task_file")
+  done < <(grep -oE '\(\./[^)]+\.md\)' "$INDEX_FILE" | tr -d '()')
   for task_file in "${INDEX_TASK_FILES[@]}"; do
     TASK_FILES+=("$PLAN_DIR/${task_file#./}")
   done
