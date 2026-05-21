@@ -86,7 +86,7 @@ if [[ ${#SELECTED_TASK_FILES[@]} -gt 0 ]]; then
   done
 else
   declare -a INDEX_TASK_FILES=()
-  IFS=$'\n' read -r -d '' -a INDEX_TASK_FILES < <(grep -oE '\(\./[^)]+\.md\)' "$INDEX_FILE" | tr -d '()' && printf '\0') || true
+  mapfile -t INDEX_TASK_FILES < <(grep -oE '\(\./[^)]+\.md\)' "$INDEX_FILE" | tr -d '()') || true
   for task_file in "${INDEX_TASK_FILES[@]}"; do
     TASK_FILES+=("$PLAN_DIR/${task_file#./}")
   done
