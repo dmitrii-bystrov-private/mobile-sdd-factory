@@ -4098,6 +4098,11 @@ class SessionCreationTests(unittest.TestCase):
 
     def test_poll_session_output_consumes_result_json_from_role_workspace(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30008B")
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
         role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
             session.task_key,
             "implementer",
@@ -4107,7 +4112,7 @@ class SessionCreationTests(unittest.TestCase):
             json.dumps(
                 {
                     "output_type": "completed",
-                    "payload": {"summary": "done from file"},
+                    "payload": {"work_item_id": active_item.id, "summary": "done from file"},
                 }
             )
         )
@@ -4127,6 +4132,11 @@ class SessionCreationTests(unittest.TestCase):
 
     def test_poll_session_output_consumes_result_json_with_raw_newline_in_string(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30008BRAW")
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
         role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
             session.task_key,
             "implementer",
@@ -4136,6 +4146,7 @@ class SessionCreationTests(unittest.TestCase):
             '{\n'
             '  "output_type": "completed",\n'
             '  "payload": {\n'
+            f'    "work_item_id": {active_item.id},\n'
             '    "summary": "done from file",\n'
             '    "notes": [\n'
             '      "Line one.\n'
@@ -4215,9 +4226,14 @@ class SessionCreationTests(unittest.TestCase):
     def test_collect_role_output_normalizes_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"done"}}',
+            f'SDD_OUTPUT: {{"output_type":"completed","payload":{{"work_item_id":{active_item.id},"summary":"done"}}}}',
         )
 
         updated_session, event, chunk_count = self.coordinator.collect_role_output(
@@ -4235,11 +4251,16 @@ class SessionCreationTests(unittest.TestCase):
     def test_collect_role_output_normalizes_wrapped_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009WRAP")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
             '\n'.join(
                 [
-                    '• SDD_OUTPUT: {"output_type":"completed","payload":{"task_key":"IOS-ACCEPT-REAL-',
+                    f'• SDD_OUTPUT: {{"output_type":"completed","payload":{{"work_item_id":{active_item.id},"task_key":"IOS-ACCEPT-REAL-',
                     '  CODEX-TWO-ROUND-847B2H6Q","result":"Applied requested acceptance change",',
                     '  "changes":["repo/placeholder_change.txt"]}}',
                 ]
@@ -4260,6 +4281,11 @@ class SessionCreationTests(unittest.TestCase):
 
     def test_collect_role_output_consumes_result_json_from_role_workspace(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009B")
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
         role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
             session.task_key,
             "implementer",
@@ -4269,7 +4295,7 @@ class SessionCreationTests(unittest.TestCase):
             json.dumps(
                 {
                     "output_type": "completed",
-                    "payload": {"summary": "done from file"},
+                    "payload": {"work_item_id": active_item.id, "summary": "done from file"},
                 }
             )
         )

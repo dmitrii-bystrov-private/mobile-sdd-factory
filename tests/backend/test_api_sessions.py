@@ -2103,13 +2103,18 @@ class SessionApiTests(unittest.TestCase):
             PrepareSessionRequest(task_key="IOS-40008"),
             dependencies=self.dependencies,
         )
+        active_item = next(
+            item
+            for item in self.dependencies.work_item_repository.list_for_session(prepare_response.session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
         implementer_role = self.dependencies.role_repository.get_by_name(
             prepare_response.session.id,
             "implementer",
         )
         self.dependencies.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"done"}}',
+            f'SDD_OUTPUT: {{"output_type":"completed","payload":{{"work_item_id":{active_item.id},"summary":"done"}}}}',
         )
 
         response = collect_role_output(
@@ -2135,6 +2140,11 @@ class SessionApiTests(unittest.TestCase):
             PrepareSessionRequest(task_key="IOS-40008B"),
             dependencies=self.dependencies,
         )
+        active_item = next(
+            item
+            for item in self.dependencies.work_item_repository.list_for_session(prepare_response.session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
         role_workspace = self.dependencies.coordinator_service.role_workspace_manager.role_directory(  # type: ignore[union-attr]
             "IOS-40008B",
             "implementer",
@@ -2144,7 +2154,7 @@ class SessionApiTests(unittest.TestCase):
             json.dumps(
                 {
                     "output_type": "completed",
-                    "payload": {"summary": "done from file"},
+                    "payload": {"work_item_id": active_item.id, "summary": "done from file"},
                 }
             )
         )

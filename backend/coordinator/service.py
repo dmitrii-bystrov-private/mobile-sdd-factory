@@ -2037,19 +2037,27 @@ class CoordinatorService:
         output_type: str,
         output_payload: dict,
     ) -> dict[str, str | int | None] | None:
-        if (
-            role_name != IMPLEMENTER_ROLE
-            or output_type != "completed"
-            or session.current_stage != "subtask_implementation_requested"
-        ):
+        if role_name not in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE} or output_type != "completed":
             return None
 
         active_item = self._find_active_primary_coding_work_item(session)
         if active_item is None:
             return None
 
-        expected_subtask_key = self._parse_subtask_work_item_title(active_item.title)["key"]
         payload_work_item_id = output_payload.get("work_item_id")
+        if payload_work_item_id != active_item.id:
+            return {
+                "reason": "address_mismatch",
+                "expected_work_item_id": active_item.id,
+                "payload_work_item_id": payload_work_item_id if isinstance(payload_work_item_id, int) else None,
+                "expected_subtask_key": None,
+                "payload_subtask_key": None,
+            }
+
+        if active_item.work_type != "subtask_implementation":
+            return None
+
+        expected_subtask_key = self._parse_subtask_work_item_title(active_item.title)["key"]
         payload_subtask_key = output_payload.get("subtask_key")
         normalized_payload_subtask_key = (
             payload_subtask_key.strip()
@@ -2057,13 +2065,13 @@ class CoordinatorService:
             else None
         )
 
-        if payload_work_item_id == active_item.id and normalized_payload_subtask_key == expected_subtask_key:
+        if normalized_payload_subtask_key == expected_subtask_key:
             return None
 
         return {
             "reason": "address_mismatch",
             "expected_work_item_id": active_item.id,
-            "payload_work_item_id": payload_work_item_id if isinstance(payload_work_item_id, int) else None,
+            "payload_work_item_id": payload_work_item_id,
             "expected_subtask_key": expected_subtask_key,
             "payload_subtask_key": normalized_payload_subtask_key,
         }
