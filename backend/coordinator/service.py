@@ -1479,7 +1479,7 @@ class CoordinatorService:
             },
         )
 
-        if session.status == SessionStatus.COMPLETED and session.workflow_profile == "story_full":
+        if session.status == SessionStatus.COMPLETED:
             subtasks = self._read_snapshot_subtasks(session.task_key)
             unresolved = unresolved_subtasks(subtasks) if subtasks is not None else []
             decomposition_artifact = self._latest_artifact_for_session_type(

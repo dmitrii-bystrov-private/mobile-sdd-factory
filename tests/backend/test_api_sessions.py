@@ -1022,6 +1022,43 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("subtask_implementation_requested", response.session.current_stage)
         self.assertEqual("active", response.session.status)
 
+    def test_refresh_snapshot_route_reopens_completed_oneshot_into_subtask_execution(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005SNAPONE", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        session_id = create_response.session.id
+        self.dependencies.session_repository.update_stage_and_owner(
+            session_id,
+            current_stage="send_to_test_completed",
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(session_id, SessionStatus.COMPLETED)
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-40005SNAPONE",
+            "\n".join(
+                [
+                    "# Statuses",
+                    "",
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005SNAPONE | Story | Parent story | Ready for test |",
+                    "| IOS-40163 | Sub-task | Address review follow-up | To Do |",
+                ]
+            ),
+        )
+
+        response = refresh_snapshot(
+            RefreshSnapshotRequest(session_id=session_id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.refreshed)
+        self.assertEqual("snapshot_refreshed_by_operator", response.event_type)
+        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
+
     def test_create_session_route_rejects_irrelevant_policy_for_profile(self) -> None:
         from fastapi import HTTPException
 

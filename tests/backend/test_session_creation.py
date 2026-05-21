@@ -3619,6 +3619,48 @@ class SessionCreationTests(unittest.TestCase):
             )
         )
 
+    def test_refresh_snapshot_and_continue_reopens_completed_oneshot_into_subtask_execution(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004REOPENONESHOT",
+            workflow_profile="oneshot",
+            policy=None,
+        )
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="send_to_test_completed",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-30004REOPENONESHOT",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004REOPENONESHOT | Story | Parent story | Ready for test |
+| IOS-30064 | Sub-task | Address review follow-up | To Do |
+""",
+        )
+
+        updated_session, event, followup_event = self.coordinator.refresh_snapshot_and_continue(session.id)
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("snapshot_refreshed_by_operator", event.event_type)
+        self.assertIsNotNone(followup_event)
+        assert followup_event is not None
+        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertTrue(
+            any(
+                item.work_type == "subtask_implementation"
+                and "IOS-30064" in item.title
+                and item.status.value == "assigned"
+                for item in work_items
+            )
+        )
+
     def test_refresh_subtask_state_reconciles_remaining_queue_during_active_subtask_execution(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004REFRESHQUEUE",
