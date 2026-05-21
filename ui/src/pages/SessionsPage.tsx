@@ -340,9 +340,14 @@ export function SessionsPage(): JSX.Element {
     useState<RuntimeDefaultsSummary | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const contentTopRef = useRef<HTMLElement | null>(null);
+  const selectedSessionIdRef = useRef<number | null>(null);
 
   const selectedSession =
     sessions.find((session) => session.id === selectedSessionId) ?? null;
+
+  useEffect(() => {
+    selectedSessionIdRef.current = selectedSessionId;
+  }, [selectedSessionId]);
 
   async function loadSessions(): Promise<number | null> {
     setError(null);
@@ -429,9 +434,10 @@ export function SessionsPage(): JSX.Element {
         sourcePath: runtimeDefaultsResponse.source_path,
       });
       const availableIds = new Set(sessionResponse.items.map((session) => session.id));
+      const currentSelectedId = selectedSessionIdRef.current;
       const nextSelectedId =
-        selectedSessionId !== null && availableIds.has(selectedSessionId)
-          ? selectedSessionId
+        currentSelectedId !== null && availableIds.has(currentSelectedId)
+          ? currentSelectedId
           : sessionResponse.items[0]?.id ?? null;
       startTransition(() => {
         setSelectedSessionId(nextSelectedId);
