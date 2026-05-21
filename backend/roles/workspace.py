@@ -354,7 +354,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Treat this role as a bounded one-shot worker: analyze unresolved MR comments, write the grouped follow-up plan package, and exit.",
             "- Start from the latest MR comments artifact, group related discussions into actionable themes, and enrich them with just enough source-code context to make the plan executable.",
             "- Use `spec/context/feature-overview.md` first when it exists and pull in the rest of `spec/context/*` selectively when they clarify the expected pattern.",
-            "- Write `plan/index.md` plus one or more `plan/NN-*.md` files only with grounded task-specific content; do not modify product code.",
+            "- Write `plan/index.md` plus one or more `plan/NN-*.md` files only with grounded task-specific content; keep numbering only in filenames, not in human-facing task titles, and do not modify product code.",
         ]
     if role_name == "doc-harvest-worker":
         return [
@@ -407,6 +407,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Treat this role as a bounded one-shot worker: prepare task decomposition, write the routed result, and exit.",
             "- Start from the verified planning package, final story spec, and `spec/context/feature-overview.md`; use `relevant-code.md` and `implementation-patterns.md` when they materially affect task boundaries.",
             "- Write the decomposition package directly into `plan/` inside your role workspace: `plan/index.md` plus self-contained Markdown task files for each task.",
+            "- Keep ordering in filenames like `plan/NN-*.md`, but do not prefix the human-facing task titles or Markdown headings with `Task 01`, `Task 02`, and similar numbering.",
             "- Keep the routed output minimal: return a concise summary only after the `plan/` package is fully written.",
             "- Make every task file self-contained: copy relevant acceptance criteria, constraints, exact repo file paths, and validation steps into the task instead of pointing back to spec files.",
             "- Keep the output compact and downstream-oriented so execution can start from an explicit decomposition instead of implicit planning assumptions.",
