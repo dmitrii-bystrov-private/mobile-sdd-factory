@@ -93,10 +93,6 @@ export function OperatorActions({
     session.status === "waiting_for_operator" &&
     session.current_stage === "subtask_creation_requested" &&
     interactiveStateSummary?.sourceReason === "subtask_creation_failed";
-  const canRefreshSubtaskState =
-    session.status === "active" &&
-    session.workflow_profile === "story_full" &&
-    ["implementation_requested", "subtask_implementation_requested"].includes(session.current_stage);
   const canCreateSubtasksFromPlan =
     session.workflow_profile === "story_full" &&
     session.current_stage === "subtask_creation_requested" &&
@@ -131,14 +127,6 @@ export function OperatorActions({
     disabled: busy || !canRefreshSnapshot,
     onClick: () => run(() => apiClient.refreshSnapshot(session.id)),
   });
-  if (canRefreshSubtaskState) {
-    dailyActions.push({
-      label: "Refresh Subtask State",
-      description: "Refresh Jira subtask state and reconcile the remaining story execution queue around the currently active subtask.",
-      disabled: busy,
-      onClick: () => run(() => apiClient.refreshSubtaskState(session.id)),
-    });
-  }
   if (runtimeStateSummary?.available) {
     const visibleRuntimeRoles = runtimeStateSummary.roles.filter((role) => role.roleName !== "task-coordinator");
     runtimeSessionActions.push({
