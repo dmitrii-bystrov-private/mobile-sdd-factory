@@ -1442,8 +1442,49 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Run deterministic verification for IOS-30003.", sent_inputs[0])
         self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[0])
         self.assertIn("Role-specific rules:", sent_inputs[0])
-        self.assertIn("Use `run-test.sh` and `run-lint.sh`; do not run `run-build.sh` here.", sent_inputs[0])
+        self.assertIn("Start from the routed verification strategy file", sent_inputs[0])
+        self.assertIn("Always invoke the wrappers with the current task key", sent_inputs[0])
         self.assertIn("verification_report_path", sent_inputs[0])
+        self.assertIn("verification_strategy_path", sent_inputs[0])
+
+    def test_verification_dispatch_materializes_strategy_file(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERSTRAT")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        strategy_path = Path(self.temp_dir.name) / "IOS-30003VERSTRAT" / "spec" / "verification-strategy.json"
+        self.assertTrue(strategy_path.exists())
+        strategy = json.loads(strategy_path.read_text())
+        self.assertEqual("android", strategy["platform"])
+        self.assertEqual("broad_safe_gate", strategy["mode"])
+        self.assertEqual(["test", "lint"], strategy["phases"])
+
+    def test_verification_dispatch_materializes_ios_strategy_context(self) -> None:
+        task_root = Path(self.temp_dir.name) / "IOS-30003VERIOS"
+        repo_root = task_root / "repo" / "Tools" / "buildscripts"
+        repo_root.mkdir(parents=True, exist_ok=True)
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERIOS")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        strategy_path = task_root / "spec" / "verification-strategy.json"
+        self.assertTrue(strategy_path.exists())
+        strategy = json.loads(strategy_path.read_text())
+        self.assertEqual("ios", strategy["platform"])
+        self.assertEqual(
+            ["prepare", "build_for_testing", "test_without_building", "lint"],
+            strategy["phases"],
+        )
+        self.assertEqual(
+            str(task_root / "tmp" / "verification" / "ios" / "derived-data"),
+            strategy["ios_context"]["derived_data_path"],
+        )
 
     def test_implementation_completed_routes_to_reviewer_when_self_review_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -3923,6 +3964,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("If the routed work is a narrow correction pass", sent_inputs[-1])
         self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
         self.assertTrue(verification_report.exists())
+        self.assertIn("## Strategy", verification_report.read_text())
+        self.assertIn("Mode: broad_safe_gate", verification_report.read_text())
         self.assertIn("## Result", verification_report.read_text())
         self.assertIn("FAIL", verification_report.read_text())
         self.assertIn("## Output: run-test.sh", verification_report.read_text())
@@ -4152,6 +4195,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("completed", updated_session.status.value)
         self.assertEqual("send_to_test_completed", followup_event.event_type)
         self.assertTrue(verification_report.exists())
+        self.assertIn("## Strategy", verification_report.read_text())
         self.assertIn("PASS", verification_report.read_text())
         self.assertEqual(
             sorted(

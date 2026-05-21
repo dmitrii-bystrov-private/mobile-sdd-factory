@@ -13,6 +13,7 @@ from backend.api.sse import SessionEventBus
 from backend.coordinator.artifacts import write_text_artifact
 from backend.coordinator.intake import IntakeError, classify_task_readiness
 from backend.coordinator.subtasks import completed_subtasks, read_snapshot_subtasks, unresolved_subtasks
+from backend.coordinator.verification_strategy import materialize_verification_strategy
 from backend.coordinator.hydration import build_role_hydration
 from backend.models.event import Event
 from backend.models.artifact import Artifact
@@ -4628,9 +4629,26 @@ class CoordinatorService:
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         verification_report_path = None
+        verification_strategy = None
+        verification_strategy_path = None
         if self.workdir_root is not None:
             verification_report_path = str(
                 self.workdir_root / session.task_key / "spec" / "final-verification.md"
+            )
+            verification_strategy, verification_strategy_file = materialize_verification_strategy(
+                task_key=session.task_key,
+                workdir_root=self.workdir_root,
+            )
+            verification_strategy_path = str(verification_strategy_file)
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="verification_requested",
+                artifact_type="verification_strategy_json",
+                path=verification_strategy_path,
+                metadata={
+                    "platform": str(verification_strategy.get("platform") or "unknown"),
+                    "mode": str(verification_strategy.get("mode") or "unknown"),
+                },
             )
         self._dispatch_role_work(
             session=session,
@@ -4639,12 +4657,48 @@ class CoordinatorService:
             stage_name="verification_requested",
             instruction=(
                 f"Run deterministic verification for {session.task_key}. "
-                "Treat this as a fresh workflow-level gate: run `run-test.sh` and `run-lint.sh`, "
-                "do not run `run-build.sh`, do not modify code, and refresh the final verification evidence."
+                "Treat this as a fresh workflow-level gate: start from the routed verification strategy, "
+                "run `run-test.sh` and `run-lint.sh`, do not run `run-build.sh`, "
+                "do not modify code, and refresh the final verification evidence."
             ),
             extra_hydration={
                 "verification_gate": "run-test.sh + run-lint.sh",
                 "verification_report_path": verification_report_path,
+                "verification_strategy_path": verification_strategy_path,
+                "verification_platform": (
+                    str(verification_strategy.get("platform") or "") if verification_strategy else None
+                ),
+                "verification_strategy_mode": (
+                    str(verification_strategy.get("mode") or "") if verification_strategy else None
+                ),
+                "verification_strategy_reason": (
+                    str(verification_strategy.get("reason") or "") if verification_strategy else None
+                ),
+                "verification_context_root": (
+                    str((verification_strategy.get("ios_context") or {}).get("context_root") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_derived_data_path": (
+                    str((verification_strategy.get("ios_context") or {}).get("derived_data_path") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_xcresult_root": (
+                    str((verification_strategy.get("ios_context") or {}).get("xcresult_root") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_cloned_source_packages_path": (
+                    str((verification_strategy.get("ios_context") or {}).get("cloned_source_packages_path") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_logs_path": (
+                    str((verification_strategy.get("ios_context") or {}).get("logs_path") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
             },
         )
         event = self._append_event(
@@ -6679,7 +6733,34 @@ class CoordinatorService:
                     if rendered_name and rendered_value:
                         rendered_outputs.append((rendered_name, rendered_value))
             passed = source_event.event_type == "verification_passed"
+            strategy_lines: list[str] = []
+            strategy_path = spec_root / "verification-strategy.json"
+            if strategy_path.is_file():
+                try:
+                    strategy = json.loads(strategy_path.read_text())
+                except json.JSONDecodeError:
+                    strategy = None
+                if isinstance(strategy, dict):
+                    platform = str(strategy.get("platform") or "").strip()
+                    mode = str(strategy.get("mode") or "").strip()
+                    reason = str(strategy.get("reason") or "").strip()
+                    phases = strategy.get("phases")
+                    phase_lines: list[str] = []
+                    if isinstance(phases, list):
+                        phase_lines = [str(item).strip() for item in phases if str(item).strip()]
+                    strategy_lines.extend(["## Strategy", ""])
+                    if platform:
+                        strategy_lines.append(f"- Platform: {platform}")
+                    if mode:
+                        strategy_lines.append(f"- Mode: {mode}")
+                    if phase_lines:
+                        strategy_lines.append(f"- Phases: {', '.join(phase_lines)}")
+                    if reason:
+                        strategy_lines.extend(["", "### Why This Path", "", reason])
             lines = [f"# Final Verification: {session.task_key}", ""]
+            if strategy_lines:
+                lines.extend(strategy_lines)
+                lines.append("")
             if passed:
                 lines.extend(
                     [

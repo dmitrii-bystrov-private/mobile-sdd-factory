@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/verification_context.sh
+source "$SCRIPT_DIR/lib/verification_context.sh"
+
+KEY="${1:?Usage: ios-test-without-building.sh <TASK-KEY>}"
+REPO_DIR="$(verification_resolve_repo_dir "$KEY")"
+
+cd "$REPO_DIR"
+verification_prepare_ios_context "$KEY"
+verification_source_ios_env "$REPO_DIR"
+
+if [[ -z "${TESTING_DEVICE_ID:-}" ]]; then
+  echo "⚠️  TESTING_DEVICE_ID is not set"
+  echo ""
+  echo "  Run the following to find your simulator ID:"
+  echo "  xcrun simctl list devices available | grep iPhone"
+  echo ""
+  echo "  Then add to your ~/.zshrc or ~/.bashrc:"
+  echo "  export TESTING_DEVICE_ID=\"your-device-uuid\""
+  exit 1
+fi
+
+TEST_LOG="$SDD_IOS_VERIFICATION_LOGS_PATH/test-without-building.log"
+RESULT_BUNDLE="$SDD_IOS_XCRESULT_ROOT/test-without-building.xcresult"
+
+rm -rf "$RESULT_BUNDLE"
+echo "⏳ Running tests without rebuilding on device: $TESTING_DEVICE_ID..."
+if xcodebuild \
+  -workspace Finom-Tuist.xcworkspace \
+  -scheme Finom \
+  -destination "platform=iOS Simulator,id=$TESTING_DEVICE_ID" \
+  -derivedDataPath "$SDD_IOS_DERIVED_DATA_PATH" \
+  -clonedSourcePackagesDirPath "$SDD_IOS_CLONED_SOURCE_PACKAGES_PATH" \
+  -resultBundlePath "$RESULT_BUNDLE" \
+  test-without-building \
+  CODE_SIGN_IDENTITY="" \
+  CODE_SIGNING_REQUIRED=NO >"$TEST_LOG" 2>&1; then
+  echo "✅ TEST SUCCEEDED"
+  exit 0
+fi
+
+echo "❌ TEST FAILED"
+echo ""
+verification_print_failure_matches "$TEST_LOG" "error:|failed:|: FAILED|Testing failed:|encountered an error|Failed to (load|create|initialize)"
+exit 1

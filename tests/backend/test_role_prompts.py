@@ -56,10 +56,12 @@ class RolePromptTests(unittest.TestCase):
                 "task_key": "IOS-123",
                 "current_stage": "verification_requested",
                 "work_item_id": 8,
+                "verification_strategy_path": "/tmp/IOS-123/spec/verification-strategy.json",
             },
             prompt_mode="full",
         )
 
+        self.assertIn("Start from the routed verification strategy file", text)
         self.assertIn("Always write or refresh `spec/final-verification.md`", text)
         self.assertIn("failed checks and their relevant command output", text)
         self.assertIn('bash scripts/run-test.sh "$SDD_FACTORY_TASK_KEY"', text)

@@ -66,6 +66,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task artifacts and verification outputs: `{task_artifacts_root}`",
             "- Build/test/lint wrappers: `{repo_root}/scripts/run-build.sh`, `{repo_root}/scripts/run-test.sh`, `{repo_root}/scripts/run-lint.sh`",
             "- Final verification report target: `{task_snapshot_root}/spec/final-verification.md`",
+            "- Verification strategy input: `{task_snapshot_root}/spec/verification-strategy.json`",
         ]
     if role_name == "code-reviewer":
         return [
@@ -309,7 +310,9 @@ def _role_operating_rules(role_name: str) -> list[str]:
     if role_name == "verification-coordinator":
         return [
             "- Run only deterministic verification work for the routed task session.",
+            "- Start from the routed verification strategy file when it is provided and preserve its selected gate unless a clear repo signal forces a broader fallback.",
             "- Treat `run-test.sh` and `run-lint.sh` as the workflow-level verification gate. Always run them with the current task key, for example `bash scripts/run-test.sh \"$SDD_FACTORY_TASK_KEY\"` and `bash scripts/run-lint.sh \"$SDD_FACTORY_TASK_KEY\"`; do not run `run-build.sh` here.",
+            "- For iOS tasks, prefer the routed task-local verification context paths for DerivedData, xcresult bundles, cloned source packages, and logs instead of relying on shared global Xcode state.",
             "- Always treat each verification round as a fresh deterministic gate and refresh the verification evidence.",
             "- Always write or refresh `spec/final-verification.md` for the current round; on failure include the failed checks and their relevant command output.",
             "- Keep the role evidence-first: summarize failures, but do not attempt fixes.",
