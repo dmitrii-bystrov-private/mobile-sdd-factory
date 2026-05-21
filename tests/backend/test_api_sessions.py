@@ -2939,6 +2939,27 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("implementer", response.role_name)
         self.assertIn("live output line", response.content)
 
+    def test_get_active_runtime_output_route_hides_output_for_completed_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013RODONE"),
+            dependencies=self.dependencies,
+        )
+        session_id = prepare_response.session.id
+        implementer_role = self.dependencies.role_repository.get_by_name(session_id, "implementer")
+        assert implementer_role is not None
+        assert implementer_role.runtime_handle is not None
+        self.dependencies.session_backend.queue_output(implementer_role.runtime_handle, "stale output line\n")
+        self.dependencies.session_repository.update_status(session_id, SessionStatus.COMPLETED)
+
+        response = get_active_runtime_output(
+            session_id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertFalse(response.available)
+        self.assertIsNone(response.role_name)
+        self.assertEqual("", response.content)
+
     def test_stop_runtime_role_route_stops_role_and_pauses_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40013S"),
