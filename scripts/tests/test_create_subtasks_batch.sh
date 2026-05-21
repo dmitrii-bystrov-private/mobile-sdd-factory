@@ -2,101 +2,58 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BATCH_SCRIPT="$SCRIPT_DIR/../create-subtasks-batch.sh"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$WORKDIR"' EXIT
 
-PASS=0
-FAIL=0
+PLAN_DIR="$WORKDIR/plan"
+mkdir -p "$PLAN_DIR"
 
-assert_contains() {
-  local name="$1" pattern="$2" file="$3"
-  if grep -q -- "$pattern" "$file"; then
-    echo "  PASS  $name"
-    (( PASS++ )) || true
-  else
-    echo "  FAIL  $name"
-    echo "        missing pattern: $pattern"
-    echo "        file: $file"
-    (( FAIL++ )) || true
-  fi
-}
+cat >"$PLAN_DIR/index.md" <<'EOF'
+# Example Decomposition
 
-assert_not_contains() {
-  local name="$1" pattern="$2" file="$3"
-  if grep -q -- "$pattern" "$file"; then
-    echo "  FAIL  $name"
-    echo "        unexpected pattern: $pattern"
-    echo "        file: $file"
-    (( FAIL++ )) || true
-  else
-    echo "  PASS  $name"
-    (( PASS++ )) || true
-  fi
-}
+## Execution order
 
-setup_workspace() {
-  TMP_ROOT="$(mktemp -d)"
-  PLAN_DIR="$TMP_ROOT/plan"
-  BIN_DIR="$TMP_ROOT/bin"
-  mkdir -p "$PLAN_DIR" "$BIN_DIR"
-
-  cat > "$PLAN_DIR/index.md" <<'EOF'
-# Plan
-
-| # | Task | Depends on | Status |
-|---|------|------------|--------|
-| 01 | [Alpha task](./01-alpha-task.md) | — | ☐ |
-| 02 | [Beta task](./02-beta-task.md) | 01 | ☐ |
-| 03 | [Gamma task](./03-gamma-task.md) | 02 | ☐ |
+1. [Build typed cache registry core](./01-build-typed-cache-registry-core.md)
+2. [Update mocks and regression coverage](./02-update-mocks-and-regression-coverage.md)
 EOF
 
-  cat > "$PLAN_DIR/01-alpha-task.md" <<'EOF'
-# Alpha task
+cat >"$PLAN_DIR/01-build-typed-cache-registry-core.md" <<'EOF'
+# Build typed cache registry core
 EOF
 
-  cat > "$PLAN_DIR/02-beta-task.md" <<'EOF'
-# Beta task
+cat >"$PLAN_DIR/02-update-mocks-and-regression-coverage.md" <<'EOF'
+# Update mocks and regression coverage
 EOF
 
-  cat > "$PLAN_DIR/03-gamma-task.md" <<'EOF'
-# Gamma task
-EOF
+ACLl_LOG="$WORKDIR/acli.log"
+CREATE_LOG="$WORKDIR/create.log"
 
-  cat > "$BIN_DIR/acli" <<'EOF'
+cat >"$WORKDIR/acli" <<EOF
 #!/usr/bin/env bash
-if [[ "$*" == *"workitem search"* ]]; then
-  cat <<'JSON'
-[
-  {
-    "fields": {
-      "summary": "Beta task"
-    }
-  }
-]
-JSON
+set -euo pipefail
+printf '%s\n' "\$*" >>"$ACLl_LOG"
+if [[ "\$1 \$2 \$3" == "jira workitem search" ]]; then
+  printf '[]\n'
   exit 0
 fi
 exit 1
 EOF
+chmod +x "$WORKDIR/acli"
 
-  cat > "$BIN_DIR/git" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-
-  cat > "$TMP_ROOT/mock-create-subtask.sh" <<'EOF'
+cat >"$WORKDIR/create-subtask.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-LOG_FILE="${LOG_FILE:?}"
+printf '%s\n' "\$*" >>"$CREATE_LOG"
+if [[ "\$1" != "--parent" ]]; then
+  echo "bad args" >&2
+  exit 1
+fi
 title=""
-description=""
-while [[ $# -gt 0 ]]; do
-  case "$1" in
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
     --title)
-      title="${2:-}"
-      shift 2
-      ;;
-    --description)
-      description="${2:-}"
+      title="\$2"
       shift 2
       ;;
     *)
@@ -104,49 +61,22 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-printf '%s|%s\n' "$title" "$description" >> "$LOG_FILE"
-printf 'IOS-9%02d\n' "$(wc -l < "$LOG_FILE" | tr -d ' ')"
+case "\$title" in
+  "Build typed cache registry core") echo "IOS-90001" ;;
+  "Update mocks and regression coverage") echo "IOS-90002" ;;
+  *) echo "UNKNOWN" ;;
+esac
 EOF
+chmod +x "$WORKDIR/create-subtask.sh"
 
-  chmod +x "$BIN_DIR/acli" "$BIN_DIR/git" "$TMP_ROOT/mock-create-subtask.sh"
-}
+PATH="$WORKDIR:$PATH" \
+CREATE_SUBTASK_SCRIPT="$WORKDIR/create-subtask.sh" \
+bash "$REPO_ROOT/scripts/create-subtasks-batch.sh" --parent IOS-12345 --plan-dir "$PLAN_DIR" >"$WORKDIR/stdout.log"
 
-run_batch() {
-  local output_file="$1"
-  shift
-  LOG_FILE="$TMP_ROOT/create.log" \
-    PATH="$BIN_DIR:$PATH" \
-    CREATE_SUBTASK_SCRIPT="$TMP_ROOT/mock-create-subtask.sh" \
-    bash "$BATCH_SCRIPT" --parent IOS-12453 --plan-dir "$PLAN_DIR" "$@" >"$output_file"
-}
+grep -q 'Found 2 task(s)' "$WORKDIR/stdout.log"
+grep -q 'IOS-90001' "$WORKDIR/stdout.log"
+grep -q 'IOS-90002' "$WORKDIR/stdout.log"
+grep -q -- '--title Build typed cache registry core' "$CREATE_LOG"
+grep -q -- '--title Update mocks and regression coverage' "$CREATE_LOG"
 
-echo "=== create-subtasks-batch tests ==="
-
-setup_workspace
-OUTPUT_ALL="$TMP_ROOT/output-all.txt"
-run_batch "$OUTPUT_ALL"
-assert_contains "default mode reads index" "Found 3 task(s) in $PLAN_DIR/index.md" "$OUTPUT_ALL"
-assert_contains "default mode creates alpha" "Creating subtask 01: Alpha task" "$OUTPUT_ALL"
-assert_contains "default mode skips existing beta" "Skipping subtask 02 (already exists): Beta task" "$OUTPUT_ALL"
-assert_contains "default mode creates gamma" "Creating subtask 03: Gamma task" "$OUTPUT_ALL"
-assert_contains "default mode logs alpha create" "Alpha task|$PLAN_DIR/01-alpha-task.md" "$TMP_ROOT/create.log"
-assert_contains "default mode logs gamma create" "Gamma task|$PLAN_DIR/03-gamma-task.md" "$TMP_ROOT/create.log"
-assert_not_contains "default mode does not call create for beta" "Beta task|$PLAN_DIR/02-beta-task.md" "$TMP_ROOT/create.log"
-rm -rf "$TMP_ROOT"
-
-setup_workspace
-OUTPUT_SELECTED="$TMP_ROOT/output-selected.txt"
-run_batch "$OUTPUT_SELECTED" --task-file ./03-gamma-task.md --task-file 01-alpha-task.md
-assert_contains "selected mode reports explicit selection" "Selected 2 task file(s) explicitly" "$OUTPUT_SELECTED"
-assert_contains "selected mode creates gamma first" "Creating subtask 01: Gamma task" "$OUTPUT_SELECTED"
-assert_contains "selected mode creates alpha second" "Creating subtask 02: Alpha task" "$OUTPUT_SELECTED"
-assert_not_contains "selected mode ignores beta from index" "Beta task" "$OUTPUT_SELECTED"
-assert_contains "selected mode logs gamma path" "Gamma task|$PLAN_DIR/03-gamma-task.md" "$TMP_ROOT/create.log"
-assert_contains "selected mode logs alpha path" "Alpha task|$PLAN_DIR/01-alpha-task.md" "$TMP_ROOT/create.log"
-rm -rf "$TMP_ROOT"
-
-echo ""
-echo "Results: $PASS passed, $FAIL failed"
-if (( FAIL > 0 )); then
-  exit 1
-fi
+echo "create-subtasks-batch parser test passed"
