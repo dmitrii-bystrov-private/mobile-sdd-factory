@@ -38,7 +38,7 @@ const SURFACE_TILES: Array<{
   {
     view: "runs",
     label: "Runs",
-    description: "Workflow runs",
+    description: "Live activity",
   },
   {
     view: "settings",
