@@ -1466,6 +1466,15 @@ class SessionCreationTests(unittest.TestCase):
         task_root = Path(self.temp_dir.name) / "IOS-30003VERIOS"
         repo_root = task_root / "repo" / "Tools" / "buildscripts"
         repo_root.mkdir(parents=True, exist_ok=True)
+        spec_root = task_root / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        (spec_root / "diff.md").write_text(
+            "# Diff Artifact: IOS-30003VERIOS\n\n"
+            "## Changed Files\n\n"
+            "| Status | Path |\n"
+            "|---|---|\n"
+            "| modified | Finom/FinomTests/Sources/Feature/ExampleTests.swift |\n"
+        )
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERIOS")
         self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -1477,14 +1486,43 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(strategy_path.exists())
         strategy = json.loads(strategy_path.read_text())
         self.assertEqual("ios", strategy["platform"])
+        self.assertEqual("ios_test_scope_gate", strategy["mode"])
         self.assertEqual(
             ["prepare", "build_for_testing", "test_without_building", "lint"],
             strategy["phases"],
         )
+        self.assertEqual("reuse_if_available", strategy["prepare"]["policy"])
+        self.assertTrue(strategy["signals"]["tests_only"])
         self.assertEqual(
             str(task_root / "tmp" / "verification" / "ios" / "derived-data"),
             strategy["ios_context"]["derived_data_path"],
         )
+
+    def test_verification_dispatch_marks_ios_prepare_sensitive_changes_required(self) -> None:
+        task_root = Path(self.temp_dir.name) / "IOS-30003VERPREP"
+        repo_root = task_root / "repo" / "Tools" / "buildscripts"
+        repo_root.mkdir(parents=True, exist_ok=True)
+        spec_root = task_root / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        (spec_root / "diff.md").write_text(
+            "# Diff Artifact: IOS-30003VERPREP\n\n"
+            "## Changed Files\n\n"
+            "| Status | Path |\n"
+            "|---|---|\n"
+            "| modified | Project.swift |\n"
+        )
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERPREP")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        strategy_path = task_root / "spec" / "verification-strategy.json"
+        strategy = json.loads(strategy_path.read_text())
+        self.assertEqual("ios_broad_safe_gate", strategy["mode"])
+        self.assertEqual("required", strategy["prepare"]["policy"])
+        self.assertTrue(strategy["signals"]["prepare_sensitive"])
 
     def test_implementation_completed_routes_to_reviewer_when_self_review_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

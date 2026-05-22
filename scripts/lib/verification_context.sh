@@ -46,3 +46,19 @@ verification_print_failure_matches() {
   local pattern="$2"
   grep -E "$pattern" "$log_path" | grep -v '^$' || true
 }
+
+verification_strategy_path() {
+  local key="$1"
+  printf '%s\n' "${SDD_WORKDIR}/${key}/spec/verification-strategy.json"
+}
+
+verification_strategy_json_value() {
+  local key="$1"
+  local jq_expr="$2"
+  local strategy_path
+  strategy_path="$(verification_strategy_path "$key")"
+  if [[ ! -f "$strategy_path" ]]; then
+    return 1
+  fi
+  jq -r "$jq_expr" "$strategy_path"
+}

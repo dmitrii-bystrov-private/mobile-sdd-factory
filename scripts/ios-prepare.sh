@@ -14,6 +14,17 @@ verification_source_ios_env "$REPO_DIR"
 
 TUIST_LOG="$SDD_IOS_VERIFICATION_LOGS_PATH/tuist-generate.log"
 POD_LOG="$SDD_IOS_VERIFICATION_LOGS_PATH/pod-install.log"
+PREPARE_MARKER="$SDD_IOS_VERIFICATION_CONTEXT_ROOT/prepare.marker.json"
+PREPARE_POLICY="required"
+
+if policy_value="$(verification_strategy_json_value "$KEY" '.prepare.policy // "required"' 2>/dev/null)"; then
+  PREPARE_POLICY="$policy_value"
+fi
+
+if [[ "$PREPARE_POLICY" == "reuse_if_available" && -f "$PREPARE_MARKER" ]]; then
+  echo "✅ IOS PREPARE REUSED"
+  exit 0
+fi
 
 echo "⏳ Generating Tuist project..."
 if ! mise exec -- tuist generate --no-open >"$TUIST_LOG" 2>&1; then
@@ -28,5 +39,9 @@ if ! pod install >"$POD_LOG" 2>&1; then
   verification_print_failure_matches "$POD_LOG" "error:|fatal:|failed|exception"
   exit 1
 fi
+
+cat >"$PREPARE_MARKER" <<EOF
+{"policy":"$PREPARE_POLICY","head":"$(git rev-parse HEAD 2>/dev/null || echo unknown)"}
+EOF
 
 echo "✅ IOS PREPARE SUCCEEDED"
