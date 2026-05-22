@@ -2360,7 +2360,7 @@ class CoordinatorService:
                 task_key=session.task_key,
                 role_name=role.role_name,
                 role_config=(session.role_config or {}).get(role.role_name),
-                resume_mode="native",
+                resume_mode=self._preferred_runtime_resume_mode((session.role_config or {}).get(role.role_name)),
             )
         except Exception as exc:
             self.role_repository.update_status(role.id, RoleStatus.FAILED)
@@ -6654,7 +6654,7 @@ class CoordinatorService:
             task_key=session.task_key,
             role_name=role.role_name,
             role_config=role_config,
-            resume_mode="native",
+            resume_mode=self._preferred_runtime_resume_mode(role_config),
         )
         role = self.role_repository.update_runtime(
             role.id,
@@ -6688,7 +6688,7 @@ class CoordinatorService:
                 task_key=session.task_key,
                 role_name=role.role_name,
                 role_config=(session.role_config or {}).get(role.role_name),
-                resume_mode="native",
+                resume_mode=self._preferred_runtime_resume_mode((session.role_config or {}).get(role.role_name)),
             )
             updated_role = self.role_repository.update_runtime(
                 role.id,
@@ -6848,6 +6848,13 @@ class CoordinatorService:
             start_directory=start_directory,
             launch_command=launch_command,
         )
+
+    @staticmethod
+    def _preferred_runtime_resume_mode(role_config: dict[str, str] | None) -> str | None:
+        runner = str((role_config or {}).get("runner") or "").strip()
+        if runner == "codex":
+            return "native"
+        return None
 
     def _reactivate_restarted_owner_work(self, session: Session, role: Role | None) -> Event | None:
         if role is None or session.current_owner != role.role_name:

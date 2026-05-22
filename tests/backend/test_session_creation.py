@@ -1046,6 +1046,16 @@ class SessionCreationTests(unittest.TestCase):
         script_text = launch_plan.launcher_script.read_text()
         self.assertIn("SDD_FACTORY_ROLE_RESUME_MODE=native", script_text)
 
+    def test_preferred_runtime_resume_mode_uses_native_only_for_codex(self) -> None:
+        self.assertEqual(
+            "native",
+            self.coordinator._preferred_runtime_resume_mode({"runner": "codex"}),
+        )
+        self.assertIsNone(
+            self.coordinator._preferred_runtime_resume_mode({"runner": "claude"}),
+        )
+        self.assertIsNone(self.coordinator._preferred_runtime_resume_mode(None))
+
     def test_claude_launcher_generates_role_scoped_mcp_files(self) -> None:
         repo_root = Path(self.temp_dir.name) / "repo-root-mcp"
         (repo_root / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
