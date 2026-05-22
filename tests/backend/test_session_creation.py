@@ -27,6 +27,7 @@ from backend.roles.contracts import (
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
     SPEC_VERIFIER_WORKER_ROLE,
     TASK_DECOMPOSER_WORKER_ROLE,
+    VERIFICATION_COORDINATOR_ROLE,
 )
 from backend.roles.launcher import RoleLauncherManager
 from backend.role_runtime_config import normalize_role_runtime_config
@@ -4110,6 +4111,80 @@ class SessionCreationTests(unittest.TestCase):
             )
         )
         self.assertTrue(any(item.event_type == "session_dispatch_reconciled" for item in events))
+
+    def test_reconcile_session_dispatch_advances_passed_verification_without_active_work_item(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004RECONVERIFY",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "enabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004RECONVERIFY")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all checks passed"},
+        )
+        broken_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_requested",
+            current_owner=VERIFICATION_COORDINATOR_ROLE,
+        )
+        broken_session = self.session_repository.update_status(broken_session.id, SessionStatus.ACTIVE)
+
+        reconciled = self.coordinator._reconcile_session_dispatch(broken_session)
+        updated_session = self.session_repository.get_by_id(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertTrue(reconciled)
+        self.assertIsNotNone(updated_session)
+        assert updated_session is not None
+        self.assertEqual("doc_harvest_requested", updated_session.current_stage)
+        self.assertEqual(DOC_HARVEST_ROLE, updated_session.current_owner)
+        self.assertTrue(any(item.event_type == "session_outcome_reconciled" for item in events))
+
+    def test_reconcile_session_dispatch_advances_completed_doc_harvest_without_active_work_item(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004RECONDOC",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "enabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004RECONDOC")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.complete_doc_harvest(
+            session_id=session.id,
+            summary="README updated.",
+        )
+        broken_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="doc_harvest_requested",
+            current_owner=DOC_HARVEST_ROLE,
+        )
+        broken_session = self.session_repository.update_status(broken_session.id, SessionStatus.ACTIVE)
+
+        reconciled = self.coordinator._reconcile_session_dispatch(broken_session)
+        updated_session = self.session_repository.get_by_id(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertTrue(reconciled)
+        self.assertIsNotNone(updated_session)
+        assert updated_session is not None
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertEqual(SessionStatus.COMPLETED, updated_session.status)
+        self.assertTrue(any(item.event_type == "session_outcome_reconciled" for item in events))
 
     def test_verification_failed_moves_session_back_to_implementer(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")

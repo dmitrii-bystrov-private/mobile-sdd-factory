@@ -5620,6 +5620,9 @@ class CoordinatorService:
         if session.current_owner is None:
             return False
 
+        if self._reconcile_terminal_outcome_progress(session):
+            return True
+
         role = self.role_repository.get_by_name(session.id, session.current_owner)
         if role is None:
             return False
@@ -5665,6 +5668,91 @@ class CoordinatorService:
             },
         )
         return True
+
+    def _reconcile_terminal_outcome_progress(self, session: Session) -> bool:
+        if session.current_stage == "verification_requested":
+            verification_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+            if verification_role is None:
+                return False
+            active_item = self._find_active_work_item_for_role(session.id, verification_role.id)
+            if active_item is not None:
+                return False
+            if self._verification_outcome_status(session) != "passed":
+                return False
+            source_event = self._latest_event_by_type(session.id, {"verification_passed"})
+            if source_event is None:
+                return False
+            if self._optional_lane_policy_mode(session.policy, "doc_harvest_policy") != "disabled":
+                _session, followup_event = self._enqueue_doc_harvest(session=session, source_event=source_event)
+            else:
+                _session, followup_event = self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
+            self._append_event(
+                session_id=session.id,
+                event_type="session_outcome_reconciled",
+                producer_type="coordinator",
+                payload={
+                    "stage_name": "verification_requested",
+                    "outcome_status": "passed",
+                    "followup_event_type": followup_event.event_type,
+                },
+            )
+            return True
+
+        if session.current_stage == "doc_harvest_requested":
+            doc_role = self.role_repository.get_by_name(session.id, DOC_HARVEST_ROLE)
+            if doc_role is None:
+                return False
+            active_item = self._find_active_work_item_for_role(session.id, doc_role.id)
+            if active_item is not None:
+                return False
+            if self._doc_harvest_outcome_status(session) != "completed":
+                return False
+            source_event = self._latest_event_by_type(session.id, {"doc_harvest_completed"})
+            if source_event is None:
+                return False
+            if self._verification_gate_required_for_delivery(session) and self._verification_outcome_status(session) != "passed":
+                session = self.session_repository.update_stage_and_owner(
+                    session.id,
+                    current_stage="doc_harvest_requested",
+                    current_owner=None,
+                )
+                session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+                followup_event = self._append_event(
+                    session_id=session.id,
+                    event_type="session_escalated_to_operator",
+                    producer_type="coordinator",
+                    payload={
+                        "reason": "delivery_gate_blocked_after_doc_harvest",
+                        "role_name": DOC_HARVEST_ROLE,
+                        "summary": "delivery blocked because workflow verification did not pass",
+                        "details": (
+                            "Documentation harvest completed, but the latest structured verification outcome is not "
+                            "passed. Resolve verification failures before delivery can continue."
+                        ),
+                        "current_stage": session.current_stage,
+                    },
+                )
+            else:
+                _session, followup_event = self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
+            self._append_event(
+                session_id=session.id,
+                event_type="session_outcome_reconciled",
+                producer_type="coordinator",
+                payload={
+                    "stage_name": "doc_harvest_requested",
+                    "outcome_status": "completed",
+                    "followup_event_type": followup_event.event_type,
+                },
+            )
+            return True
+
+        return False
+
+    def _latest_event_by_type(self, session_id: int, event_types: set[str]) -> Event | None:
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.event_type in event_types:
+                return event
+        return None
 
     def _reconcile_missing_subtask_assignment(
         self,
@@ -7591,6 +7679,21 @@ class CoordinatorService:
         if self._verification_report_passed(session):
             return "passed"
         return None
+
+    def _doc_harvest_outcome_status(self, session: Session) -> str | None:
+        if self.workdir_root is None:
+            return None
+        outcome_path = self.workdir_root / session.task_key / "spec" / "doc-harvest-outcome.json"
+        if not outcome_path.is_file():
+            return None
+        try:
+            payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        status = str(payload.get("status") or "").strip().lower()
+        return status or None
 
     def _verification_report_passed(self, session: Session) -> bool:
         if self.workdir_root is None:
