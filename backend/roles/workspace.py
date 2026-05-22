@@ -292,6 +292,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Use RAG tools first for code exploration; fall back to filesystem search only for structural queries.",
             "- If the routed input is a narrow correction pass, keep scope limited to the listed issues unless a tiny directly related change is required.",
             "- Do not run workflow-level `run-build.sh`, `run-test.sh`, or `run-lint.sh` unless the routed work explicitly requires a narrow task-specific check.",
+            "- Broad workflow-level verification wrappers remain verifier-only authority even when local code checks would be convenient.",
             "- Treat final test+lint verification as deferred to the coordinator.",
         ]
     if role_name == "bug-fixer":
@@ -304,6 +305,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- If an `Issues file:` path is routed, treat it as the primary narrow-scope input for this round and keep the fix limited to those listed issues unless a tiny directly-related adjustment is required.",
             "- If `Follow-up comments:` are routed, prioritize the latest follow-up comments over redoing the original bug analysis from scratch.",
             "- Keep the current bug task scoped to the routed pass, saved bug analysis, and latest follow-up context.",
+            "- Broad workflow-level `run-build.sh`, `run-test.sh`, and `run-lint.sh` remain verifier-only authority for this role too.",
             "- Write or update `spec/bug-analysis.md` in bug-analysis rounds; keep final workflow-level verification deferred to the coordinator.",
             "- Treat final test+lint verification as deferred to the coordinator.",
         ]

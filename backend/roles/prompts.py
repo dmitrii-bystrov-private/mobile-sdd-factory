@@ -22,6 +22,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Use RAG tools first for code exploration; use plain filesystem search only for structural queries.\n"
             "- If the routed work is a narrow correction pass, keep scope limited to the listed issues unless a tiny directly-related change is required.\n"
             "- Do not run workflow-level build/test/lint gates here unless the routed work explicitly requires a narrow task-specific check.\n"
+            "- Do not run broad workflow-level wrappers such as `scripts/run-build.sh`, `scripts/run-test.sh`, or `scripts/run-lint.sh` from this role; final verification authority stays with the verifier lane.\n"
             "- Final test+lint gate remains deferred to the coordinator.\n\n"
         )
     if role_name == "bug-fixer":
@@ -33,6 +34,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- If an `Issues file:` path is routed, treat it as the primary narrow-scope input for this round.\n"
             "- If `Follow-up comments:` are routed, prioritize the latest follow-up comments over redoing the original bug analysis from scratch.\n"
             "- Keep bug-fix follow-up and correction rounds tightly scoped to the routed issues/comments unless a tiny directly-related adjustment is required.\n"
+            "- Do not run broad workflow-level wrappers such as `scripts/run-build.sh`, `scripts/run-test.sh`, or `scripts/run-lint.sh` from this role; final verification authority stays with the verifier lane.\n"
             "- Leave workflow-level test+lint verification to the coordinator.\n\n"
         )
     if role_name == "code-reviewer":

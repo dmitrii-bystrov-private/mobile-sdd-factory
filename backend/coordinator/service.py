@@ -1913,6 +1913,25 @@ class CoordinatorService:
             return None
         return parsed
 
+    def _verification_payload_has_failure_signals(self, payload: dict) -> bool:
+        failures = payload.get("failures")
+        if isinstance(failures, list):
+            rendered_failures = [str(item).strip() for item in failures if str(item).strip()]
+            if rendered_failures:
+                return True
+        check_outputs = payload.get("check_outputs")
+        if not isinstance(check_outputs, dict):
+            return False
+        suspicious_pattern = re.compile(
+            r"(^|\b)(tests? failed|lint failed|build failed|testing failed:|encountered an error|fatal error:|error:)\b",
+            re.IGNORECASE,
+        )
+        for value in check_outputs.values():
+            rendered_value = str(value or "").strip()
+            if rendered_value and suspicious_pattern.search(rendered_value):
+                return True
+        return False
+
     def _escape_raw_control_chars_in_json_strings(self, raw_text: str) -> str:
         result: list[str] = []
         in_string = False
@@ -4959,6 +4978,12 @@ class CoordinatorService:
             }:
                 return "implementation_completed"
         if role_name == VERIFICATION_COORDINATOR_ROLE:
+            if (
+                output_type in {"passed", "completed"}
+                and session.current_stage == "verification_requested"
+                and self._verification_payload_has_failure_signals(payload)
+            ):
+                return "verification_failed"
             if output_type in {"passed", "completed"} and session.current_stage == "verification_requested":
                 return "verification_passed"
             if normalized_summary == "blocked_verification_cycle" and session.current_stage == "verification_requested":
