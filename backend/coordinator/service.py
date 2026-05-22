@@ -5486,6 +5486,13 @@ class CoordinatorService:
     ) -> None:
         if self.role_workspace_manager is None or role.runtime_handle is None:
             return
+        if (
+            session.status == SessionStatus.WAITING_FOR_OPERATOR
+            and session.current_owner == role.role_name
+        ):
+            return
+        if self._has_newer_operator_reply_than_last_collection(session.id, role.role_name):
+            return
         output_type = str(payload.get("output_type") or "").strip().lower()
         if output_type not in {"passed", "completed", "failed", "error", "blocked_verification_cycle", "blocked_review_cycle"}:
             return
@@ -5529,6 +5536,30 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
                 "result_path": str(result_path),
             },
+        )
+
+    def _has_newer_operator_reply_than_last_collection(self, session_id: int, role_name: str) -> bool:
+        latest_operator_reply_id: int | None = None
+        latest_collection_id: int | None = None
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if (
+                latest_operator_reply_id is None
+                and event.event_type == "operator_runtime_input_sent"
+                and event.payload.get("role_name") == role_name
+            ):
+                latest_operator_reply_id = event.id
+            if (
+                latest_collection_id is None
+                and event.event_type == "role_output_collected"
+                and event.payload.get("role_name") == role_name
+            ):
+                latest_collection_id = event.id
+            if latest_operator_reply_id is not None and latest_collection_id is not None:
+                break
+        return (
+            latest_operator_reply_id is not None
+            and latest_collection_id is not None
+            and latest_operator_reply_id > latest_collection_id
         )
 
     def _extract_output_markers(self, text: str) -> list[tuple[str, dict]]:

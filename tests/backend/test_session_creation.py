@@ -5495,6 +5495,65 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(len(sent_after_first), len(sent_after_second))
 
+    def test_collect_role_output_does_not_request_missing_result_recreation_after_operator_reply(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009RESULTRECREATECHAT",
+            workflow_profile="story_full",
+            policy={
+                "requirements_clarification_mode": "ask-selectively",
+            },
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_requested",
+            current_owner=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        role = self.role_repository.get_by_name(session.id, REQUIREMENTS_CLARIFIER_WORKER_ROLE)
+        self.assertIsNotNone(role)
+        self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements",
+            title="Requirements clarification for IOS-30009RESULTRECREATECHAT",
+            owner_role_id=role.id,
+            source_event_id=1,
+            priority=10,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_output_collected",
+            producer_type="coordinator",
+            payload={
+                "role_name": REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+                "chunk_count": 1,
+            },
+        )
+        self.coordinator.send_operator_runtime_input(
+            session_id=session.id,
+            text="Use option 1.",
+        )
+        sent_before_collect = list(self.session_backend.get_sent_inputs(role.runtime_handle))
+        self.session_backend.simulate_output(
+            role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"failed","payload":{"work_item_id":123,"summary":"needs clarification"}}',
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        sent_after_collect = self.session_backend.get_sent_inputs(role.runtime_handle)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual(sent_before_collect, sent_after_collect)
+        self.assertFalse(
+            any(item.event_type == "missing_result_file_recreation_requested" for item in events)
+        )
+
     def test_collect_role_output_preserves_spaces_in_wrapped_error_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRWRAP")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
