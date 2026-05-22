@@ -310,13 +310,13 @@ class TmuxSessionBackend(SessionBackend):
             not self.tmux_trust_prompt_handled.get(role_id, False)
             and self._contains_workspace_trust_prompt(normalized)
         ):
-            self._tmux(socket_path, "send-keys", "-t", runtime_handle, "1", "Enter")
+            self._tmux(socket_path, "send-keys", "-t", runtime_handle, "1", "C-m")
             self.tmux_trust_prompt_handled[role_id] = True
         if (
             not self.tmux_update_prompt_handled.get(role_id, False)
             and self._contains_update_prompt(normalized)
         ):
-            self._tmux(socket_path, "send-keys", "-t", runtime_handle, "2", "Enter")
+            self._tmux(socket_path, "send-keys", "-t", runtime_handle, "2", "C-m")
             self.tmux_update_prompt_handled[role_id] = True
 
     def is_role_alive(self, role: RuntimeRoleHandle) -> bool:
@@ -405,7 +405,7 @@ class TmuxSessionBackend(SessionBackend):
                 runtime_handle = role_id
                 session_id = runtime_handle.split(":", 1)[0]
                 socket_path = self._socket_path(session_id)
-                self._tmux(socket_path, "send-keys", "-t", runtime_handle, "1", "Enter")
+                self._tmux(socket_path, "send-keys", "-t", runtime_handle, "1", "C-m")
                 self.tmux_trust_prompt_handled[role_id] = True
             if (
                 not self.tmux_update_prompt_handled.get(role_id, False)
@@ -414,7 +414,7 @@ class TmuxSessionBackend(SessionBackend):
                 runtime_handle = role_id
                 session_id = runtime_handle.split(":", 1)[0]
                 socket_path = self._socket_path(session_id)
-                self._tmux(socket_path, "send-keys", "-t", runtime_handle, "2", "Enter")
+                self._tmux(socket_path, "send-keys", "-t", runtime_handle, "2", "C-m")
                 self.tmux_update_prompt_handled[role_id] = True
             if (
                 self._contains_runner_ready_prompt(recent_normalized)
@@ -611,7 +611,7 @@ class TmuxSessionBackend(SessionBackend):
         if result.returncode != 0:
             raise RuntimeError(result.stderr or result.stdout or "Failed to send tmux launcher input")
         time.sleep(0.25)
-        result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "Enter")
+        result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "C-m")
         if result.returncode != 0:
             raise RuntimeError(result.stderr or result.stdout or "Failed to submit tmux launcher input")
 
