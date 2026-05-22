@@ -5021,6 +5021,49 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "runtime_terminal_output_echo_ignored" for item in events))
         self.assertFalse(any(item.event_type == "implementation_completed" for item in events))
 
+    def test_collect_role_output_requests_missing_result_file_recreation_from_terminal_output(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009RESULTRECREATE")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"work_item_id":123,"summary":"done"}}',
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        events = self.event_repository.list_for_session(session.id)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("implementation_requested", updated_session.current_stage)
+        self.assertTrue(any(item.event_type == "missing_result_file_recreation_requested" for item in events))
+        self.assertTrue(sent_inputs)
+        self.assertIn("Recreate RESULT.json exactly at", sent_inputs[-1])
+        self.assertIn('"work_item_id": 123', sent_inputs[-1])
+
+    def test_collect_role_output_requests_missing_result_file_recreation_only_once(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009RESULTRECREATEONCE")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        marker = 'SDD_OUTPUT: {"output_type":"completed","payload":{"work_item_id":123,"summary":"done"}}'
+        self.session_backend.simulate_output(implementer_role.runtime_handle, marker)
+        self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        sent_after_first = list(self.session_backend.get_sent_inputs(implementer_role.runtime_handle))
+
+        self.session_backend.simulate_output(implementer_role.runtime_handle, marker)
+        self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        sent_after_second = list(self.session_backend.get_sent_inputs(implementer_role.runtime_handle))
+
+        self.assertEqual(len(sent_after_first), len(sent_after_second))
+
     def test_collect_role_output_preserves_spaces_in_wrapped_error_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRWRAP")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")

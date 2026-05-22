@@ -5309,6 +5309,11 @@ class CoordinatorService:
         for chunk in chunks:
             for marker_type, payload in self._extract_output_markers(chunk.text):
                 if marker_type == "output":
+                    self._maybe_request_missing_result_file_recreation(
+                        session=session,
+                        role=role,
+                        payload=payload,
+                    )
                     self._append_event(
                         session_id=current_session.id,
                         event_type="runtime_terminal_output_echo_ignored",
@@ -5339,6 +5344,60 @@ class CoordinatorService:
                         payload=payload,
                     )
         return current_session
+
+    def _maybe_request_missing_result_file_recreation(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        payload: dict,
+    ) -> None:
+        if self.role_workspace_manager is None or role.runtime_handle is None:
+            return
+        output_type = str(payload.get("output_type") or "").strip().lower()
+        if output_type not in {"passed", "completed", "failed", "error", "blocked_verification_cycle", "blocked_review_cycle"}:
+            return
+        nested_payload = payload.get("payload")
+        if not isinstance(nested_payload, dict):
+            return
+        work_item_id = nested_payload.get("work_item_id")
+        if not isinstance(work_item_id, int):
+            return
+        result_path = self.role_workspace_manager.role_directory(session.task_key, role.role_name) / "RESULT.json"
+        if result_path.is_file():
+            return
+        for event in reversed(self.event_repository.list_for_session(session.id)):
+            if event.event_type != "missing_result_file_recreation_requested":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if event.payload.get("work_item_id") != work_item_id:
+                continue
+            return
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        recovery_prompt = (
+            "You already finished the current routed work item. "
+            f"Recreate RESULT.json exactly at {result_path} using the same terminal payload below. "
+            "Do not rerun commands, do not re-analyze the task, and do not modify code or docs. "
+            "Only rewrite the missing RESULT.json and then stop.\n\n"
+            f"Terminal payload:\n{json.dumps(payload, indent=2, sort_keys=True)}\n"
+        )
+        self.session_backend.send_input(runtime_role, recovery_prompt)
+        self._append_event(
+            session_id=session.id,
+            event_type="missing_result_file_recreation_requested",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": work_item_id,
+                "current_stage": session.current_stage,
+                "result_path": str(result_path),
+            },
+        )
 
     def _extract_output_markers(self, text: str) -> list[tuple[str, dict]]:
         results: list[tuple[str, dict]] = []
