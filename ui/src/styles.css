@@ -69,8 +69,8 @@ input {
 .topbar-tile {
   min-width: 132px;
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
   padding: 14px 16px;
   border-radius: 20px;
@@ -99,21 +99,6 @@ input {
   background:
     linear-gradient(135deg, rgba(255, 93, 45, 0.08), rgba(73, 214, 164, 0.05)),
     var(--surface-panel);
-}
-
-.topbar-tile-icon {
-  width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--brand);
-}
-
-.topbar-tile-icon svg {
-  width: 20px;
-  height: 20px;
 }
 
 .topbar-tile-copy {
@@ -1892,7 +1877,6 @@ input {
 
   .topbar-tile {
     min-width: 0;
-    grid-template-columns: 36px minmax(0, 1fr);
   }
 
   .actions-grid,

@@ -34,46 +34,21 @@ const SURFACE_TILES: Array<{
   view: SurfaceView;
   label: string;
   description: string;
-  icon: JSX.Element;
 }> = [
   {
     view: "runs",
     label: "Runs",
     description: "Workflow runs",
-    icon: (
-      <svg aria-hidden="true" viewBox="0 0 24 24">
-        <path
-          d="M6 4h12a2 2 0 0 1 2 2v3H4V6a2 2 0 0 1 2-2Zm-2 8h7v8H6a2 2 0 0 1-2-2v-6Zm9 0h7v6a2 2 0 0 1-2 2h-5v-8Z"
-          fill="currentColor"
-        />
-      </svg>
-    ),
   },
   {
     view: "settings",
     label: "Settings",
     description: "Runtime defaults",
-    icon: (
-      <svg aria-hidden="true" viewBox="0 0 24 24">
-        <path
-          d="M10.8 3h2.4l.5 2.3c.6.2 1.2.4 1.7.7l2-1.2 1.7 1.7-1.2 2c.3.5.5 1.1.7 1.7L21 10.8v2.4l-2.3.5c-.2.6-.4 1.2-.7 1.7l1.2 2-1.7 1.7-2-1.2c-.5.3-1.1.5-1.7.7L13.2 21h-2.4l-.5-2.3c-.6-.2-1.2-.4-1.7-.7l-2 1.2-1.7-1.7 1.2-2c-.3-.5-.5-1.1-.7-1.7L3 13.2v-2.4l2.3-.5c.2-.6.4-1.2.7-1.7l-1.2-2 1.7-1.7 2 1.2c.5-.3 1.1-.5 1.7-.7L10.8 3Zm1.2 5.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"
-          fill="currentColor"
-        />
-      </svg>
-    ),
   },
   {
     view: "health",
     label: "Health",
     description: "Environment state",
-    icon: (
-      <svg aria-hidden="true" viewBox="0 0 24 24">
-        <path
-          d="M12 3 4.5 6v5.7c0 4.4 2.9 8.4 7.5 9.3 4.6-.9 7.5-4.9 7.5-9.3V6L12 3Zm-1.2 5h2.4v3h3v2.4h-3v3h-2.4v-3h-3V11h3V8Z"
-          fill="currentColor"
-        />
-      </svg>
-    ),
   },
 ];
 
@@ -633,7 +608,6 @@ export function SessionsPage(): JSX.Element {
               title={surface.description}
               type="button"
             >
-              <span className="topbar-tile-icon">{surface.icon}</span>
               <span className="topbar-tile-copy">
                 <strong>{surface.label}</strong>
                 <small>{surface.description}</small>
