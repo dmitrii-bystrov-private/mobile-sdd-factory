@@ -163,8 +163,8 @@ class TmuxBackendTests(unittest.TestCase):
         backend.send_input(role, "first routed work")
         backend._handle_tmux_interactive_driver_output(role.role_id, "❯ first routed work")
 
-        submit_calls = [call for call in backend.calls if call[-1] == "C-m"]
-        self.assertEqual([("send-keys", "-t", role.role_id, "C-m")], submit_calls)
+        submit_calls = [call for call in backend.calls if call[-1] == "Enter"]
+        self.assertEqual([("send-keys", "-t", role.role_id, "Enter")], submit_calls)
 
     def test_normalize_terminal_text_strips_ansi_noise(self) -> None:
         backend = TmuxSessionBackend(mode="recording")
