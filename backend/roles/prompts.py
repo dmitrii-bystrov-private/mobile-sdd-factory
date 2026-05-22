@@ -134,6 +134,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Run only the workflow-level deterministic verification gate for the current task.\n"
             "- Always invoke the wrappers with the current task key: `bash scripts/run-test.sh \"$SDD_FACTORY_TASK_KEY\"` and `bash scripts/run-lint.sh \"$SDD_FACTORY_TASK_KEY\"`; do not run `run-build.sh` here.\n"
             "- When the routed strategy provides explicit iOS phase commands, prefer executing that routed iOS verification sequence instead of reconstructing the phase order manually.\n"
+            "- If the routed strategy explicitly marks the task as docs-only with no code-verification phases, preserve that skip decision and explain it in the verification report instead of forcing a build/test pass.\n"
             "- For iOS tasks, prefer the routed task-local verification context paths for DerivedData, xcresult bundles, cloned source packages, and logs instead of relying on shared global Xcode state.\n"
             "- Treat every verification round as a fresh gate and refresh the verification evidence.\n"
             "- Always write or refresh `spec/final-verification.md` for the current round; on failure include the failed checks and their relevant command output.\n"

@@ -698,6 +698,7 @@ class CoordinatorService:
             )
         if session.current_stage == "mr_handoff_completed":
             raise IntakeError(f"Session {session_id} has already completed MR handoff")
+        self._require_passed_verification_for_delivery(session)
 
         result = self.gitlab_adapter.create_mr(session.task_key)
         stdout_path = write_text_artifact(
@@ -1032,6 +1033,7 @@ class CoordinatorService:
             raise IntakeError(
                 f"Session {session_id} must complete MR handoff before send-to-test handoff"
             )
+        self._require_passed_verification_for_delivery(session)
 
         result = self.jira_adapter.send_to_test(session.task_key)
         stdout_path = write_text_artifact(
@@ -6825,6 +6827,27 @@ class CoordinatorService:
                 "source_path": str(target_path),
             },
         )
+
+    def _verification_gate_required_for_delivery(self, session: Session) -> bool:
+        events = self.event_repository.list_for_session(session.id)
+        return any(item.event_type == "verification_requested" for item in events)
+
+    def _verification_report_passed(self, session: Session) -> bool:
+        if self.workdir_root is None:
+            return False
+        report_path = self.workdir_root / session.task_key / "spec" / "final-verification.md"
+        if not report_path.is_file():
+            return False
+        text = report_path.read_text(encoding="utf-8")
+        return "\nPASS\n" in text
+
+    def _require_passed_verification_for_delivery(self, session: Session) -> None:
+        if not self._verification_gate_required_for_delivery(session):
+            return
+        if not self._verification_report_passed(session):
+            raise IntakeError(
+                f"Session {session.id} cannot enter delivery because workflow verification did not pass"
+            )
 
     def _materialize_self_review_report(
         self,

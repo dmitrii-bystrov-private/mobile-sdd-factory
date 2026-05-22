@@ -19,6 +19,11 @@ fi
 
 mapfile -t PHASES < <(jq -r '.phases[]? // empty' "$STRATEGY_PATH")
 if [[ "${#PHASES[@]}" -eq 0 ]]; then
+  MODE="$(jq -r '.mode // ""' "$STRATEGY_PATH")"
+  if [[ "$MODE" == "ios_docs_only_skip" ]]; then
+    echo "✅ IOS VERIFICATION SKIPPED (docs-only)"
+    exit 0
+  fi
   echo "Verification strategy has no phases: $STRATEGY_PATH" >&2
   exit 1
 fi

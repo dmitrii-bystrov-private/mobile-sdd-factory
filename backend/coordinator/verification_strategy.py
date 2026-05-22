@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import re
 import subprocess
 
 
@@ -88,6 +89,33 @@ def _is_ios_prepare_sensitive_path(path: str) -> bool:
     return any(marker in normalized for marker in _IOS_PREPARE_SENSITIVE_MARKERS)
 
 
+def _extract_ios_test_selectors(task_repo_root: Path, changed_files: list[str]) -> list[str]:
+    selectors: list[str] = []
+    seen: set[str] = set()
+    class_pattern = re.compile(r"\b(?:final\s+)?class\s+(\w+Tests?)\s*:\s*(?:\w+\.)?XCTestCase\b")
+    for changed_path in changed_files:
+        if not _is_ios_test_path(changed_path):
+            continue
+        candidate = task_repo_root / changed_path
+        class_names: list[str] = []
+        if candidate.is_file():
+            try:
+                text = candidate.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                text = candidate.read_text(encoding="utf-8", errors="ignore")
+            class_names = [match.group(1) for match in class_pattern.finditer(text)]
+        if not class_names:
+            stem = Path(changed_path).stem
+            if stem.endswith(("Test", "Tests")):
+                class_names = [stem]
+        for class_name in class_names:
+            selector = f"FinomTests/{class_name}"
+            if selector not in seen:
+                seen.add(selector)
+                selectors.append(selector)
+    return selectors
+
+
 def detect_verification_platform(task_repo_root: Path) -> str:
     if (task_repo_root / "Tools" / "buildscripts").is_dir():
         return "ios"
@@ -128,6 +156,7 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[st
         context_root = task_root / "tmp" / "verification" / "ios"
         tests_only = bool(non_doc_files) and all(_is_ios_test_path(path) for path in non_doc_files)
         prepare_sensitive = any(_is_ios_prepare_sensitive_path(path) for path in non_doc_files)
+        targeted_selectors = _extract_ios_test_selectors(repo_root, non_doc_files) if tests_only else []
         prepare_policy = "required" if prepare_sensitive else "reuse_if_available"
         mode = "ios_broad_safe_gate"
         confidence = "high"
@@ -135,13 +164,19 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[st
             "Use the iOS workflow-level verification gate with task-local build state "
             "for safe parallel verification."
         )
-        if tests_only and not prepare_sensitive:
+        if docs_only:
+            mode = "ios_docs_only_skip"
+            confidence = "high"
+            reason = "Only documentation files changed, so code verification can be skipped safely for this iOS task."
+        elif tests_only and not prepare_sensitive:
             mode = "ios_test_scope_gate"
             confidence = "medium"
             reason = (
                 "The diff is limited to iOS test code, so the verifier can keep the "
                 "same safe gate while preferring reusable task-local prepare state."
             )
+            if targeted_selectors:
+                reason += f" Targeted test selectors were inferred for {len(targeted_selectors)} changed test file(s)."
         elif prepare_sensitive:
             reason = (
                 "The diff touches build or dependency configuration, so iOS prepare "
@@ -158,7 +193,11 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[st
         strategy["build_products_policy"] = (
             "reuse_if_same_head" if tests_only and not prepare_sensitive else "rebuild"
         )
-        strategy["phases"] = [
+        strategy["test_selection"] = {
+            "mode": "only_testing" if targeted_selectors else "broad",
+            "selectors": targeted_selectors,
+        }
+        strategy["phases"] = [] if docs_only else [
             "prepare",
             "build_for_testing",
             "test_without_building",
@@ -185,6 +224,7 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[st
             "docs_only": docs_only,
             "tests_only": tests_only,
             "prepare_sensitive": prepare_sensitive,
+            "targeted_selector_count": len(targeted_selectors),
         }
     return strategy
 

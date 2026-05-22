@@ -1495,6 +1495,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("reuse_if_available", strategy["prepare"]["policy"])
         self.assertEqual("reuse_if_same_head", strategy["build_products_policy"])
         self.assertTrue(strategy["signals"]["tests_only"])
+        self.assertEqual("only_testing", strategy["test_selection"]["mode"])
+        self.assertIn("FinomTests/ExampleTests", strategy["test_selection"]["selectors"])
         self.assertEqual(
             str(task_root / "tmp" / "verification" / "ios" / "derived-data"),
             strategy["ios_context"]["derived_data_path"],
@@ -1526,6 +1528,32 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("required", strategy["prepare"]["policy"])
         self.assertEqual("rebuild", strategy["build_products_policy"])
         self.assertTrue(strategy["signals"]["prepare_sensitive"])
+
+    def test_verification_dispatch_marks_ios_docs_only_skip(self) -> None:
+        task_root = Path(self.temp_dir.name) / "IOS-30003VERDOCS"
+        repo_root = task_root / "repo" / "Tools" / "buildscripts"
+        repo_root.mkdir(parents=True, exist_ok=True)
+        spec_root = task_root / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        (spec_root / "diff.md").write_text(
+            "# Diff Artifact: IOS-30003VERDOCS\n\n"
+            "## Changed Files\n\n"
+            "| Status | Path |\n"
+            "|---|---|\n"
+            "| modified | FinomCore/FinomCore/App Core/README.md |\n"
+        )
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERDOCS")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        strategy_path = task_root / "spec" / "verification-strategy.json"
+        strategy = json.loads(strategy_path.read_text())
+        self.assertEqual("ios_docs_only_skip", strategy["mode"])
+        self.assertEqual([], strategy["phases"])
+        self.assertTrue(strategy["signals"]["docs_only"])
 
     def test_implementation_completed_routes_to_reviewer_when_self_review_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -5944,6 +5972,52 @@ class SessionCreationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(IntakeError, "must complete MR handoff"):
             self.coordinator.send_to_test_handoff(session_id=completed_session.id)
+
+    def test_create_mr_handoff_requires_passed_verification_report_when_verification_ran(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021DELIVERYFAIL")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        verification_report = Path(self.temp_dir.name) / "IOS-30021DELIVERYFAIL" / "spec" / "final-verification.md"
+        verification_report.parent.mkdir(parents=True, exist_ok=True)
+        verification_report.write_text(
+            "# Final Verification: IOS-30021DELIVERYFAIL\n\n"
+            "## Result\nFAIL\n"
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="completed",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+
+        with self.assertRaisesRegex(IntakeError, "workflow verification did not pass"):
+            self.coordinator.create_mr_handoff(session_id=session.id)
+
+    def test_send_to_test_handoff_requires_passed_verification_report_when_verification_ran(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021SENDFAIL")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        verification_report = Path(self.temp_dir.name) / "IOS-30021SENDFAIL" / "spec" / "final-verification.md"
+        verification_report.parent.mkdir(parents=True, exist_ok=True)
+        verification_report.write_text(
+            "# Final Verification: IOS-30021SENDFAIL\n\n"
+            "## Result\nFAIL\n"
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="mr_handoff_completed",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+
+        with self.assertRaisesRegex(IntakeError, "workflow verification did not pass"):
+            self.coordinator.send_to_test_handoff(session_id=session.id)
 
     def test_send_to_test_handoff_failure_escalates_for_operator_retry(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021D1")

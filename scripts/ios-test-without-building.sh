@@ -25,6 +25,16 @@ fi
 
 TEST_LOG="$SDD_IOS_VERIFICATION_LOGS_PATH/test-without-building.log"
 RESULT_BUNDLE="$SDD_IOS_XCRESULT_ROOT/test-without-building.xcresult"
+ONLY_TESTING_ARGS=()
+
+if mode_value="$(verification_strategy_json_value "$KEY" '.test_selection.mode // "broad"' 2>/dev/null)"; then
+  if [[ "$mode_value" == "only_testing" ]]; then
+    while IFS= read -r selector; do
+      [[ -n "$selector" ]] || continue
+      ONLY_TESTING_ARGS+=("-only-testing:$selector")
+    done < <(verification_strategy_json_value "$KEY" '.test_selection.selectors[]? // empty' 2>/dev/null || true)
+  fi
+fi
 
 rm -rf "$RESULT_BUNDLE"
 echo "⏳ Running tests without rebuilding on device: $TESTING_DEVICE_ID..."
@@ -35,6 +45,7 @@ if xcodebuild \
   -derivedDataPath "$SDD_IOS_DERIVED_DATA_PATH" \
   -clonedSourcePackagesDirPath "$SDD_IOS_CLONED_SOURCE_PACKAGES_PATH" \
   -resultBundlePath "$RESULT_BUNDLE" \
+  "${ONLY_TESTING_ARGS[@]}" \
   test-without-building \
   CODE_SIGN_IDENTITY="" \
   CODE_SIGNING_REQUIRED=NO >"$TEST_LOG" 2>&1; then
