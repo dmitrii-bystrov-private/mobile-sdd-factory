@@ -4941,6 +4941,21 @@ class CoordinatorService:
                     if isinstance(verification_strategy, dict)
                     else None
                 ),
+                "verification_android_context_root": (
+                    str((verification_strategy.get("android_context") or {}).get("context_root") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_android_gradle_user_home_path": (
+                    str((verification_strategy.get("android_context") or {}).get("gradle_user_home_path") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_android_logs_path": (
+                    str((verification_strategy.get("android_context") or {}).get("logs_path") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
             },
         )
         event = self._append_event(
@@ -7229,6 +7244,10 @@ class CoordinatorService:
                         impacted_areas = impact_mapping.get("impacted_areas")
                         impacted_schemes = impact_mapping.get("impacted_schemes")
                         impacted_test_targets = impact_mapping.get("impacted_test_targets")
+                        impacted_modules = impact_mapping.get("impacted_modules")
+                        impacted_build_tasks = impact_mapping.get("impacted_build_tasks")
+                        impacted_test_tasks = impact_mapping.get("impacted_test_tasks")
+                        impacted_lint_tasks = impact_mapping.get("impacted_lint_tasks")
                         targeted_selectors = impact_mapping.get("targeted_selectors")
                         unmapped_files = impact_mapping.get("unmapped_files")
                         strategy_lines.extend(["", "### Impact Mapping", ""])
@@ -7249,6 +7268,22 @@ class CoordinatorService:
                             rendered_targets = [str(item).strip() for item in impacted_test_targets if str(item).strip()]
                             if rendered_targets:
                                 strategy_lines.append(f"- Impacted test targets: {', '.join(rendered_targets)}")
+                        if isinstance(impacted_modules, list):
+                            rendered_modules = [str(item).strip() for item in impacted_modules if str(item).strip()]
+                            if rendered_modules:
+                                strategy_lines.append(f"- Impacted modules: {', '.join(rendered_modules)}")
+                        if isinstance(impacted_build_tasks, list):
+                            rendered_build_tasks = [str(item).strip() for item in impacted_build_tasks if str(item).strip()]
+                            if rendered_build_tasks:
+                                strategy_lines.append(f"- Build tasks: {', '.join(rendered_build_tasks)}")
+                        if isinstance(impacted_test_tasks, list):
+                            rendered_test_tasks = [str(item).strip() for item in impacted_test_tasks if str(item).strip()]
+                            if rendered_test_tasks:
+                                strategy_lines.append(f"- Test tasks: {', '.join(rendered_test_tasks)}")
+                        if isinstance(impacted_lint_tasks, list):
+                            rendered_lint_tasks = [str(item).strip() for item in impacted_lint_tasks if str(item).strip()]
+                            if rendered_lint_tasks:
+                                strategy_lines.append(f"- Lint tasks: {', '.join(rendered_lint_tasks)}")
                         if isinstance(targeted_selectors, list):
                             rendered_selectors = [str(item).strip() for item in targeted_selectors if str(item).strip()]
                             if rendered_selectors:

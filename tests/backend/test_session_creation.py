@@ -1501,8 +1501,76 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(strategy_path.exists())
         strategy = json.loads(strategy_path.read_text())
         self.assertEqual("android", strategy["platform"])
-        self.assertEqual("broad_safe_gate", strategy["mode"])
-        self.assertEqual(["test", "lint"], strategy["phases"])
+        self.assertEqual("android_broad_safe_gate", strategy["mode"])
+        self.assertEqual(["prepare", "test", "lint"], strategy["phases"])
+
+    def test_verification_dispatch_materializes_android_strategy_context(self) -> None:
+        task_root = Path(self.temp_dir.name) / "ANDR-30003VERCTX"
+        repo_root = task_root / "repo"
+        module_root = repo_root / "feature" / "payments"
+        module_root.mkdir(parents=True, exist_ok=True)
+        (repo_root / "gradlew").write_text("#!/usr/bin/env bash\nexit 0\n")
+        (module_root / "build.gradle.kts").write_text("plugins {}\n")
+        spec_root = task_root / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        (spec_root / "diff.md").write_text(
+            "# Diff Artifact: ANDR-30003VERCTX\n\n"
+            "## Changed Files\n\n"
+            "| Status | Path |\n"
+            "|---|---|\n"
+            "| modified | feature/payments/src/main/java/com/example/PaymentViewModel.kt |\n"
+        )
+        session, _, _, _ = self.coordinator.prepare_task_session("ANDR-30003VERCTX")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        strategy_path = task_root / "spec" / "verification-strategy.json"
+        strategy = json.loads(strategy_path.read_text())
+        scripts_root = Path(self.temp_dir.name) / "repo-root" / "scripts"
+        self.assertEqual("android", strategy["platform"])
+        self.assertEqual("android_impacted_module_gate", strategy["mode"])
+        self.assertEqual([f"bash {scripts_root / 'android-verify.sh'} {session.task_key}"], strategy["commands"])
+        self.assertEqual(["prepare", "build", "test", "lint"], strategy["phases"])
+        self.assertEqual("reuse_if_available", strategy["prepare"]["policy"])
+        self.assertEqual([":feature:payments"], strategy["impact_mapping"]["impacted_modules"])
+        self.assertEqual([":feature:payments:assemble"], strategy["build_selection"]["gradle_build_tasks"])
+        self.assertEqual([":feature:payments:test"], strategy["test_selection"]["gradle_test_tasks"])
+        self.assertEqual([":feature:payments:lint"], strategy["test_selection"]["gradle_lint_tasks"])
+        self.assertEqual(
+            str(task_root / "tmp" / "verification" / "android" / "gradle-user-home"),
+            strategy["android_context"]["gradle_user_home_path"],
+        )
+
+    def test_verification_dispatch_marks_android_docs_only_skip(self) -> None:
+        task_root = Path(self.temp_dir.name) / "ANDR-30003VERDOCS"
+        repo_root = task_root / "repo"
+        repo_root.mkdir(parents=True, exist_ok=True)
+        spec_root = task_root / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        (spec_root / "diff.md").write_text(
+            "# Diff Artifact: ANDR-30003VERDOCS\n\n"
+            "## Changed Files\n\n"
+            "| Status | Path |\n"
+            "|---|---|\n"
+            "| modified | docs/verification.md |\n"
+        )
+        session, _, _, _ = self.coordinator.prepare_task_session("ANDR-30003VERDOCS")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        strategy_path = task_root / "spec" / "verification-strategy.json"
+        strategy = json.loads(strategy_path.read_text())
+        self.assertEqual("android_docs_only_skip", strategy["mode"])
+        self.assertEqual([], strategy["phases"])
+        self.assertTrue(strategy["signals"]["docs_only"])
+        self.assertEqual("high", strategy["impact_mapping"]["confidence"])
+        self.assertFalse(strategy["impact_mapping"]["fallback_required"])
 
     def test_verification_dispatch_materializes_ios_strategy_context(self) -> None:
         task_root = Path(self.temp_dir.name) / "IOS-30003VERIOS"

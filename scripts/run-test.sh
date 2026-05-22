@@ -15,5 +15,6 @@ if verification_is_ios_repo "$REPO_DIR"; then
     bash "$SCRIPT_DIR/ios-build-for-testing.sh" "$KEY"
     bash "$SCRIPT_DIR/ios-test-without-building.sh" "$KEY"
 else
-    bash scripts/android-test.sh
+    bash "$SCRIPT_DIR/android-prepare.sh" "$KEY"
+    bash "$SCRIPT_DIR/android-test.sh" "$KEY"
 fi

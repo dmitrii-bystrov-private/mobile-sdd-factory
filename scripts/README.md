@@ -179,8 +179,8 @@ bash scripts/run-build.sh <KEY>   # legacy/manual wrapper, not part of the defau
 ```
 
 Platform is detected by checking for `Tools/buildscripts/` in `$SDD_WORKDIR/<KEY>/repo/`:
-- Present → **iOS** (`Tools/buildscripts/build|test|lint.sh`)
-- Absent → **Android** (`scripts/android-build|test|lint.sh`)
+- Present → **iOS** (task-local orchestration scripts `scripts/ios-*.sh`)
+- Absent → **Android** (task-local orchestration scripts `scripts/android-*.sh`)
 
 Output is already filtered by the underlying scripts — on success a single `✅ ...` line is printed; on failure a `❌ ...` line followed by only the relevant error lines. **Do not pipe through `grep`, `tail`, or any other filter.**
 

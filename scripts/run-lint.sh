@@ -25,5 +25,6 @@ if verification_is_ios_repo "$REPO_DIR"; then
     cat "$LINT_LOG"
     exit 1
 else
-    bash scripts/android-lint.sh
+    bash "$SCRIPT_DIR/android-prepare.sh" "$KEY"
+    bash "$SCRIPT_DIR/android-lint.sh" "$KEY"
 fi

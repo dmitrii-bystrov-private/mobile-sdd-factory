@@ -65,6 +65,7 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("iOS impact mapping", text)
         self.assertIn("explicit commands", text)
         self.assertIn('bash scripts/ios-verify.sh "$SDD_FACTORY_TASK_KEY"', text)
+        self.assertIn('bash scripts/android-verify.sh "$SDD_FACTORY_TASK_KEY"', text)
         self.assertIn("docs-only with no code-verification phases", text)
         self.assertIn("Always write or refresh `spec/final-verification.md`", text)
         self.assertIn("failed checks and their relevant command output", text)

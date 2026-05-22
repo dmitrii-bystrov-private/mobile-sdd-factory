@@ -32,6 +32,18 @@ verification_prepare_ios_context() {
     "$SDD_IOS_VERIFICATION_LOGS_PATH"
 }
 
+verification_prepare_android_context() {
+  local key="$1"
+  local context_root="${SDD_WORKDIR}/${key}/tmp/verification/android"
+  export SDD_ANDROID_VERIFICATION_CONTEXT_ROOT="$context_root"
+  export SDD_ANDROID_GRADLE_USER_HOME="$context_root/gradle-user-home"
+  export SDD_ANDROID_VERIFICATION_LOGS_PATH="$context_root/logs"
+
+  mkdir -p \
+    "$SDD_ANDROID_GRADLE_USER_HOME" \
+    "$SDD_ANDROID_VERIFICATION_LOGS_PATH"
+}
+
 verification_source_ios_env() {
   local repo_dir="$1"
   local loader="$repo_dir/Tools/buildscripts/load-tuist-env.sh"
@@ -53,6 +65,17 @@ verification_strategy_path() {
 }
 
 verification_strategy_json_value() {
+  local key="$1"
+  local jq_expr="$2"
+  local strategy_path
+  strategy_path="$(verification_strategy_path "$key")"
+  if [[ ! -f "$strategy_path" ]]; then
+    return 1
+  fi
+  jq -r "$jq_expr" "$strategy_path"
+}
+
+verification_strategy_json_lines() {
   local key="$1"
   local jq_expr="$2"
   local strategy_path
