@@ -131,6 +131,7 @@ def role_runtime_rules(role_name: str) -> str:
         return (
             "Role-specific rules:\n"
             "- Start from the routed verification strategy file when it is provided and preserve its selected gate unless a clear repo signal forces a broader fallback.\n"
+            "- When the routed strategy includes iOS impact mapping, treat that mapping as the primary source for impacted areas, preferred schemes, test targets, and fallback confidence instead of re-deriving repository scope heuristically.\n"
             "- Run only the workflow-level deterministic verification gate for the current task.\n"
             "- Always invoke the wrappers with the current task key: `bash scripts/run-test.sh \"$SDD_FACTORY_TASK_KEY\"` and `bash scripts/run-lint.sh \"$SDD_FACTORY_TASK_KEY\"`; do not run `run-build.sh` here.\n"
             "- When the routed strategy provides explicit iOS phase commands, prefer executing that routed iOS verification sequence instead of reconstructing the phase order manually.\n"

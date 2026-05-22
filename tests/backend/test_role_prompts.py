@@ -62,6 +62,7 @@ class RolePromptTests(unittest.TestCase):
         )
 
         self.assertIn("Start from the routed verification strategy file", text)
+        self.assertIn("iOS impact mapping", text)
         self.assertIn("explicit iOS phase commands", text)
         self.assertIn("docs-only with no code-verification phases", text)
         self.assertIn("Always write or refresh `spec/final-verification.md`", text)

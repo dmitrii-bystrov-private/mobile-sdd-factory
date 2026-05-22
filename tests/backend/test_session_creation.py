@@ -1497,10 +1497,44 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(strategy["signals"]["tests_only"])
         self.assertEqual("only_testing", strategy["test_selection"]["mode"])
         self.assertIn("FinomTests/ExampleTests", strategy["test_selection"]["selectors"])
+        self.assertEqual(["FinomApp"], strategy["impact_mapping"]["impacted_areas"])
+        self.assertEqual("high", strategy["impact_mapping"]["confidence"])
+        self.assertFalse(strategy["impact_mapping"]["fallback_required"])
+        self.assertEqual(["Finom"], strategy["impact_mapping"]["impacted_schemes"])
+        self.assertEqual(["FinomTests"], strategy["impact_mapping"]["impacted_test_targets"])
         self.assertEqual(
             str(task_root / "tmp" / "verification" / "ios" / "derived-data"),
             strategy["ios_context"]["derived_data_path"],
         )
+
+    def test_verification_dispatch_marks_single_ios_area_impact_mapping(self) -> None:
+        task_root = Path(self.temp_dir.name) / "IOS-30003VERAREA"
+        repo_root = task_root / "repo" / "Tools" / "buildscripts"
+        repo_root.mkdir(parents=True, exist_ok=True)
+        spec_root = task_root / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        (spec_root / "diff.md").write_text(
+            "# Diff Artifact: IOS-30003VERAREA\n\n"
+            "## Changed Files\n\n"
+            "| Status | Path |\n"
+            "|---|---|\n"
+            "| modified | FinomCore/Sources/ObservationList/ObservationListService.swift |\n"
+        )
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERAREA")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        strategy_path = task_root / "spec" / "verification-strategy.json"
+        strategy = json.loads(strategy_path.read_text())
+        self.assertEqual("ios_impacted_area_gate", strategy["mode"])
+        self.assertEqual(["FinomCore"], strategy["impact_mapping"]["impacted_areas"])
+        self.assertEqual("high", strategy["impact_mapping"]["confidence"])
+        self.assertFalse(strategy["impact_mapping"]["fallback_required"])
+        self.assertEqual("Finom", strategy["impact_mapping"]["preferred_scheme"])
+        self.assertEqual(["FinomTests"], strategy["test_selection"]["test_targets"])
 
     def test_verification_dispatch_marks_ios_prepare_sensitive_changes_required(self) -> None:
         task_root = Path(self.temp_dir.name) / "IOS-30003VERPREP"
@@ -1528,6 +1562,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("required", strategy["prepare"]["policy"])
         self.assertEqual("rebuild", strategy["build_products_policy"])
         self.assertTrue(strategy["signals"]["prepare_sensitive"])
+        self.assertTrue(strategy["impact_mapping"]["fallback_required"])
+        self.assertEqual("low", strategy["impact_mapping"]["confidence"])
 
     def test_verification_dispatch_marks_ios_docs_only_skip(self) -> None:
         task_root = Path(self.temp_dir.name) / "IOS-30003VERDOCS"
@@ -1554,6 +1590,43 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("ios_docs_only_skip", strategy["mode"])
         self.assertEqual([], strategy["phases"])
         self.assertTrue(strategy["signals"]["docs_only"])
+        self.assertEqual("high", strategy["impact_mapping"]["confidence"])
+        self.assertFalse(strategy["impact_mapping"]["fallback_required"])
+
+    def test_ios_verification_report_includes_impact_mapping(self) -> None:
+        task_root = Path(self.temp_dir.name) / "IOS-30003VERREPORT"
+        repo_root = task_root / "repo" / "Tools" / "buildscripts"
+        repo_root.mkdir(parents=True, exist_ok=True)
+        spec_root = task_root / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        (spec_root / "diff.md").write_text(
+            "# Diff Artifact: IOS-30003VERREPORT\n\n"
+            "## Changed Files\n\n"
+            "| Status | Path |\n"
+            "|---|---|\n"
+            "| modified | FinomCore/Sources/ObservationList/ObservationListService.swift |\n"
+        )
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERREPORT")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all checks passed"},
+        )
+
+        verification_report = task_root / "spec" / "final-verification.md"
+        report_text = verification_report.read_text()
+
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertEqual("send_to_test_completed", followup_event.event_type)
+        self.assertIn("### Impact Mapping", report_text)
+        self.assertIn("Impacted areas: FinomCore", report_text)
+        self.assertIn("Impacted schemes: Finom", report_text)
+        self.assertIn("Impacted test targets: FinomTests", report_text)
 
     def test_implementation_completed_routes_to_reviewer_when_self_review_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

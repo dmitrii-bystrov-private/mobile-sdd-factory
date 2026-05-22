@@ -311,6 +311,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Run only deterministic verification work for the routed task session.",
             "- Start from the routed verification strategy file when it is provided and preserve its selected gate unless a clear repo signal forces a broader fallback.",
+            "- When the routed strategy includes iOS impact mapping, treat that mapping as the primary source for impacted areas, preferred schemes, test targets, and fallback confidence instead of re-deriving repository scope heuristically.",
             "- Treat `run-test.sh` and `run-lint.sh` as the workflow-level verification gate. Always run them with the current task key, for example `bash scripts/run-test.sh \"$SDD_FACTORY_TASK_KEY\"` and `bash scripts/run-lint.sh \"$SDD_FACTORY_TASK_KEY\"`; do not run `run-build.sh` here.",
             "- When the routed strategy provides explicit iOS phase commands, prefer executing that routed iOS verification sequence instead of reconstructing the phase order manually.",
             "- If the routed strategy explicitly marks the task as docs-only with no code-verification phases, preserve that skip decision and explain it in the verification report instead of forcing a build/test pass.",

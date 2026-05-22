@@ -62,3 +62,15 @@ verification_strategy_json_value() {
   fi
   jq -r "$jq_expr" "$strategy_path"
 }
+
+verification_ios_scheme() {
+  local key="$1"
+  local scheme="Finom"
+  local resolved=""
+
+  if resolved="$(verification_strategy_json_value "$key" '.impact_mapping.preferred_scheme // empty' 2>/dev/null)" && [[ -n "$resolved" ]]; then
+    scheme="$resolved"
+  fi
+
+  printf '%s\n' "$scheme"
+}

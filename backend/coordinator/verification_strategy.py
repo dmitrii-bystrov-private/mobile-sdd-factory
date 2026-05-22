@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 import re
 import subprocess
 
@@ -21,6 +21,36 @@ _IOS_PREPARE_SENSITIVE_MARKERS = (
     ".mise",
     ".tool-versions",
 )
+_IOS_VERIFICATION_MAP_PATH = Path(__file__).resolve().parents[2] / "config" / "ios-verification-map.json"
+
+
+def _normalize_repo_path(path: str) -> str:
+    normalized = path.replace("\\", "/").strip()
+    normalized = normalized.lstrip("./")
+    return normalized.lstrip("/")
+
+
+def _dedupe_preserving_order(values: list[str]) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for raw_value in values:
+        value = str(raw_value).strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
+def _load_ios_verification_map() -> list[dict[str, object]]:
+    try:
+        payload = json.loads(_IOS_VERIFICATION_MAP_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    areas = payload.get("areas")
+    if not isinstance(areas, list):
+        return []
+    return [item for item in areas if isinstance(item, dict)]
 
 
 def _read_changed_files_from_git(task_repo_root: Path) -> list[str]:
@@ -72,11 +102,12 @@ def _read_changed_files(task_root: Path, task_repo_root: Path) -> list[str]:
 
 
 def _is_doc_path(path: str) -> bool:
-    return path.endswith((".md", ".adoc", ".rst", ".txt"))
+    normalized = _normalize_repo_path(path).lower()
+    return normalized.endswith((".md", ".adoc", ".rst", ".txt"))
 
 
 def _is_ios_test_path(path: str) -> bool:
-    normalized = path.replace("\\", "/")
+    normalized = _normalize_repo_path(path)
     return (
         "/Tests/" in normalized
         or normalized.endswith("Tests.swift")
@@ -85,7 +116,7 @@ def _is_ios_test_path(path: str) -> bool:
 
 
 def _is_ios_prepare_sensitive_path(path: str) -> bool:
-    normalized = path.replace("\\", "/")
+    normalized = _normalize_repo_path(path)
     return any(marker in normalized for marker in _IOS_PREPARE_SENSITIVE_MARKERS)
 
 
@@ -114,6 +145,98 @@ def _extract_ios_test_selectors(task_repo_root: Path, changed_files: list[str]) 
                 seen.add(selector)
                 selectors.append(selector)
     return selectors
+
+
+def _match_ios_area(changed_path: str, areas: list[dict[str, object]]) -> dict[str, object] | None:
+    normalized_path = _normalize_repo_path(changed_path).lower()
+    best_match: dict[str, object] | None = None
+    best_length = -1
+    for area in areas:
+        prefixes = area.get("path_prefixes")
+        if not isinstance(prefixes, list):
+            continue
+        for raw_prefix in prefixes:
+            prefix = _normalize_repo_path(str(raw_prefix)).lower()
+            if not prefix:
+                continue
+            if normalized_path.startswith(prefix) and len(prefix) > best_length:
+                best_match = area
+                best_length = len(prefix)
+    return best_match
+
+
+def _build_ios_impact_mapping(
+    *,
+    changed_files: list[str],
+    non_doc_files: list[str],
+    prepare_sensitive: bool,
+    targeted_selectors: list[str],
+) -> dict[str, object]:
+    areas = _load_ios_verification_map()
+    impacted_area_names: list[str] = []
+    impacted_schemes: list[str] = []
+    impacted_test_targets: list[str] = []
+    unmapped_files: list[str] = []
+
+    for changed_path in non_doc_files:
+        matched_area = _match_ios_area(changed_path, areas)
+        if matched_area is None:
+            unmapped_files.append(changed_path)
+            continue
+        area_name = str(matched_area.get("name") or "").strip()
+        if area_name:
+            impacted_area_names.append(area_name)
+        schemes = matched_area.get("schemes")
+        if isinstance(schemes, list):
+            impacted_schemes.extend(str(item).strip() for item in schemes)
+        test_targets = matched_area.get("test_targets")
+        if isinstance(test_targets, list):
+            impacted_test_targets.extend(str(item).strip() for item in test_targets)
+
+    impacted_area_names = _dedupe_preserving_order(impacted_area_names)
+    impacted_schemes = _dedupe_preserving_order(impacted_schemes)
+    impacted_test_targets = _dedupe_preserving_order(impacted_test_targets)
+
+    confidence = "low"
+    fallback_required = True
+    reason = "The changed files could not be mapped to a stable iOS verification area, so the broad safe gate remains required."
+    preferred_scheme = impacted_schemes[0] if len(impacted_schemes) == 1 else ""
+
+    if changed_files and not non_doc_files:
+        confidence = "high"
+        fallback_required = False
+        reason = "Only documentation files changed, so no code-impact mapping is required."
+    elif prepare_sensitive:
+        confidence = "low"
+        fallback_required = True
+        reason = "Build or dependency configuration changed, so even mapped iOS areas must fall back to the broad safe gate."
+    elif non_doc_files and not unmapped_files and len(impacted_area_names) == 1:
+        confidence = "high"
+        fallback_required = False
+        reason = f"All changed code maps cleanly to the single impacted iOS area `{impacted_area_names[0]}`."
+    elif non_doc_files and not unmapped_files and len(impacted_area_names) > 1:
+        confidence = "medium"
+        fallback_required = True
+        reason = "The diff spans multiple mapped iOS areas, so narrowing further would be unsafe."
+    elif non_doc_files and unmapped_files:
+        confidence = "low"
+        fallback_required = True
+        reason = "Some changed files did not match the static iOS verification map, so the broad safe gate remains required."
+
+    impact_mapping: dict[str, object] = {
+        "confidence": confidence,
+        "fallback_required": fallback_required,
+        "reason": reason,
+        "impacted_areas": impacted_area_names,
+        "impacted_schemes": impacted_schemes,
+        "impacted_test_targets": impacted_test_targets,
+        "targeted_selectors": targeted_selectors,
+        "mapped_file_count": len(non_doc_files) - len(unmapped_files),
+        "unmapped_files": unmapped_files,
+    }
+    if preferred_scheme:
+        impact_mapping["preferred_scheme"] = preferred_scheme
+    return impact_mapping
 
 
 def detect_verification_platform(task_repo_root: Path) -> str:
@@ -157,9 +280,15 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[st
         tests_only = bool(non_doc_files) and all(_is_ios_test_path(path) for path in non_doc_files)
         prepare_sensitive = any(_is_ios_prepare_sensitive_path(path) for path in non_doc_files)
         targeted_selectors = _extract_ios_test_selectors(repo_root, non_doc_files) if tests_only else []
+        impact_mapping = _build_ios_impact_mapping(
+            changed_files=changed_files,
+            non_doc_files=non_doc_files,
+            prepare_sensitive=prepare_sensitive,
+            targeted_selectors=targeted_selectors,
+        )
         prepare_policy = "required" if prepare_sensitive else "reuse_if_available"
         mode = "ios_broad_safe_gate"
-        confidence = "high"
+        confidence = str(impact_mapping.get("confidence") or "high")
         reason = (
             "Use the iOS workflow-level verification gate with task-local build state "
             "for safe parallel verification."
@@ -177,6 +306,23 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[st
             )
             if targeted_selectors:
                 reason += f" Targeted test selectors were inferred for {len(targeted_selectors)} changed test file(s)."
+        elif not prepare_sensitive and not bool(impact_mapping.get("fallback_required")):
+            impacted_areas = impact_mapping.get("impacted_areas")
+            rendered_area = ""
+            if isinstance(impacted_areas, list) and impacted_areas:
+                rendered_area = str(impacted_areas[0]).strip()
+            mode = "ios_impacted_area_gate"
+            confidence = "high"
+            if rendered_area:
+                reason = (
+                    f"All changed iOS code maps to the single impacted area `{rendered_area}`, "
+                    "so the verifier can keep the safe task-local gate while reporting a narrower impact boundary."
+                )
+            else:
+                reason = (
+                    "All changed iOS code maps to a single impacted area, so the verifier can "
+                    "keep the safe task-local gate while reporting a narrower impact boundary."
+                )
         elif prepare_sensitive:
             reason = (
                 "The diff touches build or dependency configuration, so iOS prepare "
@@ -196,7 +342,9 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[st
         strategy["test_selection"] = {
             "mode": "only_testing" if targeted_selectors else "broad",
             "selectors": targeted_selectors,
+            "test_targets": list(impact_mapping.get("impacted_test_targets") or []),
         }
+        strategy["impact_mapping"] = impact_mapping
         strategy["phases"] = [] if docs_only else [
             "prepare",
             "build_for_testing",
@@ -225,6 +373,8 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[st
             "tests_only": tests_only,
             "prepare_sensitive": prepare_sensitive,
             "targeted_selector_count": len(targeted_selectors),
+            "mapped_area_count": len(list(impact_mapping.get("impacted_areas") or [])),
+            "unmapped_file_count": len(list(impact_mapping.get("unmapped_files") or [])),
         }
     return strategy
 

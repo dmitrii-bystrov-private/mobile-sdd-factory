@@ -7,6 +7,7 @@ source "$SCRIPT_DIR/lib/verification_context.sh"
 
 KEY="${1:?Usage: ios-test-without-building.sh <TASK-KEY>}"
 REPO_DIR="$(verification_resolve_repo_dir "$KEY")"
+SCHEME="$(verification_ios_scheme "$KEY")"
 
 cd "$REPO_DIR"
 verification_prepare_ios_context "$KEY"
@@ -40,7 +41,7 @@ rm -rf "$RESULT_BUNDLE"
 echo "⏳ Running tests without rebuilding on device: $TESTING_DEVICE_ID..."
 if xcodebuild \
   -workspace Finom-Tuist.xcworkspace \
-  -scheme Finom \
+  -scheme "$SCHEME" \
   -destination "platform=iOS Simulator,id=$TESTING_DEVICE_ID" \
   -derivedDataPath "$SDD_IOS_DERIVED_DATA_PATH" \
   -clonedSourcePackagesDirPath "$SDD_IOS_CLONED_SOURCE_PACKAGES_PATH" \

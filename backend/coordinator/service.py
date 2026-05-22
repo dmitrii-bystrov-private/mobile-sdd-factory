@@ -6757,6 +6757,47 @@ class CoordinatorService:
                         strategy_lines.append(f"- Mode: {mode}")
                     if phase_lines:
                         strategy_lines.append(f"- Phases: {', '.join(phase_lines)}")
+                    impact_mapping = strategy.get("impact_mapping")
+                    if isinstance(impact_mapping, dict):
+                        impact_confidence = str(impact_mapping.get("confidence") or "").strip()
+                        impact_reason = str(impact_mapping.get("reason") or "").strip()
+                        fallback_required = bool(impact_mapping.get("fallback_required"))
+                        impacted_areas = impact_mapping.get("impacted_areas")
+                        impacted_schemes = impact_mapping.get("impacted_schemes")
+                        impacted_test_targets = impact_mapping.get("impacted_test_targets")
+                        targeted_selectors = impact_mapping.get("targeted_selectors")
+                        unmapped_files = impact_mapping.get("unmapped_files")
+                        strategy_lines.extend(["", "### Impact Mapping", ""])
+                        if impact_confidence:
+                            strategy_lines.append(f"- Confidence: {impact_confidence}")
+                        strategy_lines.append(
+                            f"- Broad fallback required: {'yes' if fallback_required else 'no'}"
+                        )
+                        if isinstance(impacted_areas, list):
+                            rendered_areas = [str(item).strip() for item in impacted_areas if str(item).strip()]
+                            if rendered_areas:
+                                strategy_lines.append(f"- Impacted areas: {', '.join(rendered_areas)}")
+                        if isinstance(impacted_schemes, list):
+                            rendered_schemes = [str(item).strip() for item in impacted_schemes if str(item).strip()]
+                            if rendered_schemes:
+                                strategy_lines.append(f"- Impacted schemes: {', '.join(rendered_schemes)}")
+                        if isinstance(impacted_test_targets, list):
+                            rendered_targets = [str(item).strip() for item in impacted_test_targets if str(item).strip()]
+                            if rendered_targets:
+                                strategy_lines.append(f"- Impacted test targets: {', '.join(rendered_targets)}")
+                        if isinstance(targeted_selectors, list):
+                            rendered_selectors = [str(item).strip() for item in targeted_selectors if str(item).strip()]
+                            if rendered_selectors:
+                                strategy_lines.append(
+                                    f"- Targeted selectors: {', '.join(rendered_selectors[:10])}"
+                                )
+                        if isinstance(unmapped_files, list):
+                            rendered_unmapped = [str(item).strip() for item in unmapped_files if str(item).strip()]
+                            if rendered_unmapped:
+                                strategy_lines.extend(["", "#### Unmapped Files", ""])
+                                strategy_lines.extend(f"- `{item}`" for item in rendered_unmapped[:10])
+                        if impact_reason:
+                            strategy_lines.extend(["", "#### Mapping Rationale", "", impact_reason])
                     commands = strategy.get("commands")
                     if isinstance(commands, list):
                         rendered_commands = [str(item).strip() for item in commands if str(item).strip()]

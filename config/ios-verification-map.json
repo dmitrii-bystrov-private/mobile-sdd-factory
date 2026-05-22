@@ -1,0 +1,196 @@
+{
+  "areas": [
+    {
+      "name": "FinomApp",
+      "path_prefixes": [
+        "Finom/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomCore",
+      "path_prefixes": [
+        "FinomCore/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomCoreUI",
+      "path_prefixes": [
+        "FinomCoreUI/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomReusable",
+      "path_prefixes": [
+        "FinomReusable/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomAccount",
+      "path_prefixes": [
+        "FinomAccount/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomDashboard",
+      "path_prefixes": [
+        "FinomDashboard/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomTransactions",
+      "path_prefixes": [
+        "FinomTransactions/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomInvoicing",
+      "path_prefixes": [
+        "FinomInvoicing/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomWallets",
+      "path_prefixes": [
+        "FinomWallets/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomDocuments",
+      "path_prefixes": [
+        "FinomDocuments/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomCredit",
+      "path_prefixes": [
+        "FinomCredit/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomPaymentsInternational",
+      "path_prefixes": [
+        "FinomPaymentsInternational/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomPaymentsLocal",
+      "path_prefixes": [
+        "FinomPaymentsLocal/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomCreatePayment",
+      "path_prefixes": [
+        "FinomCreatePayment/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomAppCoordinator",
+      "path_prefixes": [
+        "FinomAppCoordinator/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    },
+    {
+      "name": "FinomBankOnboarding",
+      "path_prefixes": [
+        "finombankonboarding/"
+      ],
+      "schemes": [
+        "Finom"
+      ],
+      "test_targets": [
+        "FinomTests"
+      ]
+    }
+  ]
+}
