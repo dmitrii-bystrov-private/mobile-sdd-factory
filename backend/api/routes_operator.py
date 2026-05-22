@@ -341,6 +341,7 @@ def restart_runtime_role(
         session, event, followup_event = dependencies.coordinator_service.restart_runtime_role(
             session_id=payload.session_id,
             role_name=payload.role_name,
+            refresh_runtime_config=payload.refresh_runtime_config,
         )
     except IntakeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

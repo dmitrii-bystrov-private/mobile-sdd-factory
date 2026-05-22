@@ -396,10 +396,15 @@ export const apiClient = {
   restartRuntimeRole(
     sessionId: number,
     roleName: string,
+    refreshRuntimeConfig = false,
   ): Promise<{ event_type: string; followup_event_type: string | null; session: Session }> {
     return request("/operator/restart-runtime-role", {
       method: "POST",
-      body: JSON.stringify({ session_id: sessionId, role_name: roleName }),
+      body: JSON.stringify({
+        session_id: sessionId,
+        role_name: roleName,
+        refresh_runtime_config: refreshRuntimeConfig,
+      }),
     });
   },
 

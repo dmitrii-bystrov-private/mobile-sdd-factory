@@ -142,6 +142,29 @@ class SessionRepository:
             ).fetchone()
         return session_from_row(row)
 
+    def update_role_config(
+        self,
+        session_id: int,
+        role_config: dict[str, dict[str, str]] | None = None,
+    ) -> Session:
+        with self.db.connect() as connection:
+            connection.execute(
+                """
+                UPDATE sessions
+                SET role_config_json = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    json.dumps(role_config or {}, sort_keys=True),
+                    session_id,
+                ),
+            )
+            row = connection.execute(
+                "SELECT * FROM sessions WHERE id = ?",
+                (session_id,),
+            ).fetchone()
+        return session_from_row(row)
+
     def delete(self, session_id: int) -> None:
         with self.db.connect() as connection:
             connection.execute("DELETE FROM checkpoints WHERE session_id = ?", (session_id,))

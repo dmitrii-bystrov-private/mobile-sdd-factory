@@ -6189,19 +6189,62 @@ class CoordinatorService:
         )
         return session, event
 
-    def restart_runtime_role(self, session_id: int, role_name: str) -> tuple[Session, Event, Event | None]:
+    def _refresh_session_role_runtime_config(
+        self,
+        session: Session,
+        role_name: str,
+    ) -> tuple[Session, dict[str, str]]:
+        refreshed_role_config = normalize_role_runtime_config(
+            repo_root=self._repo_root(),
+            role_names=[role_name],
+            provided=None,
+        ).get(role_name)
+        if refreshed_role_config is None:
+            raise IntakeError(f"Could not refresh runtime config for role {role_name}")
+        updated_role_config = dict(session.role_config or {})
+        updated_role_config[role_name] = dict(refreshed_role_config)
+        session = self.session_repository.update_role_config(
+            session.id,
+            role_config=updated_role_config,
+        )
+        return session, dict(refreshed_role_config)
+
+    def restart_runtime_role(
+        self,
+        session_id: int,
+        role_name: str,
+        *,
+        refresh_runtime_config: bool = False,
+    ) -> tuple[Session, Event, Event | None]:
         session = self._get_session_or_raise(session_id)
         role = self.role_repository.get_by_name(session_id, role_name)
         if role is None:
             raise IntakeError(f"Role {role_name} is missing for session {session_id}")
-        if role.status != RoleStatus.STOPPED:
-            raise IntakeError(f"Role {role_name} is not stopped")
+        if role.status not in {RoleStatus.RUNNING, RoleStatus.STOPPED}:
+            raise IntakeError(f"Role {role_name} cannot be restarted from status {role.status.value}")
+
+        runtime_session = self._runtime_session_handle_for_session(session)
+        if role.status == RoleStatus.RUNNING:
+            if role.runtime_handle is None:
+                raise IntakeError(f"Role {role_name} has no live runtime handle")
+            self.session_backend.stop_role(
+                RuntimeRoleHandle(
+                    role_id=role.runtime_handle,
+                    session_id=runtime_session.session_id,
+                    backend_name=role.runtime_backend,
+                )
+            )
+            self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+
+        role_config = (session.role_config or {}).get(role.role_name)
+        if refresh_runtime_config:
+            session, role_config = self._refresh_session_role_runtime_config(session, role.role_name)
 
         runtime_role = self._spawn_role_runtime(
-            runtime_session=self._runtime_session_handle_for_session(session),
+            runtime_session=runtime_session,
             task_key=session.task_key,
             role_name=role.role_name,
-            role_config=(session.role_config or {}).get(role.role_name),
+            role_config=role_config,
             resume_mode="native",
         )
         role = self.role_repository.update_runtime(
@@ -6220,6 +6263,8 @@ class CoordinatorService:
                 "role_name": role.role_name,
                 "runtime_handle": role.runtime_handle,
                 "session_reactivated": followup_event is not None,
+                "refresh_runtime_config": refresh_runtime_config,
+                "role_config": (refreshed.role_config or {}).get(role.role_name, {}),
             },
         )
         return refreshed, event, followup_event
@@ -7796,6 +7841,10 @@ class CoordinatorService:
         return removed
 
     def _repo_root(self) -> Path:
+        if self.role_launcher_manager is not None:
+            return self.role_launcher_manager.repo_root
+        if self.role_workspace_manager is not None:
+            return self.role_workspace_manager.repo_root
         if self.workdir_root is not None:
             return self.workdir_root.parent
         return Path(__file__).resolve().parents[2]

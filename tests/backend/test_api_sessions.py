@@ -3096,6 +3096,75 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("active", response.session.status)
         self.assertTrue(self.dependencies.loop_runner.status().running)
 
+    def test_restart_runtime_role_route_can_refresh_runtime_config_for_running_owner(self) -> None:
+        self.dependencies.loop_runner.stop()
+        fake_capabilities = {
+            "available_runners": ["claude", "codex"],
+            "default_runner": "claude",
+            "runners": [
+                {
+                    "runner": "claude",
+                    "models": [
+                        {
+                            "id": "sonnet",
+                            "supported_efforts": ["medium", "high"],
+                            "default_effort": "medium",
+                        }
+                    ],
+                },
+                {
+                    "runner": "codex",
+                    "models": [
+                        {
+                            "id": "gpt-5.5",
+                            "supported_efforts": ["medium", "high"],
+                            "default_effort": "medium",
+                        }
+                    ],
+                },
+            ],
+            "role_defaults": [],
+        }
+
+        with patch("backend.role_runtime_config.build_runtime_capabilities", return_value=fake_capabilities):
+            prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+                PrepareSessionRequest(task_key="IOS-40013UREFRESH"),
+                dependencies=self.dependencies,
+            )
+
+            update_runtime_defaults(
+                UpdateRuntimeDefaultsRequest(
+                    default_runner="claude",
+                    role_defaults={
+                        "implementer": {
+                            "runner": "claude",
+                            "model": "sonnet",
+                            "effort": "high",
+                        }
+                    },
+                    policy_defaults={},
+                ),
+                dependencies=self.dependencies,
+            )
+
+            response = restart_runtime_role(
+                RestartRuntimeRoleRequest(
+                    session_id=prepare_response.session.id,
+                    role_name="implementer",
+                    refresh_runtime_config=True,
+                ),
+                dependencies=self.dependencies,
+            )
+
+        self.assertTrue(response.restarted)
+        self.assertEqual("runtime_role_restarted_by_operator", response.event_type)
+        self.assertEqual("role_input_dispatched", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertEqual("claude", response.session.role_config["implementer"]["runner"])
+        self.assertEqual("sonnet", response.session.role_config["implementer"]["model"])
+        self.assertEqual("high", response.session.role_config["implementer"]["effort"])
+        self.assertTrue(self.dependencies.loop_runner.status().running)
+
     def test_restart_runtime_session_route_restarts_roles_and_redispatches_owner(self) -> None:
         self.dependencies.loop_runner.stop()
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

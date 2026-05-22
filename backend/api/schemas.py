@@ -453,6 +453,7 @@ class StopRuntimeRoleResponse(BaseModel):
 class RestartRuntimeRoleRequest(BaseModel):
     session_id: int
     role_name: str
+    refresh_runtime_config: bool = False
 
 
 class RestartRuntimeRoleResponse(BaseModel):
