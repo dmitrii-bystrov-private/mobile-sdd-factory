@@ -588,6 +588,10 @@ class TmuxSessionBackend(SessionBackend):
             "and reply only through the SDD_* protocol described in AGENTS.md."
         )
 
+    def _normalize_launcher_input_text(self, text: str) -> str:
+        normalized = " ".join(text.split()).strip()
+        return normalized or text.strip()
+
     def _write_tmux_launcher_input(
         self,
         role_id: str,
@@ -600,18 +604,21 @@ class TmuxSessionBackend(SessionBackend):
         payload_text = text
         if "\n" in text:
             payload_text = self._materialize_routed_input(role_id, text)
+        payload_text = self._normalize_launcher_input_text(payload_text)
+        submit_key = "C-m"
         self.tmux_submit_traces[role_id].append(
             {
                 "source": source,
                 "original_text": text,
                 "payload_text": payload_text,
+                "submit_key": submit_key,
             }
         )
         result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "-l", payload_text)
         if result.returncode != 0:
             raise RuntimeError(result.stderr or result.stdout or "Failed to send tmux launcher input")
         time.sleep(0.25)
-        result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "C-m")
+        result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, submit_key)
         if result.returncode != 0:
             raise RuntimeError(result.stderr or result.stdout or "Failed to submit tmux launcher input")
 

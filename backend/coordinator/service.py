@@ -5445,7 +5445,6 @@ class CoordinatorService:
         role: Role,
         chunks: list[RuntimeOutputChunk],
     ) -> Session:
-        current_session = session
         for chunk in chunks:
             for marker_type, payload in self._extract_output_markers(chunk.text):
                 if marker_type == "output":
@@ -5455,35 +5454,23 @@ class CoordinatorService:
                         payload=payload,
                     )
                     self._append_event(
-                        session_id=current_session.id,
+                        session_id=session.id,
                         event_type="runtime_terminal_output_echo_ignored",
                         producer_type="coordinator",
                         payload={
                             "role_name": role.role_name,
-                            "current_stage": current_session.current_stage,
-                            "current_owner": current_session.current_owner,
+                            "current_stage": session.current_stage,
+                            "current_owner": session.current_owner,
                         },
                     )
                     continue
                 self._record_runtime_marker_artifact(
-                    session=current_session,
+                    session=session,
                     role=role,
                     marker_type=marker_type,
                     payload=payload,
                 )
-                self._append_runtime_marker_event(
-                    session=current_session,
-                    role=role,
-                    marker_type=marker_type,
-                    payload=payload,
-                )
-                if marker_type == "error":
-                    current_session = self._escalate_runtime_error(
-                        session=current_session,
-                        role=role,
-                        payload=payload,
-                    )
-        return current_session
+        return session
 
     def _maybe_request_missing_result_file_recreation(
         self,

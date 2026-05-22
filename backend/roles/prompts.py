@@ -195,12 +195,12 @@ def role_handoff_prompt(
         f"{role_runtime_rules(role_name)}"
         "Current routed work:\n"
         f"{instruction}\n\n"
-        "For intermediate progress updates, you may emit:\n"
+        "Optional console telemetry:\n"
         'SDD_PROGRESS: {"status":"in_progress","message":"short progress update","progress":25}\n'
-        "If you need to escalate through the live runtime, emit `SDD_ERROR`.\n"
-        "- Set `needs_operator_input: true` only when you are explicitly waiting for a direct operator reply in this same live session.\n"
-        "- Set `needs_operator_input: false` for runtime/tooling failures, missing diagnostics, MCP/network blockers, or other cases that need recovery rather than a direct reply.\n"
-        'SDD_ERROR: {"summary":"short error summary","details":"optional detail","needs_operator_input":false}\n\n'
+        "- `SDD_PROGRESS` is console-only telemetry for humans; it does not drive coordinator state.\n"
+        "- Do not rely on `SDD_ERROR` to move the workflow. For blockers, failures, and operator questions, write the structured outcome to `RESULT.json`.\n"
+        "- If a direct operator reply is required, use `output_type: \"failed\"` and set `needs_operator_input: true` in the terminal payload.\n"
+        "- For runtime/tooling failures that do not need a direct operator reply, use `output_type: \"failed\"` with a concise `summary` and optional `failures` / `details` fields.\n\n"
         "Path resolution rules:\n"
         "- Treat paths written as `spec/...`, `review/...`, or `plan/...` as paths under the task snapshot metadata root from AGENTS.md, not as paths relative to the current role workspace.\n"
         "- When the hydration payload below includes explicit absolute `*_path` fields, prefer those exact paths over reconstructing task paths yourself.\n\n"
@@ -211,7 +211,9 @@ def role_handoff_prompt(
         "- If the hydration payload below includes `subtask_key`, copy that `subtask_key` into the terminal payload unchanged as well.\n"
         "- For example: `{\"output_type\":\"completed\",\"payload\":{\"work_item_id\":123,\"summary\":\"short result\"}}`\n"
         "- Subtask example: `{\"output_type\":\"completed\",\"payload\":{\"work_item_id\":123,\"subtask_key\":\"IOS-12345\",\"summary\":\"short result\"}}`\n"
-        "- Use `failed` plus `failures` when verification/correction output must report failures.\n\n"
+        "- Use `failed` plus `failures` when verification/correction output must report failures.\n"
+        "- Operator question example: `{\"output_type\":\"failed\",\"payload\":{\"work_item_id\":123,\"summary\":\"requirements clarification needed\",\"needs_operator_input\":true,\"pending_decisions\":[\"choose option A or B\"]}}`\n"
+        "- Runtime failure example: `{\"output_type\":\"failed\",\"payload\":{\"work_item_id\":123,\"summary\":\"tooling failure\",\"failures\":[\"xcodebuild exited 65\"]}}`\n\n"
         "If you also echo the terminal outcome in the transcript, emit one line in this exact form:\n"
         'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"short result"}}\n'
         "For verification failures, the optional transcript echo is:\n"

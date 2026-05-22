@@ -2476,16 +2476,20 @@ class SessionApiTests(unittest.TestCase):
             prepare_response.session.id,
             "implementer",
         )
-        self.dependencies.session_backend.simulate_output(
-            implementer_role.runtime_handle,
-            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        active_item = next(
+            item
+            for item in self.dependencies.work_item_repository.list_for_session(prepare_response.session.id)
+            if item.work_type == "implementation"
         )
-        collect_role_output(
-            CollectRoleOutputRequest(
-                session_id=prepare_response.session.id,
-                role_name="implementer",
-            ),
-            dependencies=self.dependencies,
+        self.dependencies.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        self.dependencies.session_repository.update_stage_and_owner(
+            prepare_response.session.id,
+            current_stage="implementation_requested",
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(
+            prepare_response.session.id,
+            SessionStatus.WAITING_FOR_OPERATOR,
         )
 
         response = send_runtime_input(
@@ -2572,14 +2576,8 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        self.assertTrue(response.available)
-        self.assertEqual("implementer", response.role_name)
-        self.assertEqual("interactive selection required", response.summary)
-        self.assertEqual("operator choice needed", response.details)
-        self.assertEqual("session_escalated_to_operator", response.source_event_type)
-        self.assertEqual("runtime_error", response.source_reason)
-        self.assertTrue(response.needs_operator_input)
-        self.assertIsNone(response.resume_strategy)
+        self.assertFalse(response.available)
+        self.assertFalse(response.needs_operator_input)
 
     def test_get_interactive_state_route_clears_after_operator_runtime_input(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
@@ -2643,11 +2641,8 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        self.assertTrue(response.available)
-        self.assertEqual("tool failed", response.summary)
-        self.assertEqual("runtime_error", response.source_reason)
+        self.assertFalse(response.available)
         self.assertFalse(response.needs_operator_input)
-        self.assertIsNone(response.resume_strategy)
 
     def test_get_interactive_state_route_returns_resume_strategy(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
