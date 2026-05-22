@@ -361,7 +361,6 @@ export function SessionsPage(): JSX.Element {
   const [runtimeDefaultsSummary, setRuntimeDefaultsSummary] =
     useState<RuntimeDefaultsSummary | null>(null);
   const refreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const contentTopRef = useRef<HTMLElement | null>(null);
   const selectedSessionIdRef = useRef<number | null>(null);
 
   const selectedSession =
@@ -580,15 +579,6 @@ export function SessionsPage(): JSX.Element {
     };
   }, []);
 
-  useEffect(() => {
-    if (surfaceView !== "runs" || selectedSessionId === null) {
-      return;
-    }
-    requestAnimationFrame(() => {
-      contentTopRef.current?.scrollIntoView({ block: "start" });
-    });
-  }, [selectedSessionId, surfaceView]);
-
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -637,7 +627,7 @@ export function SessionsPage(): JSX.Element {
             sessions={sessions}
           />
         </div>
-        <section className="detail-layout" ref={contentTopRef}>
+        <section className="detail-layout">
           {surfaceView === "runs" ? (
             <SessionDetail
               bundle={bundle}
