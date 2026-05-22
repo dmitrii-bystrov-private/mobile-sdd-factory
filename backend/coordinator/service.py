@@ -4266,6 +4266,7 @@ class CoordinatorService:
 
         active_item = verification_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._materialize_verification_outcome_file(session=session, source_event=source_event)
         self._materialize_final_verification_file(session=session, source_event=source_event)
 
         coding_role = self._primary_coding_role_for_work_type(session, "verification_correction")
@@ -4379,9 +4380,10 @@ class CoordinatorService:
 
         active_item = verification_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._materialize_verification_outcome_file(session=session, source_event=source_event)
         self._materialize_final_verification_file(session=session, source_event=source_event)
         session = self._get_session_or_raise(session.id)
-        if not self._verification_report_passed(session):
+        if self._verification_outcome_status(session) != "passed":
             return self._handle_verification_failed(session, source_event)
         doc_harvest_policy = self._optional_lane_policy_mode(session.policy, "doc_harvest_policy")
         if doc_harvest_policy != "disabled":
@@ -4910,7 +4912,7 @@ class CoordinatorService:
             emit_event=False,
         )
         session, _commit_event = self._commit_task_state(session, "doc harvest")
-        if self._verification_gate_required_for_delivery(session) and not self._verification_report_passed(session):
+        if self._verification_gate_required_for_delivery(session) and self._verification_outcome_status(session) != "passed":
             session = self.session_repository.update_stage_and_owner(
                 session.id,
                 current_stage="doc_harvest_requested",
@@ -4927,8 +4929,8 @@ class CoordinatorService:
                     "work_item_id": active_item.id,
                     "summary": "delivery blocked because workflow verification did not pass",
                     "details": (
-                        "Documentation harvest completed, but the latest final-verification report is not PASS. "
-                        "Resolve verification failures before delivery can continue."
+                        "Documentation harvest completed, but the latest structured verification outcome is not "
+                        "passed. Resolve verification failures before delivery can continue."
                     ),
                     "current_stage": session.current_stage,
                 },
@@ -7171,9 +7173,90 @@ class CoordinatorService:
             },
         )
 
+    def _materialize_verification_outcome_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / "verification-outcome.json"
+
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        failures = payload.get("failures")
+        normalized_failures = (
+            [str(item).strip() for item in failures if str(item).strip()]
+            if isinstance(failures, list)
+            else []
+        )
+        check_outputs = payload.get("check_outputs")
+        normalized_check_outputs = check_outputs if isinstance(check_outputs, dict) else {}
+        commands = payload.get("commands")
+        normalized_commands = commands if isinstance(commands, list) else []
+        structured_status = (
+            "passed" if source_event.event_type == "verification_passed" else "failed"
+        )
+        outcome = {
+            "task_key": session.task_key,
+            "source_event_id": source_event.id,
+            "source_event_type": source_event.event_type,
+            "status": structured_status,
+            "work_item_id": payload.get("work_item_id"),
+            "summary": str(payload.get("summary") or "").strip(),
+            "details": str(payload.get("details") or "").strip(),
+            "verification_status": str(payload.get("verification_status") or "").strip(),
+            "result": str(payload.get("result") or "").strip(),
+            "failures": normalized_failures,
+            "check_outputs": normalized_check_outputs,
+            "commands": normalized_commands,
+        }
+        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
+        target_path.write_text(content)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "verification",
+            "verification-outcome.json",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="verification",
+            artifact_type="verification_outcome_json",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": structured_status,
+                "source_event_id": source_event.id,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+
     def _verification_gate_required_for_delivery(self, session: Session) -> bool:
         events = self.event_repository.list_for_session(session.id)
         return any(item.event_type == "verification_requested" for item in events)
+
+    def _verification_outcome_status(self, session: Session) -> str | None:
+        if self.workdir_root is not None:
+            outcome_path = self.workdir_root / session.task_key / "spec" / "verification-outcome.json"
+            if outcome_path.is_file():
+                try:
+                    payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    payload = None
+                if isinstance(payload, dict):
+                    status = str(payload.get("status") or "").strip().lower()
+                    if status in {"passed", "failed"}:
+                        return status
+        # Transitional compatibility for older sessions that predate structured outcomes.
+        if self._verification_report_passed(session):
+            return "passed"
+        return None
 
     def _verification_report_passed(self, session: Session) -> bool:
         if self.workdir_root is None:
@@ -7196,7 +7279,7 @@ class CoordinatorService:
     def _require_passed_verification_for_delivery(self, session: Session) -> None:
         if not self._verification_gate_required_for_delivery(session):
             return
-        if not self._verification_report_passed(session):
+        if self._verification_outcome_status(session) != "passed":
             raise IntakeError(
                 f"Session {session.id} cannot enter delivery because workflow verification did not pass"
             )

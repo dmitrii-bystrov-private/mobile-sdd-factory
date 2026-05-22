@@ -4478,12 +4478,15 @@ class SessionCreationTests(unittest.TestCase):
         work_items = self.work_item_repository.list_for_session(session.id)
         events = self.event_repository.list_for_session(session.id)
         verification_report = Path(self.temp_dir.name) / "IOS-30005" / "spec" / "final-verification.md"
+        verification_outcome = Path(self.temp_dir.name) / "IOS-30005" / "spec" / "verification-outcome.json"
 
         self.assertEqual("send_to_test_completed", updated_session.current_stage)
         self.assertIsNone(updated_session.current_owner)
         self.assertEqual("completed", updated_session.status.value)
         self.assertEqual("send_to_test_completed", followup_event.event_type)
         self.assertTrue(verification_report.exists())
+        self.assertTrue(verification_outcome.exists())
+        self.assertEqual("passed", json.loads(verification_outcome.read_text())["status"])
         self.assertIn("## Strategy", verification_report.read_text())
         self.assertIn("### Commands", verification_report.read_text())
         self.assertIn("PASS", verification_report.read_text())
@@ -6420,6 +6423,60 @@ class SessionCreationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(IntakeError, "workflow verification did not pass"):
             self.coordinator.send_to_test_handoff(session_id=session.id)
+
+    def test_delivery_gate_prefers_structured_verification_outcome_over_markdown(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021OUTCOMEPASS")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        spec_root = Path(self.temp_dir.name) / "IOS-30021OUTCOMEPASS" / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        (spec_root / "final-verification.md").write_text(
+            "# Final Verification\n\n"
+            "## Result\nFAIL\n"
+        )
+        (spec_root / "verification-outcome.json").write_text(
+            json.dumps({"status": "passed", "task_key": "IOS-30021OUTCOMEPASS"}) + "\n"
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="completed",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+
+        completed_session, event, _ = self.coordinator.create_mr_handoff(session_id=session.id)
+
+        self.assertEqual("completed", completed_session.status.value)
+        self.assertEqual("mr_handoff_completed", event.event_type)
+
+    def test_delivery_gate_blocks_when_structured_verification_outcome_failed_even_if_markdown_passes(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021OUTCOMEFAIL")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        spec_root = Path(self.temp_dir.name) / "IOS-30021OUTCOMEFAIL" / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        (spec_root / "final-verification.md").write_text(
+            "# Final Verification\n\n"
+            "## Result\nPASS\n"
+        )
+        (spec_root / "verification-outcome.json").write_text(
+            json.dumps({"status": "failed", "task_key": "IOS-30021OUTCOMEFAIL"}) + "\n"
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="completed",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+
+        with self.assertRaisesRegex(IntakeError, "workflow verification did not pass"):
+            self.coordinator.create_mr_handoff(session_id=session.id)
 
     def test_send_to_test_handoff_failure_escalates_for_operator_retry(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021D1")
