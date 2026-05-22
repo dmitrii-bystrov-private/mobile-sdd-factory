@@ -6875,6 +6875,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "boy_scout_deferred_markdown" for item in artifacts))
         self.assertTrue(deferred_path.is_file())
         self.assertIn("Extract helper", deferred_path.read_text())
+        outcome_path = Path(self.temp_dir.name) / "IOS-30021BS2" / "spec" / "boy-scout-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("skipped_by_operator", json.loads(outcome_path.read_text())["status"])
 
     def test_resolve_boy_scout_findings_creates_tech_debt_and_routes_remaining_findings(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -6945,6 +6948,9 @@ class SessionCreationTests(unittest.TestCase):
         actionable_text = actionable_path.read_text()
         self.assertIn("Extract builder helper", actionable_text)
         self.assertNotIn("Split legacy presenter", actionable_text)
+        outcome_path = Path(self.temp_dir.name) / "IOS-30021BSMIX" / "spec" / "boy-scout-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("resolved_create_tech_debt", json.loads(outcome_path.read_text())["status"])
 
     def test_get_interactive_state_summary_exposes_boy_scout_reason(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

@@ -866,6 +866,11 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
             },
         )
+        self._materialize_boy_scout_outcome_file(
+            session=session,
+            source_event=event,
+            status="skipped_by_operator",
+        )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         session = self.session_repository.update_stage_and_owner(
             session.id,
@@ -925,6 +930,15 @@ class CoordinatorService:
                 "created_issues": created_issues,
                 "current_stage": session.current_stage,
             },
+        )
+        self._materialize_boy_scout_outcome_file(
+            session=session,
+            source_event=event,
+            status=(
+                "resolved_create_tech_debt"
+                if resolution == "create_tech_debt"
+                else "resolved_implement_now"
+            ),
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         session = self.session_repository.update_stage_and_owner(
