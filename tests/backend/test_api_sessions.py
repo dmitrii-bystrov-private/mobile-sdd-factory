@@ -1533,7 +1533,7 @@ class SessionApiTests(unittest.TestCase):
         )
 
         self.assertTrue(response.available)
-        self.assertEqual("spec_verification_blockers", response.source_reason)
+        self.assertEqual("spec_verification_blocked", response.source_reason)
         self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, response.role_name)
         self.assertTrue(response.needs_operator_input)
 

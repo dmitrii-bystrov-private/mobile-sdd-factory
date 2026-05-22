@@ -2794,7 +2794,7 @@ class SessionCreationTests(unittest.TestCase):
         summary = self.coordinator.get_interactive_state_summary(session.id)
 
         self.assertTrue(summary["available"])
-        self.assertEqual("spec_verification_blockers", summary["source_reason"])
+        self.assertEqual("spec_verification_blocked", summary["source_reason"])
         self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, summary["role_name"])
         self.assertTrue(summary["needs_operator_input"])
 
@@ -5031,6 +5031,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("acceptance_criteria_completed", mapped_event.event_type)
         self.assertEqual("constraints_requested", followup_event.event_type)
         self.assertEqual("constraints_requested", acceptance_session.current_stage)
+        self.assertEqual("active", acceptance_session.status.value)
 
         constraints_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
@@ -5042,6 +5043,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("constraints_completed", mapped_event.event_type)
         self.assertEqual("spec_verification_requested", followup_event.event_type)
         self.assertEqual("spec_verification_requested", constraints_session.current_stage)
+        self.assertEqual("active", constraints_session.status.value)
 
         verifier_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
@@ -5053,6 +5055,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("spec_verification_completed", mapped_event.event_type)
         self.assertEqual("task_decomposition_requested", followup_event.event_type)
         self.assertEqual("task_decomposition_requested", verifier_session.current_stage)
+        self.assertEqual("active", verifier_session.status.value)
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
@@ -5078,6 +5081,69 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue((spec_root / "acceptance_criteria.md").is_file())
         self.assertTrue((spec_root / "constraints.md").is_file())
         self.assertTrue((spec_root / "spec_verification.md").is_file())
+
+    def test_story_planning_progression_reactivates_waiting_session_between_stages(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30006STORYWAIT",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30006STORYWAIT")
+
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        proposal_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=PROPOSAL_CONTEXT_WORKER_ROLE,
+            output_type="completed",
+            payload={"summary": "Context prepared"},
+        )
+        self.assertEqual("proposal_context_completed", mapped_event.event_type)
+        self.assertEqual("requirements_requested", followup_event.event_type)
+        self.assertEqual("active", proposal_session.status.value)
+
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        requirements_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+            output_type="completed",
+            payload={"summary": "Requirements prepared"},
+        )
+        self.assertEqual("requirements_completed", mapped_event.event_type)
+        self.assertEqual("acceptance_criteria_requested", followup_event.event_type)
+        self.assertEqual("active", requirements_session.status.value)
+
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        acceptance_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=ACCEPTANCE_CRITERIA_WORKER_ROLE,
+            output_type="completed",
+            payload={"summary": "Acceptance prepared"},
+        )
+        self.assertEqual("acceptance_criteria_completed", mapped_event.event_type)
+        self.assertEqual("constraints_requested", followup_event.event_type)
+        self.assertEqual("active", acceptance_session.status.value)
+
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        constraints_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CONSTRAINTS_WORKER_ROLE,
+            output_type="completed",
+            payload={"summary": "Constraints prepared"},
+        )
+        self.assertEqual("constraints_completed", mapped_event.event_type)
+        self.assertEqual("spec_verification_requested", followup_event.event_type)
+        self.assertEqual("active", constraints_session.status.value)
+
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        verifier_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=SPEC_VERIFIER_WORKER_ROLE,
+            output_type="completed",
+            payload={"summary": "Planning verified"},
+        )
+        self.assertEqual("spec_verification_completed", mapped_event.event_type)
+        self.assertEqual("task_decomposition_requested", followup_event.event_type)
+        self.assertEqual("active", verifier_session.status.value)
 
     def test_proposal_completion_preserves_existing_written_markdown(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

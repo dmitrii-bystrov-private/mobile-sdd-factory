@@ -2981,6 +2981,7 @@ class CoordinatorService:
             current_stage="proposal_context_requested",
             current_owner=PROPOSAL_CONTEXT_WORKER_ROLE,
         )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         instruction = (
             f"Produce the proposal and context package for story {session.task_key} before downstream planning and decomposition. "
             "Write or refresh `spec/proposal.md`, always write `spec/context/feature-overview.md`, "
@@ -3030,6 +3031,7 @@ class CoordinatorService:
             current_stage="requirements_requested",
             current_owner=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
         )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         clarification_mode = self._requirements_clarification_mode(session.policy)
         instruction = (
             f"Clarify the implementation requirements for story {session.task_key}. "
@@ -3129,6 +3131,7 @@ class CoordinatorService:
             current_stage="constraints_requested",
             current_owner=CONSTRAINTS_WORKER_ROLE,
         )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         instruction = (
             f"Prepare grounded implementation constraints for story {session.task_key}. "
             "Use `spec/context/project.md` as architectural ground truth, cite it instead of restating generic conventions, "
@@ -3176,6 +3179,7 @@ class CoordinatorService:
             current_stage="spec_verification_requested",
             current_owner=SPEC_VERIFIER_WORKER_ROLE,
         )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         instruction = (
             f"Verify the assembled planning package for story {session.task_key} before task decomposition. "
             "Check for contradictions, missing implementation-shaping details, or planning gaps that should be surfaced before coding starts."
@@ -3222,6 +3226,7 @@ class CoordinatorService:
             current_stage="task_decomposition_requested",
             current_owner=TASK_DECOMPOSER_WORKER_ROLE,
         )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         instruction = (
             f"Prepare task decomposition for story {session.task_key} before implementation starts. "
             "Produce a temporary `plan/index.md` plus self-contained `plan/NN-*.md` task package only for Jira subtask materialization, and break the verified planning package into the smallest useful execution-oriented chunks."
