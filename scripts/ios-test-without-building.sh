@@ -39,17 +39,25 @@ fi
 
 rm -rf "$RESULT_BUNDLE"
 echo "⏳ Running tests without rebuilding on device: $TESTING_DEVICE_ID..."
-if xcodebuild \
-  -workspace Finom-Tuist.xcworkspace \
-  -scheme "$SCHEME" \
-  -destination "platform=iOS Simulator,id=$TESTING_DEVICE_ID" \
-  -derivedDataPath "$SDD_IOS_DERIVED_DATA_PATH" \
-  -clonedSourcePackagesDirPath "$SDD_IOS_CLONED_SOURCE_PACKAGES_PATH" \
-  -resultBundlePath "$RESULT_BUNDLE" \
-  "${ONLY_TESTING_ARGS[@]}" \
-  test-without-building \
-  CODE_SIGN_IDENTITY="" \
-  CODE_SIGNING_REQUIRED=NO >"$TEST_LOG" 2>&1; then
+XCODEBUILD_CMD=(
+  xcodebuild
+  -workspace Finom-Tuist.xcworkspace
+  -scheme "$SCHEME"
+  -destination "platform=iOS Simulator,id=$TESTING_DEVICE_ID"
+  -derivedDataPath "$SDD_IOS_DERIVED_DATA_PATH"
+  -clonedSourcePackagesDirPath "$SDD_IOS_CLONED_SOURCE_PACKAGES_PATH"
+  -resultBundlePath "$RESULT_BUNDLE"
+)
+if ((${#ONLY_TESTING_ARGS[@]} > 0)); then
+  XCODEBUILD_CMD+=("${ONLY_TESTING_ARGS[@]}")
+fi
+XCODEBUILD_CMD+=(
+  test-without-building
+  CODE_SIGN_IDENTITY=
+  CODE_SIGNING_REQUIRED=NO
+)
+
+if "${XCODEBUILD_CMD[@]}" >"$TEST_LOG" 2>&1; then
   echo "✅ TEST SUCCEEDED"
   exit 0
 fi

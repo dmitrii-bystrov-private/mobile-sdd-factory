@@ -739,6 +739,47 @@ class SessionCreationTests(unittest.TestCase):
             self.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
         )
 
+    def test_send_operator_runtime_input_redispatches_one_shot_role_with_reply_context(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30002B",
+            workflow_profile="story_full",
+            policy={
+                "requirements_clarification_mode": "ask-selectively",
+            },
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_requested",
+            current_owner="requirements-clarifier-worker",
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        role = self.role_repository.get_by_name(session.id, "requirements-clarifier-worker")
+        self.assertIsNotNone(role)
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements",
+            title="Requirements clarification for IOS-30002B",
+            owner_role_id=role.id,
+            source_event_id=1,
+            priority=10,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+
+        updated_session, event = self.coordinator.send_operator_runtime_input(
+            session_id=session.id,
+            text="Do it the same way as the frontend does",
+        )
+
+        self.assertEqual("operator_runtime_input_sent", event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("requirements-clarifier-worker", updated_session.current_owner)
+        sent = self.session_backend.get_sent_inputs(role.runtime_handle)
+        self.assertTrue(sent)
+        self.assertIn("Operator reply received in this live session.", sent[-1])
+        self.assertIn("Do it the same way as the frontend does", sent[-1])
+        refreshed_item = self.work_item_repository.get_by_id(work_item.id)
+        self.assertEqual(WorkItemStatus.ASSIGNED, refreshed_item.status)
+
     def test_get_interactive_state_summary_uses_latest_runtime_error(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003",
@@ -1443,7 +1484,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[0])
         self.assertIn("Role-specific rules:", sent_inputs[0])
         self.assertIn("Start from the routed verification strategy file", sent_inputs[0])
-        self.assertIn("Always invoke the wrappers with the current task key", sent_inputs[0])
+        self.assertIn("For iOS strategies, prefer the routed `bash scripts/ios-verify.sh", sent_inputs[0])
         self.assertIn("verification_report_path", sent_inputs[0])
         self.assertIn("verification_strategy_path", sent_inputs[0])
 
@@ -4446,6 +4487,30 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
 
+    def test_verification_passed_cleans_verification_tmp_after_completion(self) -> None:
+        task_root = Path(self.temp_dir.name) / "IOS-30005TMPCLEAN"
+        verification_root = task_root / "tmp" / "verification" / "ios"
+        verification_root.mkdir(parents=True, exist_ok=True)
+        (verification_root / "placeholder.txt").write_text("x")
+
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30005TMPCLEAN")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all checks passed"},
+        )
+
+        self.assertEqual("completed", updated_session.status.value)
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertEqual("send_to_test_completed", followup_event.event_type)
+        self.assertFalse((task_root / "tmp" / "verification").exists())
+
     def test_verification_passed_preserves_existing_final_verification_report(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30005EXISTING")
         self.coordinator.handle_operator_event(
@@ -4929,6 +4994,40 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "runtime_terminal_output_echo_ignored" for item in events))
         self.assertFalse(any(item.event_type == "implementation_completed" for item in events))
 
+    def test_collect_role_output_preserves_spaces_in_wrapped_error_marker(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRWRAP")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            "\n".join(
+                [
+                    '• SDD_ERROR: {"summary":"Need one product decision before finalizing',
+                    '  requirements","details":"The proposal leaves repeated enrollment behavior',
+                    '  unresolved. Please confirm whether the new write-layer should suppress',
+                    '  duplicate enrollment requests while the current cached entry is still valid,',
+                    '  or always POST and let the backend handle',
+                    '  duplicates.","needs_operator_input":true}',
+                ]
+            ),
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        interactive = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual(
+            "The proposal leaves repeated enrollment behavior unresolved. "
+            "Please confirm whether the new write-layer should suppress "
+            "duplicate enrollment requests while the current cached entry is still valid, "
+            "or always POST and let the backend handle duplicates.",
+            interactive["details"],
+        )
+
     def test_collect_role_output_consumes_result_json_from_role_workspace(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009B")
         active_item = next(
@@ -4948,6 +5047,39 @@ class SessionCreationTests(unittest.TestCase):
                     "payload": {"work_item_id": active_item.id, "summary": "done from file"},
                 }
             )
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        events = self.event_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(any(item.event_type == "implementation_completed" for item in events))
+        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
+
+    def test_collect_role_output_consumes_truncated_result_json_from_role_workspace(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009BTRUNC")
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            "implementer",
+        )
+        result_path = role_workspace / "RESULT.json"
+        result_path.write_text(
+            '{"output_type":"completed","payload":{"work_item_id":'
+            + str(active_item.id)
+            + ',"summary":"done from file","changes":["repo/placeholder_change.txt"]}',
+            encoding="utf-8",
         )
 
         updated_session, event, chunk_count = self.coordinator.collect_role_output(
@@ -6112,6 +6244,26 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(role.status.value == "running" for role in roles))
         self.assertTrue(any(role.runtime_handle for role in roles if role.status.value == "running"))
 
+    def test_send_to_test_handoff_cleans_verification_tmp_after_completion(self) -> None:
+        task_root = Path(self.temp_dir.name) / "IOS-30021CCLEAN"
+        verification_root = task_root / "tmp" / "verification" / "ios"
+        verification_root.mkdir(parents=True, exist_ok=True)
+        (verification_root / "placeholder.txt").write_text("x")
+
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021CCLEAN")
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="mr_handoff_completed",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+
+        updated_session, event = self.coordinator.send_to_test_handoff(session_id=session.id)
+
+        self.assertEqual("completed", updated_session.status.value)
+        self.assertEqual("send_to_test_completed", event.event_type)
+        self.assertFalse((task_root / "tmp" / "verification").exists())
+
     def test_send_to_test_handoff_requires_mr_handoff_stage(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021D")
         completed_session = self.session_repository.update_stage_and_owner(
@@ -6895,7 +7047,59 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("send_to_test_completed", updated_session.current_stage)
         self.assertTrue(any(item.event_type == "git_commit_completed" for item in events))
         self.assertTrue(any(item.event_type == "mr_handoff_completed" for item in events))
-        self.assertTrue(any(item.event_type == "send_to_test_completed" for item in events))
+
+    def test_doc_harvest_completion_parks_when_delivery_gate_is_blocked(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021FHBLOCK",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021FHBLOCK")
+        verification_report = Path(self.temp_dir.name) / "IOS-30021FHBLOCK" / "spec" / "final-verification.md"
+        verification_report.parent.mkdir(parents=True, exist_ok=True)
+        verification_report.write_text(
+            "# Final Verification: IOS-30021FHBLOCK\n\n"
+            "## Result\nFAIL\n"
+        )
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="verification_requested",
+            producer_type="coordinator",
+            payload={"task_key": session.task_key},
+        )
+        doc_role = self.role_repository.get_by_name(session.id, DOC_HARVEST_ROLE)
+        assert doc_role is not None
+        doc_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="doc_harvest",
+            title=f"Doc harvest for {session.task_key}",
+            owner_role_id=doc_role.id,
+            source_event_id=None,
+            priority=112,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="doc_harvest_requested",
+            current_owner=DOC_HARVEST_ROLE,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=DOC_HARVEST_ROLE,
+            output_type="completed",
+            payload={"summary": "README remains current.", "work_item_id": doc_item.id},
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("doc_harvest_completed", mapped_event.event_type)
+        self.assertIsNotNone(followup_event)
+        assert followup_event is not None
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("doc_harvest_requested", updated_session.current_stage)
+        self.assertTrue(any(item.event_type == "git_commit_completed" for item in events))
+        self.assertFalse(any(item.event_type == "send_to_test_completed" for item in events))
 
     def test_persistent_session_roles_include_reusable_followup_roles(self) -> None:
         self.assertIn(CODE_REVIEWER_ROLE, PERSISTENT_SESSION_ROLES)

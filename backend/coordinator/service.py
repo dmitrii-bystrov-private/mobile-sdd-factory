@@ -765,6 +765,7 @@ class CoordinatorService:
             current_owner=None,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        self._remove_task_verification_residue(session.task_key)
         event = self._append_event(
             session_id=session.id,
             event_type="mr_handoff_completed",
@@ -1099,6 +1100,7 @@ class CoordinatorService:
             current_owner=None,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        self._remove_task_verification_residue(session.task_key)
         event = self._append_event(
             session_id=session.id,
             event_type="send_to_test_completed",
@@ -1901,6 +1903,15 @@ class CoordinatorService:
             try:
                 parsed = json.loads(repaired_text)
             except json.JSONDecodeError:
+                closed_text = self._close_truncated_json_containers(repaired_text)
+                if closed_text != repaired_text:
+                    try:
+                        parsed = json.loads(closed_text)
+                    except json.JSONDecodeError:
+                        parsed = None
+                    else:
+                        if isinstance(parsed, dict):
+                            return parsed
                 decoder = json.JSONDecoder()
                 try:
                     parsed, end = decoder.raw_decode(repaired_text.lstrip())
@@ -1979,6 +1990,80 @@ class CoordinatorService:
                 in_string = True
                 escape = False
         return "".join(result)
+
+    def _unwrap_wrapped_json_strings(self, raw_text: str) -> str:
+        result: list[str] = []
+        in_string = False
+        escape = False
+        index = 0
+        while index < len(raw_text):
+            char = raw_text[index]
+            if in_string:
+                if escape:
+                    result.append(char)
+                    escape = False
+                    index += 1
+                    continue
+                if char == "\\":
+                    result.append(char)
+                    escape = True
+                    index += 1
+                    continue
+                if char == '"':
+                    result.append(char)
+                    in_string = False
+                    index += 1
+                    continue
+                if char in {"\n", "\r"}:
+                    if not result or result[-1] != " ":
+                        result.append(" ")
+                    index += 1
+                    while index < len(raw_text) and raw_text[index] in {" ", "\t"}:
+                        index += 1
+                    continue
+                result.append(char)
+                index += 1
+                continue
+            result.append(char)
+            if char == '"':
+                in_string = True
+                escape = False
+            index += 1
+        return "".join(result)
+
+    def _close_truncated_json_containers(self, raw_text: str) -> str:
+        in_string = False
+        escape = False
+        curly_balance = 0
+        square_balance = 0
+        for char in raw_text:
+            if in_string:
+                if escape:
+                    escape = False
+                    continue
+                if char == "\\":
+                    escape = True
+                    continue
+                if char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+                escape = False
+                continue
+            if char == "{":
+                curly_balance += 1
+            elif char == "}":
+                curly_balance -= 1
+            elif char == "[":
+                square_balance += 1
+            elif char == "]":
+                square_balance -= 1
+        if curly_balance <= 0 and square_balance <= 0:
+            return raw_text
+        if curly_balance > 4 or square_balance > 4:
+            return raw_text
+        return raw_text + ("]" * max(square_balance, 0)) + ("}" * max(curly_balance, 0))
 
     def _handle_collected_role_output(
         self,
@@ -2454,12 +2539,13 @@ class CoordinatorService:
             current_owner=role.role_name,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        runtime_role = RuntimeRoleHandle(
-            role_id=role.runtime_handle,
-            session_id=self._runtime_session_id_for_role(role, session),
-            backend_name=role.runtime_backend,
-        )
-        self.session_backend.send_input(runtime_role, text)
+        if role.role_name in PERSISTENT_SESSION_ROLES:
+            runtime_role = RuntimeRoleHandle(
+                role_id=role.runtime_handle,
+                session_id=self._runtime_session_id_for_role(role, session),
+                backend_name=role.runtime_backend,
+            )
+            self.session_backend.send_input(runtime_role, text)
         event = self._append_event(
             session_id=session.id,
             event_type="operator_runtime_input_sent",
@@ -2470,6 +2556,36 @@ class CoordinatorService:
                 "input_length": len(text),
             },
         )
+        if role.role_name not in PERSISTENT_SESSION_ROLES:
+            instruction = self._stage_instruction(
+                session.current_stage,
+                session.task_key,
+                workflow_profile=session.workflow_profile,
+                role_name=role.role_name,
+                session_policy=session.policy,
+            )
+            if instruction is None:
+                raise IntakeError(
+                    f"Session {session.id} cannot continue operator reply for stage {session.current_stage}"
+                )
+            continuation_instruction = (
+                f"{instruction}\n\n"
+                "Operator reply received in this live session. Treat it as authoritative, "
+                "continue the same routed work item, and do not re-ask the same question "
+                "unless the reply is still genuinely ambiguous.\n\n"
+                f"Operator reply:\n{text.strip()}\n"
+            )
+            self._dispatch_role_work(
+                session=session,
+                role=role,
+                work_item=work_item,
+                stage_name=session.current_stage,
+                instruction=continuation_instruction,
+                extra_hydration={
+                    "operator_reply": text,
+                    "operator_reply_event_id": event.id,
+                },
+            )
         return session, event
 
     def _resume_paused_session(self, session: Session) -> tuple[Session, Event, Event]:
@@ -4270,6 +4386,7 @@ class CoordinatorService:
             current_owner=None,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        self._remove_task_verification_residue(session.task_key)
         completed_event = self._append_event(
             session_id=session.id,
             event_type="task_completed",
@@ -4778,6 +4895,30 @@ class CoordinatorService:
             emit_event=False,
         )
         session, _commit_event = self._commit_task_state(session, "doc harvest")
+        if self._verification_gate_required_for_delivery(session) and not self._verification_report_passed(session):
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="doc_harvest_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="session_escalated_to_operator",
+                producer_type="coordinator",
+                payload={
+                    "reason": "delivery_gate_blocked_after_doc_harvest",
+                    "role_name": DOC_HARVEST_ROLE,
+                    "work_item_id": active_item.id,
+                    "summary": "delivery blocked because workflow verification did not pass",
+                    "details": (
+                        "Documentation harvest completed, but the latest final-verification report is not PASS. "
+                        "Resolve verification failures before delivery can continue."
+                    ),
+                    "current_stage": session.current_stage,
+                },
+            )
+            return session, event
         session, event = self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
         return session, event
 
@@ -5198,14 +5339,17 @@ class CoordinatorService:
             cursor = index + 1
             parsed_payload: dict | None = None
             while True:
-                raw_payload = "".join(
-                    part if position == 0 else part.lstrip()
-                    for position, part in enumerate(payload_lines)
-                )
+                raw_payload = "\n".join(payload_lines)
                 try:
                     parsed = json.loads(raw_payload)
                 except json.JSONDecodeError:
-                    parsed = None
+                    repaired_text = self._escape_raw_control_chars_in_json_strings(
+                        self._unwrap_wrapped_json_strings(raw_payload)
+                    )
+                    try:
+                        parsed = json.loads(repaired_text)
+                    except json.JSONDecodeError:
+                        parsed = None
                 if isinstance(parsed, dict):
                     parsed_payload = parsed
                     break
@@ -7731,6 +7875,15 @@ class CoordinatorService:
                 shutil.rmtree(path, ignore_errors=True)
                 removed.append(str(path))
         return removed
+
+    def _remove_task_verification_residue(self, task_key: str) -> list[str]:
+        if self.workdir_root is None:
+            return []
+        path = self.workdir_root / task_key / "tmp" / "verification"
+        if not path.exists():
+            return []
+        shutil.rmtree(path, ignore_errors=True)
+        return [str(path)]
 
     def _remove_task_artifacts(self, task_key: str) -> list[str]:
         if self.workdir_root is None:

@@ -17,7 +17,11 @@ if [[ ! -f "$STRATEGY_PATH" ]]; then
   exit 1
 fi
 
-mapfile -t PHASES < <(jq -r '.phases[]? // empty' "$STRATEGY_PATH")
+PHASES=()
+while IFS= read -r phase; do
+  [[ -n "$phase" ]] || continue
+  PHASES+=("$phase")
+done < <(jq -r '.phases[]? // empty' "$STRATEGY_PATH")
 if [[ "${#PHASES[@]}" -eq 0 ]]; then
   MODE="$(jq -r '.mode // ""' "$STRATEGY_PATH")"
   if [[ "$MODE" == "ios_docs_only_skip" ]]; then

@@ -2505,6 +2505,47 @@ class SessionApiTests(unittest.TestCase):
             self.dependencies.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
         )
 
+    def test_send_runtime_input_route_redispatches_one_shot_role(self) -> None:
+        session, _, _ = self.dependencies.coordinator_service.create_task_session(
+            "IOS-40013A-STORY",
+            workflow_profile="story_full",
+            policy={
+                "requirements_clarification_mode": "ask-selectively",
+            },
+        )
+        session = self.dependencies.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_requested",
+            current_owner="requirements-clarifier-worker",
+        )
+        session = self.dependencies.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        role = self.dependencies.role_repository.get_by_name(session.id, "requirements-clarifier-worker")
+        self.dependencies.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements",
+            title="Requirements clarification for IOS-40013A-STORY",
+            owner_role_id=role.id,
+            source_event_id=1,
+            priority=10,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+
+        response = send_runtime_input(
+            SendOperatorRuntimeInputRequest(
+                session_id=session.id,
+                text="Do it the same way as the frontend does",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.sent)
+        self.assertEqual("operator_runtime_input_sent", response.event_type)
+        self.assertEqual("active", response.session.status)
+        sent = self.dependencies.session_backend.get_sent_inputs(role.runtime_handle)
+        self.assertTrue(sent)
+        self.assertIn("Operator reply received in this live session.", sent[-1])
+        self.assertIn("Do it the same way as the frontend does", sent[-1])
+
     def test_get_interactive_state_route_returns_runtime_blocker_summary(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40013B"),
