@@ -2505,7 +2505,7 @@ class SessionApiTests(unittest.TestCase):
             self.dependencies.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
         )
 
-    def test_send_runtime_input_route_redispatches_one_shot_role(self) -> None:
+    def test_send_runtime_input_route_sends_live_reply_to_alive_one_shot_role(self) -> None:
         session, _, _ = self.dependencies.coordinator_service.create_task_session(
             "IOS-40013A-STORY",
             workflow_profile="story_full",
@@ -2543,7 +2543,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("active", response.session.status)
         sent = self.dependencies.session_backend.get_sent_inputs(role.runtime_handle)
         self.assertTrue(sent)
-        self.assertIn("Operator reply received in this live session.", sent[-1])
+        self.assertIn("Operator answer to your pending question:", sent[-1])
         self.assertIn("Do it the same way as the frontend does", sent[-1])
 
     def test_get_interactive_state_route_returns_runtime_blocker_summary(self) -> None:
@@ -2723,6 +2723,28 @@ class SessionApiTests(unittest.TestCase):
                 text="Use the existing fallback behavior and document it explicitly.",
             ),
             dependencies=self.dependencies,
+        )
+        active_work_item = next(
+            item
+            for item in self.dependencies.work_item_repository.list_for_session(create_response.session.id)
+            if item.owner_role_id == clarifier_role.id and item.status == WorkItemStatus.ASSIGNED
+        )
+        role_workspace = self.dependencies.coordinator_service.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            "IOS-40013REQINT",
+            REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        result_path = role_workspace / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {
+                        "work_item_id": active_work_item.id,
+                        "summary": "Requirements clarified",
+                        "assumptions": "Fallback stays unchanged.",
+                    },
+                }
+            )
         )
         self.dependencies.session_backend.simulate_output(
             clarifier_role.runtime_handle,

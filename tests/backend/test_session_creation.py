@@ -740,7 +740,7 @@ class SessionCreationTests(unittest.TestCase):
             self.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
         )
 
-    def test_send_operator_runtime_input_redispatches_one_shot_role_with_reply_context(self) -> None:
+    def test_send_operator_runtime_input_sends_live_reply_to_alive_one_shot_role(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30002B",
             workflow_profile="story_full",
@@ -765,6 +765,54 @@ class SessionCreationTests(unittest.TestCase):
             priority=10,
             status=WorkItemStatus.WAITING_FOR_OPERATOR,
         )
+
+        updated_session, event = self.coordinator.send_operator_runtime_input(
+            session_id=session.id,
+            text="Do it the same way as the frontend does",
+        )
+
+        self.assertEqual("operator_runtime_input_sent", event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("requirements-clarifier-worker", updated_session.current_owner)
+        sent = self.session_backend.get_sent_inputs(role.runtime_handle)
+        self.assertTrue(sent)
+        self.assertIn("Operator answer to your pending question:", sent[-1])
+        self.assertIn("Do it the same way as the frontend does", sent[-1])
+        self.assertNotIn("Read ROUTED_WORK.md", sent[-1])
+        refreshed_item = self.work_item_repository.get_by_id(work_item.id)
+        self.assertEqual(WorkItemStatus.ASSIGNED, refreshed_item.status)
+
+    def test_send_operator_runtime_input_redispatches_one_shot_role_only_when_runtime_is_dead(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30002C",
+            workflow_profile="story_full",
+            policy={
+                "requirements_clarification_mode": "ask-selectively",
+            },
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_requested",
+            current_owner="requirements-clarifier-worker",
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        role = self.role_repository.get_by_name(session.id, "requirements-clarifier-worker")
+        self.assertIsNotNone(role)
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements",
+            title="Requirements clarification for IOS-30002C",
+            owner_role_id=role.id,
+            source_event_id=1,
+            priority=10,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self.coordinator._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        self.session_backend.stop_role(runtime_role)
 
         updated_session, event = self.coordinator.send_operator_runtime_input(
             session_id=session.id,

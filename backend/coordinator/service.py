@@ -2573,6 +2573,11 @@ class CoordinatorService:
             raise IntakeError(f"Owner role {work_item.owner_role_id} is missing for session {session.id}")
         if role.runtime_handle is None:
             raise IntakeError(f"Role {role.role_name} has no runtime handle for session {session.id}")
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
 
         self.work_item_repository.update_status(work_item.id, WorkItemStatus.ASSIGNED)
         session = self.session_repository.update_stage_and_owner(
@@ -2582,11 +2587,6 @@ class CoordinatorService:
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         if role.role_name in PERSISTENT_SESSION_ROLES:
-            runtime_role = RuntimeRoleHandle(
-                role_id=role.runtime_handle,
-                session_id=self._runtime_session_id_for_role(role, session),
-                backend_name=role.runtime_backend,
-            )
             self.session_backend.send_input(runtime_role, text)
         event = self._append_event(
             session_id=session.id,
@@ -2599,36 +2599,52 @@ class CoordinatorService:
             },
         )
         if role.role_name not in PERSISTENT_SESSION_ROLES:
-            instruction = self._stage_instruction(
-                session.current_stage,
-                session.task_key,
-                workflow_profile=session.workflow_profile,
-                role_name=role.role_name,
-                session_policy=session.policy,
-            )
-            if instruction is None:
-                raise IntakeError(
-                    f"Session {session.id} cannot continue operator reply for stage {session.current_stage}"
+            if self.session_backend.is_role_alive(runtime_role):
+                self.session_backend.send_input(
+                    runtime_role,
+                    self._operator_reply_live_message(text),
                 )
-            continuation_instruction = (
-                f"{instruction}\n\n"
-                "Operator reply received in this live session. Treat it as authoritative, "
-                "continue the same routed work item, and do not re-ask the same question "
-                "unless the reply is still genuinely ambiguous.\n\n"
-                f"Operator reply:\n{text.strip()}\n"
-            )
-            self._dispatch_role_work(
-                session=session,
-                role=role,
-                work_item=work_item,
-                stage_name=session.current_stage,
-                instruction=continuation_instruction,
-                extra_hydration={
-                    "operator_reply": text,
-                    "operator_reply_event_id": event.id,
-                },
-            )
+            else:
+                instruction = self._stage_instruction(
+                    session.current_stage,
+                    session.task_key,
+                    workflow_profile=session.workflow_profile,
+                    role_name=role.role_name,
+                    session_policy=session.policy,
+                )
+                if instruction is None:
+                    raise IntakeError(
+                        f"Session {session.id} cannot continue operator reply for stage {session.current_stage}"
+                    )
+                continuation_instruction = (
+                    f"{instruction}\n\n"
+                    "Operator reply received in this live session. Treat it as authoritative, "
+                    "continue the same routed work item, and do not re-ask the same question "
+                    "unless the reply is still genuinely ambiguous.\n\n"
+                    f"Operator reply:\n{text.strip()}\n"
+                )
+                self._dispatch_role_work(
+                    session=session,
+                    role=role,
+                    work_item=work_item,
+                    stage_name=session.current_stage,
+                    instruction=continuation_instruction,
+                    extra_hydration={
+                        "operator_reply": text,
+                        "operator_reply_event_id": event.id,
+                    },
+                )
         return session, event
+
+    def _operator_reply_live_message(self, text: str) -> str:
+        normalized_reply = " ".join(str(text).split()).strip()
+        if not normalized_reply:
+            normalized_reply = "[empty reply]"
+        return (
+            "Operator answer to your pending question: "
+            f"{normalized_reply}. "
+            "This resolves the pending ambiguity. Continue the same work item now and do not ask the same question again unless the answer is still genuinely ambiguous."
+        )
 
     def _resume_paused_session(self, session: Session) -> tuple[Session, Event, Event]:
         if session.current_owner is None:
