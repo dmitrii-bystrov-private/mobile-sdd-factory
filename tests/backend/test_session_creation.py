@@ -2114,6 +2114,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("requirements_requested", updated_session.current_stage)
         self.assertEqual(REQUIREMENTS_CLARIFIER_WORKER_ROLE, updated_session.current_owner)
         self.assertEqual("requirements_requested", followup_event.event_type)
+        outcome_path = Path(self.temp_dir.name) / "IOS-30003PC" / "spec" / "proposal_context-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("completed", json.loads(outcome_path.read_text())["status"])
         self.assertEqual(
             [("proposal_context", "completed"), ("requirements", "assigned")],
             sorted((item.work_type, item.status.value) for item in work_items),
@@ -2290,6 +2293,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("acceptance_criteria_requested", updated_session.current_stage)
         self.assertEqual(ACCEPTANCE_CRITERIA_WORKER_ROLE, updated_session.current_owner)
         self.assertEqual("acceptance_criteria_requested", followup_event.event_type)
+        outcome_path = Path(self.temp_dir.name) / "IOS-30003REQ" / "spec" / "requirements-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("completed", json.loads(outcome_path.read_text())["status"])
         self.assertEqual(
             [
                 ("acceptance_criteria", "assigned"),
@@ -2418,6 +2424,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("constraints_requested", updated_session.current_stage)
         self.assertEqual(CONSTRAINTS_WORKER_ROLE, updated_session.current_owner)
         self.assertEqual("constraints_requested", followup_event.event_type)
+        outcome_path = Path(self.temp_dir.name) / "IOS-30003ACC" / "spec" / "acceptance_criteria-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("completed", json.loads(outcome_path.read_text())["status"])
         self.assertEqual(
             [
                 ("acceptance_criteria", "completed"),
@@ -6734,6 +6743,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_requested", followup_event.event_type)
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
+        outcome_path = Path(self.temp_dir.name) / "IOS-30021BS1E" / "spec" / "boy-scout-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("clean", json.loads(outcome_path.read_text())["status"])
 
     def test_boy_scout_skipped_not_needed_is_rejected_when_policy_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -6807,6 +6819,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("boy_scout_correction_requested", followup_event.event_type)
         self.assertEqual("boy_scout_correction_requested", updated_session.current_stage)
         self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        outcome_path = Path(self.temp_dir.name) / "IOS-30021BSAUTO" / "spec" / "boy-scout-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("findings_found", json.loads(outcome_path.read_text())["status"])
         self.assertTrue(any(item.artifact_type == "boy_scout_actionable_markdown" for item in artifacts))
         self.assertIn('"issues_file_path"', sent_inputs[-1])
         self.assertIn("boy-scout-actionable.md", sent_inputs[-1])
@@ -7112,6 +7127,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("doc_harvest_completed", updated_session.current_stage)
         self.assertEqual("doc_harvest_completed", event.event_type)
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
+        outcome_path = Path(self.temp_dir.name) / "IOS-30021F" / "spec" / "doc-harvest-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("completed", json.loads(outcome_path.read_text())["status"])
 
     def test_complete_doc_harvest_is_rejected_when_policy_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

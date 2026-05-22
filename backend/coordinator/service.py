@@ -811,6 +811,18 @@ class CoordinatorService:
             if doc_items:
                 self.work_item_repository.update_status(doc_items[0].id, WorkItemStatus.COMPLETED)
             self._stop_on_demand_role(session, DOC_HARVEST_ROLE)
+        self._materialize_doc_harvest_outcome_file(
+            session=session,
+            source_event=Event(
+                id=None,
+                session_id=session.id,
+                event_type="doc_harvest_completed",
+                producer_type="coordinator",
+                producer_id=None,
+                payload={"task_key": session.task_key, "summary": normalized_summary},
+            ),
+            status="completed",
+        )
         return self._finalize_doc_harvest(
             session=session,
             summary=normalized_summary,
@@ -3251,6 +3263,12 @@ class CoordinatorService:
             role_name=PROPOSAL_CONTEXT_WORKER_ROLE,
             outputs=source_event.payload.get("outputs"),
         )
+        self._materialize_story_planning_outcome_file(
+            session=session,
+            source_event=source_event,
+            work_type="proposal_context",
+            status="completed",
+        )
         self._materialize_story_spec_file(
             session=session,
             filename="proposal.md",
@@ -3378,6 +3396,12 @@ class CoordinatorService:
             role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
             outputs=source_event.payload.get("outputs"),
         )
+        self._materialize_story_planning_outcome_file(
+            session=session,
+            source_event=source_event,
+            work_type="requirements",
+            status="completed",
+        )
         self._materialize_story_spec_file(
             session=session,
             filename="requirements.md",
@@ -3440,6 +3464,13 @@ class CoordinatorService:
             )
         if work_type == "spec_verification":
             self._materialize_spec_verification_outcome_file(session=session, source_event=source_event)
+        else:
+            self._materialize_story_planning_outcome_file(
+                session=session,
+                source_event=source_event,
+                work_type=work_type,
+                status="blocked",
+            )
 
         summary = str(source_event.payload.get("summary") or "").strip() or f"{work_type} requires operator input"
         detail_lines: list[str] = []
@@ -3496,6 +3527,12 @@ class CoordinatorService:
             role_name=ACCEPTANCE_CRITERIA_WORKER_ROLE,
             outputs=source_event.payload.get("outputs"),
         )
+        self._materialize_story_planning_outcome_file(
+            session=session,
+            source_event=source_event,
+            work_type="acceptance_criteria",
+            status="completed",
+        )
         self._materialize_story_spec_file(
             session=session,
             filename="acceptance_criteria.md",
@@ -3545,6 +3582,12 @@ class CoordinatorService:
             session=session,
             role_name=CONSTRAINTS_WORKER_ROLE,
             outputs=source_event.payload.get("outputs"),
+        )
+        self._materialize_story_planning_outcome_file(
+            session=session,
+            source_event=source_event,
+            work_type="constraints",
+            status="completed",
         )
         self._materialize_story_spec_file(
             session=session,
@@ -4446,6 +4489,11 @@ class CoordinatorService:
         self._stop_on_demand_role(session, CODE_SCOUT_ROLE)
 
         result = str(source_event.payload.get("result") or "clean").strip() or "clean"
+        self._materialize_boy_scout_outcome_file(
+            session=session,
+            source_event=source_event,
+            status="findings_found" if result == "findings_found" else "clean",
+        )
         if result == "findings_found":
             findings_path = None
             if self.workdir_root is not None:
@@ -4910,6 +4958,7 @@ class CoordinatorService:
         active_item = doc_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, DOC_HARVEST_ROLE)
+        self._materialize_doc_harvest_outcome_file(session=session, source_event=source_event, status="completed")
         summary = str(source_event.payload.get("summary") or "").strip()
         if not summary:
             summary = "Documentation harvest completed."
@@ -7298,6 +7347,67 @@ class CoordinatorService:
             },
         )
 
+    def _materialize_story_planning_outcome_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+        work_type: str,
+        status: str,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / f"{work_type}-outcome.json"
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+
+        def _normalize_list(value: object) -> list[str]:
+            return [str(item).strip() for item in value if str(item).strip()] if isinstance(value, list) else []
+
+        outcome = {
+            "task_key": session.task_key,
+            "source_event_id": source_event.id,
+            "source_event_type": source_event.event_type,
+            "work_type": work_type,
+            "status": status,
+            "summary": str(payload.get("summary") or "").strip(),
+            "details": str(payload.get("details") or "").strip(),
+            "assumptions": str(payload.get("assumptions") or "").strip(),
+            "context_findings": str(payload.get("context_findings") or "").strip(),
+            "highlighted_cases": str(payload.get("highlighted_cases") or "").strip(),
+            "key_constraints": str(payload.get("key_constraints") or "").strip(),
+            "next_step": str(payload.get("next_step") or "").strip(),
+            "failures": _normalize_list(payload.get("failures")),
+            "missing_inputs": _normalize_list(payload.get("missing_inputs")),
+            "pending_decisions": _normalize_list(payload.get("pending_decisions")),
+            "blocker_questions": _normalize_list(payload.get("blocker_questions")),
+            "work_item_id": payload.get("work_item_id"),
+        }
+        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
+        target_path.write_text(content)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            work_type.replace("_", "-"),
+            f"{work_type}-outcome.json",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name=work_type.replace("_", "-"),
+            artifact_type=f"{work_type}_outcome_json",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": status,
+                "source_event_id": source_event.id,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+
     def _materialize_spec_verification_outcome_file(
         self,
         *,
@@ -7342,6 +7452,101 @@ class CoordinatorService:
             session_id=session.id,
             stage_name="spec-verification",
             artifact_type="spec_verification_outcome_json",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": status,
+                "source_event_id": source_event.id,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+
+    def _materialize_doc_harvest_outcome_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+        status: str,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / "doc-harvest-outcome.json"
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        documentation_updates = payload.get("documentation_updates")
+        outcome = {
+            "task_key": session.task_key,
+            "source_event_id": source_event.id,
+            "source_event_type": source_event.event_type,
+            "status": status,
+            "summary": str(payload.get("summary") or "").strip(),
+            "details": str(payload.get("details") or "").strip(),
+            "documentation_updates": documentation_updates if isinstance(documentation_updates, dict) else {},
+            "work_item_id": payload.get("work_item_id"),
+        }
+        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
+        target_path.write_text(content)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "doc-harvest",
+            "doc-harvest-outcome.json",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="doc-harvest",
+            artifact_type="doc_harvest_outcome_json",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": status,
+                "source_event_id": source_event.id,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+
+    def _materialize_boy_scout_outcome_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+        status: str,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / "boy-scout-outcome.json"
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        outcome = {
+            "task_key": session.task_key,
+            "source_event_id": source_event.id,
+            "source_event_type": source_event.event_type,
+            "status": status,
+            "result": str(payload.get("result") or "").strip(),
+            "summary": str(payload.get("summary") or "").strip(),
+            "details": str(payload.get("details") or "").strip(),
+            "work_item_id": payload.get("work_item_id"),
+        }
+        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
+        target_path.write_text(content)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "boy-scout",
+            "boy-scout-outcome.json",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="boy-scout",
+            artifact_type="boy_scout_outcome_json",
             path=str(artifact_path),
             metadata={
                 "task_key": session.task_key,
