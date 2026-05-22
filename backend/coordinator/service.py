@@ -451,6 +451,18 @@ class CoordinatorService:
         session = self.session_repository.get_by_id(session_id)
         if session is None:
             raise IntakeError(f"Session {session_id} does not exist")
+        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
+            return {
+                "available": False,
+                "role_name": None,
+                "current_stage": None,
+                "summary": None,
+                "details": None,
+                "source_event_type": None,
+                "source_reason": None,
+                "needs_operator_input": False,
+                "resume_strategy": None,
+            }
 
         blocker_event = None
         clear_event = None
@@ -2640,11 +2652,7 @@ class CoordinatorService:
         normalized_reply = " ".join(str(text).split()).strip()
         if not normalized_reply:
             normalized_reply = "[empty reply]"
-        return (
-            "Operator answer to your pending question: "
-            f"{normalized_reply}. "
-            "This resolves the pending ambiguity. Continue the same work item now and do not ask the same question again unless the answer is still genuinely ambiguous."
-        )
+        return f"Operator answer: {normalized_reply}."
 
     def _resume_paused_session(self, session: Session) -> tuple[Session, Event, Event]:
         if session.current_owner is None:
@@ -3073,6 +3081,7 @@ class CoordinatorService:
             current_stage="acceptance_criteria_requested",
             current_owner=ACCEPTANCE_CRITERIA_WORKER_ROLE,
         )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
         instruction = (
             f"Prepare explicit acceptance criteria for story {session.task_key}. "
             "Use independently testable WHEN-THEN-SHALL criteria, cover happy paths, edge cases, and error scenarios from the clarified requirements, "

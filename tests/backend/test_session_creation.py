@@ -776,7 +776,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("requirements-clarifier-worker", updated_session.current_owner)
         sent = self.session_backend.get_sent_inputs(role.runtime_handle)
         self.assertTrue(sent)
-        self.assertIn("Operator answer to your pending question:", sent[-1])
+        self.assertIn("Operator answer:", sent[-1])
         self.assertIn("Do it the same way as the frontend does", sent[-1])
         self.assertNotIn("Read ROUTED_WORK.md", sent[-1])
         refreshed_item = self.work_item_repository.get_by_id(work_item.id)
@@ -886,6 +886,33 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             text="1",
         )
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertFalse(summary["available"])
+        self.assertFalse(summary["needs_operator_input"])
+
+    def test_get_interactive_state_summary_hides_stale_blocker_when_session_is_active(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004ACTIVE",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "disabled",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30004ACTIVE")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed","needs_operator_input":true}',
+        )
+        self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+
         summary = self.coordinator.get_interactive_state_summary(session.id)
 
         self.assertFalse(summary["available"])
@@ -2419,6 +2446,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual("acceptance_criteria_requested", updated_session.current_stage)
         self.assertEqual(ACCEPTANCE_CRITERIA_WORKER_ROLE, updated_session.current_owner)
+        self.assertEqual("active", updated_session.status.value)
         self.assertEqual("acceptance_criteria_requested", followup_event.event_type)
         outcome_path = Path(self.temp_dir.name) / "IOS-30003REQ" / "spec" / "requirements-outcome.json"
         self.assertTrue(outcome_path.exists())
@@ -4991,6 +5019,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("requirements_completed", mapped_event.event_type)
         self.assertEqual("acceptance_criteria_requested", followup_event.event_type)
         self.assertEqual("acceptance_criteria_requested", requirements_session.current_stage)
+        self.assertEqual("active", requirements_session.status.value)
 
         acceptance_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,

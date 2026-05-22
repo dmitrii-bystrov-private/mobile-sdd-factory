@@ -166,6 +166,35 @@ class TmuxBackendTests(unittest.TestCase):
         submit_calls = [call for call in backend.calls if call[-1] == "C-m"]
         self.assertEqual([("send-keys", "-t", role.role_id, "C-m")], submit_calls)
 
+    def test_tmux_launcher_normalizes_direct_input_before_submit(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50009:requirements-clarifier-worker",
+            session_id="sdd-IOS-50009",
+            backend_name="tmux",
+        )
+        backend.tmux_interactive_driver_enabled[role.role_id] = True
+        backend.tmux_role_ready[role.role_id] = True
+
+        backend.send_input(role, " \n  Operator answer:   full repo-wide cleanup. \n ")
+
+        submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
+        self.assertEqual("Operator answer: full repo-wide cleanup.", submit_trace["payload_text"])
+        self.assertEqual("C-m", submit_trace["submit_key"])
+        self.assertIn(
+            ("send-keys", "-t", role.role_id, "-l", "Operator answer: full repo-wide cleanup."),
+            backend.calls,
+        )
+
     def test_normalize_terminal_text_strips_ansi_noise(self) -> None:
         backend = TmuxSessionBackend(mode="recording")
         noisy = (

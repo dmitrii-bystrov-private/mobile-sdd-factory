@@ -2543,7 +2543,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("active", response.session.status)
         sent = self.dependencies.session_backend.get_sent_inputs(role.runtime_handle)
         self.assertTrue(sent)
-        self.assertIn("Operator answer to your pending question:", sent[-1])
+        self.assertIn("Operator answer:", sent[-1])
         self.assertIn("Do it the same way as the frontend does", sent[-1])
 
     def test_get_interactive_state_route_returns_runtime_blocker_summary(self) -> None:
