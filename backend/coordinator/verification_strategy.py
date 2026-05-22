@@ -164,6 +164,9 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[st
             "test_without_building",
             "lint",
         ]
+        strategy["commands"] = [
+            f"bash scripts/ios-verify.sh {task_key}",
+        ]
         strategy["phase_commands"] = {
             "prepare": f"bash scripts/ios-prepare.sh {task_key}",
             "build_for_testing": f"bash scripts/ios-build-for-testing.sh {task_key}",

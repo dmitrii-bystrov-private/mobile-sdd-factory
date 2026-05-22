@@ -1487,6 +1487,7 @@ class SessionCreationTests(unittest.TestCase):
         strategy = json.loads(strategy_path.read_text())
         self.assertEqual("ios", strategy["platform"])
         self.assertEqual("ios_test_scope_gate", strategy["mode"])
+        self.assertEqual([f"bash scripts/ios-verify.sh {session.task_key}"], strategy["commands"])
         self.assertEqual(
             ["prepare", "build_for_testing", "test_without_building", "lint"],
             strategy["phases"],
@@ -4006,6 +4007,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(verification_report.exists())
         self.assertIn("## Strategy", verification_report.read_text())
         self.assertIn("Mode: broad_safe_gate", verification_report.read_text())
+        self.assertIn("### Commands", verification_report.read_text())
         self.assertIn("## Result", verification_report.read_text())
         self.assertIn("FAIL", verification_report.read_text())
         self.assertIn("## Output: run-test.sh", verification_report.read_text())
@@ -4236,6 +4238,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("send_to_test_completed", followup_event.event_type)
         self.assertTrue(verification_report.exists())
         self.assertIn("## Strategy", verification_report.read_text())
+        self.assertIn("### Commands", verification_report.read_text())
         self.assertIn("PASS", verification_report.read_text())
         self.assertEqual(
             sorted(

@@ -6755,6 +6755,18 @@ class CoordinatorService:
                         strategy_lines.append(f"- Mode: {mode}")
                     if phase_lines:
                         strategy_lines.append(f"- Phases: {', '.join(phase_lines)}")
+                    commands = strategy.get("commands")
+                    if isinstance(commands, list):
+                        rendered_commands = [str(item).strip() for item in commands if str(item).strip()]
+                        if rendered_commands:
+                            strategy_lines.extend(["", "### Commands", ""])
+                            strategy_lines.extend(f"- `{item}`" for item in rendered_commands)
+                    changed_files = strategy.get("changed_files")
+                    if isinstance(changed_files, list):
+                        rendered_changed_files = [str(item).strip() for item in changed_files if str(item).strip()]
+                        if rendered_changed_files:
+                            strategy_lines.extend(["", "### Changed Files", ""])
+                            strategy_lines.extend(f"- `{item}`" for item in rendered_changed_files[:20])
                     if reason:
                         strategy_lines.extend(["", "### Why This Path", "", reason])
             lines = [f"# Final Verification: {session.task_key}", ""]
