@@ -992,6 +992,7 @@ class CoordinatorService:
                 producer_type="coordinator",
                 payload={
                     "task_key": session.task_key,
+                    "summary": normalized_summary,
                     "summary_length": len(normalized_summary),
                     "current_stage": session.current_stage,
                     "status": session.status.value,
@@ -1006,6 +1007,7 @@ class CoordinatorService:
             producer_type="coordinator",
             payload={
                 "task_key": session.task_key,
+                "summary": normalized_summary,
                 "summary_length": len(normalized_summary),
                 "current_stage": session.current_stage,
                 "status": session.status.value,
@@ -3436,6 +3438,8 @@ class CoordinatorService:
                 role_name=source_event.producer_id,
                 outputs=source_event.payload.get("outputs"),
             )
+        if work_type == "spec_verification":
+            self._materialize_spec_verification_outcome_file(session=session, source_event=source_event)
 
         summary = str(source_event.payload.get("summary") or "").strip() or f"{work_type} requires operator input"
         detail_lines: list[str] = []
@@ -3592,6 +3596,7 @@ class CoordinatorService:
             role_name=SPEC_VERIFIER_WORKER_ROLE,
             outputs=source_event.payload.get("outputs"),
         )
+        self._materialize_spec_verification_outcome_file(session=session, source_event=source_event)
         self._materialize_story_spec_file(
             session=session,
             filename="spec_verification.md",
@@ -4222,6 +4227,7 @@ class CoordinatorService:
 
         active_item = verification_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        self._materialize_spec_verification_outcome_file(session=session, source_event=source_event)
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage="spec_verification_requested",
@@ -4718,6 +4724,7 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
+        self._materialize_self_review_outcome_file(session=session, source_event=source_event)
         self._complete_active_self_review_work_item(session)
         return self._enqueue_post_implementation_quality_gate(
             session=session,
@@ -4729,6 +4736,7 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
+        self._materialize_self_review_outcome_file(session=session, source_event=source_event)
         self._complete_active_self_review_work_item(session)
         return self._enqueue_self_review_correction(
             session=session,
@@ -4740,6 +4748,7 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
+        self._materialize_self_review_outcome_file(session=session, source_event=source_event)
         self._complete_active_self_review_work_item(session)
         reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
         if reviewer_role is None:
@@ -7232,6 +7241,112 @@ class CoordinatorService:
                 "task_key": session.task_key,
                 "source_path": str(target_path),
                 "status": structured_status,
+                "source_event_id": source_event.id,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+
+    def _materialize_self_review_outcome_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        review_root = self.workdir_root / session.task_key / "review"
+        review_root.mkdir(parents=True, exist_ok=True)
+        target_path = review_root / "self-review-outcome.json"
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        if source_event.event_type == "self_review_passed":
+            status = "passed"
+        elif source_event.event_type == "self_review_issues_found":
+            status = "issues_found"
+        else:
+            status = "blocked"
+        outcome = {
+            "task_key": session.task_key,
+            "source_event_id": source_event.id,
+            "source_event_type": source_event.event_type,
+            "status": status,
+            "summary": str(payload.get("summary") or "").strip(),
+            "details": str(payload.get("details") or "").strip(),
+            "issues_markdown": str(payload.get("issues_markdown") or "").strip(),
+            "work_item_id": payload.get("work_item_id"),
+        }
+        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
+        target_path.write_text(content)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "self-review",
+            "self-review-outcome.json",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="self-review",
+            artifact_type="self_review_outcome_json",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": status,
+                "source_event_id": source_event.id,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+
+    def _materialize_spec_verification_outcome_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / "spec-verification-outcome.json"
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        status = "completed" if source_event.event_type == "spec_verification_completed" else "blocked"
+        blocker_questions = payload.get("blocker_questions")
+        normalized_questions = (
+            [str(item).strip() for item in blocker_questions if str(item).strip()]
+            if isinstance(blocker_questions, list)
+            else []
+        )
+        outcome = {
+            "task_key": session.task_key,
+            "source_event_id": source_event.id,
+            "source_event_type": source_event.event_type,
+            "status": status,
+            "summary": str(payload.get("summary") or "").strip(),
+            "details": str(payload.get("details") or "").strip(),
+            "verified_focus": str(payload.get("verified_focus") or "").strip(),
+            "blocker_questions": normalized_questions,
+            "work_item_id": payload.get("work_item_id"),
+        }
+        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
+        target_path.write_text(content)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "spec-verification",
+            "spec-verification-outcome.json",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="spec-verification",
+            artifact_type="spec_verification_outcome_json",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": status,
                 "source_event_id": source_event.id,
                 "work_item_id": payload.get("work_item_id"),
             },

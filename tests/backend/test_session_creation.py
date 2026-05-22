@@ -1735,6 +1735,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
+        outcome_path = Path(self.temp_dir.name) / "IOS-30003RP" / "review" / "self-review-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("passed", json.loads(outcome_path.read_text())["status"])
 
     def test_reviewer_output_failed_routes_self_review_to_correction(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -1770,6 +1773,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
         self.assertIn('"issues_file_path"', sent_inputs[-1])
         self.assertIn("pass-01.md", sent_inputs[-1])
+        outcome_path = Path(self.temp_dir.name) / "IOS-30003RF" / "review" / "self-review-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("issues_found", json.loads(outcome_path.read_text())["status"])
 
     def test_reviewer_can_block_non_converging_self_review_cycle(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -1812,6 +1818,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("session_escalated_to_operator", followup_event.event_type)
         self.assertEqual("waiting_for_operator", updated_session.status.value)
         self.assertEqual("self_review_requested", updated_session.current_stage)
+        outcome_path = Path(self.temp_dir.name) / "IOS-30003RBLOCK" / "review" / "self-review-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("blocked", json.loads(outcome_path.read_text())["status"])
         self.assertEqual(CODE_REVIEWER_ROLE, updated_session.current_owner)
         self.assertEqual("self_review_cycle", str(followup_event.payload.get("reason") or ""))
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
@@ -2530,6 +2539,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Prepare task decomposition for story IOS-30003VERIFY before implementation starts.", sent_inputs[0])
         self.assertIn("Planning verification summary: Planning package is coherent", sent_inputs[0])
         self.assertIn("Verified focus: navigation + state ownership", sent_inputs[0])
+        outcome_path = Path(self.temp_dir.name) / "IOS-30003VERIFY" / "spec" / "spec-verification-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("completed", json.loads(outcome_path.read_text())["status"])
 
     def test_spec_verification_failed_escalates_story_session_to_operator(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -2574,13 +2586,16 @@ class SessionCreationTests(unittest.TestCase):
         )
         work_items = self.work_item_repository.list_for_session(session.id)
 
-        self.assertEqual("spec_verification_blocked", mapped_event.event_type)
+        self.assertEqual("story_planning_blocked", mapped_event.event_type)
         self.assertEqual("session_escalated_to_operator", followup_event.event_type)
         self.assertEqual("waiting_for_operator", updated_session.status.value)
         self.assertEqual("spec_verification_requested", updated_session.current_stage)
         self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, updated_session.current_owner)
         self.assertTrue(bool(followup_event.payload.get("needs_operator_input")))
         self.assertTrue(any(item.work_type == "spec_verification" and item.status.value == "waiting_for_operator" for item in work_items))
+        outcome_path = Path(self.temp_dir.name) / "IOS-30003VERIFYBLOCK" / "spec" / "spec-verification-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("blocked", json.loads(outcome_path.read_text())["status"])
 
     def test_spec_verification_blockers_require_runtime_input_in_interactive_summary(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
