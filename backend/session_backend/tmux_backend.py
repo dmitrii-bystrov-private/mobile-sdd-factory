@@ -23,6 +23,8 @@ class TmuxSessionBackend(SessionBackend):
 
     _MCP_FAILED_CLIENT_RE = re.compile(r"mcp client for [`']?([a-z0-9][a-z0-9_-]*)[`']? failed to start")
     _MCP_FAILED_LIST_RE = re.compile(r"failed:\s*([a-z0-9_, -]+)")
+    _DEFAULT_TMUX_WIDTH = 220
+    _DEFAULT_TMUX_HEIGHT = 60
 
     def __init__(
         self,
@@ -33,6 +35,8 @@ class TmuxSessionBackend(SessionBackend):
         self.mode = mode
         self.runtime_root = runtime_root or Path.cwd() / "workdir"
         self.socket_root = socket_root or (self.runtime_root / ".tmux-sockets")
+        self.tmux_width = self._read_tmux_dimension("SDD_FACTORY_TMUX_WIDTH", self._DEFAULT_TMUX_WIDTH)
+        self.tmux_height = self._read_tmux_dimension("SDD_FACTORY_TMUX_HEIGHT", self._DEFAULT_TMUX_HEIGHT)
         self.sent_inputs: dict[str, list[str]] = defaultdict(list)
         self.pending_outputs: dict[str, list[str]] = defaultdict(list)
         self.last_captured_output: dict[str, str] = {}
@@ -66,6 +70,16 @@ class TmuxSessionBackend(SessionBackend):
                 raise ValueError("tmux is required for the operational runtime host")
             return "tmux"
         raise ValueError(f"Unsupported runtime backend mode: {mode}")
+
+    def _read_tmux_dimension(self, env_name: str, default: int) -> int:
+        raw = os.environ.get(env_name, "").strip()
+        if not raw:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        return value if value > 0 else default
 
     _ANSI_CSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
     _ANSI_OSC_RE = re.compile(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\\\)")
@@ -105,7 +119,18 @@ class TmuxSessionBackend(SessionBackend):
         self.session_runtime_roots[session_name] = self._task_runtime_root(task_key)
         if self._effective_mode == "tmux":
             socket_path = self._socket_path(session_name)
-            result = self._tmux(socket_path, "new-session", "-d", "-s", session_name, "sh")
+            result = self._tmux(
+                socket_path,
+                "new-session",
+                "-d",
+                "-x",
+                str(self.tmux_width),
+                "-y",
+                str(self.tmux_height),
+                "-s",
+                session_name,
+                "sh",
+            )
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to create tmux session")
         return RuntimeSessionHandle(session_id=session_name)

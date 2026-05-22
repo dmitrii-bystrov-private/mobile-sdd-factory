@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import tempfile
@@ -59,6 +60,51 @@ class TmuxBackendTests(unittest.TestCase):
 
             self.assertEqual(["first line", "second line"], [chunk.text for chunk in chunks])
             self.assertEqual([], backend.read_output(role))
+
+    def test_tmux_mode_sets_explicit_session_size_with_env_override(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        previous_width = os.environ.get("SDD_FACTORY_TMUX_WIDTH")
+        previous_height = os.environ.get("SDD_FACTORY_TMUX_HEIGHT")
+        os.environ["SDD_FACTORY_TMUX_WIDTH"] = "240"
+        os.environ["SDD_FACTORY_TMUX_HEIGHT"] = "70"
+        try:
+            backend = FakeTmuxBackend()
+            session = backend.create_task_session("IOS-50001TMUXSIZE")
+        finally:
+            if previous_width is None:
+                os.environ.pop("SDD_FACTORY_TMUX_WIDTH", None)
+            else:
+                os.environ["SDD_FACTORY_TMUX_WIDTH"] = previous_width
+            if previous_height is None:
+                os.environ.pop("SDD_FACTORY_TMUX_HEIGHT", None)
+            else:
+                os.environ["SDD_FACTORY_TMUX_HEIGHT"] = previous_height
+
+        self.assertEqual("sdd-IOS-50001TMUXSIZE", session.session_id)
+        self.assertEqual(
+            [
+                (
+                    "new-session",
+                    "-d",
+                    "-x",
+                    "240",
+                    "-y",
+                    "70",
+                    "-s",
+                    "sdd-IOS-50001TMUXSIZE",
+                    "sh",
+                )
+            ],
+            backend.calls,
+        )
 
     def test_tmux_launcher_prompt_echo_does_not_resubmit_input(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
