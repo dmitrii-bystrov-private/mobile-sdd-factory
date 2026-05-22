@@ -1492,6 +1492,7 @@ class SessionCreationTests(unittest.TestCase):
             strategy["phases"],
         )
         self.assertEqual("reuse_if_available", strategy["prepare"]["policy"])
+        self.assertEqual("reuse_if_same_head", strategy["build_products_policy"])
         self.assertTrue(strategy["signals"]["tests_only"])
         self.assertEqual(
             str(task_root / "tmp" / "verification" / "ios" / "derived-data"),
@@ -1522,6 +1523,7 @@ class SessionCreationTests(unittest.TestCase):
         strategy = json.loads(strategy_path.read_text())
         self.assertEqual("ios_broad_safe_gate", strategy["mode"])
         self.assertEqual("required", strategy["prepare"]["policy"])
+        self.assertEqual("rebuild", strategy["build_products_policy"])
         self.assertTrue(strategy["signals"]["prepare_sensitive"])
 
     def test_implementation_completed_routes_to_reviewer_when_self_review_required(self) -> None:

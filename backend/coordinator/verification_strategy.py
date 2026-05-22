@@ -155,6 +155,9 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[st
             "pod_install": prepare_policy,
             "policy": prepare_policy,
         }
+        strategy["build_products_policy"] = (
+            "reuse_if_same_head" if tests_only and not prepare_sensitive else "rebuild"
+        )
         strategy["phases"] = [
             "prepare",
             "build_for_testing",
