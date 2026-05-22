@@ -1526,9 +1526,10 @@ class SessionCreationTests(unittest.TestCase):
         strategy_path = task_root / "spec" / "verification-strategy.json"
         self.assertTrue(strategy_path.exists())
         strategy = json.loads(strategy_path.read_text())
+        scripts_root = Path(self.temp_dir.name) / "repo-root" / "scripts"
         self.assertEqual("ios", strategy["platform"])
         self.assertEqual("ios_test_scope_gate", strategy["mode"])
-        self.assertEqual([f"bash scripts/ios-verify.sh {session.task_key}"], strategy["commands"])
+        self.assertEqual([f"bash {scripts_root / 'ios-verify.sh'} {session.task_key}"], strategy["commands"])
         self.assertEqual(
             ["prepare", "build_for_testing", "test_without_building", "lint"],
             strategy["phases"],
@@ -4376,6 +4377,32 @@ class SessionCreationTests(unittest.TestCase):
                         "status": "passed",
                     },
                 },
+            },
+        )
+
+        self.assertEqual("verification_failed", mapped_event.event_type)
+        self.assertEqual("verification_correction_requested", followup_event.event_type)
+        self.assertEqual("verification_correction_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+
+    def test_verifier_completed_output_with_failed_verification_status_is_downgraded_to_verification_failed(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VSTATUSFAIL")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="verification-coordinator",
+            output_type="completed",
+            payload={
+                "verification_status": "failed",
+                "commands": [
+                    {"command": "run-test.sh", "status": "failed", "exit_code": 1},
+                    {"command": "run-lint.sh", "status": "passed", "exit_code": 0},
+                ],
             },
         )
 

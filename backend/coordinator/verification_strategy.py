@@ -245,11 +245,11 @@ def detect_verification_platform(task_repo_root: Path) -> str:
     return "android"
 
 
-def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[str, object]:
+def build_verification_strategy(*, task_key: str, workdir_root: Path, repo_root: Path) -> dict[str, object]:
     task_root = workdir_root / task_key
-    repo_root = task_root / "repo"
-    platform = detect_verification_platform(repo_root)
-    changed_files = _read_changed_files(task_root, repo_root)
+    task_repo_root = task_root / "repo"
+    platform = detect_verification_platform(task_repo_root)
+    changed_files = _read_changed_files(task_root, task_repo_root)
     non_doc_files = [path for path in changed_files if not _is_doc_path(path)]
     docs_only = bool(changed_files) and not non_doc_files
     strategy: dict[str, object] = {
@@ -351,14 +351,15 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[st
             "test_without_building",
             "lint",
         ]
+        scripts_root = repo_root / "scripts"
         strategy["commands"] = [
-            f"bash scripts/ios-verify.sh {task_key}",
+            f"bash {scripts_root / 'ios-verify.sh'} {task_key}",
         ]
         strategy["phase_commands"] = {
-            "prepare": f"bash scripts/ios-prepare.sh {task_key}",
-            "build_for_testing": f"bash scripts/ios-build-for-testing.sh {task_key}",
-            "test_without_building": f"bash scripts/ios-test-without-building.sh {task_key}",
-            "lint": f"bash scripts/run-lint.sh {task_key}",
+            "prepare": f"bash {scripts_root / 'ios-prepare.sh'} {task_key}",
+            "build_for_testing": f"bash {scripts_root / 'ios-build-for-testing.sh'} {task_key}",
+            "test_without_building": f"bash {scripts_root / 'ios-test-without-building.sh'} {task_key}",
+            "lint": f"bash {scripts_root / 'run-lint.sh'} {task_key}",
         }
         strategy["ios_context"] = {
             "context_root": str(context_root),
@@ -379,8 +380,8 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path) -> dict[st
     return strategy
 
 
-def materialize_verification_strategy(*, task_key: str, workdir_root: Path) -> tuple[dict[str, object], Path]:
-    strategy = build_verification_strategy(task_key=task_key, workdir_root=workdir_root)
+def materialize_verification_strategy(*, task_key: str, workdir_root: Path, repo_root: Path) -> tuple[dict[str, object], Path]:
+    strategy = build_verification_strategy(task_key=task_key, workdir_root=workdir_root, repo_root=repo_root)
     spec_root = workdir_root / task_key / "spec"
     spec_root.mkdir(parents=True, exist_ok=True)
     strategy_path = spec_root / "verification-strategy.json"

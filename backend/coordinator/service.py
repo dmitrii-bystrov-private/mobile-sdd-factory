@@ -1925,11 +1925,25 @@ class CoordinatorService:
         return parsed
 
     def _verification_payload_has_failure_signals(self, payload: dict) -> bool:
+        verification_status = str(payload.get("verification_status") or payload.get("result") or "").strip().lower()
+        if verification_status in {"failed", "fail"}:
+            return True
         failures = payload.get("failures")
         if isinstance(failures, list):
             rendered_failures = [str(item).strip() for item in failures if str(item).strip()]
             if rendered_failures:
                 return True
+        commands = payload.get("commands")
+        if isinstance(commands, list):
+            for command in commands:
+                if not isinstance(command, dict):
+                    continue
+                status = str(command.get("status") or "").strip().lower()
+                if status == "failed":
+                    return True
+                exit_code = command.get("exit_code")
+                if isinstance(exit_code, int) and exit_code != 0:
+                    return True
         results = payload.get("results")
         if isinstance(results, dict):
             for result_value in results.values():
@@ -4792,6 +4806,7 @@ class CoordinatorService:
             verification_strategy, verification_strategy_file = materialize_verification_strategy(
                 task_key=session.task_key,
                 workdir_root=self.workdir_root,
+                repo_root=self._repo_root(),
             )
             verification_strategy_path = str(verification_strategy_file)
             self.artifact_repository.create(
