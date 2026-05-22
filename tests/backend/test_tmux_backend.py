@@ -106,6 +106,41 @@ class TmuxBackendTests(unittest.TestCase):
             backend.calls,
         )
 
+    def test_tmux_mode_clears_duplicate_named_windows_before_spawning_role(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:4] == ("list-windows", "-t", "sdd-IOS-50002DUP", "-F"):
+                    return subprocess.CompletedProcess(
+                        ["tmux", *args],
+                        0,
+                        "0\tbash\n1\timplementer\n2\timplementer\n",
+                        "",
+                    )
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        session = backend.create_task_session("IOS-50002DUP")
+
+        backend.spawn_role(session, "implementer")
+
+        self.assertIn(
+            ("kill-window", "-t", "sdd-IOS-50002DUP:1"),
+            backend.calls,
+        )
+        self.assertIn(
+            ("kill-window", "-t", "sdd-IOS-50002DUP:2"),
+            backend.calls,
+        )
+        self.assertIn(
+            ("new-window", "-d", "-t", "sdd-IOS-50002DUP", "-n", "implementer", "sh"),
+            backend.calls,
+        )
+
     def test_tmux_launcher_prompt_echo_does_not_resubmit_input(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self) -> None:

@@ -114,6 +114,24 @@ class TmuxSessionBackend(SessionBackend):
             text=True,
         )
 
+    def _list_tmux_windows(self, socket_path: Path, session_name: str) -> list[tuple[str, str]]:
+        result = self._tmux(socket_path, "list-windows", "-t", session_name, "-F", "#{window_index}\t#{window_name}")
+        if result.returncode != 0:
+            return []
+        windows: list[tuple[str, str]] = []
+        for line in result.stdout.splitlines():
+            if "\t" not in line:
+                continue
+            index, name = line.split("\t", 1)
+            windows.append((index.strip(), name.strip()))
+        return windows
+
+    def _kill_tmux_windows_by_name(self, socket_path: Path, session_name: str, window_name: str) -> None:
+        for index, name in self._list_tmux_windows(socket_path, session_name):
+            if name != window_name:
+                continue
+            self._tmux(socket_path, "kill-window", "-t", f"{session_name}:{index}")
+
     def create_task_session(self, task_key: str) -> RuntimeSessionHandle:
         session_name = f"sdd-{self._sanitize(task_key)}"
         self.session_runtime_roots[session_name] = self._task_runtime_root(task_key)
@@ -149,6 +167,7 @@ class TmuxSessionBackend(SessionBackend):
             start_directory.mkdir(parents=True, exist_ok=True)
         if self._effective_mode == "tmux":
             socket_path = self._socket_path(session.session_id)
+            self._kill_tmux_windows_by_name(socket_path, session.session_id, role_window)
             args = [
                 "new-window",
                 "-d",
@@ -311,6 +330,8 @@ class TmuxSessionBackend(SessionBackend):
         if self._effective_mode == "tmux":
             socket_path = self._socket_path(role.session_id)
             self._tmux(socket_path, "kill-window", "-t", role.role_id)
+            role_window = role.role_id.split(":", 1)[1] if ":" in role.role_id else role.role_id
+            self._kill_tmux_windows_by_name(socket_path, role.session_id, role_window)
             self.tmux_buffered_inputs.pop(role.role_id, None)
             self.tmux_submit_traces.pop(role.role_id, None)
             self.tmux_interactive_driver_enabled.pop(role.role_id, None)
