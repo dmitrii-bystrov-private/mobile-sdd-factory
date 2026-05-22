@@ -4068,7 +4068,7 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
-        active_item = self._find_active_primary_coding_work_item(session)
+        active_item = self._coding_work_item_from_completion_event(session, source_event)
         if active_item is None:
             raise IntakeError("No active coding work item found for the session")
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
@@ -4090,6 +4090,32 @@ class CoordinatorService:
             source_event=source_event,
             completed_work_type=active_item.work_type,
         )
+
+    def _coding_work_item_from_completion_event(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> WorkItem | None:
+        payload_work_item_id = source_event.payload.get("work_item_id")
+        if isinstance(payload_work_item_id, int):
+            matching_item = next(
+                (
+                    item
+                    for item in self.work_item_repository.list_for_session(session.id)
+                    if item.id == payload_work_item_id
+                ),
+                None,
+            )
+            if matching_item is not None and matching_item.work_type in {
+                "bug_analysis",
+                "subtask_implementation",
+                "implementation",
+                "self_review_correction",
+                "verification_correction",
+                "followup_implementation",
+            }:
+                return matching_item
+        return self._find_active_primary_coding_work_item(session)
 
     def _advance_after_coding_completion(
         self,
@@ -5685,6 +5711,44 @@ class CoordinatorService:
         return True
 
     def _reconcile_terminal_outcome_progress(self, session: Session) -> bool:
+        if session.current_stage == "verification_correction_requested":
+            source_event = self._latest_event_by_type(session.id, {"implementation_completed"})
+            if source_event is not None:
+                completed_item = self._coding_work_item_from_completion_event(session, source_event)
+                if (
+                    completed_item is not None
+                    and completed_item.work_type == "verification_correction"
+                    and completed_item.status == WorkItemStatus.COMPLETED
+                ):
+                    latest_verification_request = self._latest_event_by_type(session.id, {"verification_requested"})
+                    if latest_verification_request is not None and latest_verification_request.id > source_event.id:
+                        return False
+                    implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+                    if implementer_role is not None:
+                        for item in self.work_item_repository.list_for_session(session.id):
+                            if item.id == completed_item.id:
+                                continue
+                            if item.owner_role_id != implementer_role.id:
+                                continue
+                            if item.work_type != "verification_correction":
+                                continue
+                            if item.status != WorkItemStatus.ASSIGNED:
+                                continue
+                            self.work_item_repository.update_status(item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+                    _session, followup_event = self._enqueue_verification(session=session, source_event=source_event)
+                    self._append_event(
+                        session_id=session.id,
+                        event_type="session_outcome_reconciled",
+                        producer_type="coordinator",
+                        payload={
+                            "stage_name": "verification_correction_requested",
+                            "outcome_status": "completed",
+                            "work_item_id": completed_item.id,
+                            "followup_event_type": followup_event.event_type,
+                        },
+                    )
+                    return True
+
         if session.current_stage == "verification_requested":
             verification_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
             if verification_role is None:

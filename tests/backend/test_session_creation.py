@@ -4264,6 +4264,65 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(SessionStatus.COMPLETED, updated_session.status)
         self.assertTrue(any(item.event_type == "session_outcome_reconciled" for item in events))
 
+    def test_reconcile_session_dispatch_advances_completed_verification_correction(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004RECONVERFIX",
+            workflow_profile="oneshot",
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        correction_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification_correction",
+            title="Verification corrections for IOS-30004RECONVERFIX",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.COMPLETED,
+        )
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="verification_requested",
+            producer_type="coordinator",
+            payload={"work_item_id": 12, "summary": "older verification cycle"},
+        )
+        stale_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification_correction",
+            title="Verification corrections for IOS-30004RECONVERFIX",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="implementation_completed",
+            producer_type="role_output",
+            producer_id=IMPLEMENTER_ROLE,
+            payload={"work_item_id": correction_item.id, "summary": "fixes applied"},
+        )
+        broken_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_correction_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        broken_session = self.session_repository.update_status(broken_session.id, SessionStatus.ACTIVE)
+
+        reconciled = self.coordinator._reconcile_session_dispatch(broken_session)
+        updated_session = self.session_repository.get_by_id(session.id)
+        work_items = self.work_item_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertTrue(reconciled)
+        assert updated_session is not None
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual(VERIFICATION_COORDINATOR_ROLE, updated_session.current_owner)
+        self.assertTrue(
+            any(
+                item.id == stale_item.id and item.status == WorkItemStatus.WAITING_FOR_OPERATOR
+                for item in work_items
+            )
+        )
+        self.assertTrue(any(item.event_type == "verification_requested" for item in events))
+        self.assertTrue(any(item.event_type == "session_outcome_reconciled" for item in events))
+
     def test_verification_failed_moves_session_back_to_implementer(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")
         self.coordinator.handle_operator_event(
@@ -4332,6 +4391,55 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("FAIL", verification_report.read_text())
         self.assertIn("## Output: run-test.sh", verification_report.read_text())
         self.assertIn("presenter state mismatch", verification_report.read_text())
+
+    def test_implementation_completed_uses_payload_work_item_id_over_stale_assigned_item(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004IMPLPAYLOAD",
+            workflow_profile="oneshot",
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        correction_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification_correction",
+            title="Verification corrections for IOS-30004IMPLPAYLOAD",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        stale_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification_correction",
+            title="Verification corrections for IOS-30004IMPLPAYLOAD",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        broken_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_correction_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+
+        updated_session, followup_event = self.coordinator._handle_implementation_completed(
+            broken_session,
+            self.event_repository.append(
+                session_id=session.id,
+                event_type="implementation_completed",
+                producer_type="role_output",
+                producer_id=IMPLEMENTER_ROLE,
+                payload={"work_item_id": correction_item.id, "summary": "fixes applied"},
+            ),
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual(VERIFICATION_COORDINATOR_ROLE, updated_session.current_owner)
+        self.assertTrue(
+            any(item.id == correction_item.id and item.status == WorkItemStatus.COMPLETED for item in work_items)
+        )
+        self.assertTrue(
+            any(item.id == stale_item.id and item.status == WorkItemStatus.ASSIGNED for item in work_items)
+        )
 
     def test_bug_full_verification_failed_routes_back_to_bug_fixer_with_fix_only_mode(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
