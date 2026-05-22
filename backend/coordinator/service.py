@@ -1974,9 +1974,24 @@ class CoordinatorService:
         return parsed
 
     def _verification_payload_has_failure_signals(self, payload: dict) -> bool:
-        verification_status = str(payload.get("verification_status") or payload.get("result") or "").strip().lower()
+        verification_status = str(
+            payload.get("verification_status") or payload.get("status") or payload.get("result") or ""
+        ).strip().lower()
         if verification_status in {"failed", "fail"}:
             return True
+        failure = payload.get("failure")
+        if isinstance(failure, dict):
+            rendered_failure = [str(item).strip() for item in failure.values() if str(item).strip()]
+            if rendered_failure:
+                return True
+        elif isinstance(failure, list):
+            rendered_failure = [str(item).strip() for item in failure if str(item).strip()]
+            if rendered_failure:
+                return True
+        else:
+            rendered_failure = str(failure or "").strip()
+            if rendered_failure:
+                return True
         failures = payload.get("failures")
         if isinstance(failures, list):
             rendered_failures = [str(item).strip() for item in failures if str(item).strip()]
@@ -4508,12 +4523,12 @@ class CoordinatorService:
             raise IntakeError("No active verification work item found for the session")
 
         active_item = verification_items[0]
-        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._materialize_verification_outcome_file(session=session, source_event=source_event)
         self._materialize_final_verification_file(session=session, source_event=source_event)
         session = self._get_session_or_raise(session.id)
         if self._verification_outcome_status(session) != "passed":
             return self._handle_verification_failed(session, source_event)
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         doc_harvest_policy = self._optional_lane_policy_mode(session.policy, "doc_harvest_policy")
         if doc_harvest_policy != "disabled":
             session, event = self._enqueue_doc_harvest(session=session, source_event=source_event)
@@ -5992,7 +6007,7 @@ class CoordinatorService:
         if reviewer_role is None:
             raise IntakeError("Code reviewer role is missing for the session")
         active_item = self._find_active_work_item_for_role(session.id, reviewer_role.id)
-        if active_item is None or active_item.work_type != "self_review":
+        if active_item is None or active_item.work_type not in {"self_review", "self_review_cycle_review"}:
             raise IntakeError("No active self review work item found for the session")
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
 
@@ -7374,7 +7389,7 @@ class CoordinatorService:
                     rendered_value = str(value).strip()
                     if rendered_name and rendered_value:
                         rendered_outputs.append((rendered_name, rendered_value))
-            passed = source_event.event_type == "verification_passed"
+            passed = self._verification_event_outcome_status(source_event) == "passed"
             strategy_lines: list[str] = []
             strategy_path = spec_root / "verification-strategy.json"
             if strategy_path.is_file():
@@ -7549,13 +7564,21 @@ class CoordinatorService:
             if isinstance(failures, list)
             else []
         )
+        if not normalized_failures:
+            failure = payload.get("failure")
+            if isinstance(failure, dict):
+                normalized_failures = [str(item).strip() for item in failure.values() if str(item).strip()]
+            elif isinstance(failure, list):
+                normalized_failures = [str(item).strip() for item in failure if str(item).strip()]
+            else:
+                rendered_failure = str(failure or "").strip()
+                if rendered_failure:
+                    normalized_failures = [rendered_failure]
         check_outputs = payload.get("check_outputs")
         normalized_check_outputs = check_outputs if isinstance(check_outputs, dict) else {}
         commands = payload.get("commands")
         normalized_commands = commands if isinstance(commands, list) else []
-        structured_status = (
-            "passed" if source_event.event_type == "verification_passed" else "failed"
-        )
+        structured_status = self._verification_event_outcome_status(source_event)
         outcome = {
             "task_key": session.task_key,
             "source_event_id": source_event.id,
@@ -7592,6 +7615,14 @@ class CoordinatorService:
                 "work_item_id": payload.get("work_item_id"),
             },
         )
+
+    def _verification_event_outcome_status(self, source_event: Event) -> str:
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        if source_event.event_type == "verification_failed":
+            return "failed"
+        if self._verification_payload_has_failure_signals(payload):
+            return "failed"
+        return "passed"
 
     def _materialize_self_review_outcome_file(
         self,

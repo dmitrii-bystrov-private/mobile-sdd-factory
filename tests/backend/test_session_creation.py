@@ -1988,6 +1988,57 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(CODE_REVIEWER_ROLE, summary["role_name"])
         self.assertTrue(summary["needs_operator_input"])
 
+    def test_self_review_cycle_clean_pass_completes_cycle_item_and_advances(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RCLEAN",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RCLEAN")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="blocked_review_cycle",
+            payload={
+                "summary": "blocked_review_cycle",
+                "details": "Needs one operator clarification before continuing.",
+            },
+        )
+        self.coordinator.send_operator_runtime_input(
+            session_id=prepared_session.id,
+            text="Continue with narrowed scope.",
+        )
+        cycle_item = next(
+            item for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "self_review_cycle_review"
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="completed",
+            payload={
+                "work_item_id": cycle_item.id,
+                "summary": "Self-review clean under the updated scope.",
+                "review_report_path": "/tmp/pass-03.md",
+            },
+        )
+        cycle_item = self.work_item_repository.get_by_id(cycle_item.id)
+
+        self.assertEqual("self_review_passed", mapped_event.event_type)
+        self.assertEqual(WorkItemStatus.COMPLETED, cycle_item.status)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification_requested", followup_event.event_type)
+
     def test_interactive_state_treats_persisted_numeric_operator_reply_flag_as_truthy(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003NUMERICFLAG",
@@ -4808,6 +4859,33 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_correction_requested", updated_session.current_stage)
         self.assertEqual("implementer", updated_session.current_owner)
 
+    def test_verifier_completed_output_with_failed_status_and_singular_failure_is_downgraded_to_verification_failed(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VTOPFAIL")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="verification-coordinator",
+            output_type="completed",
+            payload={
+                "status": "failed",
+                "summary": "build-for-testing phase failed",
+                "failure": {
+                    "phase": "build_for_testing",
+                    "error": "invalid redeclaration of 'illCheck'",
+                },
+            },
+        )
+
+        self.assertEqual("verification_failed", mapped_event.event_type)
+        self.assertEqual("verification_correction_requested", followup_event.event_type)
+        self.assertEqual("verification_correction_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+
     def test_verification_correction_reenters_verification_without_reopening_optional_quality_lanes(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004V2QUAL",
@@ -4913,6 +4991,38 @@ class SessionCreationTests(unittest.TestCase):
             ],
             [item.event_type for item in events],
         )
+
+    def test_inconsistent_verification_passed_event_materializes_failed_outcome_and_routes_to_correction(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30005INCONSISTENT")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, followup_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={
+                "status": "failed",
+                "summary": "build-for-testing phase failed",
+                "failure": {
+                    "phase": "build_for_testing",
+                    "error": "invalid redeclaration of 'illCheck'",
+                },
+            },
+        )
+        verification_report = Path(self.temp_dir.name) / "IOS-30005INCONSISTENT" / "spec" / "final-verification.md"
+        verification_outcome = Path(self.temp_dir.name) / "IOS-30005INCONSISTENT" / "spec" / "verification-outcome.json"
+
+        self.assertEqual("verification_correction_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("verification_correction_requested", followup_event.event_type)
+        self.assertTrue(verification_report.exists())
+        self.assertTrue(verification_outcome.exists())
+        self.assertEqual("failed", json.loads(verification_outcome.read_text())["status"])
+        self.assertIn("FAIL", verification_report.read_text())
 
     def test_verification_passed_cleans_verification_tmp_after_completion(self) -> None:
         task_root = Path(self.temp_dir.name) / "IOS-30005TMPCLEAN"
