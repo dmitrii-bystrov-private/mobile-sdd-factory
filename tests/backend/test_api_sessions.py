@@ -1537,6 +1537,54 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, response.role_name)
         self.assertTrue(response.needs_operator_input)
 
+    def test_get_interactive_state_route_marks_self_review_cycle_as_runtime_input(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003REVIEWINPUT",
+                workflow_profile="oneshot",
+                policy={
+                    "self_review_policy": "required",
+                    "boy_scout_policy": "disabled",
+                    "doc_harvest_policy": "disabled",
+                },
+            ),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003REVIEWINPUT"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "implementation done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        submit_role_output(
+            RoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name=CODE_REVIEWER_ROLE,
+                output_type="blocked_review_cycle",
+                payload={
+                    "summary": "Repeated reducer violation remains unresolved.",
+                    "details": "Two review passes raised the same reducer issue and the loop no longer converges.",
+                },
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = get_interactive_state(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.available)
+        self.assertEqual("self_review_cycle", response.source_reason)
+        self.assertEqual(CODE_REVIEWER_ROLE, response.role_name)
+        self.assertTrue(response.needs_operator_input)
+
     def test_story_spec_completed_event_returns_task_decomposition_handoff(self) -> None:
         prepare_response = create_session(
             CreateSessionRequest(

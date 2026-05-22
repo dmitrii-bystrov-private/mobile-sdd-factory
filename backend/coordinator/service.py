@@ -514,9 +514,18 @@ class CoordinatorService:
             "details": source_event.payload.get("details"),
             "source_event_type": source_event.event_type,
             "source_reason": source_event.payload.get("reason"),
-            "needs_operator_input": bool(source_event.payload.get("needs_operator_input") is True),
+            "needs_operator_input": self._payload_truthy(source_event.payload.get("needs_operator_input")),
             "resume_strategy": source_event.payload.get("resume_strategy"),
         }
+
+    def _payload_truthy(self, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return False
 
     def handle_operator_event(
         self,
@@ -2606,6 +2615,7 @@ class CoordinatorService:
             producer_type="operator",
             payload={
                 "role_name": role.role_name,
+                "work_item_id": work_item.id,
                 "current_stage": session.current_stage,
                 "input_length": len(text),
             },
@@ -4893,9 +4903,11 @@ class CoordinatorService:
             producer_type="coordinator",
             payload={
                 "reason": "self_review_cycle",
+                "role_name": CODE_REVIEWER_ROLE,
                 "summary": str(source_event.payload.get("summary") or "").strip() or "self review cycle blocked",
                 "details": str(source_event.payload.get("details") or "").strip()
                 or "The reviewer reported a non-converging review cycle and stopped automatic retries.",
+                "needs_operator_input": True,
                 "review_report_paths": report_paths,
                 "current_stage": session.current_stage,
             },
@@ -5491,8 +5503,6 @@ class CoordinatorService:
             and session.current_owner == role.role_name
         ):
             return
-        if self._has_newer_operator_reply_than_last_collection(session.id, role.role_name):
-            return
         output_type = str(payload.get("output_type") or "").strip().lower()
         if output_type not in {"passed", "completed", "failed", "error", "blocked_verification_cycle", "blocked_review_cycle"}:
             return
@@ -5501,6 +5511,16 @@ class CoordinatorService:
             return
         work_item_id = nested_payload.get("work_item_id")
         if not isinstance(work_item_id, int):
+            return
+        active_item = self._find_active_work_item_for_role(session.id, role.id)
+        if active_item is not None and active_item.id != work_item_id:
+            return
+        if self._has_pending_operator_continuation(
+            session_id=session.id,
+            role_name=role.role_name,
+            work_item_id=active_item.id if active_item is not None else None,
+            stage_name=session.current_stage,
+        ):
             return
         result_path = self.role_workspace_manager.role_directory(session.task_key, role.role_name) / "RESULT.json"
         if result_path.is_file():
@@ -5538,7 +5558,14 @@ class CoordinatorService:
             },
         )
 
-    def _has_newer_operator_reply_than_last_collection(self, session_id: int, role_name: str) -> bool:
+    def _has_pending_operator_continuation(
+        self,
+        *,
+        session_id: int,
+        role_name: str,
+        work_item_id: int | None,
+        stage_name: str | None,
+    ) -> bool:
         latest_operator_reply_id: int | None = None
         latest_collection_id: int | None = None
         for event in reversed(self.event_repository.list_for_session(session_id)):
@@ -5546,6 +5573,14 @@ class CoordinatorService:
                 latest_operator_reply_id is None
                 and event.event_type == "operator_runtime_input_sent"
                 and event.payload.get("role_name") == role_name
+                and (
+                    work_item_id is None
+                    or event.payload.get("work_item_id") == work_item_id
+                )
+                and (
+                    stage_name is None
+                    or event.payload.get("current_stage") == stage_name
+                )
             ):
                 latest_operator_reply_id = event.id
             if (
@@ -5558,8 +5593,7 @@ class CoordinatorService:
                 break
         return (
             latest_operator_reply_id is not None
-            and latest_collection_id is not None
-            and latest_operator_reply_id > latest_collection_id
+            and (latest_collection_id is None or latest_operator_reply_id > latest_collection_id)
         )
 
     def _extract_output_markers(self, text: str) -> list[tuple[str, dict]]:
@@ -5721,6 +5755,14 @@ class CoordinatorService:
             work_item = self._reconcile_missing_subtask_assignment(session, role)
             if work_item is None:
                 return False
+
+        if self._has_pending_operator_continuation(
+            session_id=session.id,
+            role_name=role.role_name,
+            work_item_id=work_item.id,
+            stage_name=session.current_stage,
+        ):
+            return False
 
         if self._has_dispatch_event(
             session_id=session.id,

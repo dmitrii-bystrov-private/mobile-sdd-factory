@@ -23,6 +23,7 @@ class TmuxSessionBackend(SessionBackend):
 
     _MCP_FAILED_CLIENT_RE = re.compile(r"mcp client for [`']?([a-z0-9][a-z0-9_-]*)[`']? failed to start")
     _MCP_FAILED_LIST_RE = re.compile(r"failed:\s*([a-z0-9_, -]+)")
+    _LAUNCHER_RUNNER_RE = re.compile(r"export\s+SDD_FACTORY_ROLE_RUNNER=(.+)")
     _DEFAULT_TMUX_WIDTH = 220
     _DEFAULT_TMUX_HEIGHT = 60
 
@@ -47,6 +48,7 @@ class TmuxSessionBackend(SessionBackend):
         self.tmux_buffered_inputs: dict[str, list[str]] = defaultdict(list)
         self.tmux_submit_traces: dict[str, list[dict[str, str]]] = defaultdict(list)
         self.tmux_interactive_driver_enabled: dict[str, bool] = {}
+        self.tmux_launcher_runners: dict[str, str] = {}
         self.tmux_role_ready: dict[str, bool] = defaultdict(lambda: True)
         self.tmux_output_buffers: dict[str, str] = defaultdict(str)
         self.tmux_trust_prompt_handled: dict[str, bool] = defaultdict(bool)
@@ -124,6 +126,7 @@ class TmuxSessionBackend(SessionBackend):
         interactive_driver_enabled = launcher_script.is_file()
         self.tmux_interactive_driver_enabled.setdefault(role_id, interactive_driver_enabled)
         if interactive_driver_enabled:
+            self.tmux_launcher_runners.setdefault(role_id, self._extract_launcher_runner(launcher_script))
             # Recovered launcher-backed roles already have a live TUI window; treat them as ready
             # so routed work keeps using the file-backed launcher path after backend restarts.
             self.tmux_role_ready.setdefault(role_id, True)
@@ -145,6 +148,29 @@ class TmuxSessionBackend(SessionBackend):
             capture_output=True,
             text=True,
         )
+
+    def _extract_launcher_runner(self, launcher_script: Path) -> str:
+        try:
+            content = launcher_script.read_text()
+        except OSError:
+            return ""
+        for line in content.splitlines():
+            match = self._LAUNCHER_RUNNER_RE.match(line.strip())
+            if not match:
+                continue
+            raw_value = match.group(1).strip()
+            if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] and raw_value[0] in {"'", '"'}:
+                raw_value = raw_value[1:-1]
+            return raw_value
+        return ""
+
+    def _launcher_submit_style(self, role_id: str, source: str) -> str:
+        runner = self.tmux_launcher_runners.get(role_id, "").strip().lower() or "default"
+        env_name = f"SDD_FACTORY_TMUX_SUBMIT_STYLE_{runner.upper()}_{source.upper()}"
+        style = os.environ.get(env_name, "").strip().lower()
+        if style:
+            return style
+        return "plain-enter-two-call"
 
     def _list_tmux_windows(self, socket_path: Path, session_name: str) -> list[tuple[str, str]]:
         result = self._tmux(socket_path, "list-windows", "-t", session_name, "-F", "#{window_index}\t#{window_name}")
@@ -216,6 +242,8 @@ class TmuxSessionBackend(SessionBackend):
                 raise RuntimeError(result.stderr or result.stdout or "Failed to create tmux window")
             interactive_driver_enabled = bool(role_command) and Path(role_command[0]).name == "launch-role.sh"
             self.tmux_interactive_driver_enabled[role_id] = interactive_driver_enabled
+            if interactive_driver_enabled and start_directory is not None:
+                self.tmux_launcher_runners[role_id] = self._extract_launcher_runner(start_directory / "launch-role.sh")
             self.tmux_role_ready[role_id] = not interactive_driver_enabled
             self.tmux_trust_prompt_handled[role_id] = False
             self.tmux_update_prompt_handled[role_id] = False
@@ -370,6 +398,7 @@ class TmuxSessionBackend(SessionBackend):
             self.tmux_buffered_inputs.pop(role.role_id, None)
             self.tmux_submit_traces.pop(role.role_id, None)
             self.tmux_interactive_driver_enabled.pop(role.role_id, None)
+            self.tmux_launcher_runners.pop(role.role_id, None)
             self.tmux_role_ready.pop(role.role_id, None)
             self.tmux_output_buffers.pop(role.role_id, None)
             self.tmux_trust_prompt_handled.pop(role.role_id, None)
@@ -389,6 +418,7 @@ class TmuxSessionBackend(SessionBackend):
                 self.tmux_buffered_inputs.pop(role_id, None)
                 self.tmux_submit_traces.pop(role_id, None)
                 self.tmux_interactive_driver_enabled.pop(role_id, None)
+                self.tmux_launcher_runners.pop(role_id, None)
                 self.tmux_role_ready.pop(role_id, None)
                 self.tmux_output_buffers.pop(role_id, None)
                 self.tmux_trust_prompt_handled.pop(role_id, None)
@@ -640,15 +670,28 @@ class TmuxSessionBackend(SessionBackend):
         if "\n" in text:
             payload_text = self._materialize_routed_input(role_id, text)
         payload_text = self._normalize_launcher_input_text(payload_text)
-        submit_key = "C-m"
+        submit_style = self._launcher_submit_style(role_id, source)
+        submit_key = "Enter"
         self.tmux_submit_traces[role_id].append(
             {
                 "source": source,
                 "original_text": text,
                 "payload_text": payload_text,
                 "submit_key": submit_key,
+                "submit_style": submit_style,
+                "runner": self.tmux_launcher_runners.get(role_id, ""),
             }
         )
+        if submit_style == "plain-enter-two-call":
+            result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, payload_text, "")
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr or result.stdout or "Failed to send tmux launcher input")
+            time.sleep(0.25)
+            result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "", "Enter")
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr or result.stdout or "Failed to submit tmux launcher input")
+            return
+
         result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "-l", payload_text)
         if result.returncode != 0:
             raise RuntimeError(result.stderr or result.stdout or "Failed to send tmux launcher input")

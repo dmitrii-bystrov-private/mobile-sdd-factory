@@ -781,6 +781,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertNotIn("Read ROUTED_WORK.md", sent[-1])
         refreshed_item = self.work_item_repository.get_by_id(work_item.id)
         self.assertEqual(WorkItemStatus.ASSIGNED, refreshed_item.status)
+        self.assertEqual(work_item.id, int(event.payload.get("work_item_id") or 0))
 
     def test_send_operator_runtime_input_redispatches_one_shot_role_only_when_runtime_is_dead(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -1977,7 +1978,42 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("blocked", json.loads(outcome_path.read_text())["status"])
         self.assertEqual(CODE_REVIEWER_ROLE, updated_session.current_owner)
         self.assertEqual("self_review_cycle", str(followup_event.payload.get("reason") or ""))
+        self.assertEqual(CODE_REVIEWER_ROLE, str(followup_event.payload.get("role_name") or ""))
+        self.assertTrue(bool(followup_event.payload.get("needs_operator_input") is True))
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
+
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+        self.assertTrue(summary["available"])
+        self.assertEqual("self_review_cycle", summary["source_reason"])
+        self.assertEqual(CODE_REVIEWER_ROLE, summary["role_name"])
+        self.assertTrue(summary["needs_operator_input"])
+
+    def test_interactive_state_treats_persisted_numeric_operator_reply_flag_as_truthy(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003NUMERICFLAG",
+            workflow_profile="oneshot",
+            policy={"self_review_policy": "disabled"},
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003NUMERICFLAG")
+        self.session_repository.update_status(prepared_session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        self.event_repository.append(
+            session_id=prepared_session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "self_review_cycle",
+                "role_name": CODE_REVIEWER_ROLE,
+                "summary": "blocked_review_cycle",
+                "details": "numeric persisted flag",
+                "needs_operator_input": 1,
+                "current_stage": "self_review_requested",
+            },
+        )
+
+        summary = self.coordinator.get_interactive_state_summary(prepared_session.id)
+
+        self.assertTrue(summary["available"])
+        self.assertTrue(summary["needs_operator_input"])
 
     def test_resume_session_retries_reviewer_after_blocked_self_review_cycle(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -5549,6 +5585,106 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, chunk_count)
         self.assertEqual("role_output_collected", event.event_type)
         self.assertEqual("active", updated_session.status.value)
+        self.assertEqual(sent_before_collect, sent_after_collect)
+        self.assertFalse(
+            any(item.event_type == "missing_result_file_recreation_requested" for item in events)
+        )
+
+    def test_reconcile_session_dispatch_skips_full_redispatch_while_operator_continuation_is_pending(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009OPCONT",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30009OPCONT")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="blocked_review_cycle",
+            payload={
+                "summary": "blocked_review_cycle",
+                "details": "Needs one operator clarification before continuing.",
+            },
+        )
+
+        waiting_session = self.session_repository.get_by_id(session.id)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, waiting_session.status)
+        review_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        self.assertIsNotNone(review_role)
+        sent_before = list(self.session_backend.get_sent_inputs(review_role.runtime_handle))
+
+        resumed_session, event = self.coordinator.send_operator_runtime_input(
+            session_id=session.id,
+            text="Accessibility identifiers are out of scope.",
+        )
+
+        self.assertEqual("operator_runtime_input_sent", event.event_type)
+        self.assertEqual(SessionStatus.ACTIVE, resumed_session.status)
+        reconciled = self.coordinator._reconcile_session_dispatch(resumed_session)
+        sent_after = self.session_backend.get_sent_inputs(review_role.runtime_handle)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertFalse(reconciled)
+        self.assertEqual(sent_before + [sent_after[-1]], sent_after)
+        self.assertFalse(any(item.event_type == "session_dispatch_reconciled" for item in events))
+
+    def test_collect_role_output_does_not_recreate_old_result_when_newer_review_cycle_item_is_active(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009RESULTREVIEWCYCLE",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30009RESULTREVIEWCYCLE")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="blocked_review_cycle",
+            payload={
+                "work_item_id": 356,
+                "summary": "blocked_review_cycle",
+                "details": "Needs scope clarification.",
+            },
+        )
+        review_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        self.assertIsNotNone(review_role)
+        self.coordinator.send_operator_runtime_input(
+            session_id=session.id,
+            text="Accessibility identifiers are out of scope.",
+        )
+        sent_before_collect = list(self.session_backend.get_sent_inputs(review_role.runtime_handle))
+        self.session_backend.simulate_output(
+            review_role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"failed","payload":{"work_item_id":356,"summary":"blocked_review_cycle"}}',
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=CODE_REVIEWER_ROLE,
+        )
+        sent_after_collect = self.session_backend.get_sent_inputs(review_role.runtime_handle)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
         self.assertEqual(sent_before_collect, sent_after_collect)
         self.assertFalse(
             any(item.event_type == "missing_result_file_recreation_requested" for item in events)

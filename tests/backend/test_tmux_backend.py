@@ -163,8 +163,8 @@ class TmuxBackendTests(unittest.TestCase):
         backend.send_input(role, "first routed work")
         backend._handle_tmux_interactive_driver_output(role.role_id, "❯ first routed work")
 
-        submit_calls = [call for call in backend.calls if call[-1] == "C-m"]
-        self.assertEqual([("send-keys", "-t", role.role_id, "C-m")], submit_calls)
+        submit_calls = [call for call in backend.calls if call[-1] == "Enter"]
+        self.assertEqual([("send-keys", "-t", role.role_id, "", "Enter")], submit_calls)
 
     def test_tmux_launcher_normalizes_direct_input_before_submit(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
@@ -189,9 +189,96 @@ class TmuxBackendTests(unittest.TestCase):
 
         submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
         self.assertEqual("Operator answer: full repo-wide cleanup.", submit_trace["payload_text"])
-        self.assertEqual("C-m", submit_trace["submit_key"])
+        self.assertEqual("Enter", submit_trace["submit_key"])
+        self.assertEqual("plain-enter-two-call", submit_trace["submit_style"])
         self.assertIn(
-            ("send-keys", "-t", role.role_id, "-l", "Operator answer: full repo-wide cleanup."),
+            ("send-keys", "-t", role.role_id, "Operator answer: full repo-wide cleanup.", ""),
+            backend.calls,
+        )
+        self.assertIn(
+            ("send-keys", "-t", role.role_id, "", "Enter"),
+            backend.calls,
+        )
+
+    def test_tmux_launcher_can_probe_plain_enter_submit_for_claude_direct_input(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50009:requirements-clarifier-worker",
+            session_id="sdd-IOS-50009",
+            backend_name="tmux",
+        )
+        backend.tmux_interactive_driver_enabled[role.role_id] = True
+        backend.tmux_launcher_runners[role.role_id] = "claude"
+        backend.tmux_role_ready[role.role_id] = True
+
+        previous = os.environ.get("SDD_FACTORY_TMUX_SUBMIT_STYLE_CLAUDE_DIRECT")
+        os.environ["SDD_FACTORY_TMUX_SUBMIT_STYLE_CLAUDE_DIRECT"] = "plain-enter-two-call"
+        try:
+            backend.send_input(role, "Operator answer: full repo-wide cleanup.")
+        finally:
+            if previous is None:
+                os.environ.pop("SDD_FACTORY_TMUX_SUBMIT_STYLE_CLAUDE_DIRECT", None)
+            else:
+                os.environ["SDD_FACTORY_TMUX_SUBMIT_STYLE_CLAUDE_DIRECT"] = previous
+
+        submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
+        self.assertEqual("claude", submit_trace["runner"])
+        self.assertEqual("plain-enter-two-call", submit_trace["submit_style"])
+        self.assertEqual(
+            [
+                ("send-keys", "-t", role.role_id, "Operator answer: full repo-wide cleanup.", ""),
+                ("send-keys", "-t", role.role_id, "", "Enter"),
+            ],
+            backend.calls,
+        )
+
+    def test_tmux_launcher_can_probe_plain_enter_submit_for_codex_direct_input(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50009:requirements-clarifier-worker",
+            session_id="sdd-IOS-50009",
+            backend_name="tmux",
+        )
+        backend.tmux_interactive_driver_enabled[role.role_id] = True
+        backend.tmux_launcher_runners[role.role_id] = "codex"
+        backend.tmux_role_ready[role.role_id] = True
+
+        previous = os.environ.get("SDD_FACTORY_TMUX_SUBMIT_STYLE_CODEX_DIRECT")
+        os.environ["SDD_FACTORY_TMUX_SUBMIT_STYLE_CODEX_DIRECT"] = "plain-enter-two-call"
+        try:
+            backend.send_input(role, "Operator answer: full repo-wide cleanup.")
+        finally:
+            if previous is None:
+                os.environ.pop("SDD_FACTORY_TMUX_SUBMIT_STYLE_CODEX_DIRECT", None)
+            else:
+                os.environ["SDD_FACTORY_TMUX_SUBMIT_STYLE_CODEX_DIRECT"] = previous
+
+        submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
+        self.assertEqual("codex", submit_trace["runner"])
+        self.assertEqual("plain-enter-two-call", submit_trace["submit_style"])
+        self.assertEqual(
+            [
+                ("send-keys", "-t", role.role_id, "Operator answer: full repo-wide cleanup.", ""),
+                ("send-keys", "-t", role.role_id, "", "Enter"),
+            ],
             backend.calls,
         )
 
@@ -215,7 +302,9 @@ class TmuxBackendTests(unittest.TestCase):
                 / "implementer"
             )
             workspace.mkdir(parents=True, exist_ok=True)
-            (workspace / "launch-role.sh").write_text("#!/usr/bin/env bash\n")
+            (workspace / "launch-role.sh").write_text(
+                "#!/usr/bin/env bash\nexport SDD_FACTORY_ROLE_RUNNER='claude'\n"
+            )
 
             backend = FakeTmuxBackend(runtime_root)
             role = RuntimeRoleHandle(
@@ -234,13 +323,14 @@ class TmuxBackendTests(unittest.TestCase):
                 "Read ROUTED_WORK.md in the current directory, read HYDRATION.json too if it exists, follow the routed instructions exactly, and reply only through the SDD_* protocol described in AGENTS.md.",
                 submit_trace["payload_text"],
             )
+            self.assertEqual("claude", submit_trace["runner"])
             self.assertTrue((workspace / "ROUTED_WORK.md").is_file())
             self.assertIn(
-                ("send-keys", "-t", role.role_id, "-l", submit_trace["payload_text"]),
+                ("send-keys", "-t", role.role_id, submit_trace["payload_text"], ""),
                 backend.calls,
             )
             self.assertIn(
-                ("send-keys", "-t", role.role_id, "C-m"),
+                ("send-keys", "-t", role.role_id, "", "Enter"),
                 backend.calls,
             )
 
