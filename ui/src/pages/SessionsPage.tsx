@@ -30,6 +30,53 @@ import type {
 
 type SurfaceView = "runs" | "settings" | "health";
 
+const SURFACE_TILES: Array<{
+  view: SurfaceView;
+  label: string;
+  description: string;
+  icon: JSX.Element;
+}> = [
+  {
+    view: "runs",
+    label: "Runs",
+    description: "Workflow runs",
+    icon: (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path
+          d="M6 4h12a2 2 0 0 1 2 2v3H4V6a2 2 0 0 1 2-2Zm-2 8h7v8H6a2 2 0 0 1-2-2v-6Zm9 0h7v6a2 2 0 0 1-2 2h-5v-8Z"
+          fill="currentColor"
+        />
+      </svg>
+    ),
+  },
+  {
+    view: "settings",
+    label: "Settings",
+    description: "Runtime defaults",
+    icon: (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path
+          d="M10.8 3h2.4l.5 2.3c.6.2 1.2.4 1.7.7l2-1.2 1.7 1.7-1.2 2c.3.5.5 1.1.7 1.7L21 10.8v2.4l-2.3.5c-.2.6-.4 1.2-.7 1.7l1.2 2-1.7 1.7-2-1.2c-.5.3-1.1.5-1.7.7L13.2 21h-2.4l-.5-2.3c-.6-.2-1.2-.4-1.7-.7l-2 1.2-1.7-1.7 1.2-2c-.3-.5-.5-1.1-.7-1.7L3 13.2v-2.4l2.3-.5c.2-.6.4-1.2.7-1.7l-1.2-2 1.7-1.7 2 1.2c.5-.3 1.1-.5 1.7-.7L10.8 3Zm1.2 5.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"
+          fill="currentColor"
+        />
+      </svg>
+    ),
+  },
+  {
+    view: "health",
+    label: "Health",
+    description: "Environment state",
+    icon: (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path
+          d="M12 3 4.5 6v5.7c0 4.4 2.9 8.4 7.5 9.3 4.6-.9 7.5-4.9 7.5-9.3V6L12 3Zm-1.2 5h2.4v3h3v2.4h-3v3h-2.4v-3h-3V11h3V8Z"
+          fill="currentColor"
+        />
+      </svg>
+    ),
+  },
+];
+
 const FOLLOWUP_ARTIFACT_TYPES_BY_SOURCE: Record<"mr" | "qa", readonly string[]> = {
   mr: ["mr_followup_plan_markdown", "mr_comments_markdown"],
   qa: ["qa_reopen_comments"],
@@ -577,71 +624,44 @@ export function SessionsPage(): JSX.Element {
             Keep every star aligned through the long run.
           </p>
         </div>
+        <div className="topbar-actions">
+          {SURFACE_TILES.map((surface) => (
+            <button
+              className={`topbar-tile ${surfaceView === surface.view ? "selected" : ""}`}
+              key={surface.view}
+              onClick={() => setSurfaceView(surface.view)}
+              title={surface.description}
+              type="button"
+            >
+              <span className="topbar-tile-icon">{surface.icon}</span>
+              <span className="topbar-tile-copy">
+                <strong>{surface.label}</strong>
+                <small>{surface.description}</small>
+              </span>
+            </button>
+          ))}
+        </div>
       </header>
 
       {error ? <div className="error-banner top-error">{error}</div> : null}
 
       <div className="page-layout">
         <div className="sidebar-stack">
-          <section className="panel panel-sidebar sidebar-zone sidebar-zone-nav">
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Workspace</p>
-                <h2>Navigation</h2>
-              </div>
-            </div>
-            <div className="surface-nav">
-              <button
-                className={`surface-nav-card ${surfaceView === "runs" ? "selected" : ""}`}
-                onClick={() => setSurfaceView("runs")}
-                type="button"
-              >
-                <strong>Workflow Runs</strong>
-                <p>Create runs, switch sessions, and handle operator actions.</p>
-              </button>
-              <button
-                className={`surface-nav-card ${surfaceView === "settings" ? "selected" : ""}`}
-                onClick={() => setSurfaceView("settings")}
-                type="button"
-              >
-                <strong>Settings</strong>
-                <p>Manage project defaults, policies, and runtime baselines.</p>
-              </button>
-              <button
-                className={`surface-nav-card ${surfaceView === "health" ? "selected" : ""}`}
-                onClick={() => setSurfaceView("health")}
-                type="button"
-              >
-                <strong>Health</strong>
-                <p>Check setup, tooling, and runtime readiness.</p>
-              </button>
-            </div>
-          </section>
-          {surfaceView === "runs" ? (
-            <>
-              <SessionList
-                onSelect={(sessionId) => setSelectedSessionId(sessionId)}
-                selectedSessionId={selectedSessionId}
-                sessions={sessions}
-              />
-              <SessionStartForm
-                onCreated={async (sessionId) => {
-                  await loadSessions();
-                  setSelectedSessionId(sessionId);
-                  setSurfaceView("runs");
-                  await loadBundle(sessionId);
-                }}
-                runtimeCapabilities={runtimeCapabilitiesSummary}
-                runtimeDefaults={runtimeDefaultsSummary}
-              />
-            </>
-          ) : null}
-          {surfaceView === "settings" ? (
-            <div />
-          ) : null}
-          {surfaceView === "health" ? (
-            <div />
-          ) : null}
+          <SessionStartForm
+            onCreated={async (sessionId) => {
+              await loadSessions();
+              setSelectedSessionId(sessionId);
+              setSurfaceView("runs");
+              await loadBundle(sessionId);
+            }}
+            runtimeCapabilities={runtimeCapabilitiesSummary}
+            runtimeDefaults={runtimeDefaultsSummary}
+          />
+          <SessionList
+            onSelect={(sessionId) => setSelectedSessionId(sessionId)}
+            selectedSessionId={selectedSessionId}
+            sessions={sessions}
+          />
         </div>
         <section className="detail-layout" ref={contentTopRef}>
           {surfaceView === "runs" ? (

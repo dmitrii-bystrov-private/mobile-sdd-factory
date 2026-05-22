@@ -66,6 +66,76 @@ input {
   gap: 12px;
 }
 
+.topbar-tile {
+  min-width: 132px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0)),
+    var(--surface-panel);
+  color: var(--ink-strong);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.topbar-tile:hover,
+.topbar-tile.selected {
+  transform: translateY(-1px);
+  border-color: rgba(255, 131, 92, 0.45);
+  box-shadow: 0 12px 24px rgba(255, 93, 45, 0.12);
+}
+
+.topbar-tile.selected {
+  background:
+    linear-gradient(135deg, rgba(255, 93, 45, 0.08), rgba(73, 214, 164, 0.05)),
+    var(--surface-panel);
+}
+
+.topbar-tile-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--brand);
+}
+
+.topbar-tile-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.topbar-tile-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.topbar-tile-copy strong,
+.topbar-tile-copy small {
+  display: block;
+}
+
+.topbar-tile-copy strong {
+  color: #ffffff;
+}
+
+.topbar-tile-copy small {
+  color: var(--ink-soft);
+  line-height: 1.3;
+}
+
 .topbar-copy {
   display: grid;
   gap: 10px;
@@ -99,7 +169,7 @@ input {
 
 .page-layout {
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-columns: 360px minmax(0, 1fr);
   gap: 24px;
   align-items: start;
 }
@@ -1753,7 +1823,7 @@ input {
 }
 
 .queue-list {
-  max-height: 52vh;
+  max-height: min(104vh, calc(100vh - 140px));
   padding-top: 10px;
   padding-bottom: 6px;
 }
@@ -1818,6 +1888,11 @@ input {
   .topbar-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .topbar-tile {
+    min-width: 0;
+    grid-template-columns: 36px minmax(0, 1fr);
   }
 
   .actions-grid,
