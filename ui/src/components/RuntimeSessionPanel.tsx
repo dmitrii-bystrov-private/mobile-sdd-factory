@@ -192,17 +192,6 @@ export function RuntimeSessionPanel({
                           >
                             Restart This Runtime
                           </button>
-                          <button
-                            className="action-button"
-                            disabled={busy || (role.status !== "running" && role.status !== "stopped")}
-                            onClick={() =>
-                              run(() => apiClient.restartRuntimeRole(session.id, role.roleName, true))
-                            }
-                            title={`Recreate ${roleDisplayName(role.roleName)} with the latest saved runtime defaults and redispatch its current work.`}
-                            type="button"
-                          >
-                            Recreate With Latest Defaults
-                          </button>
                           {role.tmuxAttachCommand ? (
                             <button
                               className="action-button"

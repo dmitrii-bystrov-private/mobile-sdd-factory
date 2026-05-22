@@ -719,6 +719,21 @@ export function SessionDetail({
                               >
                                 Restart This Runtime
                               </button>
+                              <button
+                                className="action-button"
+                                disabled={
+                                  workerActionBusyRoleName !== null ||
+                                  (runtimeRole.status !== "running" && runtimeRole.status !== "stopped")
+                                }
+                                onClick={() =>
+                                  void runWorkerAction(role.role_name, () =>
+                                    apiClient.restartRuntimeRole(session.id, role.role_name, true),
+                                  )
+                                }
+                                type="button"
+                              >
+                                Recreate With Latest Defaults
+                              </button>
                               {runtimeRole.tmuxAttachCommand ? (
                                 <button
                                   className="action-button"
