@@ -5406,6 +5406,35 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(any(item.event_type == "subtask_completed" for item in events))
         self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
 
+    def test_find_active_work_item_for_role_prefers_most_recent_assigned_item(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009ERECENT",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        older = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-30901: Older duplicate",
+            owner_role_id=implementer_role.id,
+            priority=100,
+        )
+        newer = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-30902: Newer assignment",
+            owner_role_id=implementer_role.id,
+            priority=100,
+        )
+
+        active = self.coordinator._find_active_work_item_for_role(session.id, implementer_role.id)
+
+        self.assertIsNotNone(active)
+        self.assertEqual(newer.id, active.id)
+        self.assertNotEqual(older.id, active.id)
+
     def test_collect_role_output_ignores_subtask_completion_with_mismatched_address(
         self,
     ) -> None:
@@ -7100,6 +7129,36 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("doc_harvest_requested", updated_session.current_stage)
         self.assertTrue(any(item.event_type == "git_commit_completed" for item in events))
         self.assertFalse(any(item.event_type == "send_to_test_completed" for item in events))
+
+    def test_verification_report_passed_accepts_structured_result_section(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021VPASS1",
+            workflow_profile="oneshot",
+        )
+        verification_report = Path(self.temp_dir.name) / "IOS-30021VPASS1" / "spec" / "final-verification.md"
+        verification_report.parent.mkdir(parents=True, exist_ok=True)
+        verification_report.write_text(
+            "# Final Verification Report\n\n"
+            "## task_key\nIOS-30021VPASS1\n\n"
+            "## Result\npassed\n"
+        )
+
+        self.assertTrue(self.coordinator._verification_report_passed(session))
+
+    def test_verification_report_passed_accepts_verifier_final_status_section(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021VPASS2",
+            workflow_profile="oneshot",
+        )
+        verification_report = Path(self.temp_dir.name) / "IOS-30021VPASS2" / "spec" / "final-verification.md"
+        verification_report.parent.mkdir(parents=True, exist_ok=True)
+        verification_report.write_text(
+            "# Final Verification Report\n\n"
+            "## Final status\n\n"
+            "Deterministic verification **passed**. No code changes were made in this verification role.\n"
+        )
+
+        self.assertTrue(self.coordinator._verification_report_passed(session))
 
     def test_persistent_session_roles_include_reusable_followup_roles(self) -> None:
         self.assertIn(CODE_REVIEWER_ROLE, PERSISTENT_SESSION_ROLES)
