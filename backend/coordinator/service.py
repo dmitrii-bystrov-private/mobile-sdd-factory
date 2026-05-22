@@ -1919,6 +1919,19 @@ class CoordinatorService:
             rendered_failures = [str(item).strip() for item in failures if str(item).strip()]
             if rendered_failures:
                 return True
+        results = payload.get("results")
+        if isinstance(results, dict):
+            for result_value in results.values():
+                if not isinstance(result_value, dict):
+                    continue
+                status = str(result_value.get("status") or "").strip().lower()
+                if status == "failed":
+                    return True
+                errors = result_value.get("errors")
+                if isinstance(errors, list):
+                    rendered_errors = [str(item).strip() for item in errors if str(item).strip()]
+                    if rendered_errors:
+                        return True
         check_outputs = payload.get("check_outputs")
         if not isinstance(check_outputs, dict):
             return False
@@ -4237,6 +4250,9 @@ class CoordinatorService:
         active_item = verification_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._materialize_final_verification_file(session=session, source_event=source_event)
+        session = self._get_session_or_raise(session.id)
+        if not self._verification_report_passed(session):
+            return self._handle_verification_failed(session, source_event)
         doc_harvest_policy = self._optional_lane_policy_mode(session.policy, "doc_harvest_policy")
         if doc_harvest_policy != "disabled":
             session, event = self._enqueue_doc_harvest(session=session, source_event=source_event)
@@ -4761,9 +4777,7 @@ class CoordinatorService:
             producer_id=DOC_HARVEST_ROLE,
             emit_event=False,
         )
-        session, commit_event = self._commit_task_state(session, "doc harvest")
-        if commit_event is not None:
-            return session, commit_event
+        session, _commit_event = self._commit_task_state(session, "doc harvest")
         session, event = self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
         return session, event
 

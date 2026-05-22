@@ -4313,6 +4313,36 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_correction_requested", updated_session.current_stage)
         self.assertEqual("implementer", updated_session.current_owner)
 
+    def test_verifier_completed_output_with_nested_failed_results_is_downgraded_to_verification_failed(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VRESULTFAIL")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="verification-coordinator",
+            output_type="completed",
+            payload={
+                "results": {
+                    "run_test": {
+                        "status": "failed",
+                        "errors": ["Compilation failed"],
+                    },
+                    "run_lint": {
+                        "status": "passed",
+                    },
+                },
+            },
+        )
+
+        self.assertEqual("verification_failed", mapped_event.event_type)
+        self.assertEqual("verification_correction_requested", followup_event.event_type)
+        self.assertEqual("verification_correction_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+
     def test_verification_correction_reenters_verification_without_reopening_optional_quality_lanes(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004V2QUAL",
@@ -6830,6 +6860,42 @@ class SessionCreationTests(unittest.TestCase):
         doc_role = self.role_repository.get_by_name(session.id, DOC_HARVEST_ROLE)
         assert doc_role is not None
         self.assertEqual(RoleStatus.RUNNING, doc_role.status)
+
+    def test_doc_harvest_completion_continues_delivery_after_commit(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021FHCOMMIT",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021FHCOMMIT")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=DOC_HARVEST_ROLE,
+            output_type="completed",
+            payload={"summary": "README remains current."},
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("doc_harvest_completed", mapped_event.event_type)
+        self.assertIsNotNone(followup_event)
+        assert followup_event is not None
+        self.assertEqual("send_to_test_completed", followup_event.event_type)
+        self.assertEqual("completed", updated_session.status.value)
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertTrue(any(item.event_type == "git_commit_completed" for item in events))
+        self.assertTrue(any(item.event_type == "mr_handoff_completed" for item in events))
+        self.assertTrue(any(item.event_type == "send_to_test_completed" for item in events))
 
     def test_persistent_session_roles_include_reusable_followup_roles(self) -> None:
         self.assertIn(CODE_REVIEWER_ROLE, PERSISTENT_SESSION_ROLES)
