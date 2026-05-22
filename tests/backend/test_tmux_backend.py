@@ -195,6 +195,55 @@ class TmuxBackendTests(unittest.TestCase):
             backend.calls,
         )
 
+    def test_tmux_restores_launcher_metadata_for_existing_role_after_backend_restart(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self, runtime_root: Path) -> None:
+                super().__init__(mode="tmux", runtime_root=runtime_root)
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            workspace = (
+                runtime_root
+                / "IOS-50009RECOVER"
+                / "runtime"
+                / "role-workspaces"
+                / "implementer"
+            )
+            workspace.mkdir(parents=True, exist_ok=True)
+            (workspace / "launch-role.sh").write_text("#!/usr/bin/env bash\n")
+
+            backend = FakeTmuxBackend(runtime_root)
+            role = RuntimeRoleHandle(
+                role_id="sdd-IOS-50009RECOVER:implementer",
+                session_id="sdd-IOS-50009RECOVER",
+                backend_name="tmux",
+            )
+
+            backend.send_input(
+                role,
+                "Read AGENTS.md first.\n\nCurrent routed work:\nImplement the assigned change.",
+            )
+
+            submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
+            self.assertEqual(
+                "Read ROUTED_WORK.md in the current directory, read HYDRATION.json too if it exists, follow the routed instructions exactly, and reply only through the SDD_* protocol described in AGENTS.md.",
+                submit_trace["payload_text"],
+            )
+            self.assertTrue((workspace / "ROUTED_WORK.md").is_file())
+            self.assertIn(
+                ("send-keys", "-t", role.role_id, "-l", submit_trace["payload_text"]),
+                backend.calls,
+            )
+            self.assertIn(
+                ("send-keys", "-t", role.role_id, "C-m"),
+                backend.calls,
+            )
+
     def test_normalize_terminal_text_strips_ansi_noise(self) -> None:
         backend = TmuxSessionBackend(mode="recording")
         noisy = (

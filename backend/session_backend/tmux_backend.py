@@ -100,6 +100,38 @@ class TmuxSessionBackend(SessionBackend):
     def _task_runtime_root(self, task_key: str) -> Path:
         return self.runtime_root / task_key / "runtime"
 
+    def _task_key_from_session_id(self, session_id: str) -> str:
+        if session_id.startswith("sdd-"):
+            return session_id[len("sdd-") :]
+        return session_id
+
+    def _role_workspace_path(self, session_id: str, role_window: str) -> Path:
+        task_key = self._task_key_from_session_id(session_id)
+        return self._task_runtime_root(task_key) / "role-workspaces" / role_window
+
+    def _restore_tmux_role_metadata_if_needed(self, role: RuntimeRoleHandle) -> None:
+        role_id = role.role_id
+        if role_id in self.tmux_interactive_driver_enabled and role_id in self.role_working_directories:
+            return
+        role_window = role_id.split(":", 1)[1] if ":" in role_id else role_id
+        workspace = self._role_workspace_path(role.session_id, role_window)
+        if not workspace.exists():
+            return
+        self.role_working_directories.setdefault(role_id, workspace)
+        self.last_captured_output.setdefault(role_id, "")
+        self.session_role_ids[role.session_id].add(role_id)
+        launcher_script = workspace / "launch-role.sh"
+        interactive_driver_enabled = launcher_script.is_file()
+        self.tmux_interactive_driver_enabled.setdefault(role_id, interactive_driver_enabled)
+        if interactive_driver_enabled:
+            # Recovered launcher-backed roles already have a live TUI window; treat them as ready
+            # so routed work keeps using the file-backed launcher path after backend restarts.
+            self.tmux_role_ready.setdefault(role_id, True)
+            self.tmux_trust_prompt_handled.setdefault(role_id, True)
+            self.tmux_update_prompt_handled.setdefault(role_id, True)
+        else:
+            self.tmux_role_ready.setdefault(role_id, True)
+
     def _socket_path(self, session_name: str) -> Path:
         socket_root = self.socket_root
         socket_root.mkdir(parents=True, exist_ok=True)
@@ -205,6 +237,7 @@ class TmuxSessionBackend(SessionBackend):
     def send_input(self, role: RuntimeRoleHandle, text: str) -> None:
         self.sent_inputs[role.role_id].append(text)
         if self._effective_mode == "tmux":
+            self._restore_tmux_role_metadata_if_needed(role)
             if self.tmux_interactive_driver_enabled.get(role.role_id, False) and not self.tmux_role_ready.get(role.role_id, True):
                 self.tmux_buffered_inputs[role.role_id].append(text)
                 return
@@ -226,6 +259,7 @@ class TmuxSessionBackend(SessionBackend):
             outputs = self.pending_outputs.pop(role.role_id, [])
             return [RuntimeOutputChunk(role_id=role.role_id, text=text) for text in outputs]
 
+        self._restore_tmux_role_metadata_if_needed(role)
         socket_path = self._socket_path(role.session_id)
         result = self._tmux(socket_path, "capture-pane", "-p", "-t", role.role_id)
         if result.returncode != 0:
@@ -261,6 +295,7 @@ class TmuxSessionBackend(SessionBackend):
         if self._effective_mode == "recording":
             return "".join(self.pending_outputs.get(role.role_id, []))
 
+        self._restore_tmux_role_metadata_if_needed(role)
         socket_path = self._socket_path(role.session_id)
         result = self._tmux(
             socket_path,
