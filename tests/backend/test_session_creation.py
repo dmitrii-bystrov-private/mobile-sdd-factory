@@ -4639,7 +4639,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(result_path.exists())
         self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
 
-    def test_collect_role_output_rejects_verification_completed_result_without_explicit_result(self) -> None:
+    def test_collect_role_output_escalates_verification_completed_result_without_explicit_result(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERNORESULT")
         self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -4669,14 +4669,98 @@ class SessionCreationTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with self.assertRaisesRegex(
-            IntakeError,
-            "Verification output must include payload.result set to 'passed' or 'failed'",
-        ):
-            self.coordinator.collect_role_output(
-                session_id=session.id,
-                role_name=VERIFICATION_COORDINATOR_ROLE,
-            )
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=VERIFICATION_COORDINATOR_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertIsNone(updated_session.current_owner)
+        self.assertTrue(any(item.event_type == "role_result_protocol_violation_reported" for item in events))
+
+    def test_collect_role_output_escalates_invalid_result_json_protocol_violation(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSPROTO",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSPROTO")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            CODE_SCOUT_ROLE,
+        )
+        result_path = role_workspace / "RESULT.json"
+        result_path.write_text('{"output_type":"completed","payload":{"work_item_id":1}}*** End Patch', encoding="utf-8")
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertIsNone(updated_session.current_owner)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(any(item.event_type == "role_result_protocol_violation_reported" for item in events))
+        self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertTrue(any(item.artifact_type == "invalid_role_result_raw" for item in artifacts))
+
+    def test_collect_role_output_escalates_verification_schema_violation_as_protocol_violation(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERPROTO")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        verifier_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            VERIFICATION_COORDINATOR_ROLE,
+        )
+        result_path = verifier_workspace / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {
+                        "work_item_id": next(
+                            item.id
+                            for item in self.work_item_repository.list_for_session(session.id)
+                            if item.work_type == "verification" and item.status.value == "assigned"
+                        ),
+                        "summary": "all green",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=VERIFICATION_COORDINATOR_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertIsNone(updated_session.current_owner)
+        self.assertTrue(any(item.event_type == "role_result_protocol_violation_reported" for item in events))
+        escalations = [item for item in events if item.event_type == "session_escalated_to_operator"]
+        self.assertTrue(escalations)
+        self.assertEqual("role_result_protocol_violation", escalations[-1].payload.get("reason"))
 
     def test_implementation_completed_uses_payload_work_item_id_over_stale_assigned_item(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

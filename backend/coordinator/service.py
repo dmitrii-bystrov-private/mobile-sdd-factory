@@ -1900,22 +1900,41 @@ class CoordinatorService:
             backend_name=role.runtime_backend,
         )
         chunks = self.session_backend.read_output(runtime_role)
-        file_result = self._consume_role_result_file(session, role)
-        if not chunks and file_result is None:
+        file_result: tuple[str, dict] | None = None
+        protocol_violation = False
+        try:
+            file_result = self._consume_role_result_file(session, role)
+        except IntakeError as exc:
+            session = self._handle_role_result_protocol_violation(
+                session=session,
+                role=role,
+                error_message=str(exc),
+            )
+            protocol_violation = True
+        if not chunks and file_result is None and not protocol_violation:
             return session, None, 0
 
         if chunks:
             self._record_runtime_output_artifacts(session, role, chunks)
         if file_result is not None:
             output_type, output_payload = file_result
-            handled_session = self._handle_collected_role_output(
-                session=session,
-                role=role,
-                output_type=output_type,
-                output_payload=output_payload,
-            )
-            if handled_session is not None:
-                session = handled_session
+            try:
+                handled_session = self._handle_collected_role_output(
+                    session=session,
+                    role=role,
+                    output_type=output_type,
+                    output_payload=output_payload,
+                )
+            except IntakeError as exc:
+                session = self._handle_role_result_protocol_violation(
+                    session=session,
+                    role=role,
+                    error_message=str(exc),
+                )
+                protocol_violation = True
+            else:
+                if handled_session is not None:
+                    session = handled_session
         elif chunks:
             session = self._apply_runtime_output_markers(session, role, chunks)
         event = self._append_event(
@@ -1924,10 +1943,10 @@ class CoordinatorService:
             producer_type="coordinator",
             payload={
                 "role_name": role_name,
-                "chunk_count": len(chunks) + (1 if file_result is not None else 0),
+                "chunk_count": len(chunks) + (1 if file_result is not None or protocol_violation else 0),
             },
         )
-        return session, event, len(chunks) + (1 if file_result is not None else 0)
+        return session, event, len(chunks) + (1 if file_result is not None or protocol_violation else 0)
 
     def poll_session_output(
         self,
@@ -1947,24 +1966,45 @@ class CoordinatorService:
                 backend_name=role.runtime_backend,
             )
             chunks = self.session_backend.read_output(runtime_role)
-            file_result = self._consume_role_result_file(session, role)
+            file_result: tuple[str, dict] | None = None
+            protocol_violation = False
+            try:
+                file_result = self._consume_role_result_file(session, role)
+            except IntakeError as exc:
+                session = self._handle_role_result_protocol_violation(
+                    session=session,
+                    role=role,
+                    error_message=str(exc),
+                )
+                protocol_violation = True
             if not chunks and file_result is None:
+                if protocol_violation:
+                    total_chunks += 1
                 continue
             if chunks:
                 self._record_runtime_output_artifacts(session, role, chunks)
             if file_result is not None:
                 output_type, output_payload = file_result
-                handled_session = self._handle_collected_role_output(
-                    session=session,
-                    role=role,
-                    output_type=output_type,
-                    output_payload=output_payload,
-                )
-                if handled_session is not None:
-                    session = handled_session
+                try:
+                    handled_session = self._handle_collected_role_output(
+                        session=session,
+                        role=role,
+                        output_type=output_type,
+                        output_payload=output_payload,
+                    )
+                except IntakeError as exc:
+                    session = self._handle_role_result_protocol_violation(
+                        session=session,
+                        role=role,
+                        error_message=str(exc),
+                    )
+                    protocol_violation = True
+                else:
+                    if handled_session is not None:
+                        session = handled_session
             elif chunks:
                 session = self._apply_runtime_output_markers(session, role, chunks)
-            total_chunks += len(chunks) + (1 if file_result is not None else 0)
+            total_chunks += len(chunks) + (1 if file_result is not None or protocol_violation else 0)
 
         if total_chunks == 0:
             return session, None, len(roles), 0
@@ -1998,6 +2038,7 @@ class CoordinatorService:
         output_payload: dict | None = None
         parsed_payload: dict[str, object] | None = None
         active_work_item = self._find_active_work_item_for_role(session.id, role.id)
+        invalid_result_detected = False
 
         for candidate in candidate_paths:
             if not candidate.is_file():
@@ -2005,10 +2046,12 @@ class CoordinatorService:
             raw_text = candidate.read_text()
             parsed = self._parse_role_result_json(raw_text)
             if parsed is None or not isinstance(parsed, dict):
+                invalid_result_detected = True
                 continue
             candidate_output_type = parsed.get("output_type")
             candidate_output_payload = parsed.get("payload")
             if not isinstance(candidate_output_type, str) or not isinstance(candidate_output_payload, dict):
+                invalid_result_detected = True
                 continue
             if active_work_item is not None:
                 payload_work_item_id = candidate_output_payload.get("work_item_id")
@@ -2021,6 +2064,8 @@ class CoordinatorService:
             break
 
         if result_path is None or output_type is None or output_payload is None or parsed_payload is None:
+            if invalid_result_detected:
+                raise IntakeError("RESULT.json is invalid or does not match the required terminal schema")
             return None
         artifact_path = write_text_artifact(
             self.artifacts_root,
@@ -2072,6 +2117,74 @@ class CoordinatorService:
         if not isinstance(parsed, dict):
             return None
         return parsed
+
+    def _handle_role_result_protocol_violation(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        error_message: str,
+    ) -> Session:
+        result_path = None
+        raw_result = None
+        if self.role_workspace_manager is not None:
+            result_path = self.role_workspace_manager.role_directory(session.task_key, role.role_name) / "RESULT.json"
+            if result_path.is_file():
+                raw_result = result_path.read_text(encoding="utf-8")
+        if raw_result and self.artifacts_root is not None:
+            artifact_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                f"protocol-violation-{role.role_name}",
+                "invalid-result.json.txt",
+                raw_result,
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                role_id=role.id,
+                stage_name=f"protocol-violation-{role.role_name}",
+                artifact_type="invalid_role_result_raw",
+                path=str(artifact_path),
+                metadata={
+                    "role_name": role.role_name,
+                    "current_stage": session.current_stage,
+                    "source_path": str(result_path) if result_path is not None else "",
+                },
+            )
+        if result_path is not None:
+            result_path.unlink(missing_ok=True)
+        self._append_event(
+            session_id=session.id,
+            event_type="role_result_protocol_violation_reported",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "current_stage": session.current_stage,
+                "current_owner": session.current_owner,
+                "details": error_message,
+                "result_path": str(result_path) if result_path is not None else None,
+            },
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=None,
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "role_result_protocol_violation",
+                "role_name": role.role_name,
+                "summary": f"{role.role_name} wrote an invalid RESULT.json",
+                "details": error_message,
+                "needs_operator_input": False,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session
 
     def _verification_payload_has_failure_signals(self, payload: dict) -> bool:
         verification_status = str(
