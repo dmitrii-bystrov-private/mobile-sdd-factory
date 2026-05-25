@@ -1736,6 +1736,12 @@ class CoordinatorService:
         payload: dict,
     ) -> tuple[Session, Event, Event | None]:
         session = self._get_session_or_raise(session_id)
+        payload = self._normalize_role_output_payload(
+            session=session,
+            role_name=role_name,
+            output_type=output_type,
+            payload=payload,
+        )
         self._record_role_output_artifacts(
             session=session,
             role_name=role_name,
@@ -1797,6 +1803,64 @@ class CoordinatorService:
         elif mapped_event_type == "self_review_blocked":
             session, followup_event = self._handle_self_review_blocked(session, accepted_event)
         return session, accepted_event, followup_event
+
+    def _normalize_role_output_payload(
+        self,
+        *,
+        session: Session,
+        role_name: str,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        normalized_payload = dict(payload)
+        if role_name == CODE_SCOUT_ROLE and session.current_stage == "boy_scout_requested":
+            return self._normalize_boy_scout_output_payload(
+                session=session,
+                output_type=output_type,
+                payload=normalized_payload,
+            )
+        return normalized_payload
+
+    def _normalize_boy_scout_output_payload(
+        self,
+        *,
+        session: Session,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type == "skipped_not_needed":
+            payload.setdefault("result", "clean")
+            return payload
+        if output_type not in {"passed", "completed"}:
+            return payload
+
+        explicit_result = str(payload.get("result") or "").strip().lower()
+        if explicit_result not in {"clean", "findings_found"}:
+            raise IntakeError(
+                "Boy Scout output must include payload.result set to 'clean' or 'findings_found'"
+            )
+        payload["result"] = explicit_result
+
+        if explicit_result == "findings_found":
+            findings_path = str(payload.get("findings_path") or "").strip()
+            if not findings_path and self.workdir_root is not None:
+                findings_path = str(self.workdir_root / session.task_key / "spec" / "findings.md")
+            if not findings_path:
+                raise IntakeError(
+                    "Boy Scout findings output must include payload.findings_path"
+                )
+            payload["findings_path"] = findings_path
+
+            findings_count = payload.get("findings_count")
+            if not isinstance(findings_count, int) or findings_count <= 0:
+                parsed_findings = self._parse_boy_scout_findings(session)
+                if parsed_findings:
+                    payload["findings_count"] = len(parsed_findings)
+                else:
+                    raise IntakeError(
+                        "Boy Scout findings output must include a positive payload.findings_count"
+                    )
+        return payload
 
     def collect_role_output(
         self,
@@ -5314,7 +5378,6 @@ class CoordinatorService:
         output_type: str,
         payload: dict,
     ) -> str:
-        normalized_summary = str(payload.get("summary") or "").strip()
         if (
             role_name in _STORY_PLANNING_ROLES
             and session.current_stage in _STORY_PLANNING_WORK_TYPE_BY_STAGE
@@ -5350,8 +5413,6 @@ class CoordinatorService:
                 return "verification_failed"
             if output_type in {"passed", "completed"} and session.current_stage == "verification_requested":
                 return "verification_passed"
-            if normalized_summary == "blocked_verification_cycle" and session.current_stage == "verification_requested":
-                return "verification_blocked"
             if output_type == "failed" and session.current_stage == "verification_requested":
                 return "verification_failed"
             if output_type == "blocked_verification_cycle" and session.current_stage == "verification_requested":
@@ -5363,8 +5424,6 @@ class CoordinatorService:
                 if self._optional_lane_policy_mode(session.policy, "self_review_policy") != "enabled":
                     raise IntakeError("Self review cannot be skipped when self_review_policy is required")
                 return "self_review_passed"
-            if normalized_summary == "blocked_review_cycle":
-                return "self_review_blocked"
             if output_type == "failed":
                 return "self_review_issues_found"
             if output_type == "blocked_review_cycle":
@@ -8305,12 +8364,6 @@ class CoordinatorService:
             candidate = Path(findings_path)
             if candidate.is_file():
                 return "findings_found"
-        if self.workdir_root is not None:
-            candidate = self.workdir_root / session.task_key / "spec" / "findings.md"
-            if candidate.is_file():
-                text = candidate.read_text(encoding="utf-8").strip()
-                if text and "SCOUT_RESULT: clean" not in text:
-                    return "findings_found"
         return "clean"
 
     def _added_source_paths_from_diff(self, task_key: str) -> set[str]:

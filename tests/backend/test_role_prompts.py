@@ -142,6 +142,8 @@ class RolePromptTests(unittest.TestCase):
 
         self.assertIn("Start from the routed diff input when it is provided as an absolute path", text)
         self.assertIn("write them to the routed findings target when it is provided as an absolute path", text)
+        self.assertIn("`result` set to `clean` or `findings_found`", text)
+        self.assertIn("positive `findings_count`", text)
 
     def test_full_prompt_restores_acceptance_criteria_format_contract(self) -> None:
         text = role_handoff_prompt(

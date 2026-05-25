@@ -2113,7 +2113,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("role_input_dispatched", dispatch_event.event_type)
         self.assertIn("blocked_review_cycle", sent_inputs[-1])
 
-    def test_failed_self_review_with_blocked_cycle_summary_maps_to_blocked(self) -> None:
+    def test_failed_self_review_with_blocked_cycle_summary_stays_failed(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003RBLOCKSUMMARY",
             workflow_profile="oneshot",
@@ -2142,10 +2142,10 @@ class SessionCreationTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual("self_review_blocked", mapped_event.event_type)
-        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
-        self.assertEqual("self_review_requested", updated_session.current_stage)
+        self.assertEqual("self_review_issues_found", mapped_event.event_type)
+        self.assertEqual("self_review_correction_requested", followup_event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("self_review_correction_requested", updated_session.current_stage)
 
     def test_second_self_review_dispatch_includes_previous_review_report_paths(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -4781,7 +4781,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("role_input_dispatched", dispatch_event.event_type)
         self.assertIn("blocked_verification_cycle", sent_inputs[-1])
 
-    def test_failed_verification_with_blocked_cycle_summary_maps_to_blocked(self) -> None:
+    def test_failed_verification_with_blocked_cycle_summary_stays_failed(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VBLOCKSUMMARY")
         self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -4799,10 +4799,10 @@ class SessionCreationTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual("verification_blocked", mapped_event.event_type)
-        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
-        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification_failed", mapped_event.event_type)
+        self.assertEqual("verification_correction_requested", followup_event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("verification_correction_requested", updated_session.current_stage)
 
     def test_verifier_passed_output_with_failures_is_downgraded_to_verification_failed(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VPAYLOADFAIL")
@@ -7768,7 +7768,38 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_requested", rerun_session.current_stage)
         self.assertEqual("active", rerun_session.status.value)
 
-    def test_boy_scout_findings_count_without_explicit_result_still_routes_to_operator(self) -> None:
+    def test_boy_scout_clean_summary_without_explicit_result_is_rejected(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSCLEANSUMMARY",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSCLEANSUMMARY")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSCLEANSUMMARY" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        findings_path = spec_dir / "findings.md"
+        findings_path.write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Boy Scout output must include payload.result set to 'clean' or 'findings_found'",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name=CODE_SCOUT_ROLE,
+                output_type="completed",
+                payload={"summary": "Clean Boy Scout pass: no real maintainability findings in the highest-signal changed files"},
+            )
+
+        self.assertEqual("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n", findings_path.read_text(encoding="utf-8"))
+
+    def test_boy_scout_findings_count_requires_explicit_result(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021BSCOUNT",
             workflow_profile="oneshot",
@@ -7785,25 +7816,21 @@ class SessionCreationTests(unittest.TestCase):
         spec_dir.mkdir(parents=True, exist_ok=True)
         (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
 
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={
-                "summary": "Found one maintainability improvement opportunity.",
-                "findings_count": 1,
-            },
-        )
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Boy Scout output must include payload.result set to 'clean' or 'findings_found'",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name=CODE_SCOUT_ROLE,
+                output_type="completed",
+                payload={
+                    "summary": "Found one maintainability improvement opportunity.",
+                    "findings_count": 1,
+                },
+            )
 
-        self.assertEqual("boy_scout_completed", mapped_event.event_type)
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
-        self.assertEqual("boy_scout_requested", updated_session.current_stage)
-        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
-        outcome_path = Path(self.temp_dir.name) / "IOS-30021BSCOUNT" / "spec" / "boy-scout-outcome.json"
-        self.assertTrue(outcome_path.exists())
-        self.assertEqual("findings_found", json.loads(outcome_path.read_text())["status"])
-
-    def test_boy_scout_findings_path_without_explicit_result_still_routes_to_operator(self) -> None:
+    def test_boy_scout_findings_path_requires_explicit_result(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021BSPATH",
             workflow_profile="oneshot",
@@ -7821,13 +7848,47 @@ class SessionCreationTests(unittest.TestCase):
         findings_path = spec_dir / "findings.md"
         findings_path.write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
 
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Boy Scout output must include payload.result set to 'clean' or 'findings_found'",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name=CODE_SCOUT_ROLE,
+                output_type="completed",
+                payload={
+                    "summary": "Found one maintainability improvement opportunity.",
+                    "findings_path": str(findings_path),
+                },
+            )
+
+    def test_boy_scout_findings_with_explicit_result_and_path_route_to_operator(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSPATHRESULT",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSPATHRESULT")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSPATHRESULT" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        findings_path = spec_dir / "findings.md"
+        findings_path.write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
+
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
             role_name=CODE_SCOUT_ROLE,
             output_type="completed",
             payload={
+                "result": "findings_found",
                 "summary": "Found one maintainability improvement opportunity.",
                 "findings_path": str(findings_path),
+                "findings_count": 1,
             },
         )
 
@@ -7835,7 +7896,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("waiting_for_operator", updated_session.status.value)
         self.assertEqual("boy_scout_requested", updated_session.current_stage)
         self.assertEqual("session_escalated_to_operator", followup_event.event_type)
-        outcome_path = Path(self.temp_dir.name) / "IOS-30021BSPATH" / "spec" / "boy-scout-outcome.json"
+        outcome_path = Path(self.temp_dir.name) / "IOS-30021BSPATHRESULT" / "spec" / "boy-scout-outcome.json"
         self.assertTrue(outcome_path.exists())
         self.assertEqual("findings_found", json.loads(outcome_path.read_text())["status"])
 

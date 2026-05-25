@@ -53,7 +53,9 @@ def role_runtime_rules(role_name: str) -> str:
             "- Treat this role as a bounded one-shot worker: run a Boy Scout pass, write the routed result, and exit.\n"
             "- Start from the routed diff input when it is provided as an absolute path; otherwise resolve `spec/diff.md` relative to the task snapshot metadata root from AGENTS.md, not relative to the current role workspace.\n"
             "- If signals are weak or no real maintainability issues are found, report a clean result and stop.\n"
-            "- If real maintainability findings exist, write them to the routed findings target when it is provided as an absolute path; otherwise resolve `spec/findings.md` relative to the task snapshot metadata root from AGENTS.md.\n\n"
+            "- If real maintainability findings exist, write them to the routed findings target when it is provided as an absolute path; otherwise resolve `spec/findings.md` relative to the task snapshot metadata root from AGENTS.md.\n"
+            "- Always write a deterministic terminal payload to `RESULT.json` with `result` set to `clean` or `findings_found`.\n"
+            "- When `result` is `findings_found`, also include a positive `findings_count` and the exact `findings_path` you wrote.\n\n"
         )
     if role_name == "mr-comments-analyst-worker":
         return (
