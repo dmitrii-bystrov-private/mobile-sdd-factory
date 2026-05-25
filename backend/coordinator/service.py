@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -6169,6 +6170,18 @@ class CoordinatorService:
         role: Role,
         stage_name: str,
     ) -> dict[str, str | int | None]:
+        if role.role_name == CODE_REVIEWER_ROLE and stage_name == "self_review_requested":
+            return {
+                "diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="source"),
+            }
+        if role.role_name == CODE_SCOUT_ROLE and stage_name == "boy_scout_requested":
+            return {
+                "diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="source"),
+            }
+        if role.role_name == DOC_HARVEST_ROLE and stage_name == "doc_harvest_requested":
+            return {
+                "full_diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="full"),
+            }
         if session.workflow_profile == "story_full":
             story_payload = self._story_context_extra_hydration(session.task_key)
             if role.role_name == PROPOSAL_CONTEXT_WORKER_ROLE and stage_name == "proposal_context_requested":
@@ -6324,6 +6337,49 @@ class CoordinatorService:
             return None
         candidate = Path(value)
         return value if candidate.is_file() else None
+
+    def _refresh_structured_diff_artifact(self, task_key: str, *, mode: str) -> str | None:
+        if self.workdir_root is None:
+            return None
+        output_name = {
+            "source": "diff.md",
+            "docs": "doc-diff.md",
+            "full": "full-diff.md",
+        }.get(mode)
+        if output_name is None:
+            raise IntakeError(f"Unsupported diff mode: {mode}")
+
+        task_root = self.workdir_root / task_key
+        repo_dir = task_root / "repo"
+        target_path = task_root / "spec" / output_name
+        if not repo_dir.exists():
+            return self._existing_file_path(str(target_path))
+
+        origin_master = subprocess.run(
+            ["git", "-C", str(repo_dir), "rev-parse", "--verify", "origin/master"],
+            capture_output=True,
+            text=True,
+        )
+        if origin_master.returncode != 0:
+            return self._existing_file_path(str(target_path))
+
+        script_path = self._repo_root() / "scripts" / "generate-diff.sh"
+        env = os.environ.copy()
+        env["SDD_WORKDIR"] = str(self.workdir_root)
+        command = ["bash", str(script_path), task_key, "--mode", mode]
+        result = subprocess.run(
+            command,
+            cwd=self._repo_root(),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if result.returncode != 0:
+            raise IntakeError(result.stderr.strip() or result.stdout.strip() or f"Failed to refresh {output_name}")
+        refreshed = self._existing_file_path(str(target_path))
+        if refreshed is None:
+            raise IntakeError(f"Diff refresh did not produce {target_path}")
+        return refreshed
 
     def _existing_directory_path(self, value: str | None) -> str | None:
         if not value:

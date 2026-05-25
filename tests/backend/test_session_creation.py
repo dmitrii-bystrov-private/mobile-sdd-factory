@@ -7498,6 +7498,29 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "self_review_summary" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
 
+    def test_default_hydration_refreshes_diff_for_self_review(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021SR2DIFF",
+            workflow_profile="oneshot",
+            policy={"self_review_policy": "enabled"},
+        )
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        assert reviewer_role is not None
+
+        with patch.object(
+            self.coordinator,
+            "_refresh_structured_diff_artifact",
+            return_value="/tmp/self-review-diff.md",
+        ) as refresh:
+            payload = self.coordinator._default_extra_hydration_for_dispatch(
+                session,
+                reviewer_role,
+                "self_review_requested",
+            )
+
+        self.assertEqual("/tmp/self-review-diff.md", payload["diff_path"])
+        refresh.assert_called_once_with("IOS-30021SR2DIFF", mode="source")
+
     def test_self_review_skipped_not_needed_routes_to_verification_when_policy_enabled(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021SR2E",
@@ -7625,6 +7648,29 @@ class SessionCreationTests(unittest.TestCase):
                 output_type="skipped_not_needed",
                 payload={"summary": "The change is too small to justify a meaningful Boy Scout pass."},
             )
+
+    def test_default_hydration_refreshes_diff_for_boy_scout(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BS1DIFF",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
+        assert scout_role is not None
+
+        with patch.object(
+            self.coordinator,
+            "_refresh_structured_diff_artifact",
+            return_value="/tmp/boy-scout-diff.md",
+        ) as refresh:
+            payload = self.coordinator._default_extra_hydration_for_dispatch(
+                session,
+                scout_role,
+                "boy_scout_requested",
+            )
+
+        self.assertEqual("/tmp/boy-scout-diff.md", payload["diff_path"])
+        refresh.assert_called_once_with("IOS-30021BS1DIFF", mode="source")
 
     def test_boy_scout_findings_for_new_code_route_directly_to_implementer(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
