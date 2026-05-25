@@ -8093,8 +8093,9 @@ class CoordinatorService:
         payload = source_event.payload if isinstance(source_event.payload, dict) else {}
         if source_event.event_type == "verification_failed":
             return "failed"
-        if self._verification_payload_has_failure_signals(payload):
-            return "failed"
+        explicit_result = str(payload.get("result") or "").strip().lower()
+        if explicit_result in {"passed", "failed"}:
+            return explicit_result
         return "passed"
 
     def _materialize_self_review_outcome_file(

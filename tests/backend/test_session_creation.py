@@ -5209,7 +5209,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("active", updated_session.status.value)
         self.assertEqual("verification_correction_requested", updated_session.current_stage)
 
-    def test_verifier_passed_output_with_failures_is_downgraded_to_verification_failed(self) -> None:
+    def test_verifier_passed_output_with_failures_is_rejected_without_explicit_result(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VPAYLOADFAIL")
         self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -5217,22 +5217,21 @@ class SessionCreationTests(unittest.TestCase):
             payload={"summary": "implementation done"},
         )
 
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name="verification-coordinator",
-            output_type="passed",
-            payload={
-                "summary": "looks green",
-                "failures": ["run-test.sh failed"],
-            },
-        )
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Verification output must include payload.result set to 'passed' or 'failed'",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name="verification-coordinator",
+                output_type="passed",
+                payload={
+                    "summary": "looks green",
+                    "failures": ["run-test.sh failed"],
+                },
+            )
 
-        self.assertEqual("verification_failed", mapped_event.event_type)
-        self.assertEqual("verification_correction_requested", followup_event.event_type)
-        self.assertEqual("verification_correction_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
-
-    def test_verifier_completed_output_with_failed_check_output_is_downgraded_to_verification_failed(self) -> None:
+    def test_verifier_completed_output_with_failed_check_output_is_rejected_without_explicit_result(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VCHECKFAIL")
         self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -5240,24 +5239,23 @@ class SessionCreationTests(unittest.TestCase):
             payload={"summary": "implementation done"},
         )
 
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name="verification-coordinator",
-            output_type="completed",
-            payload={
-                "summary": "verification finished",
-                "check_outputs": {
-                    "run-test.sh": "Tests failed: presenter state mismatch",
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Verification output must include payload.result set to 'passed' or 'failed'",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name="verification-coordinator",
+                output_type="completed",
+                payload={
+                    "summary": "verification finished",
+                    "check_outputs": {
+                        "run-test.sh": "Tests failed: presenter state mismatch",
+                    },
                 },
-            },
-        )
+            )
 
-        self.assertEqual("verification_failed", mapped_event.event_type)
-        self.assertEqual("verification_correction_requested", followup_event.event_type)
-        self.assertEqual("verification_correction_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
-
-    def test_verifier_completed_output_with_nested_failed_results_is_downgraded_to_verification_failed(self) -> None:
+    def test_verifier_completed_output_with_nested_failed_results_is_rejected_without_explicit_result(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VRESULTFAIL")
         self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -5265,29 +5263,28 @@ class SessionCreationTests(unittest.TestCase):
             payload={"summary": "implementation done"},
         )
 
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name="verification-coordinator",
-            output_type="completed",
-            payload={
-                "results": {
-                    "run_test": {
-                        "status": "failed",
-                        "errors": ["Compilation failed"],
-                    },
-                    "run_lint": {
-                        "status": "passed",
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Verification output must include payload.result set to 'passed' or 'failed'",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name="verification-coordinator",
+                output_type="completed",
+                payload={
+                    "results": {
+                        "run_test": {
+                            "status": "failed",
+                            "errors": ["Compilation failed"],
+                        },
+                        "run_lint": {
+                            "status": "passed",
+                        },
                     },
                 },
-            },
-        )
+            )
 
-        self.assertEqual("verification_failed", mapped_event.event_type)
-        self.assertEqual("verification_correction_requested", followup_event.event_type)
-        self.assertEqual("verification_correction_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
-
-    def test_verifier_completed_output_with_failed_verification_status_is_downgraded_to_verification_failed(self) -> None:
+    def test_verifier_completed_output_with_failed_verification_status_is_rejected_without_explicit_result(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VSTATUSFAIL")
         self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -5295,25 +5292,24 @@ class SessionCreationTests(unittest.TestCase):
             payload={"summary": "implementation done"},
         )
 
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name="verification-coordinator",
-            output_type="completed",
-            payload={
-                "verification_status": "failed",
-                "commands": [
-                    {"command": "run-test.sh", "status": "failed", "exit_code": 1},
-                    {"command": "run-lint.sh", "status": "passed", "exit_code": 0},
-                ],
-            },
-        )
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Verification output must include payload.result set to 'passed' or 'failed'",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name="verification-coordinator",
+                output_type="completed",
+                payload={
+                    "verification_status": "failed",
+                    "commands": [
+                        {"command": "run-test.sh", "status": "failed", "exit_code": 1},
+                        {"command": "run-lint.sh", "status": "passed", "exit_code": 0},
+                    ],
+                },
+            )
 
-        self.assertEqual("verification_failed", mapped_event.event_type)
-        self.assertEqual("verification_correction_requested", followup_event.event_type)
-        self.assertEqual("verification_correction_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
-
-    def test_verifier_completed_output_with_failed_command_dict_is_downgraded_to_verification_failed(self) -> None:
+    def test_verifier_completed_output_with_failed_command_dict_materializes_failed_outcome_from_explicit_result(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VCMDDICTFAIL")
         self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -5326,6 +5322,7 @@ class SessionCreationTests(unittest.TestCase):
             role_name="verification-coordinator",
             output_type="completed",
             payload={
+                "result": "failed",
                 "commands": {
                     "run_test": {
                         "command": "bash scripts/run-test.sh IOS-30004VCMDDICTFAIL",
@@ -5363,7 +5360,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("run_test", outcome["commands"][0]["name"])
         self.assertEqual("failed", outcome["commands"][0]["status"])
 
-    def test_verifier_completed_output_with_failed_status_and_singular_failure_is_downgraded_to_verification_failed(self) -> None:
+    def test_verifier_completed_output_with_failed_status_and_singular_failure_is_rejected_without_explicit_result(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VTOPFAIL")
         self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -5371,24 +5368,23 @@ class SessionCreationTests(unittest.TestCase):
             payload={"summary": "implementation done"},
         )
 
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name="verification-coordinator",
-            output_type="completed",
-            payload={
-                "status": "failed",
-                "summary": "build-for-testing phase failed",
-                "failure": {
-                    "phase": "build_for_testing",
-                    "error": "invalid redeclaration of 'illCheck'",
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Verification output must include payload.result set to 'passed' or 'failed'",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name="verification-coordinator",
+                output_type="completed",
+                payload={
+                    "status": "failed",
+                    "summary": "build-for-testing phase failed",
+                    "failure": {
+                        "phase": "build_for_testing",
+                        "error": "invalid redeclaration of 'illCheck'",
+                    },
                 },
-            },
-        )
-
-        self.assertEqual("verification_failed", mapped_event.event_type)
-        self.assertEqual("verification_correction_requested", followup_event.event_type)
-        self.assertEqual("verification_correction_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
+            )
 
     def test_verification_correction_reenters_verification_without_reopening_optional_quality_lanes(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -5508,7 +5504,7 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             event_type="verification_passed",
             payload={
-                "status": "failed",
+                "result": "failed",
                 "summary": "build-for-testing phase failed",
                 "failure": {
                     "phase": "build_for_testing",
