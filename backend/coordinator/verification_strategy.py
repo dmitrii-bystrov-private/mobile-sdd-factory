@@ -580,7 +580,7 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path, repo_root:
             "Use the Android workflow-level verification gate with task-local Gradle state "
             "for safe parallel verification."
         )
-        phases = ["prepare", "test", "lint"]
+        phases = ["prepare", "build", "test", "lint"]
         if docs_only:
             mode = "android_docs_only_skip"
             confidence = "high"
@@ -618,10 +618,8 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path, repo_root:
             )
         build_tasks = list(impact_mapping.get("impacted_build_tasks") or [])
         test_tasks = list(impact_mapping.get("impacted_test_tasks") or [])
-        lint_tasks = list(impact_mapping.get("impacted_lint_tasks") or [])
         if mode == "android_broad_safe_gate":
             test_tasks = ["test"]
-            lint_tasks = ["lint"]
             build_tasks = []
         elif mode == "android_test_scope_gate":
             build_tasks = []
@@ -638,7 +636,7 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path, repo_root:
         strategy["test_selection"] = {
             "mode": "targeted_tasks" if test_tasks and mode != "android_broad_safe_gate" else "broad",
             "gradle_test_tasks": [str(item).strip() for item in test_tasks if str(item).strip()],
-            "gradle_lint_tasks": [str(item).strip() for item in lint_tasks if str(item).strip()],
+            "gradle_lint_tasks": [],
         }
         strategy["build_selection"] = {
             "mode": "targeted_tasks" if build_tasks and mode == "android_impacted_module_gate" else "skip",

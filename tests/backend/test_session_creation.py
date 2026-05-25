@@ -1624,7 +1624,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual([":feature:payments"], strategy["impact_mapping"]["impacted_modules"])
         self.assertEqual([":feature:payments:assemble"], strategy["build_selection"]["gradle_build_tasks"])
         self.assertEqual([":feature:payments:test"], strategy["test_selection"]["gradle_test_tasks"])
-        self.assertEqual([":feature:payments:lint"], strategy["test_selection"]["gradle_lint_tasks"])
+        self.assertEqual([], strategy["test_selection"]["gradle_lint_tasks"])
         self.assertEqual(
             str(task_root / "tmp" / "verification" / "android" / "gradle-user-home"),
             strategy["android_context"]["gradle_user_home_path"],

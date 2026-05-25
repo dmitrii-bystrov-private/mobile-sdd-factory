@@ -7,12 +7,16 @@ WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
 export SDD_WORKDIR="$WORKDIR"
+export GRADLE_USER_HOME="$WORKDIR/shared-gradle-home"
 
 KEY="ANDR-TEST-VERIFY"
 TASK_ROOT="$WORKDIR/$KEY"
 REPO_DIR="$TASK_ROOT/repo"
 SPEC_DIR="$TASK_ROOT/spec"
 mkdir -p "$REPO_DIR" "$SPEC_DIR"
+mkdir -p "$GRADLE_USER_HOME/caches/modules-2" "$GRADLE_USER_HOME/daemon"
+printf '%s\n' 'seed-cache' >"$GRADLE_USER_HOME/caches/modules-2/seed.txt"
+printf '%s\n' 'skip-daemon' >"$GRADLE_USER_HOME/daemon/daemon.log"
 
 cat >"$REPO_DIR/gradlew" <<EOF
 #!/usr/bin/env bash
@@ -47,6 +51,8 @@ if expr == '.prepare.policy // "required"':
     out(payload.get("prepare", {}).get("policy", "required"))
 elif expr == '.mode // ""':
     out(payload.get("mode", ""))
+elif expr == '.test_selection.mode // "broad"':
+    out(payload.get("test_selection", {}).get("mode", "broad"))
 elif expr == '.phases[]? // empty':
     for item in payload.get("phases", []):
         print(item)
@@ -105,21 +111,150 @@ cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
 }
 EOF
 
+mkdir -p "$REPO_DIR/scripts"
+cat >"$REPO_DIR/scripts/android-build.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' 'repo-build-targeted' >>"$WORKDIR/repo-script.log"
+echo "✅ BUILD SUCCESSFUL"
+EOF
+chmod +x "$REPO_DIR/scripts/android-build.sh"
+
+cat >"$REPO_DIR/scripts/android-test.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' 'repo-test-targeted' >>"$WORKDIR/repo-script.log"
+echo "✅ TEST SUCCESSFUL"
+EOF
+chmod +x "$REPO_DIR/scripts/android-test.sh"
+
+cat >"$REPO_DIR/scripts/android-lint.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' 'repo-lint-targeted' >>"$WORKDIR/repo-script.log"
+echo "✅ LINT SUCCESSFUL"
+EOF
+chmod +x "$REPO_DIR/scripts/android-lint.sh"
+
 bash "$REPO_ROOT/scripts/android-prepare.sh" "$KEY" >"$WORKDIR/prepare.stdout"
 grep -q 'ANDROID PREPARE SUCCEEDED' "$WORKDIR/prepare.stdout"
+grep -q 'Seeding task-local Gradle home' "$WORKDIR/prepare.stdout"
 grep -q -- '--version' "$WORKDIR/gradle.log"
+grep -q 'seed-cache' "$TASK_ROOT/tmp/verification/android/gradle-user-home/caches/modules-2/seed.txt"
+test ! -e "$TASK_ROOT/tmp/verification/android/gradle-user-home/daemon/daemon.log"
 
-: >"$WORKDIR/gradle.log"
+: >"$WORKDIR/repo-script.log"
 bash "$REPO_ROOT/scripts/android-build.sh" "$KEY" >"$WORKDIR/build.stdout"
-grep -q ':feature:payments:assemble' "$WORKDIR/gradle.log"
+grep -q '^repo-build-targeted$' "$WORKDIR/repo-script.log"
 
-: >"$WORKDIR/gradle.log"
+: >"$WORKDIR/repo-script.log"
 bash "$REPO_ROOT/scripts/android-test.sh" "$KEY" >"$WORKDIR/test.stdout"
-grep -q ':feature:payments:test' "$WORKDIR/gradle.log"
+grep -q '^repo-test-targeted$' "$WORKDIR/repo-script.log"
 
-: >"$WORKDIR/gradle.log"
+: >"$WORKDIR/repo-script.log"
 bash "$REPO_ROOT/scripts/android-lint.sh" "$KEY" >"$WORKDIR/lint.stdout"
-grep -q ':feature:payments:lint' "$WORKDIR/gradle.log"
+grep -q '^repo-lint-targeted$' "$WORKDIR/repo-script.log"
+
+cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
+{
+  "prepare": {
+    "policy": "reuse_if_available"
+  },
+  "mode": "android_impacted_module_gate",
+  "phases": [
+    "prepare",
+    "lint"
+  ],
+  "test_selection": {
+    "mode": "targeted_tasks",
+    "gradle_test_tasks": [
+      ":feature:payments:test"
+    ]
+  }
+}
+EOF
+
+rm -f "$REPO_DIR/scripts/android-build.sh"
+if bash "$REPO_ROOT/scripts/android-build.sh" "$KEY" >"$WORKDIR/build-missing.stdout" 2>&1; then
+  echo "expected android-build.sh to fail when repo-local build script is missing"
+  exit 1
+fi
+grep -q 'Missing repo-local Android build contract' "$WORKDIR/build-missing.stdout"
+
+cat >"$REPO_DIR/scripts/android-build.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' 'repo-build' >>"$WORKDIR/repo-script.log"
+echo "✅ BUILD SUCCESSFUL"
+EOF
+chmod +x "$REPO_DIR/scripts/android-build.sh"
+
+rm -f "$REPO_DIR/scripts/android-test.sh"
+if bash "$REPO_ROOT/scripts/android-test.sh" "$KEY" >"$WORKDIR/test-missing.stdout" 2>&1; then
+  echo "expected android-test.sh to fail when repo-local test script is missing"
+  exit 1
+fi
+grep -q 'Missing repo-local Android test contract' "$WORKDIR/test-missing.stdout"
+
+cat >"$REPO_DIR/scripts/android-test.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' 'repo-test' >>"$WORKDIR/repo-script.log"
+echo "✅ TEST SUCCESSFUL"
+EOF
+chmod +x "$REPO_DIR/scripts/android-test.sh"
+
+rm -f "$REPO_DIR/scripts/android-lint.sh"
+if bash "$REPO_ROOT/scripts/android-lint.sh" "$KEY" >"$WORKDIR/lint-missing.stdout" 2>&1; then
+  echo "expected android-lint.sh to fail when repo-local lint script is missing"
+  exit 1
+fi
+grep -q 'Missing repo-local Android lint contract' "$WORKDIR/lint-missing.stdout"
+
+cat >"$REPO_DIR/scripts/android-lint.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' 'repo-lint-broad' >>"$WORKDIR/repo-script.log"
+echo "✅ LINT SUCCESSFUL"
+EOF
+chmod +x "$REPO_DIR/scripts/android-lint.sh"
+
+cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
+{
+  "prepare": {
+    "policy": "reuse_if_available"
+  },
+  "mode": "android_broad_safe_gate",
+  "phases": [
+    "prepare",
+    "build",
+    "test",
+    "lint"
+  ],
+  "build_selection": {
+    "mode": "skip",
+    "gradle_build_tasks": []
+  },
+  "test_selection": {
+    "mode": "broad",
+    "gradle_test_tasks": [
+      "test"
+    ]
+  }
+}
+EOF
+
+: >"$WORKDIR/repo-script.log"
+bash "$REPO_ROOT/scripts/android-build.sh" "$KEY" >"$WORKDIR/repo-build.stdout"
+grep -q '^repo-build$' "$WORKDIR/repo-script.log"
+
+: >"$WORKDIR/repo-script.log"
+bash "$REPO_ROOT/scripts/android-test.sh" "$KEY" >"$WORKDIR/repo-test.stdout"
+grep -q '^repo-test$' "$WORKDIR/repo-script.log"
+
+: >"$WORKDIR/repo-script.log"
+bash "$REPO_ROOT/scripts/android-lint.sh" "$KEY" >"$WORKDIR/repo-lint.stdout"
+grep -q '^repo-lint-broad$' "$WORKDIR/repo-script.log"
 
 cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
 {
