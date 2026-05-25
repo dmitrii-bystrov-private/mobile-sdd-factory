@@ -4635,10 +4635,14 @@ class CoordinatorService:
                 event_type="session_escalated_to_operator",
                 producer_type="coordinator",
                 payload={
+                    "role_name": CODE_SCOUT_ROLE,
                     "reason": "boy_scout_findings",
                     "summary": "boy scout findings need operator decision",
-                    "details": str(source_event.payload.get("summary") or "").strip()
-                    or "Review Boy Scout findings and choose whether to implement all of them now or create tech-debt stories for the old-code candidates.",
+                    "details": self._render_boy_scout_operator_details(
+                        implement_now_findings=implement_now_findings,
+                        tech_debt_findings=tech_debt_findings,
+                    ),
+                    "needs_operator_input": False,
                     "implement_now_count": len(implement_now_findings),
                     "tech_debt_candidate_count": len(tech_debt_findings),
                     "current_stage": session.current_stage,
@@ -6676,6 +6680,39 @@ class CoordinatorService:
         roles = self.role_repository.list_for_session(session_id)
         candidate_roles: list[Role] = []
 
+        if session.status == SessionStatus.WAITING_FOR_OPERATOR and session.current_owner is None:
+            interactive_state = self.get_interactive_state_summary(session_id)
+            blocker_role_name = (
+                str(interactive_state.get("role_name")).strip()
+                if interactive_state.get("available") and interactive_state.get("role_name")
+                else ""
+            )
+            if blocker_role_name:
+                blocker_role = self.role_repository.get_by_name(session_id, blocker_role_name)
+                if (
+                    blocker_role is not None
+                    and blocker_role.runtime_handle is not None
+                    and blocker_role.status == RoleStatus.RUNNING
+                ):
+                    runtime_role = RuntimeRoleHandle(
+                        role_id=blocker_role.runtime_handle,
+                        session_id=self._runtime_session_handle_for_session(session).session_id,
+                        backend_name=blocker_role.runtime_backend,
+                    )
+                    content = self.session_backend.capture_output_snapshot(runtime_role)
+                    return {
+                        "available": True,
+                        "role_name": blocker_role.role_name,
+                        "runtime_handle": blocker_role.runtime_handle,
+                        "content": content,
+                    }
+            return {
+                "available": False,
+                "role_name": None,
+                "runtime_handle": None,
+                "content": "",
+            }
+
         if session.current_owner is not None:
             current_owner_role = self.role_repository.get_by_name(session_id, session.current_owner)
             if current_owner_role is not None:
@@ -8264,6 +8301,37 @@ class CoordinatorService:
             else:
                 tech_debt.append(finding)
         return implement_now, tech_debt
+
+    def _render_boy_scout_operator_details(
+        self,
+        *,
+        implement_now_findings: list[dict[str, object]],
+        tech_debt_findings: list[dict[str, object]],
+    ) -> str:
+        implement_now_count = len(implement_now_findings)
+        tech_debt_count = len(tech_debt_findings)
+        total_count = implement_now_count + tech_debt_count
+
+        summary = (
+            f"Boy Scout found {total_count} maintainability finding"
+            f"{'' if total_count == 1 else 's'} requiring an operator decision."
+        )
+        if tech_debt_count > 0 and implement_now_count > 0:
+            classification = (
+                f"{implement_now_count} can be implemented now; "
+                f"{tech_debt_count} touch existing code and can be deferred into tech debt."
+            )
+        elif tech_debt_count > 0:
+            classification = (
+                f"All {tech_debt_count} finding"
+                f"{'' if tech_debt_count == 1 else 's'} touch existing code and should be reviewed for tech debt."
+            )
+        else:
+            classification = (
+                f"All {implement_now_count} finding"
+                f"{'' if implement_now_count == 1 else 's'} can be implemented immediately."
+            )
+        return f"{summary} {classification} Choose whether to implement the findings now or continue by creating tech-debt follow-ups for the old-code candidates."
 
     def _render_boy_scout_findings_markdown(self, findings: list[dict[str, object]]) -> str:
         lines = ["SCOUT_RESULT: findings_found", ""]

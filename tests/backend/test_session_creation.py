@@ -1588,7 +1588,7 @@ class SessionCreationTests(unittest.TestCase):
         strategy = json.loads(strategy_path.read_text())
         self.assertEqual("android", strategy["platform"])
         self.assertEqual("android_broad_safe_gate", strategy["mode"])
-        self.assertEqual(["prepare", "test", "lint"], strategy["phases"])
+        self.assertEqual(["prepare", "build", "test", "lint"], strategy["phases"])
 
     def test_verification_dispatch_materializes_android_strategy_context(self) -> None:
         task_root = Path(self.temp_dir.name) / "ANDR-30003VERCTX"
@@ -7758,9 +7758,49 @@ class SessionCreationTests(unittest.TestCase):
         summary = self.coordinator.get_interactive_state_summary(session.id)
 
         self.assertTrue(summary["available"])
+        self.assertEqual(CODE_SCOUT_ROLE, summary["role_name"])
         self.assertEqual("boy_scout_findings", summary["source_reason"])
         self.assertEqual("boy_scout_requested", summary["current_stage"])
         self.assertFalse(summary["needs_operator_input"])
+        self.assertIn("operator decision", str(summary["details"]))
+        self.assertNotIn("Clean Boy Scout pass", str(summary["details"]))
+
+    def test_active_runtime_output_is_hidden_for_boy_scout_operator_gate_without_live_blocker_role(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSOUTPUT",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSOUTPUT")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSOUTPUT" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
+
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        self.session_backend.simulate_output(implementer_role.runtime_handle, "stale implementer output")
+
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={"result": "findings_found", "summary": "Found one improvement opportunity."},
+        )
+        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
+        assert scout_role is not None
+        self.role_repository.update_status(scout_role.id, RoleStatus.STOPPED)
+
+        summary = self.coordinator.get_active_runtime_output_summary(session.id)
+
+        self.assertFalse(summary["available"])
+        self.assertIsNone(summary["role_name"])
+        self.assertEqual("", summary["content"])
 
     def test_boy_scout_manual_skip_is_rejected_when_policy_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
