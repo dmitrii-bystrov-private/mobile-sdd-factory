@@ -112,6 +112,7 @@ SCOUT_RESULT: findings_found
 Do not include commentary outside this format. The orchestrator reads `SCOUT_RESULT:` from the first line to decide next steps.
 
 In addition to writing the findings file, your terminal `RESULT.json` payload must be deterministic:
+- prefer `python "$SDD_FACTORY_REPO_ROOT/scripts/write-result.py" code-scout --output "<RESULT.json path>" ...` instead of composing JSON by hand
 - always include `"result": "clean"` or `"result": "findings_found"`
 - when findings exist, also include:
   - `"findings_count": <positive integer>`

@@ -1820,6 +1820,11 @@ class CoordinatorService:
                 output_type=output_type,
                 payload=normalized_payload,
             )
+        if role_name == VERIFICATION_COORDINATOR_ROLE and session.current_stage == "verification_requested":
+            return self._normalize_verification_output_payload(
+                output_type=output_type,
+                payload=normalized_payload,
+            )
         return normalized_payload
 
     def _normalize_boy_scout_output_payload(
@@ -1861,6 +1866,28 @@ class CoordinatorService:
                     raise IntakeError(
                         "Boy Scout findings output must include a positive payload.findings_count"
                     )
+        return payload
+
+    def _normalize_verification_output_payload(
+        self,
+        *,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type == "blocked_verification_cycle":
+            return payload
+        if output_type not in {"passed", "completed", "failed"}:
+            return payload
+
+        explicit_result = str(payload.get("result") or "").strip().lower()
+        if output_type == "failed" and not explicit_result:
+            payload["result"] = "failed"
+            return payload
+        if explicit_result not in {"passed", "failed"}:
+            raise IntakeError(
+                "Verification output must include payload.result set to 'passed' or 'failed'"
+            )
+        payload["result"] = explicit_result
         return payload
 
     def collect_role_output(
@@ -8876,6 +8903,7 @@ class CoordinatorService:
         workspace = self.role_workspace_manager.ensure_role_workspace(session.task_key, role.role_name)
         next_hydration_version = role.last_hydration_version + 1
         merged_hydration["result_path"] = str(workspace.directory / "RESULT.json")
+        merged_hydration["result_writer_path"] = str(self._repo_root() / "scripts" / "write-result.py")
         merged_hydration["hydration_version"] = next_hydration_version
         merged_hydration["dispatch_token"] = f"hv{next_hydration_version}-wi{work_item.id}"
         hydration = build_role_hydration(

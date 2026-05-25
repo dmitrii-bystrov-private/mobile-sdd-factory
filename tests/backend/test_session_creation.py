@@ -3,6 +3,7 @@ import json
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from backend.api.sse import SessionEventBus
@@ -42,6 +43,7 @@ from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.command_runner import CommandResult
+from backend.tools.write_result import build_result_document, write_result_file
 
 
 def decomposition_payload(summary: str, task_breakdown: str | None = None) -> dict[str, object]:
@@ -1859,6 +1861,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Role-specific rules:", sent_inputs[0])
         self.assertIn("Start from the current diff and review only the touched changes.", sent_inputs[0])
         self.assertIn("review_scope", sent_inputs[0])
+        self.assertIn("write-result.py", sent_inputs[0])
+        self.assertIn("code-reviewer --output", sent_inputs[0])
 
     def test_reviewer_output_passed_routes_self_review_to_verification(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -1893,6 +1897,25 @@ class SessionCreationTests(unittest.TestCase):
         outcome_path = Path(self.temp_dir.name) / "IOS-30003RP" / "review" / "self-review-outcome.json"
         self.assertTrue(outcome_path.exists())
         self.assertEqual("passed", json.loads(outcome_path.read_text())["status"])
+
+    def test_verification_completed_requires_explicit_result(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERSTRICT")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Verification output must include payload.result set to 'passed' or 'failed'",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name=VERIFICATION_COORDINATOR_ROLE,
+                output_type="completed",
+                payload={"summary": "all green"},
+            )
 
     def test_reviewer_output_failed_routes_self_review_to_correction(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -4554,6 +4577,67 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("FAIL", verification_report.read_text())
         self.assertIn("## Output: run-test.sh", verification_report.read_text())
         self.assertIn("presenter state mismatch", verification_report.read_text())
+
+    def test_verification_dispatch_includes_result_writer_path(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERWRITER")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        verification_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        assert verification_role is not None
+        sent_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
+
+        self.assertEqual(1, len(sent_inputs))
+        self.assertIn("write-result.py", sent_inputs[0])
+        self.assertIn("verification-coordinator --output", sent_inputs[0])
+
+    def test_collect_role_output_accepts_helper_written_verification_failed_result(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERHELPER")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "verification" and item.status.value == "assigned"
+        )
+        verifier_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            VERIFICATION_COORDINATOR_ROLE,
+        )
+        result_path = verifier_workspace / "RESULT.json"
+        document = build_result_document(
+            SimpleNamespace(
+                role="verification-coordinator",
+                output_type="completed",
+                output=str(result_path),
+                work_item_id=active_item.id,
+                result="failed",
+                summary=None,
+                details=None,
+                failure=["build-for-testing failed"],
+            )
+        )
+        write_result_file(result_path, document)
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=VERIFICATION_COORDINATOR_ROLE,
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("verification_correction_requested", updated_session.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
 
     def test_implementation_completed_uses_payload_work_item_id_over_stale_assigned_item(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -7623,6 +7707,79 @@ class SessionCreationTests(unittest.TestCase):
         outcome_path = Path(self.temp_dir.name) / "IOS-30021BS1E" / "spec" / "boy-scout-outcome.json"
         self.assertTrue(outcome_path.exists())
         self.assertEqual("clean", json.loads(outcome_path.read_text())["status"])
+
+    def test_boy_scout_dispatch_includes_result_writer_path(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSWRITER",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSWRITER")
+
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
+        assert scout_role is not None
+        sent_inputs = self.session_backend.get_sent_inputs(scout_role.runtime_handle)
+
+        self.assertEqual(1, len(sent_inputs))
+        self.assertIn("write-result.py", sent_inputs[0])
+        self.assertIn("code-scout --output", sent_inputs[0])
+
+    def test_collect_role_output_accepts_helper_written_boy_scout_clean_result(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSHELPER",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSHELPER")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "boy_scout" and item.status.value == "assigned"
+        )
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            CODE_SCOUT_ROLE,
+        )
+        result_path = role_workspace / "RESULT.json"
+        document = build_result_document(
+            SimpleNamespace(
+                role="code-scout",
+                output_type="completed",
+                output=str(result_path),
+                work_item_id=active_item.id,
+                result="clean",
+                findings_count=None,
+                findings_path=None,
+                summary=None,
+                details=None,
+            )
+        )
+        write_result_file(result_path, document)
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual(VERIFICATION_COORDINATOR_ROLE, updated_session.current_owner)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
 
     def test_boy_scout_skipped_not_needed_is_rejected_when_policy_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

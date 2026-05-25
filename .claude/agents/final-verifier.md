@@ -71,6 +71,7 @@ Use one `## Output: ...` section per failed check.
 ## Output
 
 - `$SDD_WORKDIR/<KEY>/spec/final-verification.md`
+- When the routed role workspace also requires a terminal `RESULT.json`, prefer `python "$SDD_FACTORY_REPO_ROOT/scripts/write-result.py" verification-coordinator --output "<RESULT.json path>" ...` instead of hand-writing JSON.
 - Short stdout summary:
   - `Final verification passed for <KEY>.`
   - or `Final verification failed for <KEY>. See spec/final-verification.md.`

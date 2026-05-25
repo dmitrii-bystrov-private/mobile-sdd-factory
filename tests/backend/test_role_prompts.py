@@ -136,14 +136,33 @@ class RolePromptTests(unittest.TestCase):
                 "diff_path": "/tmp/IOS-123/spec/diff.md",
                 "findings_path": "/tmp/IOS-123/spec/findings.md",
                 "result_path": "/tmp/roles/code-scout/RESULT.json",
+                "result_writer_path": "/tmp/repo/scripts/write-result.py",
             },
             prompt_mode="full",
         )
 
         self.assertIn("Start from the routed diff input when it is provided as an absolute path", text)
         self.assertIn("write them to the routed findings target when it is provided as an absolute path", text)
+        self.assertIn('python "/tmp/repo/scripts/write-result.py" code-scout --output "/tmp/roles/code-scout/RESULT.json"', text)
         self.assertIn("`result` set to `clean` or `findings_found`", text)
         self.assertIn("positive `findings_count`", text)
+
+    def test_full_prompt_exposes_result_writer_for_verification(self) -> None:
+        text = role_handoff_prompt(
+            role_name="verification-coordinator",
+            instruction="Run deterministic verification for IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "verification_requested",
+                "work_item_id": 12,
+                "result_path": "/tmp/roles/verifier/RESULT.json",
+                "result_writer_path": "/tmp/repo/scripts/write-result.py",
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("do not hand-compose verification JSON", text)
+        self.assertIn('python "/tmp/repo/scripts/write-result.py" verification-coordinator --output "/tmp/roles/verifier/RESULT.json"', text)
 
     def test_full_prompt_restores_acceptance_criteria_format_contract(self) -> None:
         text = role_handoff_prompt(

@@ -42,6 +42,7 @@ def role_runtime_rules(role_name: str) -> str:
             "Role-specific rules:\n"
             "- Start from the current diff and review only the touched changes.\n"
             "- Write or refresh the structured review report at the routed review report path before you finish this pass.\n"
+            "- Use the deterministic result writer helper for `RESULT.json`; do not hand-compose reviewer JSON.\n"
             "- If previous review reports are provided, read them first and do not re-flag already raised issues.\n"
             "- If the review loop is no longer converging and you would otherwise repeat the same issues again, emit `blocked_review_cycle` instead of another normal failed pass.\n"
             "- Read only the convention sources relevant to the touched diff area.\n"
@@ -54,7 +55,8 @@ def role_runtime_rules(role_name: str) -> str:
             "- Start from the routed diff input when it is provided as an absolute path; otherwise resolve `spec/diff.md` relative to the task snapshot metadata root from AGENTS.md, not relative to the current role workspace.\n"
             "- If signals are weak or no real maintainability issues are found, report a clean result and stop.\n"
             "- If real maintainability findings exist, write them to the routed findings target when it is provided as an absolute path; otherwise resolve `spec/findings.md` relative to the task snapshot metadata root from AGENTS.md.\n"
-            "- Always write a deterministic terminal payload to `RESULT.json` with `result` set to `clean` or `findings_found`.\n"
+            "- Always use the deterministic result writer helper for `RESULT.json` instead of hand-writing JSON.\n"
+            "- Always write a deterministic terminal payload with `result` set to `clean` or `findings_found`.\n"
             "- When `result` is `findings_found`, also include a positive `findings_count` and the exact `findings_path` you wrote.\n\n"
         )
     if role_name == "mr-comments-analyst-worker":
@@ -147,6 +149,8 @@ def role_runtime_rules(role_name: str) -> str:
             "- Treat every verification round as a fresh gate and refresh the verification evidence.\n"
             "- Always write or refresh `spec/final-verification.md` for the current round; on failure include the failed checks and their relevant command output.\n"
             "- If the verification loop is no longer converging and you would otherwise repeat the same correction guidance again, emit `blocked_verification_cycle` instead of another normal failed pass.\n"
+            "- Use the deterministic result writer helper for `RESULT.json`; do not hand-compose verification JSON.\n"
+            "- For normal rounds, always write `result=passed` or `result=failed` explicitly.\n"
             "- Do not modify code, tests, docs, or prompts; summarize failures and stop without attempting fixes.\n\n"
         )
     return ""
@@ -160,6 +164,10 @@ def role_handoff_prompt(
 ) -> str:
     result_path = hydration_payload.get("result_path")
     result_path_text = str(result_path).strip() if isinstance(result_path, str) else "RESULT.json"
+    result_writer_path = hydration_payload.get("result_writer_path")
+    result_writer_path_text = (
+        str(result_writer_path).strip() if isinstance(result_writer_path, str) else ""
+    )
     if prompt_mode == "live_bootstrap":
         return (
             "Read AGENTS.md/CLAUDE.md in the current directory now and use it as the primary durable role contract for this session.\n"
@@ -192,6 +200,11 @@ def role_handoff_prompt(
         )
     else:
         prefix = f"{base_role_prompt(role_name)}\n"
+    helper_line = (
+        f'- Use the deterministic writer helper: `python "{result_writer_path_text}" {role_name} --output "{result_path_text}" ...`.\n'
+        if result_writer_path_text
+        else ""
+    )
     return (
         f"{prefix}"
         f"{role_runtime_rules(role_name)}"
@@ -207,10 +220,12 @@ def role_handoff_prompt(
         "- Treat paths written as `spec/...`, `review/...`, or `plan/...` as paths under the task snapshot metadata root from AGENTS.md, not as paths relative to the current role workspace.\n"
         "- When the hydration payload below includes explicit absolute `*_path` fields, prefer those exact paths over reconstructing task paths yourself.\n\n"
         "Required terminal outcome path:\n"
-        f"- Write `RESULT.json` exactly to `{result_path_text}` using the same JSON object you would place after `SDD_OUTPUT:` before you finish the turn.\n"
+        f"{helper_line}"
+        f"- Write `RESULT.json` exactly to `{result_path_text}` before you finish the turn.\n"
         "- Do not place `RESULT.json` in the task root, `spec/`, `plan/`, or any directory other than the exact terminal result target above.\n"
         "- Always copy `work_item_id` from the hydration payload below into the terminal payload unchanged when it is present.\n"
         "- If the hydration payload below includes `subtask_key`, copy that `subtask_key` into the terminal payload unchanged as well.\n"
+        "- Use the helper instead of hand-writing JSON; only include the minimum role-specific fields required by the routed contract.\n"
         "- For example: `{\"output_type\":\"completed\",\"payload\":{\"work_item_id\":123,\"summary\":\"short result\"}}`\n"
         "- Subtask example: `{\"output_type\":\"completed\",\"payload\":{\"work_item_id\":123,\"subtask_key\":\"IOS-12345\",\"summary\":\"short result\"}}`\n"
         "- Use `failed` plus `failures` when verification/correction output must report failures.\n"
