@@ -7588,6 +7588,77 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(outcome_path.exists())
         self.assertEqual("skipped_by_operator", json.loads(outcome_path.read_text())["status"])
 
+    def test_boy_scout_findings_count_without_explicit_result_still_routes_to_operator(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSCOUNT",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSCOUNT")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSCOUNT" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={
+                "summary": "Found one maintainability improvement opportunity.",
+                "findings_count": 1,
+            },
+        )
+
+        self.assertEqual("boy_scout_completed", mapped_event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("boy_scout_requested", updated_session.current_stage)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        outcome_path = Path(self.temp_dir.name) / "IOS-30021BSCOUNT" / "spec" / "boy-scout-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("findings_found", json.loads(outcome_path.read_text())["status"])
+
+    def test_boy_scout_findings_path_without_explicit_result_still_routes_to_operator(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSPATH",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSPATH")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSPATH" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        findings_path = spec_dir / "findings.md"
+        findings_path.write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={
+                "summary": "Found one maintainability improvement opportunity.",
+                "findings_path": str(findings_path),
+            },
+        )
+
+        self.assertEqual("boy_scout_completed", mapped_event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("boy_scout_requested", updated_session.current_stage)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        outcome_path = Path(self.temp_dir.name) / "IOS-30021BSPATH" / "spec" / "boy-scout-outcome.json"
+        self.assertTrue(outcome_path.exists())
+        self.assertEqual("findings_found", json.loads(outcome_path.read_text())["status"])
+
     def test_resolve_boy_scout_findings_creates_tech_debt_and_routes_remaining_findings(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021BSMIX",

@@ -4583,7 +4583,7 @@ class CoordinatorService:
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, CODE_SCOUT_ROLE)
 
-        result = str(source_event.payload.get("result") or "clean").strip() or "clean"
+        result = self._boy_scout_completion_result(session=session, source_event=source_event)
         self._materialize_boy_scout_outcome_file(
             session=session,
             source_event=source_event,
@@ -8203,6 +8203,27 @@ class CoordinatorService:
                 }
             )
         return findings
+
+    def _boy_scout_completion_result(self, *, session: Session, source_event: Event) -> str:
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        explicit_result = str(payload.get("result") or "").strip().lower()
+        if explicit_result == "findings_found":
+            return "findings_found"
+        findings_count = payload.get("findings_count")
+        if isinstance(findings_count, int) and findings_count > 0:
+            return "findings_found"
+        findings_path = str(payload.get("findings_path") or "").strip()
+        if findings_path:
+            candidate = Path(findings_path)
+            if candidate.is_file():
+                return "findings_found"
+        if self.workdir_root is not None:
+            candidate = self.workdir_root / session.task_key / "spec" / "findings.md"
+            if candidate.is_file():
+                text = candidate.read_text(encoding="utf-8").strip()
+                if text and "SCOUT_RESULT: clean" not in text:
+                    return "findings_found"
+        return "clean"
 
     def _added_source_paths_from_diff(self, task_key: str) -> set[str]:
         if self.workdir_root is None:
