@@ -4908,6 +4908,56 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_correction_requested", updated_session.current_stage)
         self.assertEqual("implementer", updated_session.current_owner)
 
+    def test_verifier_completed_output_with_failed_command_dict_is_downgraded_to_verification_failed(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VCMDDICTFAIL")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="verification-coordinator",
+            output_type="completed",
+            payload={
+                "commands": {
+                    "run_test": {
+                        "command": "bash scripts/run-test.sh IOS-30004VCMDDICTFAIL",
+                        "status": "failed",
+                        "exit_code": 1,
+                        "phase": "build-for-testing",
+                        "failure": "Compilation failed",
+                    },
+                    "run_lint": {
+                        "command": "bash scripts/run-lint.sh IOS-30004VCMDDICTFAIL",
+                        "status": "passed",
+                        "exit_code": 0,
+                    },
+                    "run_build": {
+                        "status": "not_run",
+                        "reason": "per routed instructions",
+                    },
+                },
+                "verification_report": "/tmp/final-verification.md",
+                "code_modified": False,
+            },
+        )
+        verification_outcome = (
+            Path(self.temp_dir.name) / "IOS-30004VCMDDICTFAIL" / "spec" / "verification-outcome.json"
+        )
+
+        self.assertEqual("verification_failed", mapped_event.event_type)
+        self.assertEqual("verification_correction_requested", followup_event.event_type)
+        self.assertEqual("verification_correction_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertTrue(verification_outcome.exists())
+        outcome = json.loads(verification_outcome.read_text())
+        self.assertEqual("failed", outcome["status"])
+        self.assertEqual(3, len(outcome["commands"]))
+        self.assertEqual("run_test", outcome["commands"][0]["name"])
+        self.assertEqual("failed", outcome["commands"][0]["status"])
+
     def test_verifier_completed_output_with_failed_status_and_singular_failure_is_downgraded_to_verification_failed(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VTOPFAIL")
         self.coordinator.handle_operator_event(

@@ -2086,6 +2086,19 @@ class CoordinatorService:
                 exit_code = command.get("exit_code")
                 if isinstance(exit_code, int) and exit_code != 0:
                     return True
+        elif isinstance(commands, dict):
+            for command_name, command in commands.items():
+                if not isinstance(command, dict):
+                    continue
+                status = str(command.get("status") or "").strip().lower()
+                if status == "failed":
+                    return True
+                exit_code = command.get("exit_code")
+                if isinstance(exit_code, int) and exit_code != 0:
+                    return True
+                failure = str(command.get("failure") or "").strip()
+                if failure:
+                    return True
         results = payload.get("results")
         if isinstance(results, dict):
             for result_value in results.values():
@@ -7713,7 +7726,19 @@ class CoordinatorService:
         check_outputs = payload.get("check_outputs")
         normalized_check_outputs = check_outputs if isinstance(check_outputs, dict) else {}
         commands = payload.get("commands")
-        normalized_commands = commands if isinstance(commands, list) else []
+        normalized_commands: list[dict[str, object]] = []
+        if isinstance(commands, list):
+            normalized_commands = [command for command in commands if isinstance(command, dict)]
+        elif isinstance(commands, dict):
+            for command_name, command_payload in commands.items():
+                if not isinstance(command_payload, dict):
+                    continue
+                normalized_commands.append(
+                    {
+                        "name": str(command_name).strip(),
+                        **command_payload,
+                    }
+                )
         structured_status = self._verification_event_outcome_status(source_event)
         outcome = {
             "task_key": session.task_key,
