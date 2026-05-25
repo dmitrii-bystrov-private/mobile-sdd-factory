@@ -8358,22 +8358,20 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "git_commit_completed" for item in events))
         self.assertFalse(any(item.event_type == "send_to_test_completed" for item in events))
 
-    def test_verification_report_passed_accepts_structured_result_section(self) -> None:
+    def test_verification_outcome_status_reads_structured_passed_json(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021VPASS1",
             workflow_profile="oneshot",
         )
-        verification_report = Path(self.temp_dir.name) / "IOS-30021VPASS1" / "spec" / "final-verification.md"
-        verification_report.parent.mkdir(parents=True, exist_ok=True)
-        verification_report.write_text(
-            "# Final Verification Report\n\n"
-            "## task_key\nIOS-30021VPASS1\n\n"
-            "## Result\npassed\n"
+        spec_root = Path(self.temp_dir.name) / "IOS-30021VPASS1" / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        (spec_root / "verification-outcome.json").write_text(
+            json.dumps({"status": "passed", "task_key": "IOS-30021VPASS1"}) + "\n"
         )
 
-        self.assertTrue(self.coordinator._verification_report_passed(session))
+        self.assertEqual("passed", self.coordinator._verification_outcome_status(session))
 
-    def test_verification_report_passed_accepts_verifier_final_status_section(self) -> None:
+    def test_verification_outcome_status_ignores_markdown_without_structured_json(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021VPASS2",
             workflow_profile="oneshot",
@@ -8386,7 +8384,7 @@ class SessionCreationTests(unittest.TestCase):
             "Deterministic verification **passed**. No code changes were made in this verification role.\n"
         )
 
-        self.assertTrue(self.coordinator._verification_report_passed(session))
+        self.assertIsNone(self.coordinator._verification_outcome_status(session))
 
     def test_persistent_session_roles_include_reusable_followup_roles(self) -> None:
         self.assertIn(CODE_REVIEWER_ROLE, PERSISTENT_SESSION_ROLES)

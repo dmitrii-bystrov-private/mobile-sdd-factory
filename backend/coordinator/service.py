@@ -8047,9 +8047,6 @@ class CoordinatorService:
                     status = str(payload.get("status") or "").strip().lower()
                     if status in {"passed", "failed"}:
                         return status
-        # Transitional compatibility for older sessions that predate structured outcomes.
-        if self._verification_report_passed(session):
-            return "passed"
         return None
 
     def _doc_harvest_outcome_status(self, session: Session) -> str | None:
@@ -8066,24 +8063,6 @@ class CoordinatorService:
             return None
         status = str(payload.get("status") or "").strip().lower()
         return status or None
-
-    def _verification_report_passed(self, session: Session) -> bool:
-        if self.workdir_root is None:
-            return False
-        report_path = self.workdir_root / session.task_key / "spec" / "final-verification.md"
-        if not report_path.is_file():
-            return False
-        text = report_path.read_text(encoding="utf-8")
-        normalized = text.replace("\r\n", "\n")
-        if "\nPASS\n" in normalized:
-            return True
-        if re.search(r"^## Result\s+passed\s*$", normalized, re.IGNORECASE | re.MULTILINE):
-            return True
-        if re.search(r"^## Final status\s+.*passed", normalized, re.IGNORECASE | re.MULTILINE):
-            return True
-        if "Deterministic verification **passed**" in normalized:
-            return True
-        return False
 
     def _require_passed_verification_for_delivery(self, session: Session) -> None:
         if not self._verification_gate_required_for_delivery(session):
