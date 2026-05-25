@@ -1830,6 +1830,17 @@ class CoordinatorService:
                 output_type=output_type,
                 payload=normalized_payload,
             )
+        if role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE, MR_COMMENTS_ANALYST_ROLE}:
+            return self._normalize_coding_output_payload(
+                session=session,
+                output_type=output_type,
+                payload=normalized_payload,
+            )
+        if role_name == DOC_HARVEST_ROLE and session.current_stage == "doc_harvest_requested":
+            return self._normalize_doc_harvest_output_payload(
+                output_type=output_type,
+                payload=normalized_payload,
+            )
         if role_name in _STORY_PLANNING_ROLES and session.current_stage in _STORY_PLANNING_WORK_TYPE_BY_STAGE:
             return self._normalize_story_planning_output_payload(
                 role_name=role_name,
@@ -1952,6 +1963,39 @@ class CoordinatorService:
                 raise IntakeError(
                     f"{role_name} blocked output must include payload.summary, payload.details, payload.next_step, or structured blocker lists"
                 )
+        return payload
+
+    def _normalize_coding_output_payload(
+        self,
+        *,
+        session: Session,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type != "completed":
+            return payload
+        if session.current_stage != "subtask_implementation_requested":
+            return payload
+        subtask_key = str(payload.get("subtask_key") or "").strip()
+        if not subtask_key:
+            raise IntakeError(
+                "Subtask implementation output must include payload.subtask_key"
+            )
+        payload["subtask_key"] = subtask_key
+        return payload
+
+    def _normalize_doc_harvest_output_payload(
+        self,
+        *,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type not in {"completed", "passed", "skipped_not_needed"}:
+            return payload
+        if not any(str(payload.get(key) or "").strip() for key in ("summary", "details")):
+            raise IntakeError(
+                "Doc harvest output must include payload.summary or payload.details"
+            )
         return payload
 
     def collect_role_output(
@@ -2598,6 +2642,9 @@ class CoordinatorService:
             if isinstance(payload_subtask_key, str)
             else None
         )
+
+        if normalized_payload_subtask_key is None:
+            return None
 
         if normalized_payload_subtask_key == expected_subtask_key:
             return None

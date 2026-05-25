@@ -4844,6 +4844,122 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(escalations)
         self.assertEqual("role_result_protocol_violation", escalations[-1].payload.get("reason"))
 
+    def test_collect_role_output_escalates_subtask_completion_without_subtask_key(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009ESUBPROTO",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        active_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-30098: Missing addressed key",
+            owner_role_id=implementer_role.id,
+            priority=100,
+        )
+        active_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        self.session_repository.update_status(active_session.id, SessionStatus.ACTIVE)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            producer_type="coordinator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": active_item.id,
+                "stage_name": "subtask_implementation_requested",
+                "hydration_version": 1,
+                "prompt_mode": "live_continuation",
+            },
+        )
+        result_path = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            IMPLEMENTER_ROLE,
+        ) / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {
+                        "work_item_id": active_item.id,
+                        "summary": "completed subtask work without addressed key",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertIsNone(updated_session.current_owner)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(any(item.event_type == "role_result_protocol_violation_reported" for item in events))
+
+    def test_collect_role_output_escalates_doc_harvest_without_summary_or_details(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021FHPROTO",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021FHPROTO")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        doc_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "doc_harvest" and item.status.value == "assigned"
+        )
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            DOC_HARVEST_ROLE,
+        )
+        result_path = role_workspace / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {
+                        "work_item_id": doc_item.id,
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=DOC_HARVEST_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertIsNone(updated_session.current_owner)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(any(item.event_type == "role_result_protocol_violation_reported" for item in events))
+
     def test_implementation_completed_uses_payload_work_item_id_over_stale_assigned_item(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004IMPLPAYLOAD",
