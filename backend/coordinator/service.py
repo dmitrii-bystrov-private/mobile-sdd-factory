@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import re
 import shutil
@@ -875,7 +876,13 @@ class CoordinatorService:
         if not pending_items:
             raise IntakeError(f"Session {session_id} has no pending Boy Scout review decision")
         self.work_item_repository.update_status(pending_items[0].id, WorkItemStatus.COMPLETED)
-        self._materialize_boy_scout_deferred(session=session, reason=normalized_reason)
+        deferred_findings = self._active_boy_scout_findings(session)
+        self._materialize_boy_scout_deferred_entries(
+            session=session,
+            findings=deferred_findings,
+            reason=normalized_reason,
+            decision="skipped_by_operator",
+        )
 
         event = self._append_event(
             session_id=session.id,
@@ -931,7 +938,13 @@ class CoordinatorService:
         chosen_findings = list(implement_now_findings)
         if resolution == "create_tech_debt":
             created_issues = self._create_boy_scout_tech_debt_stories(session, tech_debt_findings)
-            self._materialize_boy_scout_deferred_entries(session=session, created_issues=created_issues)
+            self._materialize_boy_scout_deferred_entries(
+                session=session,
+                findings=tech_debt_findings,
+                reason="Operator chose to create tech debt and continue.",
+                decision="create_tech_debt",
+                created_issues=created_issues,
+            )
         else:
             chosen_findings = implement_now_findings + tech_debt_findings
 
@@ -4590,6 +4603,9 @@ class CoordinatorService:
             status="findings_found" if result == "findings_found" else "clean",
         )
         if result == "findings_found":
+            active_findings = self._active_boy_scout_findings(session)
+            if not active_findings:
+                return self._enqueue_verification(session=session, source_event=source_event)
             findings_path = None
             if self.workdir_root is not None:
                 candidate = self.workdir_root / session.task_key / "spec" / "findings.md"
@@ -8294,13 +8310,89 @@ class CoordinatorService:
         added_basenames = {Path(path).name for path in added_paths}
         implement_now: list[dict[str, object]] = []
         tech_debt: list[dict[str, object]] = []
-        for finding in self._parse_boy_scout_findings(session):
+        for finding in self._active_boy_scout_findings(session):
             files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
             if files and all(file_path in added_paths or Path(file_path).name in added_basenames for file_path in files):
                 implement_now.append(finding)
             else:
                 tech_debt.append(finding)
         return implement_now, tech_debt
+
+    def _normalize_boy_scout_finding_text(self, value: object) -> str:
+        return " ".join(str(value or "").strip().lower().split())
+
+    def _boy_scout_finding_fingerprint(self, finding: dict[str, object]) -> str:
+        normalized_files = sorted(
+            self._normalize_boy_scout_finding_text(item)
+            for item in finding.get("files", [])
+            if self._normalize_boy_scout_finding_text(item)
+        )
+        identity = {
+            "title": self._normalize_boy_scout_finding_text(finding.get("title")),
+            "files": normalized_files,
+            "principle": self._normalize_boy_scout_finding_text(finding.get("principle")),
+            "problem": self._normalize_boy_scout_finding_text(finding.get("problem")),
+            "suggestion": self._normalize_boy_scout_finding_text(finding.get("suggestion")),
+        }
+        return hashlib.sha1(json.dumps(identity, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+
+    def _boy_scout_deferred_registry_path(self, session: Session) -> Path | None:
+        if self.workdir_root is None:
+            return None
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        return spec_root / "scout-deferred.json"
+
+    def _read_boy_scout_deferred_entries(self, session: Session) -> list[dict[str, object]]:
+        registry_path = self._boy_scout_deferred_registry_path(session)
+        if registry_path is None or not registry_path.is_file():
+            return []
+        try:
+            payload = json.loads(registry_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        entries = payload.get("entries")
+        if not isinstance(entries, list):
+            return []
+        normalized_entries: list[dict[str, object]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            fingerprint = str(entry.get("fingerprint") or "").strip()
+            title = str(entry.get("title") or "").strip()
+            if not fingerprint or not title:
+                continue
+            files = [str(item).strip() for item in entry.get("files", []) if str(item).strip()]
+            normalized_entries.append(
+                {
+                    "fingerprint": fingerprint,
+                    "title": title,
+                    "files": files,
+                    "reason": str(entry.get("reason") or "").strip(),
+                    "decision": str(entry.get("decision") or "").strip(),
+                    "issue_key": str(entry.get("issue_key") or "").strip(),
+                }
+            )
+        return normalized_entries
+
+    def _boy_scout_deferred_fingerprints(self, session: Session) -> set[str]:
+        return {
+            str(entry.get("fingerprint") or "").strip()
+            for entry in self._read_boy_scout_deferred_entries(session)
+            if str(entry.get("fingerprint") or "").strip()
+        }
+
+    def _active_boy_scout_findings(self, session: Session) -> list[dict[str, object]]:
+        deferred_fingerprints = self._boy_scout_deferred_fingerprints(session)
+        if not deferred_fingerprints:
+            return self._parse_boy_scout_findings(session)
+        active_findings: list[dict[str, object]] = []
+        for finding in self._parse_boy_scout_findings(session):
+            fingerprint = self._boy_scout_finding_fingerprint(finding)
+            if fingerprint in deferred_fingerprints:
+                continue
+            active_findings.append({**finding, "fingerprint": fingerprint})
+        return active_findings
 
     def _render_boy_scout_operator_details(
         self,
@@ -8311,27 +8403,35 @@ class CoordinatorService:
         implement_now_count = len(implement_now_findings)
         tech_debt_count = len(tech_debt_findings)
         total_count = implement_now_count + tech_debt_count
+        lines = [
+            f"Boy Scout found {total_count} maintainability finding{'' if total_count == 1 else 's'}.",
+            "",
+        ]
 
-        summary = (
-            f"Boy Scout found {total_count} maintainability finding"
-            f"{'' if total_count == 1 else 's'} requiring an operator decision."
-        )
-        if tech_debt_count > 0 and implement_now_count > 0:
-            classification = (
-                f"{implement_now_count} can be implemented now; "
-                f"{tech_debt_count} touch existing code and can be deferred into tech debt."
-            )
-        elif tech_debt_count > 0:
-            classification = (
-                f"All {tech_debt_count} finding"
-                f"{'' if tech_debt_count == 1 else 's'} touch existing code and should be reviewed for tech debt."
-            )
-        else:
-            classification = (
-                f"All {implement_now_count} finding"
-                f"{'' if implement_now_count == 1 else 's'} can be implemented immediately."
-            )
-        return f"{summary} {classification} Choose whether to implement the findings now or continue by creating tech-debt follow-ups for the old-code candidates."
+        if implement_now_findings:
+            lines.append("Will be implemented now if you choose `Implement Boy Scout Findings`:")
+            for finding in implement_now_findings[:5]:
+                title = str(finding.get("title") or "Finding").strip()
+                files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
+                file_suffix = f" ({', '.join(files[:2])})" if files else ""
+                lines.append(f"- {title}{file_suffix}")
+            if len(implement_now_findings) > 5:
+                lines.append(f"- ...and {len(implement_now_findings) - 5} more")
+            lines.append("")
+
+        if tech_debt_findings:
+            lines.append("Will become tech debt if you choose `Create Tech Debt And Continue`:")
+            for finding in tech_debt_findings[:5]:
+                title = str(finding.get("title") or "Finding").strip()
+                files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
+                file_suffix = f" ({', '.join(files[:2])})" if files else ""
+                lines.append(f"- {title}{file_suffix}")
+            if len(tech_debt_findings) > 5:
+                lines.append(f"- ...and {len(tech_debt_findings) - 5} more")
+            lines.append("")
+
+        lines.append("Use `Skip Boy Scout` only if you want to continue without addressing these findings in this run.")
+        return "\n".join(lines).strip()
 
     def _render_boy_scout_findings_markdown(self, findings: list[dict[str, object]]) -> str:
         lines = ["SCOUT_RESULT: findings_found", ""]
@@ -8434,20 +8534,75 @@ class CoordinatorService:
         self,
         *,
         session: Session,
-        created_issues: list[dict[str, str]],
+        findings: list[dict[str, object]],
+        reason: str,
+        decision: str,
+        created_issues: list[dict[str, str]] | None = None,
     ) -> None:
         if self.workdir_root is None:
             return
         spec_root = self.workdir_root / session.task_key / "spec"
         spec_root.mkdir(parents=True, exist_ok=True)
+        created_issues = created_issues or []
+        issue_key_by_title = {
+            str(item.get("title") or "").strip(): str(item.get("issue_key") or "").strip()
+            for item in created_issues
+            if str(item.get("title") or "").strip()
+        }
+        existing_entries = self._read_boy_scout_deferred_entries(session)
+        entries_by_fingerprint = {
+            str(entry.get("fingerprint") or "").strip(): dict(entry)
+            for entry in existing_entries
+            if str(entry.get("fingerprint") or "").strip()
+        }
+        for finding in findings:
+            title = str(finding.get("title") or "Boy Scout finding").strip()
+            fingerprint = str(finding.get("fingerprint") or self._boy_scout_finding_fingerprint(finding)).strip()
+            files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
+            entries_by_fingerprint[fingerprint] = {
+                "fingerprint": fingerprint,
+                "title": title,
+                "files": files,
+                "reason": reason,
+                "decision": decision,
+                "issue_key": issue_key_by_title.get(title, ""),
+            }
+
+        registry_entries = list(entries_by_fingerprint.values())
+        registry_payload = {
+            "task_key": session.task_key,
+            "entry_count": len(registry_entries),
+            "entries": registry_entries,
+        }
+        registry_path = self._boy_scout_deferred_registry_path(session)
+        if registry_path is not None:
+            registry_path.write_text(
+                json.dumps(registry_payload, ensure_ascii=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
+
         deferred_path = spec_root / "scout-deferred.md"
-        existing = deferred_path.read_text(encoding="utf-8").rstrip() + "\n" if deferred_path.is_file() else ""
-        additions = [
-            f"- {issue['title']} ({issue['issue_key']})"
-            for issue in created_issues
-            if issue.get("title")
+        lines = [
+            "# Deferred Boy Scout Findings",
+            "",
+            f"Deferred by operator decision: {decision}",
+            "",
         ]
-        deferred_path.write_text(existing + "\n".join(additions).rstrip() + ("\n" if additions else ""), encoding="utf-8")
+        if reason.strip():
+            lines.extend(["## Reason", "", reason.strip(), ""])
+        lines.extend(["## Deferred Findings", ""])
+        for entry in registry_entries:
+            title = str(entry.get("title") or "Boy Scout finding").strip()
+            issue_key = str(entry.get("issue_key") or "").strip()
+            files = [str(item).strip() for item in entry.get("files", []) if str(item).strip()]
+            suffix_parts: list[str] = []
+            if issue_key:
+                suffix_parts.append(issue_key)
+            if files:
+                suffix_parts.append(", ".join(files[:2]))
+            suffix = f" ({' · '.join(suffix_parts)})" if suffix_parts else ""
+            lines.append(f"- {title}{suffix}")
+        deferred_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
         if self.artifacts_root is not None:
             artifact_path = write_text_artifact(
                 self.artifacts_root,
@@ -8461,11 +8616,8 @@ class CoordinatorService:
                 stage_name="boy-scout",
                 artifact_type="boy_scout_deferred_markdown",
                 path=str(artifact_path),
-                metadata={"entry_count": len(created_issues)},
+                metadata={"entry_count": len(registry_entries), "decision": decision},
             )
-
-    def _count_mr_discussions(self, markdown: str) -> int:
-        return sum(1 for line in markdown.splitlines() if line.startswith("## Discussion "))
 
     def _extract_mr_url(self, stdout: str) -> str | None:
         for line in stdout.splitlines():
@@ -8543,80 +8695,8 @@ class CoordinatorService:
             },
         )
 
-    def _materialize_boy_scout_deferred(self, *, session: Session, reason: str) -> None:
-        if self.workdir_root is None or self.artifacts_root is None:
-            return
-
-        spec_root = self.workdir_root / session.task_key / "spec"
-        findings_path = spec_root / "findings.md"
-        if not findings_path.is_file():
-            return
-
-        deferred_path = spec_root / "scout-deferred.md"
-        deferred_titles = self._read_boy_scout_deferred_titles(deferred_path)
-        for title in self._extract_boy_scout_finding_titles(findings_path.read_text()):
-            if title not in deferred_titles:
-                deferred_titles.append(title)
-        if not deferred_titles:
-            return
-
-        lines = [
-            "# Deferred Boy Scout Findings",
-            "",
-            f"Deferred after operator decision: {reason}",
-            "",
-            "## Deferred Titles",
-            "",
-        ]
-        lines.extend(f"- {title}" for title in deferred_titles)
-        content = "\n".join(lines).rstrip() + "\n"
-        deferred_path.parent.mkdir(parents=True, exist_ok=True)
-        deferred_path.write_text(content)
-
-        artifact_path = write_text_artifact(
-            self.artifacts_root,
-            session.task_key,
-            "boy-scout",
-            "scout-deferred.md",
-            content,
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="boy-scout",
-            artifact_type="boy_scout_deferred_markdown",
-            path=str(artifact_path),
-            metadata={
-                "task_key": session.task_key,
-                "source_path": str(deferred_path),
-                "deferred_count": len(deferred_titles),
-            },
-        )
-
-    def _extract_boy_scout_finding_titles(self, markdown: str) -> list[str]:
-        titles: list[str] = []
-        for line in markdown.splitlines():
-            normalized = line.strip()
-            if not normalized.startswith("## Finding"):
-                continue
-            if ":" not in normalized:
-                continue
-            title = normalized.split(":", 1)[1].strip()
-            if title and title not in titles:
-                titles.append(title)
-        return titles
-
-    def _read_boy_scout_deferred_titles(self, deferred_path: Path) -> list[str]:
-        if not deferred_path.is_file():
-            return []
-        titles: list[str] = []
-        for line in deferred_path.read_text().splitlines():
-            normalized = line.strip()
-            if not normalized.startswith("- "):
-                continue
-            title = normalized[2:].strip()
-            if title and title not in titles:
-                titles.append(title)
-        return titles
+    def _count_mr_discussions(self, markdown: str) -> int:
+        return sum(1 for line in markdown.splitlines() if line.startswith("## Discussion "))
 
     def _platform_for_task_key(self, task_key: str) -> str:
         if task_key.startswith("IOS-"):

@@ -7588,6 +7588,60 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(outcome_path.exists())
         self.assertEqual("skipped_by_operator", json.loads(outcome_path.read_text())["status"])
 
+    def test_skipped_boy_scout_findings_do_not_escalate_again_on_next_run(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSSKIPREUSE",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSSKIPREUSE")
+        implementation_session, implementation_event = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSSKIPREUSE" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "findings.md").write_text(
+            "SCOUT_RESULT: findings_found\n\n"
+            "## Finding 1: Extract helper\n\n"
+            "**Files**: `LegacyPresenter.swift`\n"
+            "**Principle**: SRP\n"
+            "**Problem**: Presenter does too much.\n"
+            "**Suggestion**: Extract a helper.\n"
+        )
+
+        waiting_session, _, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={"result": "findings_found", "summary": "Found one maintainability improvement opportunity."},
+        )
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        self.assertEqual("waiting_for_operator", waiting_session.status.value)
+
+        resumed_session, skip_event, _ = self.coordinator.skip_boy_scout(
+            session_id=session.id,
+            reason="Known refactor; defer until the presenter area changes again.",
+        )
+
+        rerun_session, _ = self.coordinator._enqueue_boy_scout(  # noqa: SLF001
+            session=resumed_session,
+            source_event=skip_event,
+        )
+        rerun_session, mapped_event, rerun_followup_event = self.coordinator.handle_role_output(
+            session_id=rerun_session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={"result": "findings_found", "summary": "Found one maintainability improvement opportunity."},
+        )
+
+        self.assertEqual("boy_scout_completed", mapped_event.event_type)
+        self.assertEqual("verification_requested", rerun_followup_event.event_type)
+        self.assertEqual("verification_requested", rerun_session.current_stage)
+        self.assertEqual("active", rerun_session.status.value)
+
     def test_boy_scout_findings_count_without_explicit_result_still_routes_to_operator(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021BSCOUNT",
@@ -7762,7 +7816,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("boy_scout_findings", summary["source_reason"])
         self.assertEqual("boy_scout_requested", summary["current_stage"])
         self.assertFalse(summary["needs_operator_input"])
-        self.assertIn("operator decision", str(summary["details"]))
+        self.assertIn("Boy Scout found", str(summary["details"]))
+        self.assertIn("Extract helper", str(summary["details"]))
         self.assertNotIn("Clean Boy Scout pass", str(summary["details"]))
 
     def test_active_runtime_output_is_hidden_for_boy_scout_operator_gate_without_live_blocker_role(self) -> None:
