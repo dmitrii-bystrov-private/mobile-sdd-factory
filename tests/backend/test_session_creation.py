@@ -1955,6 +1955,34 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(outcome_path.exists())
         self.assertEqual("issues_found", json.loads(outcome_path.read_text())["status"])
 
+    def test_reviewer_failed_output_requires_summary_details_or_issues_markdown(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RFINVALID",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RFINVALID")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Self review failed output must include payload.summary, payload.details, or payload.issues_markdown",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=prepared_session.id,
+                role_name=CODE_REVIEWER_ROLE,
+                output_type="failed",
+                payload={},
+            )
+
     def test_reviewer_can_block_non_converging_self_review_cycle(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003RBLOCK",
@@ -2614,6 +2642,30 @@ class SessionCreationTests(unittest.TestCase):
             sorted((item.work_type, item.status.value) for item in work_items),
         )
 
+    def test_story_planning_blocked_output_requires_explicit_signal(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003REQINVALID",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003REQINVALID")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="proposal_context_completed",
+            payload={"summary": "Scope clarified"},
+        )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "requirements-clarifier-worker blocked output must include payload.summary, payload.details, payload.next_step, or structured blocker lists",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+                output_type="failed",
+                payload={},
+            )
+
     def test_acceptance_criteria_failed_parks_story_session(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003ACCPARK",
@@ -2907,6 +2959,36 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("spec_verification_blocked", summary["source_reason"])
         self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, summary["role_name"])
         self.assertTrue(summary["needs_operator_input"])
+
+    def test_spec_verifier_blocked_output_requires_summary_or_questions(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003SVINVALID",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003SVINVALID")
+        for event_type, summary in [
+            ("proposal_context_completed", "Scope clarified"),
+            ("requirements_completed", "Requirements clarified"),
+            ("acceptance_criteria_completed", "Acceptance prepared"),
+            ("constraints_completed", "Constraints prepared"),
+        ]:
+            self.coordinator.handle_operator_event(
+                session_id=session.id,
+                event_type=event_type,
+                payload={"summary": summary},
+            )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Spec verification blocked output must include payload.summary or payload.blocker_questions",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name=SPEC_VERIFIER_WORKER_ROLE,
+                output_type="failed",
+                payload={},
+            )
 
     def test_spec_verification_completed_records_direct_task_decomposition_handoff(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

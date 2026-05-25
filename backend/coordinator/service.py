@@ -1825,6 +1825,17 @@ class CoordinatorService:
                 output_type=output_type,
                 payload=normalized_payload,
             )
+        if role_name == CODE_REVIEWER_ROLE and session.current_stage == "self_review_requested":
+            return self._normalize_self_review_output_payload(
+                output_type=output_type,
+                payload=normalized_payload,
+            )
+        if role_name in _STORY_PLANNING_ROLES and session.current_stage in _STORY_PLANNING_WORK_TYPE_BY_STAGE:
+            return self._normalize_story_planning_output_payload(
+                role_name=role_name,
+                output_type=output_type,
+                payload=normalized_payload,
+            )
         return normalized_payload
 
     def _normalize_boy_scout_output_payload(
@@ -1882,6 +1893,65 @@ class CoordinatorService:
                 "Verification output must include payload.result set to 'passed' or 'failed'"
             )
         payload["result"] = explicit_result
+        return payload
+
+    def _normalize_self_review_output_payload(
+        self,
+        *,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type in {"passed", "completed", "skipped_not_needed"}:
+            return payload
+        if output_type == "failed":
+            if not any(str(payload.get(key) or "").strip() for key in ("summary", "details", "issues_markdown")):
+                raise IntakeError(
+                    "Self review failed output must include payload.summary, payload.details, or payload.issues_markdown"
+                )
+            return payload
+        if output_type == "blocked_review_cycle":
+            if not str(payload.get("summary") or "").strip():
+                raise IntakeError("Blocked self review output must include payload.summary")
+            return payload
+        return payload
+
+    def _normalize_story_planning_output_payload(
+        self,
+        *,
+        role_name: str,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type in {"passed", "completed"} and not self._payload_truthy(payload.get("needs_operator_input")):
+            return payload
+
+        if role_name == SPEC_VERIFIER_WORKER_ROLE and output_type == "failed":
+            blocker_questions = payload.get("blocker_questions")
+            has_questions = isinstance(blocker_questions, list) and any(str(item).strip() for item in blocker_questions)
+            if not str(payload.get("summary") or "").strip() and not has_questions:
+                raise IntakeError(
+                    "Spec verification blocked output must include payload.summary or payload.blocker_questions"
+                )
+            return payload
+
+        if output_type == "failed" or (
+            output_type in {"passed", "completed"} and self._payload_truthy(payload.get("needs_operator_input"))
+        ):
+            has_signal = False
+            for key in ("summary", "details", "next_step"):
+                if str(payload.get(key) or "").strip():
+                    has_signal = True
+                    break
+            if not has_signal:
+                for key in ("failures", "missing_inputs", "pending_decisions", "blocker_questions"):
+                    value = payload.get(key)
+                    if isinstance(value, list) and any(str(item).strip() for item in value):
+                        has_signal = True
+                        break
+            if not has_signal:
+                raise IntakeError(
+                    f"{role_name} blocked output must include payload.summary, payload.details, payload.next_step, or structured blocker lists"
+                )
         return payload
 
     def collect_role_output(
