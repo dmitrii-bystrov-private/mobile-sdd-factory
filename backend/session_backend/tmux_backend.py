@@ -88,6 +88,8 @@ class TmuxSessionBackend(SessionBackend):
     _ANSI_ESC_RE = re.compile(r"\x1B[@-_]")
     _RUNNER_STATUS_SIGNAL_RE = re.compile(r"✻\s+\S+\s+for\s+\d+[smh](?:\s+\d+[smh])*")
     _SNAPSHOT_SCROLLBACK_LINES = 300
+    _LAUNCHER_INPUT_VISIBILITY_RETRIES = 4
+    _LAUNCHER_INPUT_VISIBILITY_DELAY_SECONDS = 0.12
 
     def _sanitize(self, value: str) -> str:
         return re.sub(r"[^A-Za-z0-9_-]+", "-", value)
@@ -657,6 +659,32 @@ class TmuxSessionBackend(SessionBackend):
         normalized = " ".join(text.split()).strip()
         return normalized or text.strip()
 
+    def _capture_tmux_pane_text(self, socket_path: Path, runtime_handle: str) -> str:
+        result = self._tmux(socket_path, "capture-pane", "-p", "-S", "-40", "-t", runtime_handle)
+        if result.returncode != 0:
+            error_text = (result.stderr or result.stdout or "").lower()
+            if "can't find window" in error_text or "can't find pane" in error_text:
+                return ""
+            raise RuntimeError(result.stderr or result.stdout or "Failed to capture tmux pane")
+        return result.stdout
+
+    def _confirm_tmux_launcher_input_visible(
+        self,
+        socket_path: Path,
+        runtime_handle: str,
+        payload_text: str,
+    ) -> None:
+        expected = self._normalize_terminal_text(payload_text)
+        if not expected:
+            return
+        for _ in range(self._LAUNCHER_INPUT_VISIBILITY_RETRIES):
+            pane_text = self._capture_tmux_pane_text(socket_path, runtime_handle)
+            normalized_pane = self._normalize_terminal_text(pane_text)
+            if expected in normalized_pane:
+                return
+            time.sleep(self._LAUNCHER_INPUT_VISIBILITY_DELAY_SECONDS)
+        raise RuntimeError("tmux launcher input was not visible in the runner window after submit")
+
     def _write_tmux_launcher_input(
         self,
         role_id: str,
@@ -690,6 +718,7 @@ class TmuxSessionBackend(SessionBackend):
             result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "", "Enter")
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to submit tmux launcher input")
+            self._confirm_tmux_launcher_input_visible(socket_path, runtime_handle, payload_text)
             return
 
         result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "-l", payload_text)
@@ -699,6 +728,7 @@ class TmuxSessionBackend(SessionBackend):
         result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, submit_key)
         if result.returncode != 0:
             raise RuntimeError(result.stderr or result.stdout or "Failed to submit tmux launcher input")
+        self._confirm_tmux_launcher_input_visible(socket_path, runtime_handle, payload_text)
 
     def get_tmux_submit_traces(self, role_id: str) -> list[dict[str, str]]:
         return list(self.tmux_submit_traces.get(role_id, []))

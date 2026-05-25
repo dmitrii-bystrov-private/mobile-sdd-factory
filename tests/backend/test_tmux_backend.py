@@ -66,9 +66,14 @@ class TmuxBackendTests(unittest.TestCase):
             def __init__(self) -> None:
                 super().__init__(mode="tmux")
                 self.calls: list[tuple[str, ...]] = []
+                self.pane_text = ""
 
             def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
                 self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                if args[:3] == ("send-keys", "-t", role.role_id):
+                    self.pane_text += " first routed work"
                 return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
 
         previous_width = os.environ.get("SDD_FACTORY_TMUX_WIDTH")
@@ -146,9 +151,14 @@ class TmuxBackendTests(unittest.TestCase):
             def __init__(self) -> None:
                 super().__init__(mode="tmux")
                 self.calls: list[tuple[str, ...]] = []
+                self.pane_text = ""
 
             def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
                 self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                if args[:3] == ("send-keys", "-t", role.role_id) and len(args) >= 4 and args[3]:
+                    self.pane_text += f" {args[3]}"
                 return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
 
         backend = FakeTmuxBackend()
@@ -171,9 +181,14 @@ class TmuxBackendTests(unittest.TestCase):
             def __init__(self) -> None:
                 super().__init__(mode="tmux")
                 self.calls: list[tuple[str, ...]] = []
+                self.pane_text = ""
 
             def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
                 self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                if args[:3] == ("send-keys", "-t", role.role_id) and len(args) >= 4 and args[3]:
+                    self.pane_text += f" {args[3]}"
                 return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
 
         backend = FakeTmuxBackend()
@@ -200,7 +215,7 @@ class TmuxBackendTests(unittest.TestCase):
             backend.calls,
         )
 
-    def test_tmux_launcher_can_probe_plain_enter_submit_for_claude_direct_input(self) -> None:
+    def test_tmux_launcher_raises_when_input_is_not_visible_in_pane(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self) -> None:
                 super().__init__(mode="tmux")
@@ -208,6 +223,35 @@ class TmuxBackendTests(unittest.TestCase):
 
             def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
                 self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50009:verification-coordinator",
+            session_id="sdd-IOS-50009",
+            backend_name="tmux",
+        )
+        backend.tmux_interactive_driver_enabled[role.role_id] = True
+        backend.tmux_role_ready[role.role_id] = True
+
+        with self.assertRaisesRegex(RuntimeError, "not visible in the runner window"):
+            backend.send_input(role, "Run deterministic verification for IOS-50009.")
+
+    def test_tmux_launcher_can_probe_plain_enter_submit_for_claude_direct_input(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+                self.pane_text = ""
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                if args[:3] == ("send-keys", "-t", role.role_id) and len(args) >= 4 and args[3]:
+                    self.pane_text += f" {args[3]}"
                 return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
 
         backend = FakeTmuxBackend()
@@ -238,17 +282,23 @@ class TmuxBackendTests(unittest.TestCase):
                 ("send-keys", "-t", role.role_id, "Operator answer: full repo-wide cleanup.", ""),
                 ("send-keys", "-t", role.role_id, "", "Enter"),
             ],
-            backend.calls,
+            backend.calls[:2],
         )
+        self.assertIn(("capture-pane", "-p", "-S", "-40", "-t", role.role_id), backend.calls)
 
     def test_tmux_launcher_can_probe_plain_enter_submit_for_codex_direct_input(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self) -> None:
                 super().__init__(mode="tmux")
                 self.calls: list[tuple[str, ...]] = []
+                self.pane_text = ""
 
             def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
                 self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                if args[:3] == ("send-keys", "-t", role.role_id) and len(args) >= 4 and args[3]:
+                    self.pane_text += f" {args[3]}"
                 return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
 
         backend = FakeTmuxBackend()
@@ -279,17 +329,23 @@ class TmuxBackendTests(unittest.TestCase):
                 ("send-keys", "-t", role.role_id, "Operator answer: full repo-wide cleanup.", ""),
                 ("send-keys", "-t", role.role_id, "", "Enter"),
             ],
-            backend.calls,
+            backend.calls[:2],
         )
+        self.assertIn(("capture-pane", "-p", "-S", "-40", "-t", role.role_id), backend.calls)
 
     def test_tmux_restores_launcher_metadata_for_existing_role_after_backend_restart(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self, runtime_root: Path) -> None:
                 super().__init__(mode="tmux", runtime_root=runtime_root)
                 self.calls: list[tuple[str, ...]] = []
+                self.pane_text = ""
 
             def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
                 self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                if args[:3] == ("send-keys", "-t", role.role_id) and len(args) >= 4 and args[3]:
+                    self.pane_text += f" {args[3]}"
                 return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -329,10 +385,11 @@ class TmuxBackendTests(unittest.TestCase):
                 ("send-keys", "-t", role.role_id, submit_trace["payload_text"], ""),
                 backend.calls,
             )
-            self.assertIn(
-                ("send-keys", "-t", role.role_id, "", "Enter"),
-                backend.calls,
-            )
+        self.assertIn(
+            ("send-keys", "-t", role.role_id, "", "Enter"),
+            backend.calls,
+        )
+        self.assertIn(("capture-pane", "-p", "-S", "-40", "-t", role.role_id), backend.calls)
 
     def test_normalize_terminal_text_strips_ansi_noise(self) -> None:
         backend = TmuxSessionBackend(mode="recording")
