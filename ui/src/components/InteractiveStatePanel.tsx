@@ -23,6 +23,13 @@ export function InteractiveStatePanel({
     return null;
   }
 
+  if (
+    !interactiveStateSummary.needsOperatorInput &&
+    interactiveStateSummary.sourceReason === "boy_scout_findings"
+  ) {
+    return null;
+  }
+
   const questionText = interactiveStateSummary.details ?? interactiveStateSummary.summary;
   const title = interactiveStateSummary.needsOperatorInput
     ? `${roleDisplayName(interactiveStateSummary.roleName)} needs a reply`
@@ -86,7 +93,7 @@ export function InteractiveStatePanel({
             title="Send a direct reply into the live runtime session."
             type="submit"
           >
-            Send Reply
+            Send reply
           </button>
         </form>
       ) : null}

@@ -181,7 +181,7 @@ export function RuntimeSessionPanel({
                             title={`Stop the live runtime for ${roleDisplayName(role.roleName)} without stopping the whole session.`}
                             type="button"
                           >
-                            Stop This Runtime
+                            Stop this runtime
                           </button>
                           <button
                             className="action-button"
@@ -190,7 +190,7 @@ export function RuntimeSessionPanel({
                             title={`Restart the stopped runtime for ${roleDisplayName(role.roleName)} inside this session.`}
                             type="button"
                           >
-                            Restart This Runtime
+                            Restart this runtime
                           </button>
                           {role.tmuxAttachCommand ? (
                             <button
@@ -203,7 +203,7 @@ export function RuntimeSessionPanel({
                               }
                               type="button"
                             >
-                              Copy Console Command
+                              Copy console command
                             </button>
                           ) : null}
                           {role.tmuxCaptureCommand ? (
@@ -217,7 +217,7 @@ export function RuntimeSessionPanel({
                               }
                               type="button"
                             >
-                              Copy Output Command
+                              Copy output command
                             </button>
                           ) : null}
                         </div>

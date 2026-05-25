@@ -186,7 +186,7 @@ export function CompletedFollowupPanel({
             onClick={() => void handleIngestMrComments()}
             type="button"
           >
-            Process MR Comments
+            Process MR comments
           </button>
           <button
             className="action-button"
@@ -194,7 +194,7 @@ export function CompletedFollowupPanel({
             onClick={() => void handleRefreshSnapshot()}
             type="button"
           >
-            Refresh Snapshot And Resume Subtasks
+            Refresh snapshot and resume subtasks
           </button>
         </div>
       </div>

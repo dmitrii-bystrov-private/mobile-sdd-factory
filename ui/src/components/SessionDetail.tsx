@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { apiClient } from "../api/client";
 import { ActiveRuntimeOutputPanel } from "./ActiveRuntimeOutputPanel";
+import { BoyScoutDecisionPanel } from "./BoyScoutDecisionPanel";
 import { CompletedFollowupPanel } from "./CompletedFollowupPanel";
 import { InteractiveStatePanel } from "./InteractiveStatePanel";
 import { OperatorActions } from "./OperatorActions";
@@ -600,6 +601,12 @@ export function SessionDetail({
         sessionId={session.id}
       />
 
+      <BoyScoutDecisionPanel
+        interactiveStateSummary={bundle.interactiveStateSummary}
+        onRefresh={onRefresh}
+        session={session}
+      />
+
       <CompletedFollowupPanel
         artifacts={bundle.artifacts}
         events={bundle.events}
@@ -628,7 +635,7 @@ export function SessionDetail({
               onClick={() => void retryDeliveryStep()}
               type="button"
             >
-              {activeSession.current_stage === "mr_handoff_failed" ? "Retry MR Handoff" : "Retry Send To Test"}
+              {activeSession.current_stage === "mr_handoff_failed" ? "Retry MR handoff" : "Retry send to test"}
             </button>
           </div>
         </section>
@@ -702,7 +709,7 @@ export function SessionDetail({
                                 }
                                 type="button"
                               >
-                                Stop This Runtime
+                                Stop this runtime
                               </button>
                               <button
                                 className="action-button"
@@ -717,7 +724,7 @@ export function SessionDetail({
                                 }
                                 type="button"
                               >
-                                Restart This Runtime
+                                Restart this runtime
                               </button>
                               <button
                                 className="action-button"
@@ -732,7 +739,7 @@ export function SessionDetail({
                                 }
                                 type="button"
                               >
-                                Recreate With Latest Defaults
+                                Recreate with latest defaults
                               </button>
                               {runtimeRole.tmuxAttachCommand ? (
                                 <button
@@ -746,7 +753,7 @@ export function SessionDetail({
                                   }
                                   type="button"
                                 >
-                                  Copy Console Command
+                                  Copy console command
                                 </button>
                               ) : null}
                               {runtimeRole.tmuxCaptureCommand ? (
@@ -761,7 +768,7 @@ export function SessionDetail({
                                   }
                                   type="button"
                                 >
-                                  Copy Output Command
+                                  Copy output command
                                 </button>
                               ) : null}
                             </div>
@@ -793,7 +800,7 @@ export function SessionDetail({
             type="button"
           >
             <div>
-              <strong>Orchestrator Trace</strong>
+              <strong>Orchestrator trace</strong>
               <p>Expand to inspect the full orchestration history for this session.</p>
             </div>
             <span className={`chevron${showOrchestratorTrace ? " expanded" : ""}`} aria-hidden="true" />

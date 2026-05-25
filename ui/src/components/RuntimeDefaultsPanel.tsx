@@ -624,9 +624,9 @@ export function RuntimeDefaultsPanel({
             onClick={() => setShowRoleDefaults((current) => !current)}
             aria-expanded={showRoleDefaults}
             type="button"
-          >
-            <div>
-              <strong>Lane Runtime Overrides</strong>
+        >
+          <div>
+              <strong>Lane runtime overrides</strong>
               <p>
                 Override runner, model, or effort for specific lanes when a workflow needs different execution settings than the project baseline.
               </p>
@@ -712,7 +712,7 @@ export function RuntimeDefaultsPanel({
             title="Save these runtime and policy defaults for future sessions in this project."
             type="button"
           >
-            Save Runtime Defaults
+            Save runtime defaults
           </button>
 
           {error ? <p className="error-banner">{error}</p> : null}

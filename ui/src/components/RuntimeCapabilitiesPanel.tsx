@@ -104,7 +104,7 @@ export function RuntimeCapabilitiesPanel({
           type="button"
         >
           <div>
-            <strong>Advanced Runner Catalog</strong>
+            <strong>Advanced runner catalog</strong>
             <p>Expand to inspect raw model catalogs and runner discovery sources.</p>
           </div>
           <span className={`chevron${showModelCatalog ? " expanded" : ""}`} aria-hidden="true" />
@@ -146,7 +146,7 @@ export function RuntimeCapabilitiesPanel({
           type="button"
         >
           <div>
-            <strong>Advanced Role Baselines</strong>
+            <strong>Advanced role baselines</strong>
             <p>Expand to inspect per-role model, effort, and MCP baseline settings.</p>
           </div>
           <span className={`chevron${showRoleBaselines ? " expanded" : ""}`} aria-hidden="true" />

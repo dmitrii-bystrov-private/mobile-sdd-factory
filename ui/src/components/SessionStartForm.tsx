@@ -364,7 +364,7 @@ export function SessionStartForm({
             type="button"
           >
             <div>
-              <strong>Workflow Policies</strong>
+              <strong>Workflow policies</strong>
               <p>Change optional lanes and clarification behavior for this run only.</p>
             </div>
             <div className="advanced-disclosure-meta">
@@ -477,7 +477,7 @@ export function SessionStartForm({
               type="button"
             >
               <div>
-                <strong>Lane Runtime Overrides</strong>
+                <strong>Lane runtime overrides</strong>
                 <p>Override runner, model, or effort for specific lanes in this run.</p>
               </div>
               <div className="advanced-disclosure-meta">
@@ -562,7 +562,7 @@ export function SessionStartForm({
             title="Create the task session, prepare the snapshot, and route the first workflow step automatically."
             type="submit"
           >
-            {busy ? "Starting Run…" : "Start Run"}
+            {busy ? "Starting run…" : "Start run"}
           </button>
 
           {error ? <p className="error-banner">{error}</p> : null}

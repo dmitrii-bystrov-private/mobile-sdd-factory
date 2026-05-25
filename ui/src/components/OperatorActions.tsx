@@ -30,7 +30,6 @@ export function OperatorActions({
   const { showActivity, clearActivity, showToast } = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [boyScoutSkipReason, setBoyScoutSkipReason] = useState("");
 
   async function run(action: () => Promise<unknown>, activityLabel?: string): Promise<void> {
     setBusy(true);
@@ -53,41 +52,11 @@ export function OperatorActions({
     }
   }
 
-  async function handleBoyScoutSkip(event: React.FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const normalizedReason = boyScoutSkipReason.trim();
-    if (normalizedReason.length === 0) {
-      setError("Boy Scout skip reason is required");
-      return;
-    }
-    await run(async () => {
-      await apiClient.skipBoyScout(session.id, normalizedReason);
-      setBoyScoutSkipReason("");
-    });
-  }
-
-  async function handleBoyScoutResolution(
-    resolution: "implement_now" | "create_tech_debt",
-  ): Promise<void> {
-    await run(async () => {
-      await apiClient.resolveBoyScoutFindings(session.id, resolution);
-    });
-  }
-
   const canRefreshSnapshot =
     session.status === "active" ||
     (session.status === "completed" &&
       session.workflow_profile === "story_full" &&
       ["mr_handoff_completed", "send_to_test_completed"].includes(session.current_stage));
-  const canSkipBoyScout =
-    session.current_stage === "boy_scout_requested" &&
-    session.status === "waiting_for_operator" &&
-    interactiveStateSummary?.sourceReason === "boy_scout_findings" &&
-    session.policy["boy_scout_policy"] === "enabled";
-  const canResolveBoyScoutFindings =
-    session.current_stage === "boy_scout_requested" &&
-    session.status === "waiting_for_operator" &&
-    interactiveStateSummary?.sourceReason === "boy_scout_findings";
   const canStartSubtaskGraph =
     session.workflow_profile === "story_full" &&
     session.status === "waiting_for_operator" &&
@@ -122,7 +91,7 @@ export function OperatorActions({
   const dailyActions: ActionDefinition[] = [];
   const runtimeSessionActions: ActionDefinition[] = [];
   dailyActions.push({
-    label: "Refresh Task Snapshot",
+    label: "Refresh task snapshot",
     description: "Pull the latest task snapshot into this run and reconcile any task-side changes.",
     disabled: busy || !canRefreshSnapshot,
     onClick: () => run(() => apiClient.refreshSnapshot(session.id)),
@@ -130,13 +99,13 @@ export function OperatorActions({
   if (runtimeStateSummary?.available) {
     const visibleRuntimeRoles = runtimeStateSummary.roles.filter((role) => role.roleName !== "task-coordinator");
     runtimeSessionActions.push({
-      label: "Stop All Live Runtimes",
+      label: "Stop all live runtimes",
       description: "Stop every live lane runtime in this session while keeping the task files intact.",
       disabled: busy || visibleRuntimeRoles.every((role) => role.status === "stopped"),
       onClick: () => run(() => apiClient.stopRuntimeSession(session.id)),
     });
     runtimeSessionActions.push({
-      label: "Restart All Runtimes",
+      label: "Restart all runtimes",
       description: "Start the stopped runtime session again and relaunch its lane runtimes.",
       disabled: busy || visibleRuntimeRoles.some((role) => role.status !== "stopped"),
       onClick: () => run(() => apiClient.restartRuntimeSession(session.id)),
@@ -145,7 +114,7 @@ export function OperatorActions({
 
   const recoveryActions: ActionDefinition[] = [];
   recoveryActions.push({
-    label: "Pause Session",
+    label: "Pause session",
     description: "Pause the current workflow so no new automated steps start until you explicitly resume it.",
     disabled: busy || session.status !== "active",
     confirmMessage:
@@ -154,7 +123,7 @@ export function OperatorActions({
   });
   if (session.status === "paused" || supportsGenericRecovery) {
     recoveryActions.push({
-      label: "Resume Session",
+      label: "Resume session",
       description: "Resume a paused or operator-blocked session after the external blocker has been fixed.",
       disabled: busy,
       onClick: () => run(() => apiClient.resumeSession(session.id)),
@@ -162,7 +131,7 @@ export function OperatorActions({
   }
   if (supportsGenericRecovery) {
     recoveryActions.push({
-      label: "Retry Current Stage",
+      label: "Retry current stage",
       description: "Retry the current stage after a waiting-for-operator interruption without changing the routed work.",
       disabled: busy,
       onClick: () => run(() => apiClient.retrySession(session.id)),
@@ -170,7 +139,7 @@ export function OperatorActions({
   }
   if (canCreateSubtasksFromPlan) {
     recoveryActions.push({
-      label: "Create Jira Subtasks",
+      label: "Create Jira subtasks",
       description: "Retry Jira subtask materialization after the automatic story setup failed before execution could start.",
       disabled: busy,
       onClick: () => run(() => apiClient.createSubtasksFromPlan(session.id), "Creating Jira subtasks…"),
@@ -178,7 +147,7 @@ export function OperatorActions({
   }
   if (canStartSubtaskGraph) {
     recoveryActions.push({
-      label: "Start Subtask Graph",
+      label: "Start subtask graph",
       description: "Force story subtask execution from a recovery checkpoint when Jira subtasks already exist and only graph dispatch remains.",
       disabled: busy,
       strong: true,
@@ -187,7 +156,7 @@ export function OperatorActions({
   }
   const cleanupActions: ActionDefinition[] = [
     {
-      label: "Soft Cleanup",
+      label: "Soft cleanup",
       description:
         "Safely clean this task: keep local state for open work, but fully clean closed tasks when Jira status allows it.",
       disabled: busy,
@@ -196,7 +165,7 @@ export function OperatorActions({
       onClick: () => run(() => apiClient.cleanupTask(session.id, "smart"), "Running safe cleanup…"),
     },
     {
-      label: "Force Cleanup",
+      label: "Force cleanup",
       description: "Fully remove task snapshot and runtime residue regardless of Jira status safeguards.",
       disabled: busy,
       danger: true,
@@ -303,66 +272,6 @@ export function OperatorActions({
               </button>
             ))}
           </div>
-        </div>
-      ) : null}
-
-      {canResolveBoyScoutFindings || canSkipBoyScout ? (
-        <div className="operator-followup-stack">
-          <div className="operator-followup-copy">
-            <p className="eyebrow">Optional Lane</p>
-            <h4>Boy Scout</h4>
-          </div>
-
-          {canResolveBoyScoutFindings ? (
-            <div className="actions-grid operator-actions-grid">
-              <div className="operator-action-card">
-                <button
-                  className="action-button action-button-strong"
-                  disabled={busy || !canResolveBoyScoutFindings}
-                  onClick={() => void handleBoyScoutResolution("implement_now")}
-                  title="Send every Boy Scout finding back to the coding lane immediately."
-                  type="button"
-                >
-                  Implement Boy Scout Findings
-                </button>
-              </div>
-              <div className="operator-action-card">
-                <button
-                  className="action-button"
-                  disabled={busy || !canResolveBoyScoutFindings}
-                  onClick={() => void handleBoyScoutResolution("create_tech_debt")}
-                  title="Create tech-debt stories for the old-code findings and route the remaining actionable findings back to the coder."
-                  type="button"
-                >
-                  Create Tech Debt And Continue
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          {canSkipBoyScout ? (
-            <form className="followup-form" onSubmit={(event) => void handleBoyScoutSkip(event)}>
-              <label className="form-field">
-                <span>Skip Reason</span>
-                <textarea
-                  className="text-area-input"
-                  disabled={busy || !canSkipBoyScout}
-                  onChange={(event) => setBoyScoutSkipReason(event.target.value)}
-                  placeholder="Example: Findings acknowledged; continue with final verification and track refactors separately."
-                  rows={3}
-                  value={boyScoutSkipReason}
-                />
-              </label>
-              <button
-                className="action-button"
-                disabled={busy || !canSkipBoyScout}
-                title="Skip the optional Boy Scout lane for this session and continue with the downstream flow."
-                type="submit"
-              >
-                Skip Boy Scout
-              </button>
-            </form>
-          ) : null}
         </div>
       ) : null}
 
