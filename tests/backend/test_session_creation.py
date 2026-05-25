@@ -7683,6 +7683,37 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(outcome_path.exists())
         self.assertEqual("skipped_by_operator", json.loads(outcome_path.read_text())["status"])
 
+    def test_boy_scout_explicit_clean_overrides_stale_findings_file(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSCLEAN",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSCLEAN")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSCLEAN" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        findings_path = spec_dir / "findings.md"
+        findings_path.write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={"result": "clean", "summary": "Clean Boy Scout pass."},
+        )
+
+        self.assertEqual("boy_scout_completed", mapped_event.event_type)
+        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("verification-coordinator", updated_session.current_owner)
+        self.assertEqual("SCOUT_RESULT: clean\n", findings_path.read_text(encoding="utf-8"))
+
     def test_skipped_boy_scout_findings_do_not_escalate_again_on_next_run(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021BSSKIPREUSE",

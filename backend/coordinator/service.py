@@ -7962,6 +7962,15 @@ class CoordinatorService:
                 "work_item_id": payload.get("work_item_id"),
             },
         )
+        self._materialize_boy_scout_findings_state(session=session, status=status)
+
+    def _materialize_boy_scout_findings_state(self, *, session: Session, status: str) -> None:
+        if self.workdir_root is None:
+            return
+        findings_path = self.workdir_root / session.task_key / "spec" / "findings.md"
+        if status == "clean":
+            findings_path.parent.mkdir(parents=True, exist_ok=True)
+            findings_path.write_text("SCOUT_RESULT: clean\n", encoding="utf-8")
 
     def _verification_gate_required_for_delivery(self, session: Session) -> bool:
         events = self.event_repository.list_for_session(session.id)
@@ -8286,6 +8295,8 @@ class CoordinatorService:
         explicit_result = str(payload.get("result") or "").strip().lower()
         if explicit_result == "findings_found":
             return "findings_found"
+        if explicit_result == "clean":
+            return "clean"
         findings_count = payload.get("findings_count")
         if isinstance(findings_count, int) and findings_count > 0:
             return "findings_found"
