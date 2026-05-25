@@ -5796,6 +5796,52 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(sent_before + [sent_after[-1]], sent_after)
         self.assertFalse(any(item.event_type == "session_dispatch_reconciled" for item in events))
 
+    def test_reconcile_session_dispatch_skips_duplicate_redispatch_for_recent_dispatch(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009REDISPATCH",
+            workflow_profile="oneshot",
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title="Initial implementation for IOS-30009REDISPATCH",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        active_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="implementation_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        active_session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+
+        self.coordinator._dispatch_role_work(
+            session=active_session,
+            role=implementer_role,
+            work_item=work_item,
+            stage_name="implementation_requested",
+            instruction="Start implementation work for IOS-30009REDISPATCH.",
+        )
+        sent_before = list(self.session_backend.get_sent_inputs(implementer_role.runtime_handle))
+
+        original_has_dispatch_event = self.coordinator._has_dispatch_event
+        self.coordinator._has_dispatch_event = lambda *args, **kwargs: False  # type: ignore[method-assign]
+        try:
+            refreshed_session = self.session_repository.get_by_id(session.id)
+            assert refreshed_session is not None
+            reconciled = self.coordinator._reconcile_session_dispatch(refreshed_session)
+        finally:
+            self.coordinator._has_dispatch_event = original_has_dispatch_event  # type: ignore[method-assign]
+
+        sent_after = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertFalse(reconciled)
+        self.assertEqual(sent_before, sent_after)
+        self.assertFalse(any(item.event_type == "session_dispatch_reconciled" for item in events))
+
     def test_collect_role_output_does_not_recreate_old_result_when_newer_review_cycle_item_is_active(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009RESULTREVIEWCYCLE",

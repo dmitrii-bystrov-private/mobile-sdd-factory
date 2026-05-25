@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import re
@@ -5800,6 +5801,9 @@ class CoordinatorService:
         ):
             return False
 
+        if self._role_recently_dispatched(role):
+            return False
+
         if self._has_dispatch_event(
             session_id=session.id,
             work_item_id=work_item.id,
@@ -5835,6 +5839,25 @@ class CoordinatorService:
             },
         )
         return True
+
+    def _role_recently_dispatched(self, role: Role, *, window_seconds: int = 5) -> bool:
+        if role.last_hydration_version <= 0:
+            return False
+        if role.status != RoleStatus.RUNNING:
+            return False
+        if role.updated_at is None:
+            return False
+        updated_at = role.updated_at
+        if isinstance(updated_at, str):
+            try:
+                updated_at_dt = datetime.fromisoformat(updated_at)
+            except ValueError:
+                return False
+        else:
+            updated_at_dt = updated_at
+        if updated_at_dt.tzinfo is None:
+            updated_at_dt = updated_at_dt.replace(tzinfo=UTC)
+        return updated_at_dt >= (datetime.now(UTC) - timedelta(seconds=window_seconds))
 
     def _reconcile_terminal_outcome_progress(self, session: Session) -> bool:
         if session.current_stage == "verification_correction_requested":
