@@ -72,7 +72,7 @@ class TmuxBackendTests(unittest.TestCase):
                 self.calls.append(args)
                 if args[:3] == ("capture-pane", "-p", "-S"):
                     return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
-                if args[:3] == ("send-keys", "-t", role.role_id):
+                if len(args) >= 3 and args[0] == "send-keys" and args[1] == "-t":
                     self.pane_text += " first routed work"
                 return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
 

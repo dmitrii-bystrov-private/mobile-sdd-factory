@@ -2319,7 +2319,10 @@ class SessionCreationTests(unittest.TestCase):
             [item.event_type for item in events],
         )
         self.assertEqual(1, len(sent_inputs))
-        self.assertIn("Produce the proposal and context package for story IOS-30002STORY before requirements and final story spec.", sent_inputs[0])
+        self.assertIn(
+            "Produce the proposal and context package for story IOS-30002STORY before downstream planning and decomposition.",
+            sent_inputs[0],
+        )
         self.assertIn("Read `description.md` and `comments.md`", sent_inputs[0])
         self.assertIn("comments take precedence over description when they conflict", sent_inputs[0])
         self.assertIn("use Notion MCP for `notion.so` links", sent_inputs[0])
@@ -3147,7 +3150,6 @@ class SessionCreationTests(unittest.TestCase):
                 ("proposal_context", "completed"),
                 ("requirements", "completed"),
                 ("spec_verification", "completed"),
-                ("story_spec", "completed"),
                 ("task_decomposition", "completed"),
             ],
             sorted((item.work_type, item.status.value) for item in work_items),
@@ -3173,10 +3175,8 @@ class SessionCreationTests(unittest.TestCase):
                 "spec_verification_requested",
                 "spec_verification_completed",
                 "role_input_dispatched",
-                "story_spec_requested",
-                "story_spec_completed",
-                "role_input_dispatched",
                 "task_decomposition_requested",
+                "story_spec_completed",
                 "task_decomposition_completed",
                 "jira_subtasks_created",
             ],
@@ -3264,8 +3264,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("jira_subtasks_created", followup_event.event_type)
         self.assertEqual("subtask_creation_requested", updated_session.current_stage)
         self.assertEqual("waiting_for_operator", updated_session.status.value)
-        self.assertTrue((plan_dir / "index.md").is_file())
-        self.assertTrue((plan_dir / "01-build-data-source.md").is_file())
+        self.assertFalse(plan_dir.exists())
         self.assertTrue(
             any(artifact.artifact_type == "task_decomposition_plan_index" for artifact in artifacts)
         )
@@ -3775,7 +3774,6 @@ class SessionCreationTests(unittest.TestCase):
                     ("proposal_context", "completed"),
                     ("requirements", "completed"),
                     ("spec_verification", "completed"),
-                    ("story_spec", "completed"),
                     ("task_decomposition", "completed"),
                     ("subtask_implementation", "assigned"),
                     ("subtask_implementation", "unassigned"),
@@ -3864,7 +3862,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual([("IOS-30004SUBTASK", "subtask IOS-30020")], self.gitlab_adapter.commit_requests)
         self.assertEqual(["IOS-30020"], self.jira_adapter.completed_subtasks)
         self.assertEqual(
-            ["assigned", "completed", "completed", "completed", "completed", "completed", "completed", "completed", "completed"],
+            ["assigned", "completed", "completed", "completed", "completed", "completed", "completed", "completed"],
             sorted(item.status.value for item in work_items),
         )
 
@@ -4653,7 +4651,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
         self.assertTrue(verification_report.exists())
         self.assertIn("## Strategy", verification_report.read_text())
-        self.assertIn("Mode: broad_safe_gate", verification_report.read_text())
+        self.assertIn("Mode: android_broad_safe_gate", verification_report.read_text())
         self.assertIn("### Commands", verification_report.read_text())
         self.assertIn("## Result", verification_report.read_text())
         self.assertIn("FAIL", verification_report.read_text())
@@ -5090,8 +5088,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Mode: fix-only", sent_inputs[-1])
         self.assertIn("Apply verification corrections for IOS-30004BUG.", sent_inputs[-1])
         self.assertIn("narrow bug-fix correction pass", sent_inputs[-1])
-        self.assertIn('"issues_file_path"', sent_inputs[-1])
-        self.assertIn('"bug_analysis_report_path"', sent_inputs[-1])
+        self.assertNotIn('"issues_file_path"', sent_inputs[-1])
+        self.assertNotIn('"bug_analysis_report_path"', sent_inputs[-1])
 
     def test_second_verification_dispatch_uses_continuation_prompt(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004V2")
@@ -6055,9 +6053,14 @@ class SessionCreationTests(unittest.TestCase):
     def test_collect_role_output_normalizes_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            'SDD_OUTPUT: {"output_type":"completed","payload":{"work_item_id":123,"summary":"done"}}',
+            f'SDD_OUTPUT: {json.dumps({"output_type":"completed","payload":{"work_item_id":active_item.id,"summary":"done"}})}',
         )
 
         updated_session, event, chunk_count = self.coordinator.collect_role_output(
@@ -6075,11 +6078,16 @@ class SessionCreationTests(unittest.TestCase):
     def test_collect_role_output_normalizes_wrapped_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009WRAP")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
             '\n'.join(
                 [
-                    '• SDD_OUTPUT: {"output_type":"completed","payload":{"work_item_id":123,"task_key":"IOS-ACCEPT-REAL-',
+                    f'• SDD_OUTPUT: {{"output_type":"completed","payload":{{"work_item_id":{active_item.id},"task_key":"IOS-ACCEPT-REAL-',
                     '  CODEX-TWO-ROUND-847B2H6Q","result":"Applied requested acceptance change",',
                     '  "changes":["repo/placeholder_change.txt"]}}',
                 ]
@@ -6101,9 +6109,14 @@ class SessionCreationTests(unittest.TestCase):
     def test_collect_role_output_requests_missing_result_file_recreation_from_terminal_output(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009RESULTRECREATE")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
         self.session_backend.simulate_output(
             implementer_role.runtime_handle,
-            'SDD_OUTPUT: {"output_type":"completed","payload":{"work_item_id":123,"summary":"done"}}',
+            f'SDD_OUTPUT: {json.dumps({"output_type":"completed","payload":{"work_item_id":active_item.id,"summary":"done"}})}',
         )
 
         updated_session, event, chunk_count = self.coordinator.collect_role_output(
@@ -6119,7 +6132,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "missing_result_file_recreation_requested" for item in events))
         self.assertTrue(sent_inputs)
         self.assertIn("Recreate RESULT.json exactly at", sent_inputs[-1])
-        self.assertIn('"work_item_id": 123', sent_inputs[-1])
+        self.assertIn(f'"work_item_id": {active_item.id}', sent_inputs[-1])
 
     def test_collect_role_output_requests_missing_result_file_recreation_only_once(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009RESULTRECREATEONCE")
@@ -6990,7 +7003,7 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             role_name="code-scout",
             output_type="completed",
-            payload={"summary": "boy scout clean"},
+            payload={"result": "clean", "summary": "boy scout clean"},
         )
         code_scout_role = self.role_repository.get_by_name(session.id, "code-scout")
         self.session_backend.simulate_output(
@@ -7053,12 +7066,12 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, chunk_count)
         self.assertEqual("role_output_collected", event.event_type)
         self.assertEqual("implementation_requested", updated_session.current_stage)
-        self.assertEqual("active", updated_session.status.value)
-        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertIsNone(updated_session.current_owner)
         work_items = self.work_item_repository.list_for_session(session.id)
-        self.assertEqual("assigned", work_items[0].status.value)
-        self.assertFalse(any(item.event_type == "role_runtime_error_reported" for item in events))
-        self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertEqual("waiting_for_operator", work_items[0].status.value)
+        self.assertTrue(any(item.event_type == "role_runtime_error_reported" for item in events))
+        self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
         self.assertFalse(any(item.event_type == "implementation_completed" for item in events))
         self.assertTrue(any(item.artifact_type == "runtime_error_json" for item in artifacts))
 
@@ -7133,7 +7146,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification-coordinator", updated_session.current_owner)
         self.assertFalse(any(item.event_type == "role_runtime_error_reported" for item in events))
         self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
-        self.assertTrue(any(item.artifact_type == "runtime_error_json" for item in artifacts))
+        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
+        self.assertFalse(any(item.artifact_type == "runtime_error_json" for item in artifacts))
 
     def test_event_bus_receives_published_session_events(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30015")
@@ -7519,7 +7533,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Apply QA reopen follow-up changes for IOS-30021BUG.", sent_inputs[-1])
         self.assertIn("highest-priority follow-up scope", sent_inputs[-1])
         self.assertIn('"followup_comments_path"', sent_inputs[-1])
-        self.assertIn('"bug_analysis_report_path"', sent_inputs[-1])
+        self.assertNotIn('"bug_analysis_report_path"', sent_inputs[-1])
 
     def test_create_mr_handoff_marks_completed_session_as_handed_off(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021A")
@@ -8181,7 +8195,12 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             role_name=CODE_SCOUT_ROLE,
             output_type="completed",
-            payload={"result": "findings_found", "summary": "Found one improvement opportunity."},
+            payload={
+                "result": "findings_found",
+                "summary": "Found one improvement opportunity.",
+                "findings_path": str(spec_dir / "findings.md"),
+                "findings_count": 1,
+            },
         )
         artifacts = self.artifact_repository.list_for_session(session.id)
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
@@ -8227,6 +8246,8 @@ class SessionCreationTests(unittest.TestCase):
             payload={
                 "result": "findings_found",
                 "summary": "Found one maintainability improvement opportunity.",
+                "findings_path": str(spec_dir / "findings.md"),
+                "findings_count": 1,
             },
         )
 
@@ -8312,7 +8333,12 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             role_name=CODE_SCOUT_ROLE,
             output_type="completed",
-            payload={"result": "findings_found", "summary": "Found one maintainability improvement opportunity."},
+            payload={
+                "result": "findings_found",
+                "summary": "Found one maintainability improvement opportunity.",
+                "findings_path": str(spec_dir / "findings.md"),
+                "findings_count": 1,
+            },
         )
         self.assertEqual("session_escalated_to_operator", followup_event.event_type)
         self.assertEqual("waiting_for_operator", waiting_session.status.value)
@@ -8330,7 +8356,12 @@ class SessionCreationTests(unittest.TestCase):
             session_id=rerun_session.id,
             role_name=CODE_SCOUT_ROLE,
             output_type="completed",
-            payload={"result": "findings_found", "summary": "Found one maintainability improvement opportunity."},
+            payload={
+                "result": "findings_found",
+                "summary": "Found one maintainability improvement opportunity.",
+                "findings_path": str(spec_dir / "findings.md"),
+                "findings_count": 1,
+            },
         )
 
         self.assertEqual("boy_scout_completed", mapped_event.event_type)
@@ -8552,7 +8583,12 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             role_name=CODE_SCOUT_ROLE,
             output_type="completed",
-            payload={"result": "findings_found", "summary": "Found two improvement opportunities."},
+            payload={
+                "result": "findings_found",
+                "summary": "Found two improvement opportunities.",
+                "findings_path": str(spec_dir / "findings.md"),
+                "findings_count": 2,
+            },
         )
         self.assertEqual("waiting_for_operator", updated_session.status.value)
         self.assertEqual("session_escalated_to_operator", followup_event.event_type)
@@ -8604,7 +8640,12 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             role_name=CODE_SCOUT_ROLE,
             output_type="completed",
-            payload={"result": "findings_found", "summary": "Found one improvement opportunity."},
+            payload={
+                "result": "findings_found",
+                "summary": "Found one improvement opportunity.",
+                "findings_path": str(spec_dir / "findings.md"),
+                "findings_count": 1,
+            },
         )
 
         summary = self.coordinator.get_interactive_state_summary(session.id)
@@ -8643,7 +8684,12 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             role_name=CODE_SCOUT_ROLE,
             output_type="completed",
-            payload={"result": "findings_found", "summary": "Found one improvement opportunity."},
+            payload={
+                "result": "findings_found",
+                "summary": "Found one improvement opportunity.",
+                "findings_path": str(spec_dir / "findings.md"),
+                "findings_count": 1,
+            },
         )
         scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
         assert scout_role is not None
@@ -8678,6 +8724,8 @@ class SessionCreationTests(unittest.TestCase):
             payload={
                 "result": "findings_found",
                 "summary": "Found one maintainability improvement opportunity.",
+                "findings_path": str(spec_dir / "findings.md"),
+                "findings_count": 1,
             },
         )
 
@@ -9209,10 +9257,10 @@ class SessionCreationTests(unittest.TestCase):
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
         sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
 
-        self.assertEqual("implementation_requested", followup_event.event_type)
-        self.assertEqual("implementation_requested", active_session.current_stage)
-        self.assertEqual("active", active_session.status.value)
-        self.assertIn("Start implementation work for IOS-30021EXEC.", sent_inputs[-1])
+        self.assertEqual("jira_subtasks_created", followup_event.event_type)
+        self.assertEqual("subtask_creation_requested", active_session.current_stage)
+        self.assertEqual("waiting_for_operator", active_session.status.value)
+        self.assertEqual([], sent_inputs)
 
     def test_resume_session_from_subtask_creation_checkpoint_can_start_subtask_lane(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

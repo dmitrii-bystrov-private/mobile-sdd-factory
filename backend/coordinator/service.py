@@ -2169,8 +2169,14 @@ class CoordinatorService:
                 continue
             if active_work_item is not None:
                 payload_work_item_id = candidate_output_payload.get("work_item_id")
-                if payload_work_item_id != active_work_item.id:
-                    continue
+                if candidate_output_type != "error" and payload_work_item_id != active_work_item.id:
+                    allow_subtask_stale_intake = (
+                        role.role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE}
+                        and active_work_item.work_type == "subtask_implementation"
+                        and candidate_output_type == "completed"
+                    )
+                    if not allow_subtask_stale_intake:
+                        continue
             result_path = candidate
             output_type = candidate_output_type
             output_payload = candidate_output_payload
@@ -5757,6 +5763,46 @@ class CoordinatorService:
         for chunk in chunks:
             for marker_type, payload in self._extract_output_markers(chunk.text):
                 if marker_type == "output":
+                    output_type = str(payload.get("output_type") or "").strip().lower()
+                    nested_payload = payload.get("payload")
+                    if isinstance(nested_payload, dict):
+                        output_mismatch = self._stale_role_output_mismatch(
+                            session=session,
+                            role_name=role.role_name,
+                            output_type=output_type,
+                            output_payload=nested_payload,
+                        )
+                        if output_mismatch is not None:
+                            self._append_event(
+                                session_id=session.id,
+                                event_type="stale_role_output_ignored",
+                                producer_type="coordinator",
+                                payload={
+                                    "role_name": role.role_name,
+                                    "output_type": output_type,
+                                    "current_stage": session.current_stage,
+                                    "current_owner": session.current_owner,
+                                    **output_mismatch,
+                                },
+                            )
+                            continue
+                    if self._should_ignore_stale_role_output(
+                        session=session,
+                        role_name=role.role_name,
+                        output_type=output_type,
+                    ):
+                        self._append_event(
+                            session_id=session.id,
+                            event_type="stale_role_output_ignored",
+                            producer_type="coordinator",
+                            payload={
+                                "role_name": role.role_name,
+                                "output_type": output_type,
+                                "current_stage": session.current_stage,
+                                "current_owner": session.current_owner,
+                            },
+                        )
+                        continue
                     self._maybe_request_missing_result_file_recreation(
                         session=session,
                         role=role,
@@ -5771,6 +5817,42 @@ class CoordinatorService:
                             "current_stage": session.current_stage,
                             "current_owner": session.current_owner,
                         },
+                    )
+                    continue
+                if marker_type == "error":
+                    if self._should_ignore_stale_role_output(
+                        session=session,
+                        role_name=role.role_name,
+                        output_type="error",
+                    ):
+                        self._append_event(
+                            session_id=session.id,
+                            event_type="stale_role_output_ignored",
+                            producer_type="coordinator",
+                            payload={
+                                "role_name": role.role_name,
+                                "output_type": "error",
+                                "current_stage": session.current_stage,
+                                "current_owner": session.current_owner,
+                            },
+                        )
+                        continue
+                    self._record_runtime_marker_artifact(
+                        session=session,
+                        role=role,
+                        marker_type=marker_type,
+                        payload=payload,
+                    )
+                    self._append_runtime_marker_event(
+                        session=session,
+                        role=role,
+                        marker_type=marker_type,
+                        payload=payload,
+                    )
+                    session = self._escalate_runtime_error(
+                        session=session,
+                        role=role,
+                        payload=payload,
                     )
                     continue
                 self._record_runtime_marker_artifact(
@@ -6056,15 +6138,22 @@ class CoordinatorService:
         ):
             return False
 
-        if self._role_recently_dispatched(role):
-            return False
-
         if self._has_dispatch_event(
             session_id=session.id,
             work_item_id=work_item.id,
             stage_name=session.current_stage,
         ):
             return False
+
+        if self._role_recently_dispatched(role):
+            latest_dispatch = self._latest_event_by_type(session.id, {"role_input_dispatched"})
+            if (
+                latest_dispatch is not None
+                and latest_dispatch.payload.get("role_name") == role.role_name
+                and latest_dispatch.payload.get("work_item_id") == work_item.id
+                and latest_dispatch.payload.get("stage_name") == session.current_stage
+            ):
+                return False
 
         instruction = self._stage_instruction(
             session.current_stage,
@@ -8497,7 +8586,32 @@ class CoordinatorService:
                 role_plan_dir = candidate
         source_plan_dir = role_plan_dir if role_plan_dir is not None else (plan_dir if plan_dir.is_dir() else None)
         if source_plan_dir is None:
-            raise IntakeError(f"Temporary plan package is missing for session {session.task_key}")
+            plan_index_markdown = str(payload.get("plan_index_markdown") or "").strip()
+            raw_plan_task_files = payload.get("plan_task_files")
+            normalized_task_files: list[dict[str, str]] = []
+            if isinstance(raw_plan_task_files, list):
+                for item in raw_plan_task_files:
+                    if not isinstance(item, dict):
+                        continue
+                    filename = str(item.get("filename") or "").strip()
+                    content = str(item.get("content") or "").strip()
+                    if not filename or not content:
+                        continue
+                    normalized_task_files.append(
+                        {
+                            "filename": filename,
+                            "content": content,
+                        }
+                    )
+            if not plan_index_markdown:
+                raise IntakeError(
+                    f"Temporary plan package is missing for session {session.task_key}"
+                )
+            if not normalized_task_files:
+                raise IntakeError(
+                    "Task decomposition payload must include at least one plan_task_files entry"
+                )
+            return plan_index_markdown, normalized_task_files
 
         index_path = source_plan_dir / "index.md"
         if not index_path.is_file():
