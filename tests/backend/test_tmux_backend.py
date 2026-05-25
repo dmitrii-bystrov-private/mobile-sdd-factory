@@ -239,6 +239,42 @@ class TmuxBackendTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "not visible in the runner window"):
             backend.send_input(role, "Run deterministic verification for IOS-50009.")
 
+    def test_tmux_launcher_materialized_trigger_includes_dispatch_token_from_hydration(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self, runtime_root: Path) -> None:
+                super().__init__(mode="tmux", runtime_root=runtime_root)
+                self.calls: list[tuple[str, ...]] = []
+                self.pane_text = ""
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                if args[:3] == ("send-keys", "-t", role.role_id) and len(args) >= 4 and args[3]:
+                    self.pane_text += f" {args[3]}"
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            workspace = runtime_root / "IOS-50009TOKEN" / "runtime" / "role-workspaces" / "implementer"
+            workspace.mkdir(parents=True, exist_ok=True)
+            (workspace / "HYDRATION.json").write_text('{"dispatch_token":"hv7-wi123"}')
+
+            backend = FakeTmuxBackend(runtime_root)
+            role = RuntimeRoleHandle(
+                role_id="sdd-IOS-50009TOKEN:implementer",
+                session_id="sdd-IOS-50009TOKEN",
+                backend_name="tmux",
+            )
+            backend.tmux_interactive_driver_enabled[role.role_id] = True
+            backend.tmux_role_ready[role.role_id] = True
+            backend.role_working_directories[role.role_id] = workspace
+
+            backend.send_input(role, "line 1\nline 2")
+
+            submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
+            self.assertIn("Dispatch token: hv7-wi123.", submit_trace["payload_text"])
+
     def test_tmux_launcher_can_probe_plain_enter_submit_for_claude_direct_input(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self) -> None:

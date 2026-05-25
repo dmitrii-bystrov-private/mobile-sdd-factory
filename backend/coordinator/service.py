@@ -8818,7 +8818,10 @@ class CoordinatorService:
         merged_hydration = self._sanitize_dispatch_hydration(merged_hydration)
         prompt_mode = self._prompt_mode_for_dispatch(session, role)
         workspace = self.role_workspace_manager.ensure_role_workspace(session.task_key, role.role_name)
+        next_hydration_version = role.last_hydration_version + 1
         merged_hydration["result_path"] = str(workspace.directory / "RESULT.json")
+        merged_hydration["hydration_version"] = next_hydration_version
+        merged_hydration["dispatch_token"] = f"hv{next_hydration_version}-wi{work_item.id}"
         hydration = build_role_hydration(
             role_name=role.role_name,
             task_key=session.task_key,
@@ -8848,6 +8851,12 @@ class CoordinatorService:
             f"{role.role_name}.prompt.txt",
             prompt_text,
         )
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle or f"{role.runtime_backend}:{role.role_name}",
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        self.session_backend.send_input(runtime_role, prompt_text)
         updated_role = self.role_repository.increment_hydration_version(role.id)
         self.artifact_repository.create(
             session_id=session.id,
@@ -8875,12 +8884,6 @@ class CoordinatorService:
                 "prompt_mode": prompt_mode,
             },
         )
-        runtime_role = RuntimeRoleHandle(
-            role_id=role.runtime_handle or f"{role.runtime_backend}:{role.role_name}",
-            session_id=self._runtime_session_id_for_role(role, session),
-            backend_name=role.runtime_backend,
-        )
-        self.session_backend.send_input(runtime_role, prompt_text)
         return self._append_event(
             session_id=session.id,
             event_type="role_input_dispatched",
@@ -8890,6 +8893,7 @@ class CoordinatorService:
                 "work_item_id": work_item.id,
                 "stage_name": stage_name,
                 "hydration_version": updated_role.last_hydration_version,
+                "dispatch_token": f"hv{updated_role.last_hydration_version}-wi{work_item.id}",
                 "prompt_mode": prompt_mode,
             },
         )

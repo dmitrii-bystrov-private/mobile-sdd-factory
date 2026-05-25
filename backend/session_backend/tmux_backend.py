@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import hashlib
+import json
 from pathlib import Path
 import os
 import re
@@ -650,10 +651,26 @@ class TmuxSessionBackend(SessionBackend):
             return text
         routed_input_path = workspace / "ROUTED_WORK.md"
         routed_input_path.write_text(text)
+        dispatch_token = self._read_launcher_dispatch_token(role_id)
+        dispatch_suffix = f" Dispatch token: {dispatch_token}." if dispatch_token else ""
         return (
             "Read ROUTED_WORK.md in the current directory, read HYDRATION.json too if it exists, follow the routed instructions exactly, "
-            "and reply only through the SDD_* protocol described in AGENTS.md."
+            f"and reply only through the SDD_* protocol described in AGENTS.md.{dispatch_suffix}"
         )
+
+    def _read_launcher_dispatch_token(self, role_id: str) -> str:
+        workspace = self.role_working_directories.get(role_id)
+        if workspace is None:
+            return ""
+        hydration_path = workspace / "HYDRATION.json"
+        if not hydration_path.is_file():
+            return ""
+        try:
+            parsed = json.loads(hydration_path.read_text())
+        except Exception:
+            return ""
+        token = parsed.get("dispatch_token")
+        return str(token).strip() if token is not None else ""
 
     def _normalize_launcher_input_text(self, text: str) -> str:
         normalized = " ".join(text.split()).strip()
