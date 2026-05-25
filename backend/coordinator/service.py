@@ -1849,8 +1849,6 @@ class CoordinatorService:
 
         if explicit_result == "findings_found":
             findings_path = str(payload.get("findings_path") or "").strip()
-            if not findings_path and self.workdir_root is not None:
-                findings_path = str(self.workdir_root / session.task_key / "spec" / "findings.md")
             if not findings_path:
                 raise IntakeError(
                     "Boy Scout findings output must include payload.findings_path"
@@ -1859,13 +1857,9 @@ class CoordinatorService:
 
             findings_count = payload.get("findings_count")
             if not isinstance(findings_count, int) or findings_count <= 0:
-                parsed_findings = self._parse_boy_scout_findings(session)
-                if parsed_findings:
-                    payload["findings_count"] = len(parsed_findings)
-                else:
-                    raise IntakeError(
-                        "Boy Scout findings output must include a positive payload.findings_count"
-                    )
+                raise IntakeError(
+                    "Boy Scout findings output must include a positive payload.findings_count"
+                )
         return payload
 
     def _normalize_verification_output_payload(
@@ -5446,13 +5440,18 @@ class CoordinatorService:
             }:
                 return "implementation_completed"
         if role_name == VERIFICATION_COORDINATOR_ROLE:
+            explicit_result = str(payload.get("result") or "").strip().lower()
             if (
                 output_type in {"passed", "completed"}
                 and session.current_stage == "verification_requested"
-                and self._verification_payload_has_failure_signals(payload)
+                and explicit_result == "failed"
             ):
                 return "verification_failed"
-            if output_type in {"passed", "completed"} and session.current_stage == "verification_requested":
+            if (
+                output_type in {"passed", "completed"}
+                and session.current_stage == "verification_requested"
+                and explicit_result == "passed"
+            ):
                 return "verification_passed"
             if output_type == "failed" and session.current_stage == "verification_requested":
                 return "verification_failed"
@@ -8441,16 +8440,6 @@ class CoordinatorService:
         explicit_result = str(payload.get("result") or "").strip().lower()
         if explicit_result == "findings_found":
             return "findings_found"
-        if explicit_result == "clean":
-            return "clean"
-        findings_count = payload.get("findings_count")
-        if isinstance(findings_count, int) and findings_count > 0:
-            return "findings_found"
-        findings_path = str(payload.get("findings_path") or "").strip()
-        if findings_path:
-            candidate = Path(findings_path)
-            if candidate.is_file():
-                return "findings_found"
         return "clean"
 
     def _added_source_paths_from_diff(self, task_key: str) -> set[str]:

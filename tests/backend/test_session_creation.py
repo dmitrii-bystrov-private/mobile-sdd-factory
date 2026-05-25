@@ -4639,6 +4639,45 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(result_path.exists())
         self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
 
+    def test_collect_role_output_rejects_verification_completed_result_without_explicit_result(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERNORESULT")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        verifier_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            VERIFICATION_COORDINATOR_ROLE,
+        )
+        result_path = verifier_workspace / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {
+                        "work_item_id": next(
+                            item.id
+                            for item in self.work_item_repository.list_for_session(session.id)
+                            if item.work_type == "verification" and item.status.value == "assigned"
+                        ),
+                        "summary": "all green",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Verification output must include payload.result set to 'passed' or 'failed'",
+        ):
+            self.coordinator.collect_role_output(
+                session_id=session.id,
+                role_name=VERIFICATION_COORDINATOR_ROLE,
+            )
+
     def test_implementation_completed_uses_payload_work_item_id_over_stale_assigned_item(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004IMPLPAYLOAD",
@@ -8152,6 +8191,47 @@ class SessionCreationTests(unittest.TestCase):
         outcome_path = Path(self.temp_dir.name) / "IOS-30021BSPATHRESULT" / "spec" / "boy-scout-outcome.json"
         self.assertTrue(outcome_path.exists())
         self.assertEqual("findings_found", json.loads(outcome_path.read_text())["status"])
+
+    def test_boy_scout_findings_result_requires_explicit_count_and_path_without_file_fallback(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSSTRICT",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021BSSTRICT")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Boy Scout findings output must include payload.findings_path",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name=CODE_SCOUT_ROLE,
+                output_type="completed",
+                payload={
+                    "result": "findings_found",
+                    "findings_count": 1,
+                },
+            )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Boy Scout findings output must include a positive payload.findings_count",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name=CODE_SCOUT_ROLE,
+                output_type="completed",
+                payload={
+                    "result": "findings_found",
+                    "findings_path": "/tmp/fake-findings.md",
+                },
+            )
 
     def test_resolve_boy_scout_findings_creates_tech_debt_and_routes_remaining_findings(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
