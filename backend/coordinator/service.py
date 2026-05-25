@@ -4170,7 +4170,7 @@ class CoordinatorService:
                 (
                     item
                     for item in self.work_item_repository.list_for_session(session.id)
-                    if item.id == payload_work_item_id
+                if item.id == payload_work_item_id
                 ),
                 None,
             )
@@ -4179,6 +4179,7 @@ class CoordinatorService:
                 "subtask_implementation",
                 "implementation",
                 "self_review_correction",
+                "boy_scout_correction",
                 "verification_correction",
                 "followup_implementation",
             }:
