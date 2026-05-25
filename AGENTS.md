@@ -91,6 +91,9 @@ When behavior changes:
 - run the narrowest affected backend tests first
 - run `cd ui && npm run build` for UI changes
 - run targeted acceptance when the change affects orchestration or operator flow
+- do not add subprocess-based crash harnesses for hosted mobile tests
+- in iOS/Android app-hosted test targets, do not respawn the current executable or app binary to assert `precondition` / `fatalError` behavior
+- prefer deterministic seams instead: injectable assertion/trap handlers, `throws`, or other testable contracts that do not depend on process relaunch
 
 For live acceptance:
 

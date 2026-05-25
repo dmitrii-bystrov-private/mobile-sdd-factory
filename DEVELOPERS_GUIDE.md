@@ -157,6 +157,20 @@ When changing orchestration:
 - required lanes may not use `skipped_not_needed`
 - delivery failures should use stage-specific retries, not generic recovery actions
 
+## Test Design Rules
+
+For supported backend/UI/runtime work, treat mobile hosted tests as a constrained environment:
+
+- do not add subprocess-based crash harnesses for app-hosted iOS or Android tests
+- do not respawn `CommandLine.arguments[0]`, the app host binary, or simulator app bundles to prove `precondition` / `fatalError` behavior
+- do not treat dyld crashes, simulator launch failures, or arbitrary child-process signals as valid proof that a specific assertion path was exercised
+- prefer deterministic seams instead:
+  - injectable assertion/trap handlers
+  - `throws`-based contracts where feasible
+  - narrowly scoped adapters that can be unit-tested without process relaunch
+
+If a test requires a separate process to validate a crash contract, that harness must live outside normal hosted mobile test execution and must not depend on relaunching the simulator app binary.
+
 ## Documentation Hygiene
 
 If you change supported behavior, keep these aligned:
