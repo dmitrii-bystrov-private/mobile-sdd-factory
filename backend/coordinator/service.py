@@ -6616,6 +6616,14 @@ class CoordinatorService:
         ):
             return False
 
+        if self._has_recent_matching_dispatch_event(
+            session_id=session.id,
+            role_name=role.role_name,
+            work_item_id=work_item.id,
+            stage_name=session.current_stage,
+        ):
+            return False
+
         if self._role_recently_dispatched(role):
             latest_dispatch = self._latest_event_by_type(session.id, {"role_input_dispatched"})
             if (
@@ -6673,6 +6681,38 @@ class CoordinatorService:
         if updated_at_dt.tzinfo is None:
             updated_at_dt = updated_at_dt.replace(tzinfo=UTC)
         return updated_at_dt >= (datetime.now(UTC) - timedelta(seconds=window_seconds))
+
+    def _has_recent_matching_dispatch_event(
+        self,
+        *,
+        session_id: int,
+        role_name: str,
+        work_item_id: int,
+        stage_name: str,
+        window_seconds: int = 10,
+    ) -> bool:
+        cutoff = datetime.now(UTC) - timedelta(seconds=window_seconds)
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.event_type != "role_input_dispatched":
+                continue
+            if event.payload.get("role_name") != role_name:
+                continue
+            if event.payload.get("work_item_id") != work_item_id:
+                continue
+            if event.payload.get("stage_name") != stage_name:
+                continue
+            created_at = event.created_at
+            if isinstance(created_at, str):
+                try:
+                    created_at_dt = datetime.fromisoformat(created_at)
+                except ValueError:
+                    return True
+            else:
+                created_at_dt = created_at
+            if created_at_dt.tzinfo is None:
+                created_at_dt = created_at_dt.replace(tzinfo=UTC)
+            return created_at_dt >= cutoff
+        return False
 
     def _reconcile_terminal_outcome_progress(self, session: Session) -> bool:
         if session.current_stage == "verification_correction_requested":
