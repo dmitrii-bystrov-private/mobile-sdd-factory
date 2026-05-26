@@ -91,6 +91,8 @@ class TmuxSessionBackend(SessionBackend):
     _SNAPSHOT_SCROLLBACK_LINES = 300
     _LAUNCHER_INPUT_VISIBILITY_RETRIES = 4
     _LAUNCHER_INPUT_VISIBILITY_DELAY_SECONDS = 0.12
+    _LAUNCHER_SUBMIT_PROGRESS_RETRIES = 4
+    _LAUNCHER_SUBMIT_PROGRESS_DELAY_SECONDS = 0.12
 
     def _sanitize(self, value: str) -> str:
         return re.sub(r"[^A-Za-z0-9_-]+", "-", value)
@@ -593,6 +595,9 @@ class TmuxSessionBackend(SessionBackend):
     def _contains_runner_status_signal(self, normalized_text: str) -> bool:
         return self._RUNNER_STATUS_SIGNAL_RE.search(normalized_text) is not None
 
+    def _contains_runner_working_signal(self, normalized_text: str) -> bool:
+        return "working (" in normalized_text and "esc to interrupt" in normalized_text
+
     def _contains_interactive_input_prompt(self, normalized_text: str) -> bool:
         return (
             ("❯" in normalized_text or "›" in normalized_text)
@@ -702,6 +707,30 @@ class TmuxSessionBackend(SessionBackend):
             time.sleep(self._LAUNCHER_INPUT_VISIBILITY_DELAY_SECONDS)
         raise RuntimeError("tmux launcher input was not visible in the runner window after submit")
 
+    def _tmux_launcher_submit_needs_retry(
+        self,
+        socket_path: Path,
+        runtime_handle: str,
+    ) -> bool:
+        for _ in range(self._LAUNCHER_SUBMIT_PROGRESS_RETRIES):
+            pane_text = self._capture_tmux_pane_text(socket_path, runtime_handle)
+            normalized_pane = self._normalize_terminal_text(pane_text)
+            if not normalized_pane:
+                return False
+            if (
+                self._contains_runner_status_signal(normalized_pane)
+                or self._contains_runner_working_signal(normalized_pane)
+                or self._contains_generic_selection_blocker(normalized_pane)
+                or self._contains_generic_confirmation_blocker(normalized_pane)
+                or self._contains_workspace_trust_prompt(normalized_pane)
+                or self._contains_update_prompt(normalized_pane)
+            ):
+                return False
+            if not self._contains_interactive_input_prompt(normalized_pane):
+                return False
+            time.sleep(self._LAUNCHER_SUBMIT_PROGRESS_DELAY_SECONDS)
+        return True
+
     def _write_tmux_launcher_input(
         self,
         role_id: str,
@@ -736,6 +765,10 @@ class TmuxSessionBackend(SessionBackend):
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to submit tmux launcher input")
             self._confirm_tmux_launcher_input_visible(socket_path, runtime_handle, payload_text)
+            if self._tmux_launcher_submit_needs_retry(socket_path, runtime_handle):
+                result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "", "Enter")
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr or result.stdout or "Failed to retry tmux launcher input submit")
             return
 
         result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "-l", payload_text)
@@ -746,6 +779,10 @@ class TmuxSessionBackend(SessionBackend):
         if result.returncode != 0:
             raise RuntimeError(result.stderr or result.stdout or "Failed to submit tmux launcher input")
         self._confirm_tmux_launcher_input_visible(socket_path, runtime_handle, payload_text)
+        if self._tmux_launcher_submit_needs_retry(socket_path, runtime_handle):
+            result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, submit_key)
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr or result.stdout or "Failed to retry tmux launcher input submit")
 
     def get_tmux_submit_traces(self, role_id: str) -> list[dict[str, str]]:
         return list(self.tmux_submit_traces.get(role_id, []))

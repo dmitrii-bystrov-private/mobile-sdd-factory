@@ -369,6 +369,52 @@ class TmuxBackendTests(unittest.TestCase):
         )
         self.assertIn(("capture-pane", "-p", "-S", "-40", "-t", role.role_id), backend.calls)
 
+    def test_tmux_launcher_retries_submit_when_pane_stays_idle_after_first_enter(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+                self.enter_count = 0
+                self.pane_text = "› Summarize recent commits\n\ngpt-5.5 medium · ~/repo"
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                if args[:3] == ("send-keys", "-t", role.role_id) and len(args) >= 4:
+                    if args[3]:
+                        self.pane_text = f"{self.pane_text}\n{args[3]}"
+                    elif args[-1] == "Enter":
+                        self.enter_count += 1
+                        if self.enter_count >= 2:
+                            self.pane_text = "◦ Working (1s • esc to interrupt)"
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50009:verification-coordinator",
+            session_id="sdd-IOS-50009",
+            backend_name="tmux",
+        )
+        backend.tmux_interactive_driver_enabled[role.role_id] = True
+        backend.tmux_launcher_runners[role.role_id] = "codex"
+        backend.tmux_role_ready[role.role_id] = True
+
+        backend.send_input(role, "Run deterministic verification for IOS-50009.")
+
+        submit_calls = [
+            call
+            for call in backend.calls
+            if call[:3] == ("send-keys", "-t", role.role_id) and call[-1] == "Enter"
+        ]
+        self.assertEqual(
+            [
+                ("send-keys", "-t", role.role_id, "", "Enter"),
+                ("send-keys", "-t", role.role_id, "", "Enter"),
+            ],
+            submit_calls,
+        )
+
     def test_tmux_restores_launcher_metadata_for_existing_role_after_backend_restart(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self, runtime_root: Path) -> None:
@@ -790,6 +836,7 @@ class TmuxBackendTests(unittest.TestCase):
         self.assertTrue(backend._contains_runner_ready_prompt(status_signal))
         self.assertTrue(backend._contains_runner_status_signal(status_signal_long))
         self.assertTrue(backend._contains_runner_ready_prompt(status_signal_long))
+        self.assertTrue(backend._contains_runner_working_signal("◦ working (1s • esc to interrupt)"))
         self.assertTrue(backend._contains_interactive_input_prompt(prompt_ready))
         self.assertTrue(backend._contains_runner_ready_prompt(prompt_ready))
         self.assertTrue(backend._contains_interactive_input_prompt(codex_prompt_ready))
