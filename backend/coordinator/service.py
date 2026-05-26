@@ -847,12 +847,14 @@ class CoordinatorService:
             ),
             status="completed",
         )
-        return self._finalize_doc_harvest(
+        session, event = self._finalize_doc_harvest(
             session=session,
             summary=normalized_summary,
             producer_type="coordinator",
             producer_id=None,
         )
+        self._refresh_post_harvest_diff_artifacts(session.task_key)
+        return session, event
 
     def skip_boy_scout(
         self,
@@ -5463,6 +5465,7 @@ class CoordinatorService:
             emit_event=False,
         )
         session, _commit_event = self._commit_task_state(session, "doc harvest")
+        self._refresh_post_harvest_diff_artifacts(session.task_key)
         if self._verification_gate_required_for_delivery(session) and self._verification_outcome_status(session) != "passed":
             session = self.session_repository.update_stage_and_owner(
                 session.id,
@@ -6749,6 +6752,10 @@ class CoordinatorService:
         if refreshed is None:
             raise IntakeError(f"Diff refresh did not produce {target_path}")
         return refreshed
+
+    def _refresh_post_harvest_diff_artifacts(self, task_key: str) -> None:
+        for mode in ("source", "docs", "full"):
+            self._refresh_structured_diff_artifact(task_key, mode=mode)
 
     def _existing_directory_path(self, value: str | None) -> str | None:
         if not value:

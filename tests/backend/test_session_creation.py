@@ -4,7 +4,7 @@ import tempfile
 import time
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from backend.api.sse import SessionEventBus
 from backend import session_policy as session_policy_module
@@ -8857,6 +8857,43 @@ class SessionCreationTests(unittest.TestCase):
         outcome_path = Path(self.temp_dir.name) / "IOS-30021F" / "spec" / "doc-harvest-outcome.json"
         self.assertTrue(outcome_path.exists())
         self.assertEqual("completed", json.loads(outcome_path.read_text())["status"])
+
+    def test_complete_doc_harvest_refreshes_structured_diffs(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021FDIFF",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "enabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021FDIFF")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+
+        with patch.object(
+            self.coordinator,
+            "_refresh_structured_diff_artifact",
+            side_effect=lambda task_key, *, mode: f"/tmp/{task_key}-{mode}.md",
+        ) as refresh_mock:
+            self.coordinator.complete_doc_harvest(
+                session_id=session.id,
+                summary="Feature README updated with current behavior.",
+            )
+
+        self.assertEqual(
+            [
+                call("IOS-30021FDIFF", mode="source"),
+                call("IOS-30021FDIFF", mode="docs"),
+                call("IOS-30021FDIFF", mode="full"),
+            ],
+            refresh_mock.call_args_list,
+        )
 
     def test_complete_doc_harvest_is_rejected_when_policy_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
