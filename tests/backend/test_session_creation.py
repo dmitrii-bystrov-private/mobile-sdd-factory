@@ -1862,7 +1862,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Start from the current diff and review only the touched changes.", sent_inputs[0])
         self.assertIn("review_scope", sent_inputs[0])
         self.assertIn("write-result.py", sent_inputs[0])
-        self.assertIn("code-reviewer --output", sent_inputs[0])
+        self.assertIn("--work-item-id", sent_inputs[0])
 
     def test_reviewer_output_passed_routes_self_review_to_verification(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -4672,7 +4672,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("write-result.py", sent_inputs[0])
-        self.assertIn("verification-coordinator --output", sent_inputs[0])
+        self.assertIn("--work-item-id", sent_inputs[0])
 
     def test_collect_role_output_accepts_helper_written_verification_failed_result(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERHELPER")
@@ -8059,7 +8059,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("write-result.py", sent_inputs[0])
-        self.assertIn("code-scout --output", sent_inputs[0])
+        self.assertIn("--work-item-id", sent_inputs[0])
 
     def test_collect_role_output_accepts_helper_written_boy_scout_clean_result(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

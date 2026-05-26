@@ -116,6 +116,7 @@ class RoleLauncherManager:
                 f'export SDD_FACTORY_ROLE_AGENTS_MD={_shell_escape(str(workspace.agents_path))}',
                 f'export SDD_FACTORY_REPO_ROOT={_shell_escape(str(self.repo_root))}',
                 f'export SDD_FACTORY_WORKDIR_ROOT={_shell_escape(str(self.workdir_root))}',
+                f'export SDD_FACTORY_DB_PATH={_shell_escape(os.environ.get("SDD_FACTORY_DB_PATH", str(self.workdir_root / "factory.sqlite3")))}',
                 f'export SDD_FACTORY_TASK_REPO_ROOT={_shell_escape(str(self.workdir_root / task_key / "repo"))}',
                 f'export SDD_FACTORY_ROLE_LIFECYCLE={_shell_escape(_role_lifecycle_mode(role_name))}',
                 f'export SDD_FACTORY_ROLE_RUNNER={_shell_escape(runner)}',

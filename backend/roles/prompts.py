@@ -162,11 +162,16 @@ def role_handoff_prompt(
     hydration_payload: dict[str, str | int | None],
     prompt_mode: str = "full",
 ) -> str:
-    result_path = hydration_payload.get("result_path")
-    result_path_text = str(result_path).strip() if isinstance(result_path, str) else "RESULT.json"
     result_writer_path = hydration_payload.get("result_writer_path")
     result_writer_path_text = (
         str(result_writer_path).strip() if isinstance(result_writer_path, str) else ""
+    )
+    work_item_id = hydration_payload.get("work_item_id")
+    work_item_id_text = str(work_item_id).strip() if work_item_id is not None else ""
+    helper_example_prefix = (
+        f'python "{result_writer_path_text}" --work-item-id {work_item_id_text or "<work_item_id>"}'
+        if result_writer_path_text
+        else 'python "$SDD_FACTORY_REPO_ROOT/scripts/write-result.py" --work-item-id <work_item_id>'
     )
     if prompt_mode == "live_bootstrap":
         return (
@@ -201,7 +206,11 @@ def role_handoff_prompt(
     else:
         prefix = f"{base_role_prompt(role_name)}\n"
     helper_line = (
-        f'- Use the deterministic writer helper: `python "{result_writer_path_text}" {role_name} --output "{result_path_text}" ...`.\n'
+        (
+            f'- Submit the terminal result with the deterministic helper: `python "{result_writer_path_text}" --work-item-id {work_item_id_text} ...`.\n'
+            if work_item_id_text
+            else f'- Submit the terminal result with the deterministic helper: `python "{result_writer_path_text}" --work-item-id <work_item_id> ...`.\n'
+        )
         if result_writer_path_text
         else ""
     )
@@ -219,18 +228,15 @@ def role_handoff_prompt(
         "Path resolution rules:\n"
         "- Treat paths written as `spec/...`, `review/...`, or `plan/...` as paths under the task snapshot metadata root from AGENTS.md, not as paths relative to the current role workspace.\n"
         "- When the hydration payload below includes explicit absolute `*_path` fields, prefer those exact paths over reconstructing task paths yourself.\n\n"
-        "Required terminal outcome path:\n"
+        "Required terminal outcome submission:\n"
         f"{helper_line}"
-        f"- Write `RESULT.json` exactly to `{result_path_text}` before you finish the turn.\n"
-        "- Do not place `RESULT.json` in the task root, `spec/`, `plan/`, or any directory other than the exact terminal result target above.\n"
-        "- Always copy `work_item_id` from the hydration payload below into the terminal payload unchanged when it is present.\n"
+        "- Do not hand-write `RESULT.json` and do not choose the output path yourself; the helper resolves the canonical target from `work_item_id`.\n"
+        "- Always copy `work_item_id` from the hydration payload below into the helper call unchanged when it is present.\n"
         "- If the hydration payload below includes `subtask_key`, copy that `subtask_key` into the terminal payload unchanged as well.\n"
-        "- Use the helper instead of hand-writing JSON; only include the minimum role-specific fields required by the routed contract.\n"
-        "- For example: `{\"output_type\":\"completed\",\"payload\":{\"work_item_id\":123,\"summary\":\"short result\"}}`\n"
-        "- Subtask example: `{\"output_type\":\"completed\",\"payload\":{\"work_item_id\":123,\"subtask_key\":\"IOS-12345\",\"summary\":\"short result\"}}`\n"
-        "- Use `failed` plus `failures` when verification/correction output must report failures.\n"
-        "- Operator question example: `{\"output_type\":\"failed\",\"payload\":{\"work_item_id\":123,\"summary\":\"requirements clarification needed\",\"needs_operator_input\":true,\"pending_decisions\":[\"choose option A or B\"]}}`\n"
-        "- Runtime failure example: `{\"output_type\":\"failed\",\"payload\":{\"work_item_id\":123,\"summary\":\"tooling failure\",\"failures\":[\"xcodebuild exited 65\"]}}`\n\n"
+        "- Use the helper instead of hand-writing JSON; only pass the minimum role-specific fields required by the routed contract.\n"
+        f"- Example: `{helper_example_prefix} --summary \"short result\"`\n"
+        f"- Subtask example: `{helper_example_prefix} --summary \"short result\" --subtask-key \"IOS-12345\"`\n"
+        f"- Verification failure example: `{helper_example_prefix} --result failed --failure \"xcodebuild exited 65\"`\n\n"
         "If you also echo the terminal outcome in the transcript, emit one line in this exact form:\n"
         'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"short result"}}\n'
         "For verification failures, the optional transcript echo is:\n"

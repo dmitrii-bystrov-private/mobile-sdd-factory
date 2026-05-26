@@ -2,12 +2,54 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
+
+from backend.config import load_config
+from backend.state.db import Database
+from backend.state.role_repository import RoleRepository
+from backend.state.session_repository import SessionRepository
+from backend.state.work_item_repository import WorkItemRepository
+
+
+CODING_ROLES = {"implementer", "bug-fixer", "mr-comments-analyst-worker"}
+PLANNING_ROLES = {
+    "proposal-context-worker",
+    "requirements-clarifier-worker",
+    "acceptance-criteria-worker",
+    "constraints-worker",
+    "task-decomposer-worker",
+}
+SUPPORTED_ROLES = {
+    "code-scout",
+    "verification-coordinator",
+    "code-reviewer",
+    "spec-verifier-worker",
+    "doc-harvest-worker",
+    *CODING_ROLES,
+    *PLANNING_ROLES,
+}
+OUTPUT_TYPE_CHOICES = {
+    "completed",
+    "passed",
+    "failed",
+    "skipped_not_needed",
+    "blocked_review_cycle",
+    "blocked_verification_cycle",
+}
 
 
 class ResultWriterError(ValueError):
     """Raised when CLI input cannot be converted into a deterministic result."""
+
+
+@dataclass(frozen=True)
+class SubmissionContext:
+    role_name: str
+    output_path: Path
+    task_key: str
 
 
 def _positive_int(value: str) -> int:
@@ -17,117 +59,28 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
-def _non_empty(value: str) -> str:
-    rendered = value.strip()
-    if not rendered:
-        raise argparse.ArgumentTypeError("value must not be empty")
-    return rendered
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Write deterministic RESULT.json files for routed role outcomes."
     )
-    subparsers = parser.add_subparsers(dest="role", required=True)
-
-    scout = subparsers.add_parser("code-scout")
-    scout.add_argument("--output", required=True)
-    scout.add_argument("--work-item-id", required=True, type=_positive_int)
-    scout.add_argument(
-        "--output-type",
-        default="completed",
-        choices=["completed", "passed", "skipped_not_needed"],
-    )
-    scout.add_argument("--result", required=True, choices=["clean", "findings_found"])
-    scout.add_argument("--findings-count", type=_positive_int)
-    scout.add_argument("--findings-path")
-    scout.add_argument("--summary")
-    scout.add_argument("--details")
-
-    verifier = subparsers.add_parser("verification-coordinator")
-    verifier.add_argument("--output", required=True)
-    verifier.add_argument("--work-item-id", required=True, type=_positive_int)
-    verifier.add_argument(
-        "--output-type",
-        default="completed",
-        choices=["completed", "passed", "failed", "blocked_verification_cycle"],
-    )
-    verifier.add_argument("--result", choices=["passed", "failed"])
-    verifier.add_argument("--summary")
-    verifier.add_argument("--details")
-    verifier.add_argument("--failure", action="append", default=[])
-
-    reviewer = subparsers.add_parser("code-reviewer")
-    reviewer.add_argument("--output", required=True)
-    reviewer.add_argument("--work-item-id", required=True, type=_positive_int)
-    reviewer.add_argument(
-        "--output-type",
-        default="completed",
-        choices=["completed", "passed", "failed", "blocked_review_cycle", "skipped_not_needed"],
-    )
-    reviewer.add_argument("--summary")
-    reviewer.add_argument("--details")
-    reviewer.add_argument("--issues-markdown")
-
-    coding_roles = ["implementer", "bug-fixer", "mr-comments-analyst-worker"]
-    for role_name in coding_roles:
-        coding = subparsers.add_parser(role_name)
-        coding.add_argument("--output", required=True)
-        coding.add_argument("--work-item-id", required=True, type=_positive_int)
-        coding.add_argument("--output-type", default="completed", choices=["completed"])
-        coding.add_argument("--summary")
-        coding.add_argument("--details")
-        coding.add_argument("--subtask-key")
-
-    planning_roles = [
-        "proposal-context-worker",
-        "requirements-clarifier-worker",
-        "acceptance-criteria-worker",
-        "constraints-worker",
-        "task-decomposer-worker",
-    ]
-    for role_name in planning_roles:
-        planning = subparsers.add_parser(role_name)
-        planning.add_argument("--output", required=True)
-        planning.add_argument("--work-item-id", required=True, type=_positive_int)
-        planning.add_argument(
-            "--output-type",
-            default="completed",
-            choices=["completed", "passed", "failed"],
-        )
-        planning.add_argument("--summary")
-        planning.add_argument("--details")
-        planning.add_argument("--needs-operator-input", action="store_true")
-        planning.add_argument("--failure", action="append", default=[])
-        planning.add_argument("--missing-input", action="append", default=[])
-        planning.add_argument("--pending-decision", action="append", default=[])
-        planning.add_argument("--blocker-question", action="append", default=[])
-        planning.add_argument("--next-step")
-
-    spec_verifier = subparsers.add_parser("spec-verifier-worker")
-    spec_verifier.add_argument("--output", required=True)
-    spec_verifier.add_argument("--work-item-id", required=True, type=_positive_int)
-    spec_verifier.add_argument(
-        "--output-type",
-        default="completed",
-        choices=["completed", "passed", "failed"],
-    )
-    spec_verifier.add_argument("--summary")
-    spec_verifier.add_argument("--details")
-    spec_verifier.add_argument("--blocker-question", action="append", default=[])
-    spec_verifier.add_argument("--verified-focus")
-
-    doc_harvest = subparsers.add_parser("doc-harvest-worker")
-    doc_harvest.add_argument("--output", required=True)
-    doc_harvest.add_argument("--work-item-id", required=True, type=_positive_int)
-    doc_harvest.add_argument(
-        "--output-type",
-        default="completed",
-        choices=["completed", "passed", "skipped_not_needed"],
-    )
-    doc_harvest.add_argument("--summary")
-    doc_harvest.add_argument("--details")
-
+    parser.add_argument("legacy_role", nargs="?", choices=sorted(SUPPORTED_ROLES))
+    parser.add_argument("--output")
+    parser.add_argument("--work-item-id", required=True, type=_positive_int)
+    parser.add_argument("--output-type", default="completed", choices=sorted(OUTPUT_TYPE_CHOICES))
+    parser.add_argument("--result")
+    parser.add_argument("--findings-count", type=_positive_int)
+    parser.add_argument("--findings-path")
+    parser.add_argument("--summary")
+    parser.add_argument("--details")
+    parser.add_argument("--failure", action="append", default=[])
+    parser.add_argument("--issues-markdown")
+    parser.add_argument("--subtask-key")
+    parser.add_argument("--needs-operator-input", action="store_true")
+    parser.add_argument("--missing-input", action="append", default=[])
+    parser.add_argument("--pending-decision", action="append", default=[])
+    parser.add_argument("--blocker-question", action="append", default=[])
+    parser.add_argument("--next-step")
+    parser.add_argument("--verified-focus")
     return parser
 
 
@@ -139,15 +92,109 @@ def _clean_optional_text(payload: dict[str, object], key: str, value: str | None
         payload[key] = rendered
 
 
+def _normalized_list(values: Sequence[str]) -> list[str]:
+    return [item.strip() for item in values if item.strip()]
+
+
+def _load_database() -> Database:
+    configured_path = os.environ.get("SDD_FACTORY_DB_PATH")
+    if configured_path:
+        return Database(Path(configured_path))
+    return Database(load_config().database_path)
+
+
+def _resolve_submission_context(
+    *,
+    work_item_id: int,
+    explicit_role: str | None,
+    explicit_output: str | None,
+) -> SubmissionContext:
+    database = _load_database()
+    work_items = WorkItemRepository(database)
+    sessions = SessionRepository(database)
+    roles = RoleRepository(database)
+
+    work_item = work_items.get_by_id(work_item_id)
+    if work_item is None:
+        raise ResultWriterError(f"unknown work_item_id: {work_item_id}")
+    session = sessions.get_by_id(work_item.session_id)
+    if session is None:
+        raise ResultWriterError(f"work item {work_item_id} references a missing session")
+    if work_item.owner_role_id is None:
+        raise ResultWriterError(
+            f"work item {work_item_id} has no assigned owner role; cannot resolve RESULT.json target"
+        )
+    role = roles.get_by_id(work_item.owner_role_id)
+    if role is None:
+        raise ResultWriterError(
+            f"work item {work_item_id} references a missing owner role; cannot resolve RESULT.json target"
+        )
+
+    if explicit_role and explicit_role != role.role_name:
+        raise ResultWriterError(
+            f"work item {work_item_id} belongs to role {role.role_name}, not {explicit_role}"
+        )
+    runtime_role_name = str(os.environ.get("SDD_FACTORY_ROLE_NAME", "")).strip()
+    if runtime_role_name and runtime_role_name != role.role_name:
+        raise ResultWriterError(
+            f"work item {work_item_id} belongs to role {role.role_name}, not current runtime {runtime_role_name}"
+        )
+
+    workdir_root_env = str(os.environ.get("SDD_FACTORY_WORKDIR_ROOT", "")).strip()
+    if workdir_root_env:
+        workdir_root = Path(workdir_root_env)
+    else:
+        config = load_config()
+        workdir_root = config.workdir_root
+    output_path = workdir_root / session.task_key / "runtime" / "role-workspaces" / role.role_name / "RESULT.json"
+    if explicit_output is not None and Path(explicit_output) != output_path:
+        raise ResultWriterError(
+            f"work item {work_item_id} resolves to {output_path}, not explicit output {explicit_output}"
+        )
+    return SubmissionContext(role_name=role.role_name, output_path=output_path, task_key=session.task_key)
+
+
+def _validate_role_output_type(role_name: str, output_type: str) -> None:
+    allowed: dict[str, set[str]] = {
+        "code-scout": {"completed", "passed", "skipped_not_needed"},
+        "verification-coordinator": {
+            "completed",
+            "passed",
+            "failed",
+            "blocked_verification_cycle",
+        },
+        "code-reviewer": {
+            "completed",
+            "passed",
+            "failed",
+            "blocked_review_cycle",
+            "skipped_not_needed",
+        },
+        "spec-verifier-worker": {"completed", "passed", "failed"},
+        "doc-harvest-worker": {"completed", "passed", "skipped_not_needed"},
+    }
+    if role_name in CODING_ROLES:
+        allowed_types = {"completed"}
+    elif role_name in PLANNING_ROLES:
+        allowed_types = {"completed", "passed", "failed"}
+    else:
+        allowed_types = allowed.get(role_name, set())
+    if output_type not in allowed_types:
+        raise ResultWriterError(f"{role_name} does not support output_type={output_type}")
+
+
 def _build_code_scout_payload(args: argparse.Namespace) -> dict[str, object]:
+    result = str(args.result or "").strip()
+    if result not in {"clean", "findings_found"}:
+        raise ResultWriterError("code-scout requires --result clean|findings_found")
     payload: dict[str, object] = {
         "work_item_id": args.work_item_id,
-        "result": args.result,
+        "result": result,
     }
     _clean_optional_text(payload, "summary", args.summary)
     _clean_optional_text(payload, "details", args.details)
 
-    if args.result == "findings_found":
+    if result == "findings_found":
         findings_path = str(args.findings_path or "").strip()
         if not findings_path:
             raise ResultWriterError("code-scout findings results require --findings-path")
@@ -168,15 +215,16 @@ def _build_verification_payload(args: argparse.Namespace) -> dict[str, object]:
     if args.output_type == "blocked_verification_cycle":
         return payload
 
-    if args.result not in {"passed", "failed"}:
+    result = str(args.result or "").strip()
+    if result not in {"passed", "failed"}:
         raise ResultWriterError("verification-coordinator requires --result passed|failed")
-    payload["result"] = args.result
+    payload["result"] = result
 
-    failures = [item.strip() for item in args.failure if item.strip()]
+    failures = _normalized_list(args.failure)
     if failures:
         payload["failures"] = failures
 
-    if args.result == "failed" and "failures" not in payload and "summary" not in payload:
+    if result == "failed" and "failures" not in payload and "summary" not in payload:
         raise ResultWriterError(
             "failed verification results require at least --failure or --summary"
         )
@@ -201,10 +249,6 @@ def _build_coding_payload(args: argparse.Namespace) -> dict[str, object]:
     _clean_optional_text(payload, "details", args.details)
     _clean_optional_text(payload, "subtask_key", args.subtask_key)
     return payload
-
-
-def _normalized_list(values: Sequence[str]) -> list[str]:
-    return [item.strip() for item in values if item.strip()]
 
 
 def _build_story_planning_payload(args: argparse.Namespace) -> dict[str, object]:
@@ -254,29 +298,31 @@ def _build_doc_harvest_payload(args: argparse.Namespace) -> dict[str, object]:
     return payload
 
 
-def build_result_document(args: argparse.Namespace) -> dict[str, object]:
-    if args.role == "code-scout":
+def build_result_document(
+    args: argparse.Namespace,
+    role_name: str | None = None,
+) -> dict[str, object]:
+    resolved_role_name = role_name or str(getattr(args, "role", "") or getattr(args, "legacy_role", "")).strip()
+    if not resolved_role_name:
+        raise ResultWriterError("role name is required to build a terminal result document")
+    _validate_role_output_type(resolved_role_name, args.output_type)
+
+    if resolved_role_name == "code-scout":
         payload = _build_code_scout_payload(args)
-    elif args.role == "verification-coordinator":
+    elif resolved_role_name == "verification-coordinator":
         payload = _build_verification_payload(args)
-    elif args.role == "code-reviewer":
+    elif resolved_role_name == "code-reviewer":
         payload = _build_code_reviewer_payload(args)
-    elif args.role in {"implementer", "bug-fixer", "mr-comments-analyst-worker"}:
+    elif resolved_role_name in CODING_ROLES:
         payload = _build_coding_payload(args)
-    elif args.role in {
-        "proposal-context-worker",
-        "requirements-clarifier-worker",
-        "acceptance-criteria-worker",
-        "constraints-worker",
-        "task-decomposer-worker",
-    }:
+    elif resolved_role_name in PLANNING_ROLES:
         payload = _build_story_planning_payload(args)
-    elif args.role == "spec-verifier-worker":
+    elif resolved_role_name == "spec-verifier-worker":
         payload = _build_spec_verifier_payload(args)
-    elif args.role == "doc-harvest-worker":
+    elif resolved_role_name == "doc-harvest-worker":
         payload = _build_doc_harvest_payload(args)
     else:
-        raise ResultWriterError(f"unsupported role: {args.role}")
+        raise ResultWriterError(f"unsupported role: {resolved_role_name}")
 
     return {
         "output_type": args.output_type,
@@ -293,8 +339,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        document = build_result_document(args)
-        write_result_file(Path(args.output), document)
+        context = _resolve_submission_context(
+            work_item_id=args.work_item_id,
+            explicit_role=args.legacy_role,
+            explicit_output=args.output,
+        )
+        document = build_result_document(args, context.role_name)
+        write_result_file(context.output_path, document)
     except ResultWriterError as exc:
         parser.exit(2, f"error: {exc}\n")
     return 0
@@ -302,6 +353,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 __all__ = [
     "ResultWriterError",
+    "SubmissionContext",
     "build_parser",
     "build_result_document",
     "main",

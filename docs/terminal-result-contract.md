@@ -6,6 +6,7 @@ The goal is simple:
 - orchestration must depend only on a small structured payload
 - markdown reports, summaries, and console output stay human-facing
 - roles should not hand-assemble large JSON objects when only a few fields drive state transitions
+- `work_item_id` should be the only coordinator-owned context key a role needs for terminal submission
 
 ## General Rules
 
@@ -385,7 +386,7 @@ Keep those in dedicated files under `spec/`, `review/`, `plan/`, or task-local v
 
 To make this contract deterministic in practice:
 - roles should stop writing JSON manually
-- a shared writer helper should emit `RESULT.json`
-- prompts should ask roles for the minimum fields only
+- a shared writer helper should resolve role and canonical output path from `work_item_id`
+- prompts should ask roles for the minimum fields only and invoke the helper with `--work-item-id`
 
 This document defines the target schema for that helper migration.

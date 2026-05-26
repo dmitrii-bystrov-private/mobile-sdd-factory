@@ -86,12 +86,12 @@ class RolePromptTests(unittest.TestCase):
             prompt_mode="full",
         )
 
-        self.assertIn("Write `RESULT.json` exactly to `/tmp/roles/implementer/RESULT.json`", text)
-        self.assertIn("Do not place `RESULT.json` in the task root", text)
+        self.assertIn('python "$SDD_FACTORY_REPO_ROOT/scripts/write-result.py" --work-item-id <work_item_id>', text)
+        self.assertIn("Do not hand-write `RESULT.json`", text)
         self.assertIn("Do not run broad workflow-level wrappers", text)
         self.assertIn("Always copy `work_item_id` from the hydration payload below", text)
         self.assertIn("If the hydration payload below includes `subtask_key`", text)
-        self.assertIn('{"output_type":"completed","payload":{"work_item_id":123,"subtask_key":"IOS-12345","summary":"short result"}}', text)
+        self.assertIn('--subtask-key "IOS-12345"', text)
 
     def test_full_prompt_restores_proposal_context_fetch_and_conflict_rules(self) -> None:
         text = role_handoff_prompt(
@@ -143,7 +143,7 @@ class RolePromptTests(unittest.TestCase):
 
         self.assertIn("Start from the routed diff input when it is provided as an absolute path", text)
         self.assertIn("write them to the routed findings target when it is provided as an absolute path", text)
-        self.assertIn('python "/tmp/repo/scripts/write-result.py" code-scout --output "/tmp/roles/code-scout/RESULT.json"', text)
+        self.assertIn('python "/tmp/repo/scripts/write-result.py" --work-item-id 11', text)
         self.assertIn("`result` set to `clean` or `findings_found`", text)
         self.assertIn("positive `findings_count`", text)
 
@@ -162,7 +162,7 @@ class RolePromptTests(unittest.TestCase):
         )
 
         self.assertIn("do not hand-compose verification JSON", text)
-        self.assertIn('python "/tmp/repo/scripts/write-result.py" verification-coordinator --output "/tmp/roles/verifier/RESULT.json"', text)
+        self.assertIn('python "/tmp/repo/scripts/write-result.py" --work-item-id 12', text)
 
     def test_full_prompt_restores_acceptance_criteria_format_contract(self) -> None:
         text = role_handoff_prompt(

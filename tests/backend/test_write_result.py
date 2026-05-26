@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+from backend.models.enums import WorkItemStatus
+from backend.state.db import Database
+from backend.state.role_repository import RoleRepository
+from backend.state.session_repository import SessionRepository
+from backend.state.work_item_repository import WorkItemRepository
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -13,23 +20,57 @@ SCRIPT_PATH = REPO_ROOT / "scripts" / "write-result.py"
 
 
 class WriteResultScriptTests(unittest.TestCase):
-    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def _create_context(self, temp_dir: str, *, role_name: str, work_type: str = "generic") -> tuple[dict[str, str], Path, int]:
+        workdir_root = Path(temp_dir) / "workdir"
+        database_path = workdir_root / "factory.sqlite3"
+        database = Database(database_path)
+        database.initialize()
+
+        sessions = SessionRepository(database)
+        roles = RoleRepository(database)
+        work_items = WorkItemRepository(database)
+
+        session = sessions.create(
+            task_key="IOS-12345",
+            current_stage="verification_requested",
+            workflow_profile="legacy",
+            policy={},
+        )
+        role = roles.create(
+            session_id=session.id,
+            role_name=role_name,
+            runtime_backend="tmux",
+        )
+        work_item = work_items.create(
+            session_id=session.id,
+            work_type=work_type,
+            title=f"{role_name} item",
+            owner_role_id=role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        output_path = workdir_root / "IOS-12345" / "runtime" / "role-workspaces" / role_name / "RESULT.json"
+        env = dict(os.environ)
+        env["SDD_FACTORY_DB_PATH"] = str(database_path)
+        env["SDD_FACTORY_WORKDIR_ROOT"] = str(workdir_root)
+        env["SDD_FACTORY_ROLE_NAME"] = role_name
+        return env, output_path, int(work_item.id or 0)
+
+    def _run(self, env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
             [sys.executable, str(SCRIPT_PATH), *args],
             cwd=REPO_ROOT,
+            env=env,
             capture_output=True,
             text=True,
         )
 
     def test_code_scout_clean_result_is_minimal_and_valid(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "RESULT.json"
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-scout")
             result = self._run(
-                "code-scout",
-                "--output",
-                str(output_path),
+                env,
                 "--work-item-id",
-                "11",
+                str(work_item_id),
                 "--result",
                 "clean",
             )
@@ -40,22 +81,38 @@ class WriteResultScriptTests(unittest.TestCase):
                 {
                     "output_type": "completed",
                     "payload": {
-                        "work_item_id": 11,
+                        "work_item_id": work_item_id,
                         "result": "clean",
                     },
                 },
                 payload,
             )
 
-    def test_code_scout_findings_require_count_and_path(self) -> None:
+    def test_legacy_role_and_output_arguments_remain_compatible(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "RESULT.json"
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-scout")
             result = self._run(
+                env,
                 "code-scout",
                 "--output",
                 str(output_path),
                 "--work-item-id",
-                "12",
+                str(work_item_id),
+                "--result",
+                "clean",
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual("clean", payload["payload"]["result"])
+
+    def test_code_scout_findings_require_count_and_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, _, work_item_id = self._create_context(temp_dir, role_name="code-scout")
+            result = self._run(
+                env,
+                "--work-item-id",
+                str(work_item_id),
                 "--result",
                 "findings_found",
             )
@@ -65,13 +122,11 @@ class WriteResultScriptTests(unittest.TestCase):
 
     def test_verification_failed_result_requires_explicit_failure_signal(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "RESULT.json"
+            env, _, work_item_id = self._create_context(temp_dir, role_name="verification-coordinator")
             result = self._run(
-                "verification-coordinator",
-                "--output",
-                str(output_path),
+                env,
                 "--work-item-id",
-                "481",
+                str(work_item_id),
                 "--result",
                 "failed",
             )
@@ -81,13 +136,11 @@ class WriteResultScriptTests(unittest.TestCase):
 
     def test_verification_failed_result_writes_minimal_valid_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "RESULT.json"
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="verification-coordinator")
             result = self._run(
-                "verification-coordinator",
-                "--output",
-                str(output_path),
+                env,
                 "--work-item-id",
-                "481",
+                str(work_item_id),
                 "--result",
                 "failed",
                 "--failure",
@@ -97,19 +150,17 @@ class WriteResultScriptTests(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr)
             payload = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertEqual("completed", payload["output_type"])
-            self.assertEqual(481, payload["payload"]["work_item_id"])
+            self.assertEqual(work_item_id, payload["payload"]["work_item_id"])
             self.assertEqual("failed", payload["payload"]["result"])
             self.assertEqual(["build-for-testing failed"], payload["payload"]["failures"])
 
     def test_verification_blocked_cycle_does_not_require_result(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "RESULT.json"
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="verification-coordinator")
             result = self._run(
-                "verification-coordinator",
-                "--output",
-                str(output_path),
+                env,
                 "--work-item-id",
-                "482",
+                str(work_item_id),
                 "--output-type",
                 "blocked_verification_cycle",
                 "--summary",
@@ -123,13 +174,11 @@ class WriteResultScriptTests(unittest.TestCase):
 
     def test_code_reviewer_failed_result_can_include_issues_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "RESULT.json"
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-reviewer")
             result = self._run(
-                "code-reviewer",
-                "--output",
-                str(output_path),
+                env,
                 "--work-item-id",
-                "210",
+                str(work_item_id),
                 "--output-type",
                 "failed",
                 "--summary",
@@ -145,13 +194,14 @@ class WriteResultScriptTests(unittest.TestCase):
 
     def test_story_planning_blocked_result_can_carry_operator_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "RESULT.json"
+            env, output_path, work_item_id = self._create_context(
+                temp_dir,
+                role_name="requirements-clarifier-worker",
+            )
             result = self._run(
-                "requirements-clarifier-worker",
-                "--output",
-                str(output_path),
+                env,
                 "--work-item-id",
-                "31",
+                str(work_item_id),
                 "--output-type",
                 "failed",
                 "--summary",
@@ -172,13 +222,11 @@ class WriteResultScriptTests(unittest.TestCase):
 
     def test_doc_harvest_completed_result_is_minimal(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "RESULT.json"
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="doc-harvest-worker")
             result = self._run(
-                "doc-harvest-worker",
-                "--output",
-                str(output_path),
+                env,
                 "--work-item-id",
-                "91",
+                str(work_item_id),
                 "--summary",
                 "README updated",
             )
@@ -186,18 +234,16 @@ class WriteResultScriptTests(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr)
             payload = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertEqual("completed", payload["output_type"])
-            self.assertEqual(91, payload["payload"]["work_item_id"])
+            self.assertEqual(work_item_id, payload["payload"]["work_item_id"])
             self.assertEqual("README updated", payload["payload"]["summary"])
 
     def test_spec_verifier_failed_result_can_carry_blocker_questions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "RESULT.json"
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="spec-verifier-worker")
             result = self._run(
-                "spec-verifier-worker",
-                "--output",
-                str(output_path),
+                env,
                 "--work-item-id",
-                "41",
+                str(work_item_id),
                 "--output-type",
                 "failed",
                 "--summary",
@@ -216,13 +262,11 @@ class WriteResultScriptTests(unittest.TestCase):
 
     def test_implementer_completed_result_can_carry_subtask_key(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "RESULT.json"
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="implementer")
             result = self._run(
-                "implementer",
-                "--output",
-                str(output_path),
+                env,
                 "--work-item-id",
-                "501",
+                str(work_item_id),
                 "--subtask-key",
                 "IOS-55555",
                 "--summary",
@@ -236,34 +280,49 @@ class WriteResultScriptTests(unittest.TestCase):
 
     def test_bug_fixer_completed_result_is_supported(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "RESULT.json"
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="bug-fixer")
             result = self._run(
-                "bug-fixer",
-                "--output",
-                str(output_path),
+                env,
                 "--work-item-id",
-                "601",
+                str(work_item_id),
                 "--summary",
                 "bug fixed",
             )
 
             self.assertEqual(0, result.returncode, result.stderr)
             payload = json.loads(output_path.read_text(encoding="utf-8"))
-            self.assertEqual(601, payload["payload"]["work_item_id"])
+            self.assertEqual(work_item_id, payload["payload"]["work_item_id"])
 
     def test_mr_comments_analyst_completed_result_is_supported(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / "RESULT.json"
+            env, output_path, work_item_id = self._create_context(
+                temp_dir,
+                role_name="mr-comments-analyst-worker",
+            )
             result = self._run(
-                "mr-comments-analyst-worker",
-                "--output",
-                str(output_path),
+                env,
                 "--work-item-id",
-                "701",
+                str(work_item_id),
                 "--summary",
-                "mr comments triaged",
+                "comments processed",
             )
 
             self.assertEqual(0, result.returncode, result.stderr)
             payload = json.loads(output_path.read_text(encoding="utf-8"))
-            self.assertEqual("mr comments triaged", payload["payload"]["summary"])
+            self.assertEqual("comments processed", payload["payload"]["summary"])
+            self.assertEqual(work_item_id, payload["payload"]["work_item_id"])
+
+    def test_rejects_work_item_from_other_runtime_role(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, _, work_item_id = self._create_context(temp_dir, role_name="code-scout")
+            env["SDD_FACTORY_ROLE_NAME"] = "verification-coordinator"
+            result = self._run(
+                env,
+                "--work-item-id",
+                str(work_item_id),
+                "--result",
+                "clean",
+            )
+
+            self.assertEqual(2, result.returncode)
+            self.assertIn("not current runtime", result.stderr)
