@@ -132,8 +132,12 @@ class InteractiveStateSummaryResponse(BaseModel):
 class RuntimeRoleStateResponse(BaseModel):
     role_name: str
     status: str
+    live_state: str | None = None
     runtime_backend: str
     runtime_handle: str | None = None
+    is_current_owner: bool = False
+    has_active_work_item: bool = False
+    has_pending_operator_continuation: bool = False
     tmux_attach_command: str | None = None
     tmux_capture_command: str | None = None
 

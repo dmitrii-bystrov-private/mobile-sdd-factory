@@ -3102,7 +3102,9 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(response.available)
         self.assertTrue(response.runtime_session_id)
         self.assertGreaterEqual(len(response.roles), 1)
-        self.assertTrue(any(role.role_name == "implementer" for role in response.roles))
+        implementer = next(role for role in response.roles if role.role_name == "implementer")
+        self.assertEqual("owner-active", implementer.live_state)
+        self.assertTrue(implementer.is_current_owner)
 
     def test_get_runtime_state_route_returns_last_auto_recovery(self) -> None:
         from tests.backend.test_session_creation import AutoRecoveryRecordingBackend

@@ -7479,6 +7479,31 @@ class CoordinatorService:
             tmux_session_visibility = self.session_backend.get_tmux_visibility(runtime_session_id)
         role_summaries = []
         for role in roles:
+            is_current_owner = session.current_owner == role.role_name
+            has_active_work_item = self._find_active_work_item_for_role(session.id, role.id) is not None
+            has_pending_operator_continuation = self._has_pending_operator_continuation(
+                session_id=session.id,
+                role_name=role.role_name,
+                work_item_id=None,
+                stage_name=session.current_stage,
+            )
+            live_state = role.status.value
+            if role.status == RoleStatus.RUNNING:
+                runtime_alive = False
+                if role.runtime_handle is not None:
+                    runtime_alive = self.session_backend.is_role_alive(
+                        RuntimeRoleHandle(
+                            role_id=role.runtime_handle,
+                            session_id=self._runtime_session_id_for_role(role, session),
+                            backend_name=role.runtime_backend,
+                        )
+                    )
+                if not runtime_alive:
+                    live_state = "dead-stale"
+                elif is_current_owner:
+                    live_state = "owner-active"
+                else:
+                    live_state = "live-idle"
             role_tmux_visibility = None
             if (
                 runtime_session_id is not None
@@ -7493,8 +7518,12 @@ class CoordinatorService:
                 {
                     "role_name": role.role_name,
                     "status": role.status.value,
+                    "live_state": live_state,
                     "runtime_backend": role.runtime_backend,
                     "runtime_handle": role.runtime_handle,
+                    "is_current_owner": is_current_owner,
+                    "has_active_work_item": has_active_work_item,
+                    "has_pending_operator_continuation": has_pending_operator_continuation,
                     "tmux_attach_command": (
                         role_tmux_visibility.get("tmux_role_attach_command")
                         if isinstance(role_tmux_visibility, dict)

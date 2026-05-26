@@ -6282,11 +6282,45 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("tmux -S ", summary["tmux_attach_command"])
         self.assertTrue(str(summary["tmux_socket_path"]).endswith(".sock"))
         implementer = next(item for item in summary["roles"] if item["role_name"] == "implementer")
+        self.assertEqual("live-idle", implementer["live_state"])
+        self.assertFalse(implementer["is_current_owner"])
         self.assertIn("select-window", implementer["tmux_attach_command"])
         self.assertIn("capture-pane", implementer["tmux_capture_command"])
+        verifier = next(item for item in summary["roles"] if item["role_name"] == "verification-coordinator")
+        self.assertEqual("live-idle", verifier["live_state"])
+        self.assertFalse(verifier["is_current_owner"])
 
         runtime_session = coordinator._runtime_session_handle_for_session(session)
         tmux_backend.stop_session(runtime_session)
+
+    def test_runtime_state_summary_marks_dead_and_idle_roles(self) -> None:
+        backend = AutoRecoveryRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004RUNTIMESTATE")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        verifier_role = self.role_repository.get_by_name(session.id, "verification-coordinator")
+        assert implementer_role is not None
+        assert verifier_role is not None
+        assert implementer_role.runtime_handle is not None
+
+        self.role_repository.update_runtime(
+            verifier_role.id,
+            runtime_backend=verifier_role.runtime_backend,
+            runtime_handle="recording-IOS-30004RUNTIMESTATE:verification-coordinator:legacy",
+            status=RoleStatus.RUNNING,
+        )
+        backend.role_alive["recording-IOS-30004RUNTIMESTATE:verification-coordinator:legacy"] = True
+        backend.mark_dead(implementer_role.runtime_handle)
+
+        summary = self.coordinator.get_runtime_state_summary(session.id)
+
+        implementer = next(item for item in summary["roles"] if item["role_name"] == "implementer")
+        verifier = next(item for item in summary["roles"] if item["role_name"] == "verification-coordinator")
+        self.assertEqual("dead-stale", implementer["live_state"])
+        self.assertTrue(implementer["is_current_owner"])
+        self.assertEqual("live-idle", verifier["live_state"])
+        self.assertFalse(verifier["is_current_owner"])
 
     def test_collect_role_output_normalizes_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")
