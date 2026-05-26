@@ -4289,6 +4289,45 @@ class SessionCreationTests(unittest.TestCase):
             )
         )
 
+    def test_prepare_task_session_resumes_existing_subtasks_for_new_oneshot_flow(self) -> None:
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-30004INTAKERESUME",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004INTAKERESUME | Story | Parent story | In Progress |
+| IOS-30065 | Sub-task | Already implemented piece | Resolved |
+| IOS-30066 | Sub-task | Remaining follow-up | To Do |
+""",
+        )
+
+        session, event, created, details = self.coordinator.prepare_task_session(
+            "IOS-30004INTAKERESUME",
+            workflow_profile="oneshot",
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertTrue(created)
+        self.assertEqual("task_prepared", event.event_type)
+        self.assertEqual("subtask_implementation_requested", details["followup_event_type"])
+        self.assertEqual("subtask_implementation_requested", session.current_stage)
+        self.assertEqual("active", session.status.value)
+        self.assertTrue(
+            any(
+                item.work_type == "subtask_implementation"
+                and "IOS-30066" in item.title
+                and item.status.value == "assigned"
+                for item in work_items
+            )
+        )
+        self.assertTrue(
+            any(
+                recorded_event.event_type == "subtask_resume_detected_on_intake"
+                for recorded_event in self.event_repository.list_for_session(session.id)
+            )
+        )
+
     def test_refresh_subtask_state_reconciles_remaining_queue_during_active_subtask_execution(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004REFRESHQUEUE",

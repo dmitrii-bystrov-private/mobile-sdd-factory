@@ -287,6 +287,15 @@ class CoordinatorService:
             "followup_event_type": None,
         }
         if snapshot_result.ok and readiness == "ready_for_execution":
+            if created:
+                resumed_followup = self._maybe_resume_subtasks_from_intake(
+                    session=session,
+                    source_event=event,
+                )
+                if resumed_followup is not None:
+                    details["followup_event_type"] = resumed_followup.event_type
+                    session = self._get_session_or_raise(session.id)
+                    return session, event, created, details
             if session.workflow_profile == "bug_full":
                 details["followup_event_type"] = self._enqueue_bug_analysis(
                     session=session,
@@ -305,6 +314,55 @@ class CoordinatorService:
                 ).event_type
             session = self._get_session_or_raise(session.id)
         return session, event, created, details
+
+    def _maybe_resume_subtasks_from_intake(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+    ) -> Event | None:
+        subtasks = self._read_snapshot_subtasks(session.task_key)
+        if subtasks is None:
+            return None
+        unresolved = unresolved_subtasks(subtasks)
+        completed = completed_subtasks(subtasks)
+        if not unresolved or not completed:
+            return None
+
+        implementation_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title=f"Resume subtask execution for {session.task_key}",
+            owner_role_id=None,
+            source_event_id=source_event.id,
+            priority=95,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="implementation_requested",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._append_event(
+            session_id=session.id,
+            event_type="subtask_resume_detected_on_intake",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "completed_count": len(completed),
+                "unresolved_count": len(unresolved),
+                "workflow_profile": session.workflow_profile,
+                "work_item_id": implementation_item.id,
+            },
+        )
+        _graph_event, followup_event = self._start_subtask_graph_flow(
+            session=session,
+            producer_type="coordinator",
+            subtasks=subtasks,
+            initial_work_item=implementation_item,
+            decomposition_artifact=None,
+        )
+        return followup_event
 
     def get_subtask_graph_summary(self, session_id: int) -> dict[str, object]:
         session = self.session_repository.get_by_id(session_id)
