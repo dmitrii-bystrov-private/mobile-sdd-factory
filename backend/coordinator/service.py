@@ -2298,9 +2298,10 @@ class CoordinatorService:
             payload={
                 "reason": "role_result_protocol_violation",
                 "role_name": role.role_name,
-                "summary": f"{role.role_name} wrote an invalid RESULT.json",
+                "summary": "RESULT.json is invalid or does not match the required terminal schema",
                 "details": error_message,
                 "needs_operator_input": False,
+                "resume_strategy": "protocol_recovery",
                 "current_stage": session.current_stage,
             },
         )

@@ -597,6 +597,7 @@ export function SessionDetail({
       <>
       <InteractiveStatePanel
         interactiveStateSummary={bundle.interactiveStateSummary}
+        runtimeStateSummary={bundle.runtimeStateSummary}
         onRefresh={onRefresh}
         sessionId={session.id}
       />
