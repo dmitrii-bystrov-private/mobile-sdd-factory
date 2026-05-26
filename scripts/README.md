@@ -27,6 +27,8 @@ Convenience entrypoint for the most common supported local developer actions:
 ```bash
 bash scripts/dev.sh help
 bash scripts/dev.sh ui
+bash scripts/dev.sh backend-start
+bash scripts/dev.sh backend-status
 bash scripts/dev.sh stack
 bash scripts/dev.sh test
 bash scripts/dev.sh test-live

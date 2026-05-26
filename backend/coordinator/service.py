@@ -2502,6 +2502,7 @@ class CoordinatorService:
                     **replayed_blocker,
                 },
             )
+            self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
             return None
         output_mismatch = self._stale_role_output_mismatch(
             session=session,
@@ -2522,6 +2523,7 @@ class CoordinatorService:
                     **output_mismatch,
                 },
             )
+            self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
             return None
         if self._should_ignore_stale_role_output(
             session=session,
@@ -2539,6 +2541,7 @@ class CoordinatorService:
                     "current_owner": session.current_owner,
                 },
             )
+            self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
             return None
         if output_type == "error":
             self._record_runtime_marker_artifact(
@@ -2754,6 +2757,43 @@ class CoordinatorService:
             session.id,
             active_item.id,
             "subtask_implementation_requested",
+        )
+
+    def _maybe_stop_stale_runtime_role(self, *, session: Session, role_name: str) -> None:
+        if role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE}:
+            return
+        role = self.role_repository.get_by_name(session.id, role_name)
+        if role is None or role.runtime_handle is None or role.status != RoleStatus.RUNNING:
+            return
+        if session.current_owner == role_name:
+            return
+        active_item = self._find_active_work_item_for_role(session.id, role.id)
+        if active_item is not None:
+            return
+        if self._has_pending_operator_continuation(
+            session_id=session.id,
+            role_name=role_name,
+            work_item_id=None,
+            stage_name=session.current_stage,
+        ):
+            return
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        self.session_backend.stop_role(runtime_role)
+        self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+        self._append_event(
+            session_id=session.id,
+            event_type="stale_runtime_role_stopped",
+            producer_type="coordinator",
+            payload={
+                "role_name": role_name,
+                "runtime_handle": role.runtime_handle,
+                "current_stage": session.current_stage,
+                "current_owner": session.current_owner,
+            },
         )
 
     def run_loop_once(self) -> tuple[Event | None, int, int]:

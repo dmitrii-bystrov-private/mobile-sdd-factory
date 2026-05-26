@@ -10,6 +10,10 @@ Usage: bash scripts/dev.sh <command>
 
 Supported convenience commands:
   ui             Start the local backend/UI stack and open the operator UI
+  backend-start  Start only the backend in the background
+  backend-stop   Stop the background backend
+  backend-status Show backend status
+  backend-logs   Tail backend logs
   ui-smoke       Run browser smoke for Workflow Runs, Settings, and Health
   stack          Start the local backend/UI stack without opening a browser
   test           Run the supported test rail
@@ -40,6 +44,18 @@ cd "$REPO_ROOT"
 case "$command_name" in
   ui)
     exec bash factory/open-local-ui.sh
+    ;;
+  backend-start)
+    exec bash scripts/backend.sh start
+    ;;
+  backend-stop)
+    exec bash scripts/backend.sh stop
+    ;;
+  backend-status)
+    exec bash scripts/backend.sh status
+    ;;
+  backend-logs)
+    exec bash scripts/backend.sh logs
     ;;
   ui-smoke)
     exec bash factory/acceptance/run-ui-surface-smoke.sh
