@@ -754,8 +754,11 @@ class TmuxSessionBackend(SessionBackend):
                 "submit_key": submit_key,
                 "submit_style": submit_style,
                 "runner": self.tmux_launcher_runners.get(role_id, ""),
+                "retry_count": "0",
+                "delivery_state": "submitted",
             }
         )
+        submit_trace = self.tmux_submit_traces[role_id][-1]
         if submit_style == "plain-enter-two-call":
             result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, payload_text, "")
             if result.returncode != 0:
@@ -769,6 +772,10 @@ class TmuxSessionBackend(SessionBackend):
                 result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "", "Enter")
                 if result.returncode != 0:
                     raise RuntimeError(result.stderr or result.stdout or "Failed to retry tmux launcher input submit")
+                submit_trace["retry_count"] = "1"
+                submit_trace["delivery_state"] = "retried"
+            else:
+                submit_trace["delivery_state"] = "confirmed"
             return
 
         result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "-l", payload_text)
@@ -783,6 +790,10 @@ class TmuxSessionBackend(SessionBackend):
             result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, submit_key)
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to retry tmux launcher input submit")
+            submit_trace["retry_count"] = "1"
+            submit_trace["delivery_state"] = "retried"
+        else:
+            submit_trace["delivery_state"] = "confirmed"
 
     def get_tmux_submit_traces(self, role_id: str) -> list[dict[str, str]]:
         return list(self.tmux_submit_traces.get(role_id, []))

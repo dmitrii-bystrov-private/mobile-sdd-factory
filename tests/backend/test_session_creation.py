@@ -260,6 +260,31 @@ class AutoRecoveryRecordingBackend(RecordingSessionBackend):
         super().stop_session(session)
 
 
+class DispatchTraceRecordingBackend(RecordingSessionBackend):
+    def __init__(self, *, fail_send: bool = False) -> None:
+        super().__init__()
+        self.fail_send = fail_send
+        self.tmux_submit_traces: dict[str, list[dict[str, str]]] = {}
+
+    def send_input(self, role: RuntimeRoleHandle, text: str) -> None:
+        if self.fail_send:
+            raise RuntimeError("simulated send failure")
+        super().send_input(role, text)
+        self.tmux_submit_traces.setdefault(role.role_id, []).append(
+            {
+                "source": "direct",
+                "submit_style": "plain-enter-two-call",
+                "submit_key": "Enter",
+                "runner": "codex",
+                "retry_count": "1",
+                "delivery_state": "retried",
+            }
+        )
+
+    def get_tmux_submit_traces(self, role_id: str) -> list[dict[str, str]]:
+        return list(self.tmux_submit_traces.get(role_id, []))
+
+
 class SessionCreationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -6321,6 +6346,42 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(implementer["is_current_owner"])
         self.assertEqual("live-idle", verifier["live_state"])
         self.assertFalse(verifier["is_current_owner"])
+
+    def test_dispatch_records_transport_retry_event(self) -> None:
+        backend = DispatchTraceRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004DISPATCHTRACE")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        events = self.event_repository.list_for_session(session.id)
+        retry_event = [item for item in events if item.event_type == "role_input_delivery_retried"][-1]
+        self.assertEqual("verification-coordinator", retry_event.payload["role_name"])
+        self.assertEqual(1, retry_event.payload["retry_count"])
+        self.assertEqual("retried", retry_event.payload["delivery_state"])
+
+    def test_dispatch_records_transport_stall_event_on_send_failure(self) -> None:
+        backend = DispatchTraceRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004DISPATCHSTALL")
+        backend.fail_send = True
+
+        with self.assertRaisesRegex(RuntimeError, "simulated send failure"):
+            self.coordinator.handle_operator_event(
+                session_id=session.id,
+                event_type="implementation_completed",
+                payload={"summary": "implementation done"},
+            )
+
+        events = self.event_repository.list_for_session(session.id)
+        stalled_event = next(item for item in events if item.event_type == "role_input_delivery_stalled")
+        self.assertEqual("verification-coordinator", stalled_event.payload["role_name"])
+        self.assertIn("simulated send failure", stalled_event.payload["error"])
 
     def test_collect_role_output_normalizes_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")

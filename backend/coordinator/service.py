@@ -9662,7 +9662,30 @@ class CoordinatorService:
             session_id=self._runtime_session_id_for_role(role, session),
             backend_name=role.runtime_backend,
         )
-        self.session_backend.send_input(runtime_role, prompt_text)
+        try:
+            self.session_backend.send_input(runtime_role, prompt_text)
+        except Exception as exc:
+            self._append_event(
+                session_id=session.id,
+                event_type="role_input_delivery_stalled",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "work_item_id": work_item.id,
+                    "stage_name": stage_name,
+                    "runtime_backend": role.runtime_backend,
+                    "runtime_handle": runtime_role.role_id,
+                    "error": str(exc),
+                },
+            )
+            raise
+        self._record_role_input_delivery_event(
+            session=session,
+            role=role,
+            runtime_role=runtime_role,
+            work_item=work_item,
+            stage_name=stage_name,
+        )
         updated_role = self.role_repository.increment_hydration_version(role.id)
         self.artifact_repository.create(
             session_id=session.id,
@@ -9702,6 +9725,46 @@ class CoordinatorService:
                 "dispatch_token": f"hv{updated_role.last_hydration_version}-wi{work_item.id}",
                 "prompt_mode": prompt_mode,
             },
+        )
+
+    def _record_role_input_delivery_event(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        runtime_role: RuntimeRoleHandle,
+        work_item: WorkItem,
+        stage_name: str,
+    ) -> None:
+        payload = {
+            "role_name": role.role_name,
+            "work_item_id": work_item.id,
+            "stage_name": stage_name,
+            "runtime_backend": role.runtime_backend,
+            "runtime_handle": runtime_role.role_id,
+        }
+        event_type = "role_input_delivery_confirmed"
+        if hasattr(self.session_backend, "get_tmux_submit_traces"):
+            traces = self.session_backend.get_tmux_submit_traces(runtime_role.role_id)
+            if traces:
+                latest = traces[-1]
+                payload.update(
+                    {
+                        "submission_source": latest.get("source"),
+                        "submit_style": latest.get("submit_style"),
+                        "submit_key": latest.get("submit_key"),
+                        "runner": latest.get("runner"),
+                        "retry_count": int(latest.get("retry_count", "0") or "0"),
+                        "delivery_state": latest.get("delivery_state"),
+                    }
+                )
+                if payload["retry_count"] > 0:
+                    event_type = "role_input_delivery_retried"
+        self._append_event(
+            session_id=session.id,
+            event_type=event_type,
+            producer_type="coordinator",
+            payload=payload,
         )
 
     def _runtime_session_id_for_role(self, role: Role, session: Session) -> str:
