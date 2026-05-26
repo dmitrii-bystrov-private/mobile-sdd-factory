@@ -23,6 +23,21 @@ need_cmd() {
   fi
 }
 
+need_file_exec() {
+  if [[ ! -x "$1" ]]; then
+    echo "Missing required executable: $1" >&2
+    exit 1
+  fi
+}
+
+clear_stale_pid() {
+  local pid
+  pid="$(backend_pid || true)"
+  if [[ -n "${pid}" ]] && ! pid_is_running "${pid}"; then
+    rm -f "${PID_FILE}"
+  fi
+}
+
 backend_pid() {
   if [[ -f "${PID_FILE}" ]]; then
     cat "${PID_FILE}"
@@ -48,6 +63,7 @@ wait_http() {
 
 start_backend() {
   mkdir -p "${RUNTIME_DIR}"
+  clear_stale_pid
   local pid
   pid="$(backend_pid || true)"
   if [[ -n "${pid}" ]] && pid_is_running "${pid}"; then
@@ -57,12 +73,24 @@ start_backend() {
   : >"${LOG_FILE}"
   (
     cd "${REPO_ROOT}"
-    nohup ./.venv/bin/uvicorn backend.api.app:create_app --factory --host "${BACKEND_HOST}" --port "${BACKEND_PORT}" \
+    nohup ./.venv/bin/python -m uvicorn backend.api.app:create_app --factory --host "${BACKEND_HOST}" --port "${BACKEND_PORT}" \
       >>"${LOG_FILE}" 2>&1 < /dev/null &
     echo $! > "${PID_FILE}"
   )
+  pid="$(backend_pid || true)"
   if ! wait_http 30; then
     echo "Backend failed to start; log follows:" >&2
+    if [[ -n "${pid}" ]] && pid_is_running "${pid}"; then
+      kill "${pid}" >/dev/null 2>&1 || true
+    fi
+    rm -f "${PID_FILE}"
+    cat "${LOG_FILE}" >&2 || true
+    exit 1
+  fi
+  sleep 2
+  if [[ -z "${pid}" ]] || ! pid_is_running "${pid}"; then
+    echo "Backend died shortly after startup; log follows:" >&2
+    rm -f "${PID_FILE}"
     cat "${LOG_FILE}" >&2 || true
     exit 1
   fi
@@ -70,6 +98,7 @@ start_backend() {
 }
 
 stop_backend() {
+  clear_stale_pid
   local pid
   pid="$(backend_pid || true)"
   if [[ -z "${pid}" ]]; then
@@ -93,6 +122,7 @@ stop_backend() {
 }
 
 status_backend() {
+  clear_stale_pid
   local pid
   pid="$(backend_pid || true)"
   if [[ -n "${pid}" ]] && pid_is_running "${pid}"; then
@@ -116,6 +146,7 @@ show_logs() {
 }
 
 need_cmd curl
+need_file_exec "${REPO_ROOT}/.venv/bin/python"
 
 case "${1:-}" in
   start)
