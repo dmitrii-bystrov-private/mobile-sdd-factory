@@ -4624,7 +4624,7 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
-        active_item = self._find_active_primary_coding_work_item(session)
+        active_item = self._coding_work_item_from_completion_event(session, source_event)
         if active_item is None or active_item.work_type != "subtask_implementation":
             raise IntakeError("No active subtask implementation work item found for the session")
 

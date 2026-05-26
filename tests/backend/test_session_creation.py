@@ -5319,6 +5319,59 @@ class SessionCreationTests(unittest.TestCase):
             any(item.id == stale_item.id and item.status == WorkItemStatus.ASSIGNED for item in work_items)
         )
 
+    def test_subtask_completed_uses_payload_work_item_id_over_stale_assigned_item(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004SUBTASKPAYLOAD",
+            workflow_profile="story_full",
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        target_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-39991: Target subtask",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        stale_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-39992: Stale subtask",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        broken_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+
+        updated_session, followup_event = self.coordinator._handle_subtask_completed(
+            broken_session,
+            self.event_repository.append(
+                session_id=session.id,
+                event_type="subtask_completed",
+                producer_type="role_output",
+                producer_id=IMPLEMENTER_ROLE,
+                payload={
+                    "work_item_id": target_item.id,
+                    "subtask_key": "IOS-39991",
+                    "summary": "subtask done",
+                },
+            ),
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual(VERIFICATION_COORDINATOR_ROLE, updated_session.current_owner)
+        self.assertTrue(
+            any(item.id == target_item.id and item.status == WorkItemStatus.COMPLETED for item in work_items)
+        )
+        self.assertTrue(
+            any(item.id == stale_item.id and item.status == WorkItemStatus.ASSIGNED for item in work_items)
+        )
+
     def test_bug_full_verification_failed_routes_back_to_bug_fixer_with_fix_only_mode(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004BUG",
