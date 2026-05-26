@@ -25,8 +25,8 @@ try:
     from backend.api.routes_events import inject_event, list_events
     from backend.api.routes_work_items import list_work_items
     from backend.api.schemas import InjectEventRequest
-    from backend.api.routes_roles import submit_role_output
-    from backend.api.schemas import CollectRoleOutputRequest, RoleOutputRequest
+    from backend.api.routes_roles import submit_role_output, submit_role_result
+    from backend.api.schemas import CollectRoleOutputRequest, RoleOutputRequest, SubmitRoleResultRequest
     from backend.api.routes_artifacts import get_artifact, list_artifacts
     from backend.api.routes_roles import collect_role_output
     from backend.api.routes_operator import poll_session_output
@@ -2290,6 +2290,37 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("role_output_collected", response.event_type)
         self.assertEqual("verification_requested", response.session.current_stage)
         self.assertFalse(result_path.exists())
+
+    def test_submit_role_result_route_accepts_ingress_document(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008C"),
+            dependencies=self.dependencies,
+        )
+        active_item = next(
+            item
+            for item in self.dependencies.work_item_repository.list_for_session(prepare_response.session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
+
+        response = submit_role_result(
+            SubmitRoleResultRequest(
+                output_type="completed",
+                payload={"work_item_id": active_item.id, "summary": "done from ingress"},
+            ),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.accepted)
+        self.assertFalse(response.ignored)
+        self.assertEqual("role_output_collected", response.event_type)
+        self.assertEqual("implementation_completed", response.mapped_event_type)
+        self.assertEqual("verification_requested", response.followup_event_type)
+        self.assertEqual("verification_requested", response.session.current_stage)
+        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts_response.items))
 
     def test_poll_session_output_route_collects_all_role_chunks(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

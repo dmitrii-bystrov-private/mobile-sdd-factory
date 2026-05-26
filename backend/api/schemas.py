@@ -291,6 +291,20 @@ class RoleOutputResponse(BaseModel):
     session: SessionResponse
 
 
+class SubmitRoleResultRequest(BaseModel):
+    output_type: str
+    payload: dict = {}
+
+
+class SubmitRoleResultResponse(BaseModel):
+    accepted: bool
+    ignored: bool = False
+    event_type: str
+    mapped_event_type: str | None = None
+    followup_event_type: str | None = None
+    session: SessionResponse
+
+
 class CollectRoleOutputRequest(BaseModel):
     session_id: int
     role_name: str

@@ -4839,6 +4839,41 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(result_path.exists())
         self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
 
+    def test_submit_role_result_document_accepts_verification_failed_result(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERINGRESS")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "verification" and item.status.value == "assigned"
+        )
+        updated_session, event, mapped_event_type, followup_event_type, ignored = (
+            self.coordinator.submit_role_result_document(
+                document={
+                    "output_type": "completed",
+                    "payload": {
+                        "work_item_id": active_item.id,
+                        "result": "failed",
+                        "failures": ["build-for-testing failed"],
+                    },
+                }
+            )
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("verification_failed", mapped_event_type)
+        self.assertEqual("verification_correction_requested", followup_event_type)
+        self.assertFalse(ignored)
+        self.assertEqual("verification_correction_requested", updated_session.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
+
     def test_collect_role_output_escalates_verification_completed_result_without_explicit_result(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERNORESULT")
         self.coordinator.handle_operator_event(

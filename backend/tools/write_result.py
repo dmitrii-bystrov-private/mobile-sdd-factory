@@ -101,7 +101,7 @@ def _load_database() -> Database:
     return Database(load_config().database_path)
 
 
-def _resolve_submission_context(
+def resolve_submission_context(
     *,
     work_item_id: int,
 ) -> SubmissionContext:
@@ -327,7 +327,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        context = _resolve_submission_context(
+        context = resolve_submission_context(
             work_item_id=args.work_item_id,
         )
         document = build_result_document(args, context.role_name)
@@ -343,5 +343,6 @@ __all__ = [
     "build_parser",
     "build_result_document",
     "main",
+    "resolve_submission_context",
     "write_result_file",
 ]

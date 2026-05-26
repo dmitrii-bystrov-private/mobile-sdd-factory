@@ -12,6 +12,8 @@ from backend.api.schemas import (
     RoleOutputResponse,
     RoleResponse,
     RolesResponse,
+    SubmitRoleResultRequest,
+    SubmitRoleResultResponse,
 )
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
@@ -85,4 +87,31 @@ def collect_role_output(
         session=to_session_response(session),
         chunk_count=chunk_count,
         event_type=event.event_type if event else None,
+    )
+
+
+@router.post("/submit-result", response_model=SubmitRoleResultResponse, include_in_schema=False)
+def submit_role_result(
+    payload: SubmitRoleResultRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> SubmitRoleResultResponse:
+    try:
+        session, event, mapped_event_type, followup_event_type, ignored = (
+            dependencies.coordinator_service.submit_role_result_document(
+                document={
+                    "output_type": payload.output_type,
+                    "payload": payload.payload,
+                }
+            )
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return SubmitRoleResultResponse(
+        accepted=True,
+        ignored=ignored,
+        event_type=event.event_type,
+        mapped_event_type=mapped_event_type,
+        followup_event_type=followup_event_type,
+        session=to_session_response(session),
     )

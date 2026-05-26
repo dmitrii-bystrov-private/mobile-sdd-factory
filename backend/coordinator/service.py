@@ -2247,6 +2247,23 @@ class CoordinatorService:
             if invalid_result_detected:
                 raise IntakeError("RESULT.json is invalid or does not match the required terminal schema")
             return None
+        self._materialize_role_result_artifact(
+            session=session,
+            role=role,
+            parsed_payload=parsed_payload,
+            source_path=str(result_path),
+        )
+        result_path.unlink(missing_ok=True)
+        return output_type, output_payload
+
+    def _materialize_role_result_artifact(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        parsed_payload: dict[str, object],
+        source_path: str,
+    ) -> None:
         artifact_path = write_text_artifact(
             self.artifacts_root,
             session.task_key,
@@ -2263,11 +2280,81 @@ class CoordinatorService:
             metadata={
                 "role_name": role.role_name,
                 "current_stage": session.current_stage,
-                "source_path": str(result_path),
+                "source_path": source_path,
             },
         )
-        result_path.unlink(missing_ok=True)
-        return output_type, output_payload
+
+    def submit_role_result_document(
+        self,
+        *,
+        document: dict[str, object],
+    ) -> tuple[Session, Event, str | None, str | None, bool]:
+        output_type = document.get("output_type")
+        output_payload = document.get("payload")
+        if not isinstance(output_type, str) or not isinstance(output_payload, dict):
+            raise IntakeError("submitted result must contain string output_type and object payload")
+        work_item_id = output_payload.get("work_item_id")
+        if not isinstance(work_item_id, int):
+            raise IntakeError("submitted result payload must include integer work_item_id")
+        work_item = self.work_item_repository.get_by_id(work_item_id)
+        if work_item is None:
+            raise IntakeError(f"unknown work_item_id: {work_item_id}")
+        session = self._get_session_or_raise(work_item.session_id)
+        if work_item.owner_role_id is None:
+            raise IntakeError(f"work item {work_item_id} has no owner role")
+        role = self.role_repository.get_by_id(work_item.owner_role_id)
+        if role is None:
+            raise IntakeError(f"work item {work_item_id} references a missing owner role")
+
+        self._materialize_role_result_artifact(
+            session=session,
+            role=role,
+            parsed_payload={"output_type": output_type, "payload": output_payload},
+            source_path="coordinator_ingress",
+        )
+
+        mapped_event_type: str | None = None
+        followup_event_type: str | None = None
+        ignored = False
+        try:
+            handled_session = self._handle_collected_role_output(
+                session=session,
+                role=role,
+                output_type=output_type,
+                output_payload=output_payload,
+            )
+        except IntakeError as exc:
+            session = self._handle_role_result_protocol_violation(
+                session=session,
+                role=role,
+                error_message=str(exc),
+            )
+        else:
+            mapped_event_type = self._map_role_output_to_event_type(
+                session=session,
+                role_name=role.role_name,
+                output_type=output_type,
+                payload=output_payload,
+            )
+            latest_event = self.event_repository.list_for_session(session.id)[-1]
+            if handled_session is not None:
+                session = handled_session
+                if latest_event.event_type != mapped_event_type:
+                    followup_event_type = latest_event.event_type
+            else:
+                ignored = True
+
+        event = self._append_event(
+            session_id=session.id,
+            event_type="role_output_collected",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "chunk_count": 1,
+                "source": "ingress",
+            },
+        )
+        return session, event, mapped_event_type, followup_event_type, ignored
 
     def _parse_role_result_json(self, raw_text: str) -> dict[str, object] | None:
         try:
