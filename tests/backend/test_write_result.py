@@ -88,24 +88,6 @@ class WriteResultScriptTests(unittest.TestCase):
                 payload,
             )
 
-    def test_legacy_role_and_output_arguments_remain_compatible(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-scout")
-            result = self._run(
-                env,
-                "code-scout",
-                "--output",
-                str(output_path),
-                "--work-item-id",
-                str(work_item_id),
-                "--result",
-                "clean",
-            )
-
-            self.assertEqual(0, result.returncode, result.stderr)
-            payload = json.loads(output_path.read_text(encoding="utf-8"))
-            self.assertEqual("clean", payload["payload"]["result"])
-
     def test_code_scout_findings_require_count_and_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env, _, work_item_id = self._create_context(temp_dir, role_name="code-scout")

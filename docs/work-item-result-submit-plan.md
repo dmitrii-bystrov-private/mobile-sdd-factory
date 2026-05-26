@@ -24,8 +24,8 @@ The role should submit only the outcome fields it actually knows from the curren
 6. Keep strict backend intake and schema validation fail-closed.
 7. Add helper tests for `work_item_id` resolution and invalid context cases.
 8. Roll the short submit form out to `verification-coordinator`, `code-scout`, and `code-reviewer` first.
-9. Keep the old helper invocation only as a temporary compatibility layer.
-10. After the migration is stable, remove the old `--output`/role-oriented helper contract.
+9. Verify live roles submit successfully with the short `--work-item-id` form.
+10. If live rollout stays stable, keep the submit contract limited to `work_item_id` plus outcome fields.
 
 ## Non-Goals For This Step
 

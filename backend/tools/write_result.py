@@ -63,8 +63,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Write deterministic RESULT.json files for routed role outcomes."
     )
-    parser.add_argument("legacy_role", nargs="?", choices=sorted(SUPPORTED_ROLES))
-    parser.add_argument("--output")
     parser.add_argument("--work-item-id", required=True, type=_positive_int)
     parser.add_argument("--output-type", default="completed", choices=sorted(OUTPUT_TYPE_CHOICES))
     parser.add_argument("--result")
@@ -106,8 +104,6 @@ def _load_database() -> Database:
 def _resolve_submission_context(
     *,
     work_item_id: int,
-    explicit_role: str | None,
-    explicit_output: str | None,
 ) -> SubmissionContext:
     database = _load_database()
     work_items = WorkItemRepository(database)
@@ -130,10 +126,6 @@ def _resolve_submission_context(
             f"work item {work_item_id} references a missing owner role; cannot resolve RESULT.json target"
         )
 
-    if explicit_role and explicit_role != role.role_name:
-        raise ResultWriterError(
-            f"work item {work_item_id} belongs to role {role.role_name}, not {explicit_role}"
-        )
     runtime_role_name = str(os.environ.get("SDD_FACTORY_ROLE_NAME", "")).strip()
     if runtime_role_name and runtime_role_name != role.role_name:
         raise ResultWriterError(
@@ -147,10 +139,6 @@ def _resolve_submission_context(
         config = load_config()
         workdir_root = config.workdir_root
     output_path = workdir_root / session.task_key / "runtime" / "role-workspaces" / role.role_name / "RESULT.json"
-    if explicit_output is not None and Path(explicit_output) != output_path:
-        raise ResultWriterError(
-            f"work item {work_item_id} resolves to {output_path}, not explicit output {explicit_output}"
-        )
     return SubmissionContext(role_name=role.role_name, output_path=output_path, task_key=session.task_key)
 
 
@@ -341,8 +329,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         context = _resolve_submission_context(
             work_item_id=args.work_item_id,
-            explicit_role=args.legacy_role,
-            explicit_output=args.output,
         )
         document = build_result_document(args, context.role_name)
         write_result_file(context.output_path, document)
