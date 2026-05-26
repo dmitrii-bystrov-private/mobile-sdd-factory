@@ -10,6 +10,7 @@ from backend.api.sse import SessionEventBus
 from backend import session_policy as session_policy_module
 from backend.coordinator.intake import IntakeError
 from backend.coordinator.service import CoordinatorService
+from backend.coordinator.subtasks import SnapshotSubtask
 from backend.models.enums import RoleStatus, SessionStatus
 from backend.models.work_item import WorkItemStatus
 from backend.roles.contracts import (
@@ -4996,6 +4997,88 @@ class SessionCreationTests(unittest.TestCase):
         escalations = [item for item in events if item.event_type == "session_escalated_to_operator"]
         self.assertTrue(escalations)
         self.assertEqual("role_result_protocol_violation", escalations[-1].payload.get("reason"))
+
+    def test_enqueue_verification_respawns_stopped_verification_role(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERSTOP")
+        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        assert verifier_role is not None
+        self.role_repository.update_runtime(
+            verifier_role.id,
+            runtime_backend=verifier_role.runtime_backend,
+            runtime_handle=None,
+            status=RoleStatus.STOPPED,
+        )
+
+        updated_session, _ = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        refreshed_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        assert refreshed_role is not None
+        self.assertEqual(RoleStatus.RUNNING, refreshed_role.status)
+        self.assertIsNotNone(refreshed_role.runtime_handle)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual(VERIFICATION_COORDINATOR_ROLE, updated_session.current_owner)
+
+    def test_subtask_dispatch_respawns_stopped_implementer_role(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009RESPAWN",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        self.role_repository.update_runtime(
+            implementer_role.id,
+            runtime_backend=implementer_role.runtime_backend,
+            runtime_handle=None,
+            status=RoleStatus.STOPPED,
+        )
+        source_event = self.coordinator._append_event(  # type: ignore[attr-defined]
+            session_id=session.id,
+            event_type="jira_subtasks_refreshed",
+            producer_type="operator",
+            payload={"task_key": session.task_key},
+        )
+        initial_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_creation",
+            title=f"Subtask creation for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            source_event_id=source_event.id,
+            priority=80,
+        )
+        followup_event = self.coordinator._enqueue_subtask_graph(  # type: ignore[attr-defined]
+            session=session,
+            source_event=source_event,
+            initial_work_item=initial_item,
+            subtasks=[
+                SnapshotSubtask(
+                    key="IOS-30100",
+                    issue_type="Sub-task",
+                    title="Already done chunk",
+                    status="Ready for test",
+                ),
+                SnapshotSubtask(
+                    key="IOS-30101",
+                    issue_type="Sub-task",
+                    title="Active chunk",
+                    status="In Progress",
+                ),
+            ],
+        )
+        refreshed_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        updated_session = self.session_repository.get_by_id(session.id)
+        assert refreshed_role is not None
+        assert updated_session is not None
+
+        self.assertEqual(RoleStatus.RUNNING, refreshed_role.status)
+        self.assertIsNotNone(refreshed_role.runtime_handle)
+        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
+        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
 
     def test_collect_role_output_escalates_subtask_completion_without_subtask_key(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

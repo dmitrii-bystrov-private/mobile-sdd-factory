@@ -7424,6 +7424,25 @@ class CoordinatorService:
             status=RoleStatus.RUNNING,
         )
 
+    def _ensure_dispatchable_role(self, session: Session, role: Role) -> Role:
+        if role.status == RoleStatus.RUNNING and role.runtime_handle is not None:
+            return role
+
+        runtime_session = self._runtime_session_handle_for_session(session)
+        runtime_role = self._spawn_role_runtime(
+            runtime_session=runtime_session,
+            task_key=session.task_key,
+            role_name=role.role_name,
+            role_config=(session.role_config or {}).get(role.role_name),
+            resume_mode=self._preferred_runtime_resume_mode((session.role_config or {}).get(role.role_name)),
+        )
+        return self.role_repository.update_runtime(
+            role.id,
+            runtime_backend=runtime_role.backend_name,
+            runtime_handle=runtime_role.role_id,
+            status=RoleStatus.RUNNING,
+        )
+
     def _stop_on_demand_role(self, session: Session, role_name: str) -> None:
         if role_name in PERSISTENT_SESSION_ROLES:
             return
@@ -9573,6 +9592,7 @@ class CoordinatorService:
             merged_hydration.update(extra_hydration)
         merged_hydration = self._sanitize_dispatch_hydration(merged_hydration)
         prompt_mode = self._prompt_mode_for_dispatch(session, role)
+        role = self._ensure_dispatchable_role(session, role)
         workspace = self.role_workspace_manager.ensure_role_workspace(session.task_key, role.role_name)
         next_hydration_version = role.last_hydration_version + 1
         merged_hydration["result_path"] = str(workspace.directory / "RESULT.json")
