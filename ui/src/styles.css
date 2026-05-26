@@ -1070,6 +1070,12 @@ input {
   line-height: 1.6;
 }
 
+.interactive-recovery-toolbar {
+  margin-top: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+
 .interactive-question-text-prewrap {
   white-space: pre-wrap;
 }
