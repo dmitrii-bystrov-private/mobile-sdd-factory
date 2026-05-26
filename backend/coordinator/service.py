@@ -2625,10 +2625,8 @@ class CoordinatorService:
             output_payload=output_payload,
         )
         if output_mismatch is not None:
-            self._append_event(
+            self._append_stale_role_output_ignored_once(
                 session_id=session.id,
-                event_type="stale_role_output_ignored",
-                producer_type="coordinator",
                 payload={
                     "role_name": role.role_name,
                     "output_type": output_type,
@@ -2644,10 +2642,8 @@ class CoordinatorService:
             role_name=role.role_name,
             output_type=output_type,
         ):
-            self._append_event(
+            self._append_stale_role_output_ignored_once(
                 session_id=session.id,
-                event_type="stale_role_output_ignored",
-                producer_type="coordinator",
                 payload={
                     "role_name": role.role_name,
                     "output_type": output_type,
@@ -2862,6 +2858,22 @@ class CoordinatorService:
     @staticmethod
     def _normalized_json_signature(payload: dict) -> str:
         return json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+    def _append_stale_role_output_ignored_once(
+        self,
+        *,
+        session_id: int,
+        payload: dict[str, object],
+    ) -> None:
+        latest = self._latest_event_by_type(session_id, {"stale_role_output_ignored"})
+        if latest is not None and self._normalized_json_signature(latest.payload) == self._normalized_json_signature(payload):
+            return
+        self._append_event(
+            session_id=session_id,
+            event_type="stale_role_output_ignored",
+            producer_type="coordinator",
+            payload=payload,
+        )
 
     def _active_subtask_completion_dispatch_missing(self, session: Session) -> bool:
         active_item = self._find_active_primary_coding_work_item(session)
@@ -6182,10 +6194,8 @@ class CoordinatorService:
                             output_payload=nested_payload,
                         )
                         if output_mismatch is not None:
-                            self._append_event(
+                            self._append_stale_role_output_ignored_once(
                                 session_id=session.id,
-                                event_type="stale_role_output_ignored",
-                                producer_type="coordinator",
                                 payload={
                                     "role_name": role.role_name,
                                     "output_type": output_type,
@@ -6194,16 +6204,15 @@ class CoordinatorService:
                                     **output_mismatch,
                                 },
                             )
+                            self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
                             continue
                     if self._should_ignore_stale_role_output(
                         session=session,
                         role_name=role.role_name,
                         output_type=output_type,
                     ):
-                        self._append_event(
+                        self._append_stale_role_output_ignored_once(
                             session_id=session.id,
-                            event_type="stale_role_output_ignored",
-                            producer_type="coordinator",
                             payload={
                                 "role_name": role.role_name,
                                 "output_type": output_type,
@@ -6211,6 +6220,7 @@ class CoordinatorService:
                                 "current_owner": session.current_owner,
                             },
                         )
+                        self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
                         continue
                     self._maybe_request_missing_result_file_recreation(
                         session=session,
@@ -6234,10 +6244,8 @@ class CoordinatorService:
                         role_name=role.role_name,
                         output_type="error",
                     ):
-                        self._append_event(
+                        self._append_stale_role_output_ignored_once(
                             session_id=session.id,
-                            event_type="stale_role_output_ignored",
-                            producer_type="coordinator",
                             payload={
                                 "role_name": role.role_name,
                                 "output_type": "error",
@@ -6245,6 +6253,7 @@ class CoordinatorService:
                                 "current_owner": session.current_owner,
                             },
                         )
+                        self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
                         continue
                     self._record_runtime_marker_artifact(
                         session=session,

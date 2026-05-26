@@ -7369,6 +7369,39 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, sum(1 for item in events if item.event_type == "implementation_completed"))
         self.assertTrue(any(item.artifact_type == "runtime_output" for item in artifacts))
 
+    def test_poll_session_output_deduplicates_repeated_stale_implementer_runtime_marker(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009G2",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30009G2")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"late stale implementer result"}}',
+        )
+        self.coordinator.poll_session_output(session_id=session.id)
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"late stale implementer result"}}',
+        )
+        self.coordinator.poll_session_output(session_id=session.id)
+
+        events = self.event_repository.list_for_session(session.id)
+        stale_events = [item for item in events if item.event_type == "stale_role_output_ignored"]
+
+        self.assertEqual(1, len(stale_events))
+
     def test_poll_session_output_ignores_stale_code_scout_runtime_marker_after_handoff_to_verifier(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009H",
@@ -7411,6 +7444,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
         self.assertEqual(1, sum(1 for item in events if item.event_type == "boy_scout_completed"))
         self.assertTrue(any(item.artifact_type == "runtime_output" for item in artifacts))
+        refreshed_role = self.role_repository.get_by_name(session.id, "code-scout")
+        assert refreshed_role is not None
+        self.assertEqual("stopped", refreshed_role.status.value)
 
     def test_collect_role_output_records_progress_marker_without_stage_transition(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30010")
