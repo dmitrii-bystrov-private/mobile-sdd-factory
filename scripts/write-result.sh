@@ -65,6 +65,9 @@ if [[ "${submit_status}" -ne 10 ]]; then
   exit "${submit_status}"
 fi
 
+echo "SDD_RESULT_INGRESS_FALLBACK: transport failure; falling back to file-based RESULT.json write" >&2
+export SDD_RESULT_SUBMISSION_PATH="file-fallback"
+
 if command -v python3 >/dev/null 2>&1; then
   exec python3 "${REPO_ROOT}/scripts/write-result.py" "$@"
 fi

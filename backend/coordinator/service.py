@@ -2252,6 +2252,7 @@ class CoordinatorService:
             role=role,
             parsed_payload=parsed_payload,
             source_path=str(result_path),
+            submission_path="file",
         )
         result_path.unlink(missing_ok=True)
         return output_type, output_payload
@@ -2263,6 +2264,7 @@ class CoordinatorService:
         role: Role,
         parsed_payload: dict[str, object],
         source_path: str,
+        submission_path: str | None = None,
     ) -> None:
         artifact_path = write_text_artifact(
             self.artifacts_root,
@@ -2281,6 +2283,7 @@ class CoordinatorService:
                 "role_name": role.role_name,
                 "current_stage": session.current_stage,
                 "source_path": source_path,
+                "submission_path": submission_path or ("ingress" if source_path == "coordinator_ingress" else "file"),
             },
         )
 
@@ -2311,6 +2314,18 @@ class CoordinatorService:
             role=role,
             parsed_payload={"output_type": output_type, "payload": output_payload},
             source_path="coordinator_ingress",
+            submission_path="ingress",
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="role_result_ingress_accepted",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": work_item_id,
+                "current_stage": session.current_stage,
+                "output_type": output_type,
+            },
         )
 
         mapped_event_type: str | None = None
@@ -2324,6 +2339,18 @@ class CoordinatorService:
                 output_payload=output_payload,
             )
         except IntakeError as exc:
+            self._append_event(
+                session_id=session.id,
+                event_type="role_result_ingress_rejected",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "work_item_id": work_item_id,
+                    "current_stage": session.current_stage,
+                    "output_type": output_type,
+                    "error": str(exc),
+                },
+            )
             session = self._handle_role_result_protocol_violation(
                 session=session,
                 role=role,
