@@ -3008,6 +3008,96 @@ class CoordinatorService:
                 f"Session {session_id} is not waiting for operator; current status is {session.status.value}"
             )
 
+        latest_blocker = self._latest_event_by_type(
+            session.id,
+            {"session_escalated_to_operator", "role_runtime_error_reported"},
+        )
+        if (
+            latest_blocker is not None
+            and latest_blocker.event_type == "session_escalated_to_operator"
+            and latest_blocker.payload.get("reason") == "role_result_protocol_violation"
+        ):
+            role_name = latest_blocker.payload.get("role_name")
+            if not isinstance(role_name, str) or not role_name.strip():
+                raise IntakeError(f"Session {session_id} is missing the blocked role for protocol recovery")
+            role = self.role_repository.get_by_name(session.id, role_name)
+            if role is None:
+                raise IntakeError(f"Blocked role {role_name} is missing for session {session_id}")
+            work_item = self._find_active_work_item_for_role(session.id, role.id)
+            if work_item is None:
+                raise IntakeError(f"Session {session_id} has no active work item for {role_name} protocol recovery")
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage=session.current_stage,
+                current_owner=role.role_name,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            retried_event = self._append_event(
+                session_id=session.id,
+                event_type="session_retried_by_operator",
+                producer_type="operator",
+                payload={
+                    "role_name": role.role_name,
+                    "retry_mode": "protocol_recovery",
+                    "retry_work_item_id": work_item.id,
+                    "current_stage": session.current_stage,
+                },
+            )
+            recovery_instruction = self._protocol_recovery_retry_instruction(session, work_item)
+            try:
+                dispatch_event = self._dispatch_role_work(
+                    session=session,
+                    role=role,
+                    work_item=work_item,
+                    stage_name=session.current_stage,
+                    instruction=recovery_instruction,
+                )
+            except RuntimeError:
+                runtime_session = self._runtime_session_handle_for_session(session)
+                if role.runtime_handle is not None and role.status == RoleStatus.RUNNING:
+                    self.session_backend.stop_role(
+                        RuntimeRoleHandle(
+                            role_id=role.runtime_handle,
+                            session_id=runtime_session.session_id,
+                            backend_name=role.runtime_backend,
+                        )
+                    )
+                    self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+                runtime_role = self._spawn_role_runtime(
+                    runtime_session=runtime_session,
+                    task_key=session.task_key,
+                    role_name=role.role_name,
+                    role_config=(session.role_config or {}).get(role.role_name),
+                    resume_mode=self._preferred_runtime_resume_mode((session.role_config or {}).get(role.role_name)),
+                )
+                role = self.role_repository.update_runtime(
+                    role.id,
+                    runtime_backend=runtime_role.backend_name,
+                    runtime_handle=runtime_role.role_id,
+                    status=RoleStatus.RUNNING,
+                )
+                self._append_event(
+                    session_id=session.id,
+                    event_type="runtime_role_restarted_by_operator",
+                    producer_type="operator",
+                    payload={
+                        "role_name": role.role_name,
+                        "runtime_handle": role.runtime_handle,
+                        "session_reactivated": True,
+                        "refresh_runtime_config": False,
+                        "role_config": (session.role_config or {}).get(role.role_name, {}),
+                        "restart_reason": "protocol_recovery_retry_fallback",
+                    },
+                )
+                dispatch_event = self._dispatch_role_work(
+                    session=session,
+                    role=role,
+                    work_item=work_item,
+                    stage_name=session.current_stage,
+                    instruction=recovery_instruction,
+                )
+            return session, retried_event, dispatch_event
+
         previous_work_item = self._find_operator_pending_work_item(session.id)
         if previous_work_item is None:
             raise IntakeError(f"Session {session_id} has no operator-pending work item to retry")
@@ -3065,6 +3155,13 @@ class CoordinatorService:
             instruction=instruction,
         )
         return session, retried_event, dispatch_event
+
+    def _protocol_recovery_retry_instruction(self, session: Session, work_item: WorkItem) -> str:
+        return (
+            f"Do not rerun the substantive {work_item.work_type.replace('_', ' ')} work for {session.task_key}. "
+            "Rewrite RESULT.json only for the current routed work item using the deterministic writer helper. "
+            "Reuse the work you already completed, preserve the same outcome, and stop after the terminal result file is valid."
+        )
 
     def redirect_session(
         self,

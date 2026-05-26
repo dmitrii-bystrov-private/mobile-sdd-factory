@@ -9372,6 +9372,46 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn(followup_event.event_type, {"jira_subtasks_created", "subtask_implementation_requested"})
         self.assertIn(retried_session.current_stage, {"subtask_creation_requested", "subtask_implementation_requested"})
 
+    def test_retry_session_retries_protocol_violation_with_same_work_item(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022PROTO")
+        scout_role = self.role_repository.create(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+            runtime_backend="recording",
+            runtime_handle="recording:code-scout",
+        )
+        active_scout_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="boy_scout",
+            title=f"Boy Scout pass for {session.task_key}",
+            owner_role_id=scout_role.id,
+            source_event_id=None,
+            priority=91,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="boy_scout_requested",
+            current_owner=CODE_SCOUT_ROLE,
+        )
+        blocked_session = self.coordinator._handle_role_result_protocol_violation(
+            session=session,
+            role=scout_role,
+            error_message="RESULT.json is invalid or does not match the required terminal schema",
+        )
+        self.assertEqual("waiting_for_operator", blocked_session.status.value)
+
+        retried_session, retried_event, dispatch_event = self.coordinator.retry_session(session.id)
+        sent_inputs = self.session_backend.get_sent_inputs(scout_role.runtime_handle)
+
+        self.assertEqual("active", retried_session.status.value)
+        self.assertEqual(CODE_SCOUT_ROLE, retried_session.current_owner)
+        self.assertEqual("session_retried_by_operator", retried_event.event_type)
+        self.assertEqual("protocol_recovery", retried_event.payload.get("retry_mode"))
+        self.assertEqual("role_input_dispatched", dispatch_event.event_type)
+        self.assertEqual(active_scout_item.id, dispatch_event.payload.get("work_item_id"))
+        self.assertIn("Rewrite RESULT.json only", sent_inputs[-1])
+
     def test_redirect_session_reroutes_escalated_work_item_to_allowed_role(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30023")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
