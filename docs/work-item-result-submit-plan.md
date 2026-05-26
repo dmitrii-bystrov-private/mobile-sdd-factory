@@ -17,7 +17,7 @@ The role should submit only the outcome fields it actually knows from the curren
 ## Rollout Steps
 
 1. Make `work_item_id` the primary terminal submit key.
-2. Teach `write-result.py` to resolve session, role, stage, and canonical result path from `work_item_id`.
+2. Teach the result submit helper to resolve session, role, stage, and canonical result path from `work_item_id`.
 3. Remove `--output` from the primary prompt contract.
 4. Remove explicit role names from the primary prompt contract when they can be derived from `work_item_id`.
 5. Update prompts and AGENTS/workspace rules to show the minimal helper invocation.

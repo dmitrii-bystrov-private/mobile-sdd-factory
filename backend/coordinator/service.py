@@ -9422,7 +9422,7 @@ class CoordinatorService:
         workspace = self.role_workspace_manager.ensure_role_workspace(session.task_key, role.role_name)
         next_hydration_version = role.last_hydration_version + 1
         merged_hydration["result_path"] = str(workspace.directory / "RESULT.json")
-        merged_hydration["result_writer_path"] = str(self._repo_root() / "scripts" / "write-result.py")
+        merged_hydration["result_writer_path"] = str(self._repo_root() / "scripts" / "write-result.sh")
         merged_hydration["hydration_version"] = next_hydration_version
         merged_hydration["dispatch_token"] = f"hv{next_hydration_version}-wi{work_item.id}"
         hydration = build_role_hydration(

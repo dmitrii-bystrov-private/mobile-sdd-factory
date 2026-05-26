@@ -44,7 +44,7 @@ You are a senior developer performing a self-review of a completed feature branc
 
 Produce the review result in the format below, then **write it to the path given in `Output:`** using the Write tool. Create parent directories if they do not exist.
 
-If the routed workspace also requires a terminal `RESULT.json`, prefer `python "$SDD_FACTORY_REPO_ROOT/scripts/write-result.py" --work-item-id "<hydrated work_item_id>" ...` instead of hand-writing JSON.
+If the routed workspace also requires a terminal `RESULT.json`, prefer `bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh" --work-item-id "<hydrated work_item_id>" ...` instead of hand-writing JSON.
 
 If no issues are found:
 ```

@@ -458,7 +458,7 @@ def build_role_agents_md(
             "- Treat this file as durable role context; treat routed handoff prompts as per-work instructions.",
             "- Paths written as `spec/...`, `review/...`, or `plan/...` refer to the task snapshot metadata root listed above, not to this role workspace current directory.",
             "- When hydration or the relevant-path list provides explicit absolute `*_path` values, use those exact paths directly instead of reconstructing task paths relative to the current directory.",
-            "- For terminal outcomes, call `python \"$SDD_FACTORY_REPO_ROOT/scripts/write-result.py\" --work-item-id <work_item_id> ...` instead of hand-writing JSON.",
+            "- For terminal outcomes, call `bash \"$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh\" --work-item-id <work_item_id> ...` instead of hand-writing JSON.",
             "- Do not choose the `RESULT.json` path yourself; the helper resolves the canonical terminal target from `work_item_id`.",
             "- When the routed hydration payload includes `work_item_id`, pass that same `work_item_id` into the helper unchanged. When it also includes `subtask_key`, pass that same `subtask_key` unchanged too.",
             "- You may emit `SDD_PROGRESS` for intermediate updates and `SDD_ERROR` when operator visibility is required.",

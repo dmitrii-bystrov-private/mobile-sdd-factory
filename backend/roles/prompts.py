@@ -169,9 +169,9 @@ def role_handoff_prompt(
     work_item_id = hydration_payload.get("work_item_id")
     work_item_id_text = str(work_item_id).strip() if work_item_id is not None else ""
     helper_example_prefix = (
-        f'python "{result_writer_path_text}" --work-item-id {work_item_id_text or "<work_item_id>"}'
+        f'bash "{result_writer_path_text}" --work-item-id {work_item_id_text or "<work_item_id>"}'
         if result_writer_path_text
-        else 'python "$SDD_FACTORY_REPO_ROOT/scripts/write-result.py" --work-item-id <work_item_id>'
+        else 'bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh" --work-item-id <work_item_id>'
     )
     if prompt_mode == "live_bootstrap":
         return (
@@ -207,9 +207,9 @@ def role_handoff_prompt(
         prefix = f"{base_role_prompt(role_name)}\n"
     helper_line = (
         (
-            f'- Submit the terminal result with the deterministic helper: `python "{result_writer_path_text}" --work-item-id {work_item_id_text} ...`.\n'
+            f'- Submit the terminal result with the deterministic helper: `bash "{result_writer_path_text}" --work-item-id {work_item_id_text} ...`.\n'
             if work_item_id_text
-            else f'- Submit the terminal result with the deterministic helper: `python "{result_writer_path_text}" --work-item-id <work_item_id> ...`.\n'
+            else f'- Submit the terminal result with the deterministic helper: `bash "{result_writer_path_text}" --work-item-id <work_item_id> ...`.\n'
         )
         if result_writer_path_text
         else ""
