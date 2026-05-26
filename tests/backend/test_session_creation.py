@@ -894,6 +894,87 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(summary["available"])
         self.assertFalse(summary["needs_operator_input"])
 
+    def test_story_planning_replayed_blocker_is_ignored_after_operator_reply(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004REQREPLAY",
+            workflow_profile="story_full",
+        )
+        requirements_role = self.role_repository.get_by_name(
+            session.id,
+            REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        self.assertIsNotNone(requirements_role)
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements",
+            title="Requirements clarification for IOS-30004REQREPLAY",
+            owner_role_id=requirements_role.id,
+            priority=10,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_requested",
+            current_owner=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        result_path = role_workspace / "RESULT.json"
+        blocked_document = build_result_document(
+            SimpleNamespace(
+                role=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+                output_type="completed",
+                output=str(result_path),
+                work_item_id=work_item.id,
+                summary="Requirements clarification needed",
+                details="Need one deviceId decision.",
+                next_step="Answer the open question.",
+                failure=[],
+                missing_input=[],
+                pending_decision=["Choose the deviceId enrollment behavior."],
+                blocker_question=["Should deviceId perform write-side enrollment?"],
+                needs_operator_input=True,
+            )
+        )
+        write_result_file(result_path, blocked_document)
+
+        waiting_session, _, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        self.assertEqual(1, chunk_count)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, waiting_session.status)
+
+        resumed_session, _ = self.coordinator.send_operator_runtime_input(
+            session_id=session.id,
+            text="Use read-only deviceId support for now.",
+        )
+        self.assertEqual(SessionStatus.ACTIVE, resumed_session.status)
+
+        write_result_file(result_path, blocked_document)
+        updated_session, _, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
+        self.assertEqual("requirements_requested", updated_session.current_stage)
+        self.assertFalse(summary["available"])
+        self.assertTrue(
+            any(
+                item.event_type == "stale_role_output_ignored"
+                and item.payload.get("reason") == "replayed_blocker_after_operator_reply"
+                for item in events
+            )
+        )
+
     def test_get_interactive_state_summary_hides_stale_blocker_when_session_is_active(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004ACTIVE",

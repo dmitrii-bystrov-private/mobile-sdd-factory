@@ -2483,6 +2483,26 @@ class CoordinatorService:
         output_type: str,
         output_payload: dict,
     ) -> Session | None:
+        replayed_blocker = self._replayed_blocked_output_after_operator_reply(
+            session=session,
+            role_name=role.role_name,
+            output_type=output_type,
+            output_payload=output_payload,
+        )
+        if replayed_blocker is not None:
+            self._append_event(
+                session_id=session.id,
+                event_type="stale_role_output_ignored",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "output_type": output_type,
+                    "current_stage": session.current_stage,
+                    "current_owner": session.current_owner,
+                    **replayed_blocker,
+                },
+            )
+            return None
         output_mismatch = self._stale_role_output_mismatch(
             session=session,
             role_name=role.role_name,
@@ -2649,6 +2669,82 @@ class CoordinatorService:
             "expected_subtask_key": expected_subtask_key,
             "payload_subtask_key": normalized_payload_subtask_key,
         }
+
+    def _replayed_blocked_output_after_operator_reply(
+        self,
+        *,
+        session: Session,
+        role_name: str,
+        output_type: str,
+        output_payload: dict,
+    ) -> dict[str, str | int | None] | None:
+        if role_name not in _STORY_PLANNING_ROLES:
+            return None
+        mapped_event_type = self._map_role_output_to_event_type(
+            session,
+            role_name,
+            output_type,
+            output_payload,
+        )
+        if mapped_event_type != "story_planning_blocked":
+            return None
+
+        role = self.role_repository.get_by_name(session.id, role_name)
+        active_work_item_id: int | None = None
+        if role is not None:
+            active_item = self._find_active_work_item_for_role(session.id, role.id)
+            if active_item is not None:
+                active_work_item_id = active_item.id
+        if not self._has_pending_operator_continuation(
+            session_id=session.id,
+            role_name=role_name,
+            work_item_id=active_work_item_id,
+            stage_name=session.current_stage,
+        ):
+            return None
+
+        latest_reply: Event | None = None
+        events = self.event_repository.list_for_session(session.id)
+        for event in reversed(events):
+            if event.event_type != "operator_runtime_input_sent":
+                continue
+            if event.payload.get("role_name") != role_name:
+                continue
+            if event.payload.get("current_stage") != session.current_stage:
+                continue
+            if active_work_item_id is not None and event.payload.get("work_item_id") != active_work_item_id:
+                continue
+            latest_reply = event
+            break
+        if latest_reply is None:
+            return None
+
+        latest_prior_blocked: Event | None = None
+        for event in reversed(events):
+            if event.id >= latest_reply.id:
+                continue
+            if event.event_type != "story_planning_blocked":
+                continue
+            if event.producer_id != role_name:
+                continue
+            latest_prior_blocked = event
+            break
+        if latest_prior_blocked is None:
+            return None
+
+        if self._normalized_json_signature(latest_prior_blocked.payload) != self._normalized_json_signature(
+            output_payload
+        ):
+            return None
+        return {
+            "reason": "replayed_blocker_after_operator_reply",
+            "operator_reply_event_id": latest_reply.id,
+            "replayed_event_id": latest_prior_blocked.id,
+        }
+
+    @staticmethod
+    def _normalized_json_signature(payload: dict) -> str:
+        return json.dumps(payload, sort_keys=True, ensure_ascii=True)
 
     def _active_subtask_completion_dispatch_missing(self, session: Session) -> bool:
         active_item = self._find_active_primary_coding_work_item(session)
