@@ -2905,7 +2905,7 @@ class CoordinatorService:
         )
 
     def _maybe_stop_stale_runtime_role(self, *, session: Session, role_name: str) -> None:
-        if role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE}:
+        if role_name in PERSISTENT_SESSION_ROLES:
             return
         role = self.role_repository.get_by_name(session.id, role_name)
         if role is None or role.runtime_handle is None or role.status != RoleStatus.RUNNING:

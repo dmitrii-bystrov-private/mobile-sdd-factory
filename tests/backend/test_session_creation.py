@@ -9674,7 +9674,38 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn(CODE_REVIEWER_ROLE, PERSISTENT_SESSION_ROLES)
         self.assertIn(CODE_SCOUT_ROLE, PERSISTENT_SESSION_ROLES)
         self.assertIn(DOC_HARVEST_ROLE, PERSISTENT_SESSION_ROLES)
-        self.assertIn(MR_COMMENTS_ANALYST_ROLE, PERSISTENT_SESSION_ROLES)
+        self.assertNotIn(MR_COMMENTS_ANALYST_ROLE, PERSISTENT_SESSION_ROLES)
+
+    def test_stale_runtime_cleanup_keeps_persistent_optional_roles_running(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021PERSISTOPT",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "doc_harvest_policy": "enabled"},
+        )
+
+        self.coordinator._maybe_stop_stale_runtime_role(session=session, role_name=CODE_SCOUT_ROLE)
+        self.coordinator._maybe_stop_stale_runtime_role(session=session, role_name=DOC_HARVEST_ROLE)
+
+        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
+        doc_role = self.role_repository.get_by_name(session.id, DOC_HARVEST_ROLE)
+        assert scout_role is not None
+        assert doc_role is not None
+
+        self.assertEqual(RoleStatus.RUNNING, scout_role.status)
+        self.assertEqual(RoleStatus.RUNNING, doc_role.status)
+
+    def test_stale_runtime_cleanup_stops_mr_comments_analyst_worker(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021MRONDEMAND",
+            workflow_profile="oneshot",
+        )
+
+        self.coordinator._maybe_stop_stale_runtime_role(session=session, role_name=MR_COMMENTS_ANALYST_ROLE)
+
+        analyst_role = self.role_repository.get_by_name(session.id, MR_COMMENTS_ANALYST_ROLE)
+        assert analyst_role is not None
+
+        self.assertEqual(RoleStatus.STOPPED, analyst_role.status)
 
     def test_doc_harvest_skipped_not_needed_completes_session_when_policy_enabled(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
