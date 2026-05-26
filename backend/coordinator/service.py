@@ -1511,12 +1511,10 @@ class CoordinatorService:
                 if parsed["key"] is not None
             }
             active_subtask_key = self._parse_subtask_work_item_title(active_item.title)["key"]
-            queued_items = [
-                item
-                for item in self.work_item_repository.list_for_session(session.id)
-                if item.work_type == "subtask_implementation"
-                and item.status == WorkItemStatus.UNASSIGNED
-            ]
+            queued_items = self._pending_subtask_queue_items(
+                session.id,
+                exclude_ids={active_item.id},
+            )
             self._reconcile_subtask_queue_after_refresh(
                 session=session,
                 source_event=event,
@@ -4714,12 +4712,10 @@ class CoordinatorService:
         if implementer_role is None:
             raise IntakeError("Implementer role is missing for the session")
 
-        remaining_items = [
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "subtask_implementation"
-            and item.status == WorkItemStatus.UNASSIGNED
-        ]
+        remaining_items = self._pending_subtask_queue_items(
+            session.id,
+            exclude_ids={active_item.id},
+        )
         if refreshed_subtasks is not None:
             completed_subtask_keys = {
                 parsed["key"]
@@ -6814,9 +6810,8 @@ class CoordinatorService:
         next_item = next(
             (
                 item
-                for item in self.work_item_repository.list_for_session(session.id)
-                if item.work_type == "subtask_implementation"
-                and item.status == WorkItemStatus.UNASSIGNED
+                for item in self._pending_subtask_queue_items(session.id)
+                if item.status == WorkItemStatus.UNASSIGNED
             ),
             None,
         )
@@ -6828,6 +6823,21 @@ class CoordinatorService:
             owner_role_id=role.id,
             status=WorkItemStatus.ASSIGNED,
         )
+
+    def _pending_subtask_queue_items(
+        self,
+        session_id: int,
+        *,
+        exclude_ids: set[int] | None = None,
+    ) -> list[WorkItem]:
+        excluded = exclude_ids or set()
+        return [
+            item
+            for item in self.work_item_repository.list_for_session(session_id)
+            if item.id not in excluded
+            and item.work_type == "subtask_implementation"
+            and item.status in {WorkItemStatus.UNASSIGNED, WorkItemStatus.ASSIGNED}
+        ]
 
     def _find_active_work_item_for_role(
         self,
