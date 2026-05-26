@@ -3205,6 +3205,13 @@ class CoordinatorService:
         role = self.role_repository.get_by_id(work_item.owner_role_id)
         if role is None:
             raise IntakeError(f"Owner role {work_item.owner_role_id} is missing for session {session.id}")
+        if work_item.work_type == "self_review_cycle_review":
+            return self._send_self_review_cycle_operator_reply(
+                session=session,
+                work_item=work_item,
+                reviewer_role=role,
+                text=text,
+            )
         if role.runtime_handle is None:
             raise IntakeError(f"Role {role.role_name} has no runtime handle for session {session.id}")
         runtime_role = RuntimeRoleHandle(
@@ -3270,6 +3277,51 @@ class CoordinatorService:
                     },
                 )
         return session, event
+
+    def _send_self_review_cycle_operator_reply(
+        self,
+        session: Session,
+        work_item: WorkItem,
+        reviewer_role: Role,
+        text: str,
+    ) -> tuple[Session, Event]:
+        for item in self.work_item_repository.list_for_session(session.id):
+            if item.work_type != "self_review_cycle_review":
+                continue
+            if item.status == WorkItemStatus.COMPLETED:
+                continue
+            self.work_item_repository.update_status(item.id, WorkItemStatus.COMPLETED)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="operator_runtime_input_sent",
+            producer_type="operator",
+            payload={
+                "role_name": reviewer_role.role_name,
+                "redirected_role_name": IMPLEMENTER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+                "continuation_stage": "self_review_correction_requested",
+                "input_length": len(text),
+            },
+        )
+        operator_reply = text.strip()
+        additional_context = (
+            "Operator guidance received after a blocked self-review cycle. "
+            "Apply the latest self-review findings without reintroducing earlier fixes, "
+            "and treat the operator reply below as authoritative additional guidance.\n\n"
+            f"Operator reply:\n{operator_reply}\n"
+        )
+        updated_session, _ = self._enqueue_self_review_correction(
+            session=session,
+            source_event=event,
+            additional_context=additional_context,
+            extra_hydration={
+                "operator_reply": operator_reply,
+                "operator_reply_event_id": event.id,
+                "review_cycle_resolution": "operator_guided_fix",
+            },
+        )
+        return updated_session, event
 
     def _operator_reply_live_message(self, text: str) -> str:
         normalized_reply = " ".join(str(text).split()).strip()
@@ -5458,6 +5510,8 @@ class CoordinatorService:
         self,
         session: Session,
         source_event: Event,
+        additional_context: str | None = None,
+        extra_hydration: dict[str, str | int | None] | None = None,
     ) -> tuple[Session, Event]:
         coding_role = self._primary_coding_role_for_work_type(session, "self_review_correction")
 
@@ -5486,12 +5540,15 @@ class CoordinatorService:
             raise IntakeError(
                 f"No self review correction instruction is available for role {coding_role.role_name}"
             )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
         self._dispatch_role_work(
             session=session,
             role=coding_role,
             work_item=correction_item,
             stage_name="self_review_correction_requested",
             instruction=instruction,
+            extra_hydration=extra_hydration,
         )
         event = self._append_event(
             session_id=session.id,

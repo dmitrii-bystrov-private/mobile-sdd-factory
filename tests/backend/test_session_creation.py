@@ -2146,7 +2146,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(CODE_REVIEWER_ROLE, summary["role_name"])
         self.assertTrue(summary["needs_operator_input"])
 
-    def test_self_review_cycle_clean_pass_completes_cycle_item_and_advances(self) -> None:
+    def test_operator_reply_to_blocked_self_review_cycle_redirects_to_implementer(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003RCLEAN",
             workflow_profile="oneshot",
@@ -2171,7 +2171,7 @@ class SessionCreationTests(unittest.TestCase):
                 "details": "Needs one operator clarification before continuing.",
             },
         )
-        self.coordinator.send_operator_runtime_input(
+        updated_session, operator_event = self.coordinator.send_operator_runtime_input(
             session_id=prepared_session.id,
             text="Continue with narrowed scope.",
         )
@@ -2179,23 +2179,23 @@ class SessionCreationTests(unittest.TestCase):
             item for item in self.work_item_repository.list_for_session(session.id)
             if item.work_type == "self_review_cycle_review"
         )
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="completed",
-            payload={
-                "work_item_id": cycle_item.id,
-                "summary": "Self-review clean under the updated scope.",
-                "review_report_path": "/tmp/pass-03.md",
-            },
+        correction_item = next(
+            item for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "self_review_correction"
         )
         cycle_item = self.work_item_repository.get_by_id(cycle_item.id)
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
 
-        self.assertEqual("self_review_passed", mapped_event.event_type)
         self.assertEqual(WorkItemStatus.COMPLETED, cycle_item.status)
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual("operator_runtime_input_sent", operator_event.event_type)
+        self.assertEqual("self_review_correction_requested", updated_session.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
+        self.assertEqual(WorkItemStatus.ASSIGNED, correction_item.status)
+        self.assertTrue(sent_inputs)
+        self.assertIn("Continue with narrowed scope.", sent_inputs[-1])
+        self.assertIn("operator_reply", (Path(self.temp_dir.name) / "IOS-30003RCLEAN" / "runtime" / "role-workspaces" / IMPLEMENTER_ROLE / "HYDRATION.json").read_text())
 
     def test_interactive_state_treats_persisted_numeric_operator_reply_flag_as_truthy(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -6630,6 +6630,9 @@ class SessionCreationTests(unittest.TestCase):
         review_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
         self.assertIsNotNone(review_role)
         sent_before = list(self.session_backend.get_sent_inputs(review_role.runtime_handle))
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        self.assertIsNotNone(implementer_role)
+        implementer_sent_before = list(self.session_backend.get_sent_inputs(implementer_role.runtime_handle))
 
         resumed_session, event = self.coordinator.send_operator_runtime_input(
             session_id=session.id,
@@ -6640,10 +6643,12 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(SessionStatus.ACTIVE, resumed_session.status)
         reconciled = self.coordinator._reconcile_session_dispatch(resumed_session)
         sent_after = self.session_backend.get_sent_inputs(review_role.runtime_handle)
+        implementer_sent_after = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
         events = self.event_repository.list_for_session(session.id)
 
         self.assertFalse(reconciled)
-        self.assertEqual(sent_before + [sent_after[-1]], sent_after)
+        self.assertEqual(sent_before, sent_after)
+        self.assertEqual(implementer_sent_before + [implementer_sent_after[-1]], implementer_sent_after)
         self.assertFalse(any(item.event_type == "session_dispatch_reconciled" for item in events))
 
     def test_reconcile_session_dispatch_skips_duplicate_redispatch_for_recent_dispatch(self) -> None:
