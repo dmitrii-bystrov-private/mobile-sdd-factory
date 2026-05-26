@@ -2742,11 +2742,32 @@ class CoordinatorService:
         if role_name not in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE} or output_type != "completed":
             return None
 
-        active_item = self._find_active_primary_coding_work_item(session)
-        if active_item is None:
+        payload_work_item_id = output_payload.get("work_item_id")
+        target_item: WorkItem | None = None
+        if isinstance(payload_work_item_id, int):
+            target_item = next(
+                (
+                    item
+                    for item in self.work_item_repository.list_for_session(session.id)
+                    if item.id == payload_work_item_id
+                    and item.work_type
+                    in {
+                        "bug_analysis",
+                        "subtask_implementation",
+                        "implementation",
+                        "self_review_correction",
+                        "boy_scout_correction",
+                        "verification_correction",
+                        "followup_implementation",
+                    }
+                ),
+                None,
+            )
+
+        active_item = target_item or self._find_active_primary_coding_work_item(session)
+        if active_item is None or target_item is None and payload_work_item_id is None:
             return None
 
-        payload_work_item_id = output_payload.get("work_item_id")
         if payload_work_item_id != active_item.id:
             return {
                 "reason": "address_mismatch",

@@ -5372,6 +5372,46 @@ class SessionCreationTests(unittest.TestCase):
             any(item.id == stale_item.id and item.status == WorkItemStatus.ASSIGNED for item in work_items)
         )
 
+    def test_stale_role_output_mismatch_uses_payload_work_item_id_over_stale_assigned_item(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004SUBTASKSTALECHECK",
+            workflow_profile="story_full",
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        target_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-39995: Target subtask",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-39996: Stale subtask",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        broken_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+
+        mismatch = self.coordinator._stale_role_output_mismatch(
+            session=broken_session,
+            role_name=IMPLEMENTER_ROLE,
+            output_type="completed",
+            output_payload={
+                "work_item_id": target_item.id,
+                "subtask_key": "IOS-39995",
+                "summary": "subtask done",
+            },
+        )
+
+        self.assertIsNone(mismatch)
+
     def test_subtask_completed_reuses_existing_assigned_next_item_after_snapshot_refresh(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004SUBTASKREUSE",
