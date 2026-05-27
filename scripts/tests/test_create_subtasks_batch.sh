@@ -26,6 +26,24 @@ cat >"$PLAN_DIR/02-update-mocks-and-regression-coverage.md" <<'EOF'
 # Update mocks and regression coverage
 EOF
 
+cat >"$PLAN_DIR/tasks.json" <<'EOF'
+{
+  "version": 1,
+  "tasks": [
+    {
+      "order": 1,
+      "filename": "01-build-typed-cache-registry-core.md",
+      "title": "Build typed cache registry core"
+    },
+    {
+      "order": 2,
+      "filename": "02-update-mocks-and-regression-coverage.md",
+      "title": "Update mocks and regression coverage"
+    }
+  ]
+}
+EOF
+
 ACLl_LOG="$WORKDIR/acli.log"
 CREATE_LOG="$WORKDIR/create.log"
 
@@ -80,3 +98,27 @@ grep -q -- '--title Build typed cache registry core' "$CREATE_LOG"
 grep -q -- '--title Update mocks and regression coverage' "$CREATE_LOG"
 
 echo "create-subtasks-batch parser test passed"
+
+cat >"$PLAN_DIR/index.md" <<'EOF'
+# Example Decomposition
+
+## Execution order
+
+1. [Build typed cache registry core](01-build-typed-cache-registry-core.md)
+2. [Update mocks and regression coverage](02-update-mocks-and-regression-coverage.md)
+EOF
+
+: >"$CREATE_LOG"
+rm -f "$PLAN_DIR/tasks.json"
+
+PATH="$WORKDIR:$PATH" \
+CREATE_SUBTASK_SCRIPT="$WORKDIR/create-subtask.sh" \
+bash "$REPO_ROOT/scripts/create-subtasks-batch.sh" --parent IOS-12345 --plan-dir "$PLAN_DIR" >"$WORKDIR/stdout-bare.log"
+
+grep -q 'Found 2 task(s)' "$WORKDIR/stdout-bare.log"
+grep -q 'IOS-90001' "$WORKDIR/stdout-bare.log"
+grep -q 'IOS-90002' "$WORKDIR/stdout-bare.log"
+grep -q -- '--title Build typed cache registry core' "$CREATE_LOG"
+grep -q -- '--title Update mocks and regression coverage' "$CREATE_LOG"
+
+echo "create-subtasks-batch bare-link parser test passed"

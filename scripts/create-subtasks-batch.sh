@@ -7,7 +7,7 @@ set -euo pipefail
 #   scripts/create-subtasks-batch.sh --parent <KEY> [--plan-dir <path-to-plan/>] [--task-file <file.md> ...]
 #
 # If --plan-dir is omitted, defaults to $SDD_WORKDIR/<KEY>/plan/
-# If --task-file is omitted, all task files are read from plan/index.md in order.
+# If --task-file is omitted, all task files are read from plan/tasks.json in order.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CREATE_SUBTASK_SCRIPT="${CREATE_SUBTASK_SCRIPT:-$SCRIPT_DIR/create-subtask.sh}"
@@ -63,6 +63,7 @@ if [[ -z "$PLAN_DIR" ]]; then
 fi
 
 INDEX_FILE="$PLAN_DIR/index.md"
+MANIFEST_FILE="$PLAN_DIR/tasks.json"
 
 if [[ ! -f "$INDEX_FILE" ]]; then
   err "index.md not found at: $INDEX_FILE"
@@ -70,6 +71,20 @@ if [[ ! -f "$INDEX_FILE" ]]; then
 fi
 
 declare -a TASK_FILES=()
+declare -a MANIFEST_TASK_FILES=()
+declare -a MANIFEST_TASK_TITLES=()
+
+manifest_title_for() {
+  local task_file="$1"
+  local i
+  for i in "${!MANIFEST_TASK_FILES[@]}"; do
+    if [[ "${MANIFEST_TASK_FILES[$i]}" == "$task_file" ]]; then
+      printf '%s\n' "${MANIFEST_TASK_TITLES[$i]}"
+      return 0
+    fi
+  done
+  return 1
+}
 
 if [[ ${#SELECTED_TASK_FILES[@]} -gt 0 ]]; then
   for task_file in "${SELECTED_TASK_FILES[@]}"; do
@@ -85,18 +100,31 @@ if [[ ${#SELECTED_TASK_FILES[@]} -gt 0 ]]; then
     fi
   done
 else
-  while IFS= read -r task_file; do
-    [[ -n "$task_file" ]] || continue
-    normalized_task_file="${task_file#./}"
-    normalized_task_file="${normalized_task_file#plan/}"
-    [[ "$normalized_task_file" == "index.md" ]] && continue
-    TASK_FILES+=("$PLAN_DIR/$normalized_task_file")
-  done < <(
-    perl -ne '
-      while (/\[[^\]]*\]\(((?:\.\/|plan\/)[^)\n]+\.md)\)/g) { print "$1\n" }
-      while (/`((?:\.\/|plan\/)[^`\n]+\.md)`/g) { print "$1\n" }
-    ' "$INDEX_FILE" | awk "!seen[\$0]++"
-  )
+  if [[ -f "$MANIFEST_FILE" ]]; then
+    while IFS=$'\t' read -r task_file task_title; do
+      [[ -n "$task_file" ]] || continue
+      normalized_task_file="${task_file#./}"
+      normalized_task_file="${normalized_task_file#plan/}"
+      TASK_FILES+=("$PLAN_DIR/$normalized_task_file")
+      MANIFEST_TASK_FILES+=("$PLAN_DIR/$normalized_task_file")
+      MANIFEST_TASK_TITLES+=("$task_title")
+    done < <(
+      jq -r '.tasks[] | select(.filename and .title) | [.filename, .title] | @tsv' "$MANIFEST_FILE"
+    )
+  else
+    while IFS= read -r task_file; do
+      [[ -n "$task_file" ]] || continue
+      normalized_task_file="${task_file#./}"
+      normalized_task_file="${normalized_task_file#plan/}"
+      [[ "$normalized_task_file" == "index.md" ]] && continue
+      TASK_FILES+=("$PLAN_DIR/$normalized_task_file")
+    done < <(
+      perl -ne '
+        while (/\[[^\]]*\]\(((?:(?:\.\/|plan\/)?)[^)\n]+\.md)\)/g) { print "$1\n" }
+        while (/`((?:(?:\.\/|plan\/)?)[^`\n]+\.md)`/g) { print "$1\n" }
+      ' "$INDEX_FILE" | awk "!seen[\$0]++"
+    )
+  fi
 fi
 
 if [[ ${#TASK_FILES[@]} -eq 0 ]]; then
@@ -131,7 +159,10 @@ for i in "${!TASK_FILES[@]}"; do
     exit 1
   fi
 
-  TASK_TITLE="$(grep -m1 '^# ' "$TASK_FILE" | sed 's/^# //')"
+  TASK_TITLE="$(manifest_title_for "$TASK_FILE" || true)"
+  if [[ -z "$TASK_TITLE" ]]; then
+    TASK_TITLE="$(grep -m1 '^# ' "$TASK_FILE" | sed 's/^# //')"
+  fi
   if [[ -z "$TASK_TITLE" ]]; then
     BASENAME="$(basename "$TASK_FILE" .md)"
     TASK_TITLE="$(echo "${BASENAME#[0-9][0-9]-}" | tr '-' ' ' | sed 's/\b\(.\)/\u\1/g')"

@@ -3357,6 +3357,16 @@ class SessionCreationTests(unittest.TestCase):
             payload={
                 "summary": "Decomposition prepared",
                 "plan_index_markdown": "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n",
+                "plan_tasks_manifest": {
+                    "version": 1,
+                    "tasks": [
+                        {
+                            "order": 1,
+                            "filename": "01-build-data-source.md",
+                            "title": "Build data source",
+                        }
+                    ],
+                },
                 "plan_task_files": [
                     {
                         "filename": "01-build-data-source.md",
@@ -3374,6 +3384,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(plan_dir.exists())
         self.assertTrue(
             any(artifact.artifact_type == "task_decomposition_plan_index" for artifact in artifacts)
+        )
+        self.assertTrue(
+            any(artifact.artifact_type == "task_decomposition_plan_manifest" for artifact in artifacts)
         )
         self.assertTrue(
             any(artifact.artifact_type == "task_decomposition_plan_package" for artifact in artifacts)
@@ -3693,6 +3706,20 @@ class SessionCreationTests(unittest.TestCase):
         (plan_dir / "index.md").write_text(
             "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
         )
+        (plan_dir / "tasks.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "tasks": [
+                        {
+                            "order": 1,
+                            "filename": "01-build-data-source.md",
+                            "title": "Build data source",
+                        }
+                    ],
+                }
+            )
+        )
         (plan_dir / "01-build-data-source.md").write_text(
             "# Build data source\n\n## What to implement\nCreate the feature data source.\n"
         )
@@ -3786,6 +3813,16 @@ class SessionCreationTests(unittest.TestCase):
             payload={
                 "summary": "Decomposition prepared",
                 "plan_index_markdown": "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n",
+                "plan_tasks_manifest": {
+                    "version": 1,
+                    "tasks": [
+                        {
+                            "order": 1,
+                            "filename": "01-build-data-source.md",
+                            "title": "Build data source",
+                        }
+                    ],
+                },
                 "plan_task_files": [
                     {
                         "filename": "01-build-data-source.md",

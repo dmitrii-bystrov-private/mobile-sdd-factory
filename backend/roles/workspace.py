@@ -401,8 +401,9 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Treat this role as a bounded one-shot worker: prepare task decomposition, write the routed result, and exit.",
             "- Start from the verified planning package and `spec/context/feature-overview.md`; use `relevant-code.md` and `implementation-patterns.md` when they materially affect task boundaries.",
-            "- Write the decomposition package directly into `plan/` inside your role workspace: `plan/index.md` plus self-contained Markdown task files for each task.",
+            "- Write the decomposition package directly into `plan/` inside your role workspace: mandatory machine-readable `plan/tasks.json` plus self-contained Markdown task files for each task; `plan/index.md` is optional companion context only.",
             "- Keep ordering in filenames like `plan/NN-*.md`, but do not prefix the human-facing task titles or Markdown headings with `Task 01`, `Task 02`, and similar numbering.",
+            "- `plan/tasks.json` is the source of truth for Jira subtask materialization. It must be valid JSON with `{ \"version\": 1, \"tasks\": [{ \"order\": 1, \"filename\": \"01-something.md\", \"title\": \"Human title\" }] }` and every listed file must exist.",
             "- Keep the routed output minimal: return a concise summary only after the `plan/` package is fully written.",
             "- Make every task file self-contained: copy relevant acceptance criteria, constraints, exact repo file paths, and validation steps into the task instead of pointing back to spec files.",
             "- Keep the output compact and downstream-oriented so execution can start from an explicit decomposition instead of implicit planning assumptions.",

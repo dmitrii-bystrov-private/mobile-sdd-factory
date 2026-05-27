@@ -143,17 +143,16 @@ export function CompletedFollowupPanel({
 
   return (
     <section className="panel completed-followup-panel">
-      {mrUrl ? (
-        <a className="hero-link hero-link-button completed-followup-link" href={mrUrl} rel="noreferrer" target="_blank">
-          Open MR
-        </a>
-      ) : null}
-
       <div className="panel-header">
         <div>
           <p className="eyebrow">Follow-up</p>
           <h3>Completed Session Recovery</h3>
         </div>
+        {mrUrl ? (
+          <a className="hero-link hero-link-button completed-followup-link" href={mrUrl} rel="noreferrer" target="_blank">
+            Open MR
+          </a>
+        ) : null}
       </div>
 
       <div className="completed-followup-stack">

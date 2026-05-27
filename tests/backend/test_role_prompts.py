@@ -239,7 +239,7 @@ class RolePromptTests(unittest.TestCase):
             prompt_mode="full",
         )
 
-        self.assertIn("Always produce a durable `plan/index.md` plus `plan/NN-*.md` task package", text)
+        self.assertIn("Always produce a durable `plan/tasks.json` manifest plus `plan/NN-*.md` task files", text)
         self.assertIn("Make each task file self-contained", text)
         self.assertIn("without reopening the full planning process", text)
 

@@ -225,6 +225,8 @@ input {
 
 .panel-sidebar {
   align-self: start;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .panel-sidebar .panel-header {
@@ -530,6 +532,9 @@ input {
   width: 100%;
   padding: var(--space-3);
   text-align: left;
+  display: grid;
+  align-content: start;
+  min-height: 104px;
 }
 
 .session-card small {
@@ -1820,12 +1825,20 @@ input {
   max-height: 320px;
   overflow: auto;
   padding-right: 6px;
+  min-width: 0;
 }
 
 .queue-list {
-  max-height: min(104vh, calc(100vh - 140px));
+  max-height: calc(100dvh - 18rem);
+  min-height: 0;
+  overflow-x: hidden;
   padding-top: 10px;
   padding-bottom: 6px;
+  align-content: start;
+}
+
+.queue-list .session-card {
+  min-height: 108px;
 }
 
 .progress-placeholder {
@@ -1869,6 +1882,12 @@ input {
     justify-self: start;
   }
 
+  .completed-followup-link {
+    position: static;
+    margin-bottom: var(--space-3);
+    justify-self: start;
+  }
+
   .hero-trace-item {
     flex-direction: column;
     gap: 2px;
@@ -1898,7 +1917,8 @@ input {
   .hero-stats,
   .grid-two,
   .followup-form-grid,
-  .factory-state-grid {
+  .factory-state-grid,
+  .completed-followup-actions {
     grid-template-columns: 1fr;
   }
 }

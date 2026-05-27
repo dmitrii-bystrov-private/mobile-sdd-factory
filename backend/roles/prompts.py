@@ -118,7 +118,8 @@ def role_runtime_rules(role_name: str) -> str:
         return (
             "Role-specific rules:\n"
             "- Treat this role as a bounded one-shot worker: decompose the verified story package into execution tasks, write the routed result, and exit.\n"
-            "- Always produce a durable `plan/index.md` plus `plan/NN-*.md` task package when decomposition is requested; do not treat the plan package as optional.\n"
+            "- Always produce a durable `plan/tasks.json` manifest plus `plan/NN-*.md` task files when decomposition is requested; do not treat the package as optional. `plan/index.md` is optional companion context only.\n"
+            "- `plan/tasks.json` is the machine-readable source of truth for Jira subtask materialization. Keep it valid JSON with ordered entries containing `order`, `filename`, and `title`, and ensure every referenced Markdown file exists.\n"
             "- Make each task file self-contained: copy the relevant acceptance criteria, constraints, exact file paths, and validation steps into the task instead of pointing back to spec files.\n"
             "- Keep the decomposition execution-oriented so implementation can start from the generated plan package without reopening the full planning process.\n\n"
         )

@@ -4526,7 +4526,7 @@ class CoordinatorService:
             outputs=source_event.payload.get("outputs"),
         )
         try:
-            plan_index_markdown, raw_plan_task_files = self._normalize_task_decomposition_plan_package(
+            plan_index_markdown, raw_plan_task_files, plan_manifest = self._normalize_task_decomposition_plan_package(
                 session=session,
                 payload=source_event.payload,
             )
@@ -4578,6 +4578,7 @@ class CoordinatorService:
                 session=session,
                 plan_index_markdown=plan_index_markdown,
                 raw_plan_task_files=raw_plan_task_files,
+                plan_manifest=plan_manifest,
             )
         coding_role = self._primary_coding_role_for_work_type(session, "implementation")
         self.work_item_repository.create(
@@ -9117,6 +9118,7 @@ class CoordinatorService:
         session: Session,
         plan_index_markdown: str,
         raw_plan_task_files: object,
+        plan_manifest: dict[str, object],
     ) -> None:
         if self.workdir_root is None:
             raise IntakeError("Coordinator is missing workdir root")
@@ -9126,6 +9128,8 @@ class CoordinatorService:
 
         index_path = plan_dir / "index.md"
         index_path.write_text(plan_index_markdown.rstrip() + "\n")
+        manifest_path = plan_dir / "tasks.json"
+        manifest_path.write_text(json.dumps(plan_manifest, indent=2, sort_keys=True) + "\n")
 
         normalized_task_files: list[str] = []
         if isinstance(raw_plan_task_files, list):
@@ -9143,6 +9147,16 @@ class CoordinatorService:
                 file_path.write_text(content.rstrip() + "\n")
                 normalized_task_files.append(safe_name)
 
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="planning",
+            artifact_type="task_decomposition_plan_manifest",
+            path=str(manifest_path),
+            metadata={
+                "task_key": session.task_key,
+                "task_file_count": len(plan_manifest.get("tasks", [])) if isinstance(plan_manifest.get("tasks"), list) else 0,
+            },
+        )
         self.artifact_repository.create(
             session_id=session.id,
             stage_name="planning",
@@ -9164,12 +9178,66 @@ class CoordinatorService:
             },
         )
 
+    def _build_task_decomposition_manifest(
+        self,
+        *,
+        plan_task_files: list[dict[str, str]],
+        raw_manifest: object | None = None,
+    ) -> dict[str, object]:
+        tasks: list[dict[str, object]] = []
+        manifest_by_filename: dict[str, dict[str, object]] = {}
+        if isinstance(raw_manifest, dict):
+            raw_tasks = raw_manifest.get("tasks")
+            if isinstance(raw_tasks, list):
+                for item in raw_tasks:
+                    if not isinstance(item, dict):
+                        continue
+                    filename = str(item.get("filename") or "").strip()
+                    title = str(item.get("title") or "").strip()
+                    if not filename or not title:
+                        continue
+                    manifest_by_filename[filename] = {"filename": filename, "title": title}
+
+        for index, item in enumerate(plan_task_files, start=1):
+            filename = str(item.get("filename") or "").strip()
+            content = str(item.get("content") or "").strip()
+            if not filename or not content:
+                continue
+            safe_name = Path(filename).name
+            if safe_name != filename or not safe_name.endswith(".md"):
+                continue
+            title = ""
+            manifest_task = manifest_by_filename.get(safe_name)
+            if manifest_task is not None:
+                title = str(manifest_task.get("title") or "").strip()
+            if not title:
+                first_heading = next(
+                    (line[2:].strip() for line in content.splitlines() if line.startswith("# ")),
+                    "",
+                )
+                title = first_heading or safe_name.removesuffix(".md")
+            tasks.append(
+                {
+                    "order": index,
+                    "filename": safe_name,
+                    "title": title,
+                }
+            )
+
+        if not tasks:
+            raise IntakeError("Task decomposition package must contain at least one task markdown file")
+
+        return {
+            "version": 1,
+            "tasks": tasks,
+        }
+
     def _normalize_task_decomposition_plan_package(
         self,
         *,
         session: Session,
         payload: dict[str, object],
-    ) -> tuple[str, list[dict[str, str]]]:
+    ) -> tuple[str, list[dict[str, str]], dict[str, object]]:
         if self.workdir_root is None:
             raise IntakeError("Coordinator is missing workdir root")
 
@@ -9186,6 +9254,7 @@ class CoordinatorService:
         if source_plan_dir is None:
             plan_index_markdown = str(payload.get("plan_index_markdown") or "").strip()
             raw_plan_task_files = payload.get("plan_task_files")
+            raw_plan_manifest = payload.get("plan_tasks_manifest")
             normalized_task_files: list[dict[str, str]] = []
             if isinstance(raw_plan_task_files, list):
                 for item in raw_plan_task_files:
@@ -9209,7 +9278,14 @@ class CoordinatorService:
                 raise IntakeError(
                     "Task decomposition payload must include at least one plan_task_files entry"
                 )
-            return plan_index_markdown, normalized_task_files
+            return (
+                plan_index_markdown,
+                normalized_task_files,
+                self._build_task_decomposition_manifest(
+                    plan_task_files=normalized_task_files,
+                    raw_manifest=raw_plan_manifest,
+                ),
+            )
 
         index_path = source_plan_dir / "index.md"
         if not index_path.is_file():
@@ -9217,6 +9293,13 @@ class CoordinatorService:
         plan_index_markdown = index_path.read_text().strip()
         if not plan_index_markdown:
             raise IntakeError("Task decomposition package contains an empty plan/index.md")
+        manifest_path = source_plan_dir / "tasks.json"
+        raw_manifest: object | None = None
+        if manifest_path.is_file():
+            try:
+                raw_manifest = json.loads(manifest_path.read_text())
+            except json.JSONDecodeError as exc:
+                raise IntakeError(f"Task decomposition package contains invalid plan/tasks.json: {exc}") from exc
 
         normalized_task_files: list[dict[str, str]] = []
         for file_path in sorted(source_plan_dir.glob("*.md")):
@@ -9232,10 +9315,14 @@ class CoordinatorService:
                 }
             )
 
-        if not normalized_task_files:
-            raise IntakeError("Task decomposition package must contain at least one task markdown file")
-
-        return plan_index_markdown, normalized_task_files
+        return (
+            plan_index_markdown,
+            normalized_task_files,
+            self._build_task_decomposition_manifest(
+                plan_task_files=normalized_task_files,
+                raw_manifest=raw_manifest,
+            ),
+        )
 
     def _cleanup_temporary_plan_package(self, session: Session) -> None:
         if self.workdir_root is None:
