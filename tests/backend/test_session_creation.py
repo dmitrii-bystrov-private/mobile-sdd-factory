@@ -2243,9 +2243,10 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual("self_review_requested", updated_session.current_stage)
         self.assertTrue(sent_inputs)
-        self.assertIn("Authoritative operator resolution", sent_inputs[-1])
+        self.assertIn("Authoritative operator resolutions", sent_inputs[-1])
         self.assertIn("treat .error as authoritative", sent_inputs[-1])
         self.assertIn("\"review_cycle_resolution\": \"operator_guided_recheck\"", sent_inputs[-1])
+        self.assertIn("\"operator_resolution_history\": [", sent_inputs[-1])
 
     def test_waiting_self_review_correction_completion_is_not_ignored_as_stale(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -2353,9 +2354,74 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertTrue(redispatched)
         self.assertTrue(sent_inputs)
-        self.assertIn("Authoritative operator resolution", sent_inputs[-1])
+        self.assertIn("Authoritative operator resolutions", sent_inputs[-1])
         self.assertIn("Use .error; the old warning premise is outdated.", sent_inputs[-1])
         self.assertIn("\"review_cycle_resolution\": \"operator_guided_recheck\"", sent_inputs[-1])
+
+    def test_reviewer_recheck_keeps_earlier_relevant_operator_resolution_alongside_later_unrelated_one(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RSTACK",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RSTACK")
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        assert reviewer_role is not None
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="self_review",
+            title=f"Self review for {session.task_key}",
+            owner_role_id=reviewer_role.id,
+            priority=89,
+        )
+        self.session_repository.update_stage_and_owner(
+            prepared_session.id,
+            current_stage="self_review_requested",
+            current_owner=CODE_REVIEWER_ROLE,
+        )
+        self.session_repository.update_status(prepared_session.id, SessionStatus.ACTIVE)
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="operator_runtime_input_sent",
+            producer_type="operator",
+            payload={
+                "role_name": CODE_REVIEWER_ROLE,
+                "redirected_role_name": IMPLEMENTER_ROLE,
+                "work_item_id": 101,
+                "current_stage": "self_review_requested",
+                "continuation_stage": "self_review_correction_requested",
+                "input_length": 44,
+                "operator_reply": "Wrong-PIN failure is a failed action and must remain .error.",
+            },
+        )
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="operator_runtime_input_sent",
+            producer_type="operator",
+            payload={
+                "role_name": CODE_REVIEWER_ROLE,
+                "redirected_role_name": IMPLEMENTER_ROLE,
+                "work_item_id": 102,
+                "current_stage": "self_review_requested",
+                "continuation_stage": "self_review_correction_requested",
+                "input_length": 51,
+                "operator_reply": "Replay ownership belongs to app-level orchestration.",
+            },
+        )
+
+        refreshed = self.coordinator._get_session_or_raise(session.id)
+        redispatched = self.coordinator._reconcile_session_dispatch(refreshed)
+        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
+
+        self.assertTrue(redispatched)
+        self.assertTrue(sent_inputs)
+        self.assertIn("Wrong-PIN failure is a failed action and must remain .error.", sent_inputs[-1])
+        self.assertIn("Replay ownership belongs to app-level orchestration.", sent_inputs[-1])
+        self.assertIn("do not let an unrelated later reply supersede an earlier relevant resolution", sent_inputs[-1])
 
     def test_interactive_state_treats_persisted_numeric_operator_reply_flag_as_truthy(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

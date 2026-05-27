@@ -5142,15 +5142,22 @@ class CoordinatorService:
                 "\nPrevious review reports (read first and do not re-flag the same issues):\n"
                 + "\n".join(previous_review_reports)
             )
-        operator_guidance = self._latest_self_review_cycle_operator_guidance(
+        operator_guidance_history = self._self_review_cycle_operator_guidance_history(
             session.id,
             before_event_id=before_event_id,
         )
-        if operator_guidance is not None:
+        latest_operator_guidance = operator_guidance_history[-1] if operator_guidance_history else None
+        if operator_guidance_history:
+            guidance_lines = []
+            for guidance in operator_guidance_history:
+                guidance_lines.append(
+                    f"- event {guidance['operator_reply_event_id']}: {guidance['operator_reply']}"
+                )
             instruction += (
-                "\nAuthoritative operator resolution from the last blocked self-review cycle "
-                "(do not re-flag findings that this explicitly supersedes):\n"
-                f"{operator_guidance['operator_reply']}"
+                "\nAuthoritative operator resolutions from prior blocked self-review cycles "
+                "(newer entries may be unrelated to the current finding; do not let an unrelated later reply "
+                "supersede an earlier relevant resolution for the same issue):\n"
+                + "\n".join(guidance_lines)
             )
         return instruction, {
             "review_scope": "current_diff_only",
@@ -5158,12 +5165,15 @@ class CoordinatorService:
             "previous_review_report_paths": "\n".join(previous_review_reports)
             if previous_review_reports
             else None,
-            "operator_reply": operator_guidance["operator_reply"] if operator_guidance is not None else None,
+            "operator_reply": latest_operator_guidance["operator_reply"] if latest_operator_guidance is not None else None,
             "operator_reply_event_id": (
-                operator_guidance["operator_reply_event_id"] if operator_guidance is not None else None
+                latest_operator_guidance["operator_reply_event_id"] if latest_operator_guidance is not None else None
             ),
+            "operator_resolution_history": json.dumps(operator_guidance_history, indent=2)
+            if operator_guidance_history
+            else None,
             "review_cycle_resolution": (
-                "operator_guided_recheck" if operator_guidance is not None else None
+                "operator_guided_recheck" if operator_guidance_history else None
             ),
         }
 
@@ -5703,13 +5713,14 @@ class CoordinatorService:
             source_event=source_event,
         )
 
-    def _latest_self_review_cycle_operator_guidance(
+    def _self_review_cycle_operator_guidance_history(
         self,
         session_id: int,
         *,
         before_event_id: int | None = None,
-    ) -> dict[str, str | int] | None:
-        for event in reversed(self.event_repository.list_for_session(session_id)):
+    ) -> list[dict[str, str | int]]:
+        guidance: list[dict[str, str | int]] = []
+        for event in self.event_repository.list_for_session(session_id):
             if before_event_id is not None and event.id > before_event_id:
                 continue
             if event.event_type != "operator_runtime_input_sent":
@@ -5719,11 +5730,13 @@ class CoordinatorService:
             operator_reply = str(event.payload.get("operator_reply") or "").strip()
             if not operator_reply:
                 continue
-            return {
-                "operator_reply": operator_reply,
-                "operator_reply_event_id": event.id,
-            }
-        return None
+            guidance.append(
+                {
+                    "operator_reply": operator_reply,
+                    "operator_reply_event_id": event.id,
+                }
+            )
+        return guidance
 
     def _handle_self_review_issues_found(
         self,
