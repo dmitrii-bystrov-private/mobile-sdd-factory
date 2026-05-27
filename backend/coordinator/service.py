@@ -2639,6 +2639,7 @@ class CoordinatorService:
             session=session,
             role_name=role.role_name,
             output_type=output_type,
+            output_payload=output_payload,
         ):
             self._append_stale_role_output_ignored_once(
                 session_id=session.id,
@@ -2682,6 +2683,7 @@ class CoordinatorService:
         session: Session,
         role_name: str,
         output_type: str,
+        output_payload: dict | None = None,
     ) -> bool:
         # A live verifier can finish its previous round slightly after the coordinator has
         # already routed the implementer into verification corrections. Treat that late
@@ -2691,6 +2693,25 @@ class CoordinatorService:
             and output_type in {"completed", "error"}
             and session.current_owner != role_name
         ):
+            payload_work_item_id = output_payload.get("work_item_id") if isinstance(output_payload, dict) else None
+            if isinstance(payload_work_item_id, int):
+                matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
+                if (
+                    matching_item is not None
+                    and matching_item.session_id == session.id
+                    and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+                    and matching_item.work_type
+                    in {
+                        "bug_analysis",
+                        "subtask_implementation",
+                        "implementation",
+                        "self_review_correction",
+                        "boy_scout_correction",
+                        "verification_correction",
+                        "followup_implementation",
+                    }
+                ):
+                    return False
             return True
         if (
             role_name == IMPLEMENTER_ROLE
@@ -3321,6 +3342,7 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
                 "continuation_stage": "self_review_correction_requested",
                 "input_length": len(text),
+                "operator_reply": text.strip(),
             },
         )
         operator_reply = text.strip()
@@ -5074,32 +5096,17 @@ class CoordinatorService:
             current_owner=CODE_REVIEWER_ROLE,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        previous_review_reports = self._previous_self_review_report_paths(session.id)
-        review_report_path = self._next_self_review_report_target_path(session)
-        instruction = (
-            f"Review the current task changes for {session.task_key}. "
-            "Start from the current diff, read only the relevant convention sources, "
-            "write or refresh the current structured review report at the routed review report path, "
-            "and report a clean pass or remaining issues."
+        instruction, review_hydration = self._self_review_dispatch_context(
+            session,
+            before_event_id=source_event.id,
         )
-        if previous_review_reports:
-            instruction += (
-                "\nPrevious review reports (read first and do not re-flag the same issues):\n"
-                + "\n".join(previous_review_reports)
-            )
         self._dispatch_role_work(
             session=session,
             role=reviewer_role,
             work_item=review_item,
             stage_name="self_review_requested",
             instruction=instruction,
-            extra_hydration={
-                "review_scope": "current_diff_only",
-                "review_report_path": str(review_report_path) if review_report_path is not None else None,
-                "previous_review_report_paths": "\n".join(previous_review_reports)
-                if previous_review_reports
-                else None,
-            },
+            extra_hydration=review_hydration,
         )
         event = self._append_event(
             session_id=session.id,
@@ -5115,6 +5122,50 @@ class CoordinatorService:
             },
         )
         return session, event
+
+    def _self_review_dispatch_context(
+        self,
+        session: Session,
+        *,
+        before_event_id: int | None = None,
+    ) -> tuple[str, dict[str, str | int | None]]:
+        previous_review_reports = self._previous_self_review_report_paths(session.id)
+        review_report_path = self._next_self_review_report_target_path(session)
+        instruction = (
+            f"Review the current task changes for {session.task_key}. "
+            "Start from the current diff, read only the relevant convention sources, "
+            "write or refresh the current structured review report at the routed review report path, "
+            "and report a clean pass or remaining issues."
+        )
+        if previous_review_reports:
+            instruction += (
+                "\nPrevious review reports (read first and do not re-flag the same issues):\n"
+                + "\n".join(previous_review_reports)
+            )
+        operator_guidance = self._latest_self_review_cycle_operator_guidance(
+            session.id,
+            before_event_id=before_event_id,
+        )
+        if operator_guidance is not None:
+            instruction += (
+                "\nAuthoritative operator resolution from the last blocked self-review cycle "
+                "(do not re-flag findings that this explicitly supersedes):\n"
+                f"{operator_guidance['operator_reply']}"
+            )
+        return instruction, {
+            "review_scope": "current_diff_only",
+            "review_report_path": str(review_report_path) if review_report_path is not None else None,
+            "previous_review_report_paths": "\n".join(previous_review_reports)
+            if previous_review_reports
+            else None,
+            "operator_reply": operator_guidance["operator_reply"] if operator_guidance is not None else None,
+            "operator_reply_event_id": (
+                operator_guidance["operator_reply_event_id"] if operator_guidance is not None else None
+            ),
+            "review_cycle_resolution": (
+                "operator_guided_recheck" if operator_guidance is not None else None
+            ),
+        }
 
     def _handle_spec_verification_blocked(
         self,
@@ -5651,6 +5702,28 @@ class CoordinatorService:
             session=session,
             source_event=source_event,
         )
+
+    def _latest_self_review_cycle_operator_guidance(
+        self,
+        session_id: int,
+        *,
+        before_event_id: int | None = None,
+    ) -> dict[str, str | int] | None:
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if before_event_id is not None and event.id > before_event_id:
+                continue
+            if event.event_type != "operator_runtime_input_sent":
+                continue
+            if str(event.payload.get("continuation_stage") or "") != "self_review_correction_requested":
+                continue
+            operator_reply = str(event.payload.get("operator_reply") or "").strip()
+            if not operator_reply:
+                continue
+            return {
+                "operator_reply": operator_reply,
+                "operator_reply_event_id": event.id,
+            }
+        return None
 
     def _handle_self_review_issues_found(
         self,
@@ -6656,13 +6729,17 @@ class CoordinatorService:
             ):
                 return False
 
-        instruction = self._stage_instruction(
-            session.current_stage,
-            session.task_key,
-            workflow_profile=session.workflow_profile,
-            role_name=role.role_name,
-            session_policy=session.policy,
-        )
+        extra_hydration: dict[str, str | int | None] | None = None
+        if role.role_name == CODE_REVIEWER_ROLE and session.current_stage == "self_review_requested":
+            instruction, extra_hydration = self._self_review_dispatch_context(session)
+        else:
+            instruction = self._stage_instruction(
+                session.current_stage,
+                session.task_key,
+                workflow_profile=session.workflow_profile,
+                role_name=role.role_name,
+                session_policy=session.policy,
+            )
         if instruction is None:
             return False
 
@@ -6672,6 +6749,7 @@ class CoordinatorService:
             work_item=work_item,
             stage_name=session.current_stage,
             instruction=instruction,
+            extra_hydration=extra_hydration,
         )
         self._append_event(
             session_id=session.id,

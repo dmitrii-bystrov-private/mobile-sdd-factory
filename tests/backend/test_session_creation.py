@@ -2196,6 +2196,166 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(sent_inputs)
         self.assertIn("Continue with narrowed scope.", sent_inputs[-1])
         self.assertIn("operator_reply", (Path(self.temp_dir.name) / "IOS-30003RCLEAN" / "runtime" / "role-workspaces" / IMPLEMENTER_ROLE / "HYDRATION.json").read_text())
+        self.assertEqual(
+            "Continue with narrowed scope.",
+            str(operator_event.payload.get("operator_reply") or ""),
+        )
+
+    def test_reviewer_recheck_includes_operator_guidance_after_blocked_cycle_reply(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RGUIDE",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RGUIDE")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="blocked_review_cycle",
+            payload={
+                "summary": "blocked_review_cycle",
+                "details": "Needs one operator clarification before continuing.",
+            },
+        )
+        self.coordinator.send_operator_runtime_input(
+            session_id=prepared_session.id,
+            text="The previous warning-only premise is outdated; treat .error as authoritative.",
+        )
+
+        updated_session, _, _ = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=IMPLEMENTER_ROLE,
+            output_type="completed",
+            payload={"summary": "corrections applied"},
+        )
+
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
+
+        self.assertEqual("self_review_requested", updated_session.current_stage)
+        self.assertTrue(sent_inputs)
+        self.assertIn("Authoritative operator resolution", sent_inputs[-1])
+        self.assertIn("treat .error as authoritative", sent_inputs[-1])
+        self.assertIn("\"review_cycle_resolution\": \"operator_guided_recheck\"", sent_inputs[-1])
+
+    def test_waiting_self_review_correction_completion_is_not_ignored_as_stale(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RRECOVER",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RRECOVER")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="blocked_review_cycle",
+            payload={
+                "summary": "blocked_review_cycle",
+                "details": "Needs one operator clarification before continuing.",
+            },
+        )
+        self.coordinator.send_operator_runtime_input(
+            session_id=prepared_session.id,
+            text="Use the latest authoritative premise.",
+        )
+        correction_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "self_review_correction" and item.status == WorkItemStatus.ASSIGNED
+        )
+
+        self.work_item_repository.update_status(correction_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        self.session_repository.update_stage_and_owner(
+            prepared_session.id,
+            current_stage="self_review_correction_requested",
+            current_owner=None,
+        )
+        self.session_repository.update_status(prepared_session.id, SessionStatus.WAITING_FOR_OPERATOR)
+
+        updated_session, _, _ = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=IMPLEMENTER_ROLE,
+            output_type="completed",
+            payload={
+                "work_item_id": correction_item.id,
+                "summary": "correction done",
+            },
+        )
+
+        correction_item = self.work_item_repository.get_by_id(correction_item.id)
+        self.assertEqual(WorkItemStatus.COMPLETED, correction_item.status)
+        self.assertEqual("self_review_requested", updated_session.current_stage)
+        self.assertEqual(CODE_REVIEWER_ROLE, updated_session.current_owner)
+        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
+
+    def test_reconcile_self_review_dispatch_keeps_operator_guidance(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RRECON",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RRECON")
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        assert reviewer_role is not None
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="self_review",
+            title=f"Self review for {session.task_key}",
+            owner_role_id=reviewer_role.id,
+            priority=89,
+        )
+        self.session_repository.update_stage_and_owner(
+            prepared_session.id,
+            current_stage="self_review_requested",
+            current_owner=CODE_REVIEWER_ROLE,
+        )
+        self.session_repository.update_status(prepared_session.id, SessionStatus.ACTIVE)
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="operator_runtime_input_sent",
+            producer_type="operator",
+            payload={
+                "role_name": CODE_REVIEWER_ROLE,
+                "redirected_role_name": IMPLEMENTER_ROLE,
+                "work_item_id": 999,
+                "current_stage": "self_review_requested",
+                "continuation_stage": "self_review_correction_requested",
+                "input_length": 33,
+                "operator_reply": "Use .error; the old warning premise is outdated.",
+            },
+        )
+
+        refreshed = self.coordinator._get_session_or_raise(session.id)
+        redispatched = self.coordinator._reconcile_session_dispatch(refreshed)
+        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
+
+        self.assertTrue(redispatched)
+        self.assertTrue(sent_inputs)
+        self.assertIn("Authoritative operator resolution", sent_inputs[-1])
+        self.assertIn("Use .error; the old warning premise is outdated.", sent_inputs[-1])
+        self.assertIn("\"review_cycle_resolution\": \"operator_guided_recheck\"", sent_inputs[-1])
 
     def test_interactive_state_treats_persisted_numeric_operator_reply_flag_as_truthy(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
