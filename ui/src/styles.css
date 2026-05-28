@@ -1829,7 +1829,7 @@ input {
 }
 
 .queue-list {
-  max-height: calc(100dvh - 18rem);
+  max-height: calc((100dvh - 18rem) * 2);
   min-height: 0;
   overflow-x: hidden;
   padding-top: 10px;
