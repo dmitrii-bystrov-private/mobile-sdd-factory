@@ -108,8 +108,12 @@ export type InteractiveStateSummary = {
 export type RuntimeRoleStateSummary = {
   roleName: string;
   status: string;
+  liveState: string | null;
   runtimeBackend: string;
   runtimeHandle: string | null;
+  isCurrentOwner: boolean;
+  hasActiveWorkItem: boolean;
+  hasPendingOperatorContinuation: boolean;
   tmuxAttachCommand: string | null;
   tmuxCaptureCommand: string | null;
 };

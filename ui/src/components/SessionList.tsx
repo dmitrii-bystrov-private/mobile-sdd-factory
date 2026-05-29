@@ -21,7 +21,7 @@ export function SessionList({
           <p className="eyebrow">Sessions</p>
           <h2>Session Queue</h2>
         </div>
-        {sessions.length > 0 ? <span className="badge badge-muted">{sessions.length}</span> : null}
+        {sessions.length > 0 ? <span className="badge badge-muted session-queue-count">{sessions.length}</span> : null}
       </div>
       {sessions.length > 0 ? (
         <div className="session-list limited-list queue-list">

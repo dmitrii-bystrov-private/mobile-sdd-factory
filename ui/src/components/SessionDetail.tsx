@@ -13,7 +13,7 @@ import {
 } from "../sessionDisplay";
 import { stageDisplayName } from "../stageDisplay";
 import type { EventItem } from "../types";
-import type { Role, Session, SessionBundle, WorkItem } from "../types";
+import type { Role, RuntimeRoleStateSummary, Session, SessionBundle, WorkItem } from "../types";
 
 type SessionDetailProps = {
   session: Session | null;
@@ -26,6 +26,8 @@ type DeliveryFailureState = {
   summary: string;
   details: string | null;
 } | null;
+
+const ON_DEMAND_SLEEPING_ROLES = new Set(["mr-comments-analyst-worker"]);
 
 function humanizeEventType(value: string): string {
   return value
@@ -306,6 +308,7 @@ function workerStateLabel(
   activeRoleIds: Set<number>,
   session: Session,
   bundle: SessionBundle,
+  runtimeRole: RuntimeRoleStateSummary | null,
 ): string {
   if (activeRoleIds.has(role.id)) {
     if (
@@ -316,6 +319,14 @@ function workerStateLabel(
       return "Waiting for operator";
     }
     return "Active";
+  }
+  if (ON_DEMAND_SLEEPING_ROLES.has(role.role_name)) {
+    if (role.status === "running" || runtimeRole?.liveState === "live-idle") {
+      return "On-demand";
+    }
+    if (role.status === "stopped") {
+      return "Sleeping";
+    }
   }
   if (role.status === "running") {
     return "Standing by";
@@ -342,6 +353,7 @@ export function SessionDetail({
   const [workerMenuRoleName, setWorkerMenuRoleName] = useState<string | null>(null);
   const [workerActionBusyRoleName, setWorkerActionBusyRoleName] = useState<string | null>(null);
   const [workerActionError, setWorkerActionError] = useState<string | null>(null);
+  const [showAllWorkflowRoles, setShowAllWorkflowRoles] = useState(false);
   const [deliveryFailure, setDeliveryFailure] = useState<DeliveryFailureState>(null);
   const [deliveryRetryBusy, setDeliveryRetryBusy] = useState(false);
   const { showToast, showActivity, clearActivity } = useToast();
@@ -496,15 +508,33 @@ export function SessionDetail({
     }
     return left.id - right.id;
   });
-  const firstColumnCount = Math.ceil(orderedRoles.length / 2);
-  const workerColumns = [
-    orderedRoles.slice(0, firstColumnCount),
-    orderedRoles.slice(firstColumnCount),
-  ];
   const runtimeRoleIndex = new Map(
     (bundle.runtimeStateSummary?.roles ?? []).map((role) => [role.roleName, role]),
   );
   const orchestratorTrace = buildOrchestratorTrace(bundle.events, bundle.workItems);
+  const visibleWorkflowRoles = orderedRoles.filter((role) => {
+    if (showAllWorkflowRoles) {
+      return true;
+    }
+    const label = workerStateLabel(
+      role,
+      activeRoleIds,
+      session,
+      bundle,
+      runtimeRoleIndex.get(role.role_name) ?? null,
+    );
+    return (
+      label === "Active" ||
+      label === "Waiting for operator" ||
+      label === "Standing by" ||
+      label === "On-demand"
+    );
+  });
+  const visibleFirstColumnCount = Math.ceil(visibleWorkflowRoles.length / 2);
+  const visibleWorkerColumns = [
+    visibleWorkflowRoles.slice(0, visibleFirstColumnCount),
+    visibleWorkflowRoles.slice(visibleFirstColumnCount),
+  ];
 
   async function runWorkerAction(
     roleName: string,
@@ -572,7 +602,7 @@ export function SessionDetail({
               {session.task_title ? <p className="hero-title">{session.task_title}</p> : null}
             </div>
             {session.jira_url ? (
-              <a className="hero-link hero-link-button" href={session.jira_url} rel="noreferrer" target="_blank">
+              <a className="hero-link-button" href={session.jira_url} rel="noreferrer" target="_blank">
                 Open in Jira
               </a>
             ) : null}
@@ -648,9 +678,16 @@ export function SessionDetail({
               <p className="eyebrow">Progress</p>
               <h3>Workflow Pulse</h3>
             </div>
+            <button
+              className="action-button workflow-pulse-filter-button"
+              onClick={() => setShowAllWorkflowRoles((current) => !current)}
+              type="button"
+            >
+              {showAllWorkflowRoles ? "Hide inactive lanes" : "Show all lanes"}
+            </button>
           </div>
         <div className="workflow-pulse-grid">
-          {workerColumns.map((column, columnIndex) => (
+          {visibleWorkerColumns.map((column, columnIndex) => (
             <div className="workflow-pulse-column" key={`worker-column-${columnIndex}`}>
               {column.map((role) => {
                 const summary = laneSummary(role, bundle.workItems, session);
@@ -671,7 +708,13 @@ export function SessionDetail({
                     <div className="subpanel-head">
                       <strong className="workflow-pulse-role-name">{roleDisplayName(role.role_name)}</strong>
                       <span className={`status-pill status-${role.status === "running" ? "running" : role.status}`}>
-                        {workerStateLabel(role, activeRoleIds, session, bundle)}
+                        {workerStateLabel(
+                          role,
+                          activeRoleIds,
+                          session,
+                          bundle,
+                          runtimeRoleIndex.get(role.role_name) ?? null,
+                        )}
                       </span>
                     </div>
                     <p className="progress-card-title">{summary.title}</p>

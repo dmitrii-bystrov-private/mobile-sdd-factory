@@ -288,6 +288,14 @@ input {
   gap: var(--space-1);
 }
 
+.workflow-pulse-filter-button {
+  align-self: flex-start;
+}
+
+.session-queue-count {
+  align-self: flex-start;
+}
+
 .badge,
 .status-pill {
   display: inline-flex;
@@ -516,7 +524,8 @@ input {
 }
 
 .session-card,
-.action-button {
+.action-button,
+.hero-link-button {
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--surface-strong);
@@ -591,10 +600,11 @@ input {
 .hero-link-button {
   display: inline-flex;
   align-items: center;
-  padding: 8px 12px;
-  border: 1px solid rgba(255, 131, 92, 0.25);
-  border-radius: 999px;
-  background: rgba(255, 131, 92, 0.08);
+  justify-content: center;
+  min-height: 44px;
+  padding: 12px 14px;
+  text-decoration: none;
+  line-height: 1.2;
   white-space: nowrap;
   position: absolute;
   top: 0;
@@ -676,7 +686,8 @@ input {
 }
 
 .session-card:hover,
-.action-button:hover {
+.action-button:hover,
+.hero-link-button:hover {
   transform: translateY(-1px);
   border-color: rgba(209, 76, 39, 0.42);
   box-shadow: 0 12px 24px rgba(209, 76, 39, 0.12);
@@ -1842,7 +1853,8 @@ input {
   min-height: 0;
   overflow-x: hidden;
   padding-top: 10px;
-  padding-bottom: 6px;
+  padding-right: 0;
+  padding-bottom: 0;
   align-content: start;
 }
 
@@ -1886,15 +1898,8 @@ input {
     padding-right: 0;
   }
 
-  .hero-link-button {
-    position: static;
-    justify-self: start;
-  }
-
   .completed-followup-link {
-    position: static;
     margin-bottom: var(--space-3);
-    justify-self: start;
   }
 
   .hero-trace-item {

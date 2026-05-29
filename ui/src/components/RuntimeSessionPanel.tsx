@@ -69,6 +69,27 @@ function runtimeRoleStatusLabel(status: string): string {
   }
 }
 
+function runtimeRoleDisplayLabel(
+  role: RuntimeSessionStateSummary["roles"][number],
+): string {
+  if (role.roleName === "mr-comments-analyst-worker") {
+    if (role.status === "stopped") {
+      return "Sleeping";
+    }
+    return "On-demand";
+  }
+  switch (role.liveState) {
+    case "owner-active":
+      return "Active owner";
+    case "live-idle":
+      return "Standing by";
+    case "dead-stale":
+      return "Stale";
+    default:
+      return runtimeRoleStatusLabel(role.status);
+  }
+}
+
 export function RuntimeSessionPanel({
   runtimeStateSummary,
   session,
@@ -163,15 +184,23 @@ export function RuntimeSessionPanel({
                     {sortedRoles.map((role) => (
                       <article className="artifact-card runtime-role-card" key={role.roleName}>
                         <div className="artifact-meta">
-                          <span>{runtimeRoleStatusLabel(role.status)}</span>
+                          <span>{runtimeRoleDisplayLabel(role)}</span>
                           <strong>{roleDisplayName(role.roleName)}</strong>
                         </div>
                         <p className="artifact-path">
-                          {role.status === "running"
-                            ? "This lane currently has a live runtime."
-                            : role.status === "stopped"
-                              ? "This lane is currently stopped."
-                              : "This lane is waiting on runtime or orchestration state."}
+                          {role.roleName === "mr-comments-analyst-worker"
+                            ? role.status === "stopped"
+                              ? "This on-demand lane stays sleeping until MR follow-up analysis is requested."
+                              : "This on-demand lane has a live runtime and will only run when MR follow-up analysis is requested."
+                            : role.liveState === "owner-active"
+                              ? "This lane is currently owning the active workflow stage."
+                              : role.liveState === "live-idle" || role.status === "running"
+                                ? "This lane currently has a live reusable runtime."
+                                : role.liveState === "dead-stale"
+                                  ? "This lane has stale runtime state and may need restart."
+                                  : role.status === "stopped"
+                                    ? "This lane is currently stopped."
+                                    : "This lane is waiting on runtime or orchestration state."}
                         </p>
                         <div className="actions-grid runtime-role-actions">
                           <button

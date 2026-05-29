@@ -228,8 +228,12 @@ export const apiClient = {
     roles: Array<{
       role_name: string;
       status: string;
+      live_state: string | null;
       runtime_backend: string;
       runtime_handle: string | null;
+      is_current_owner: boolean;
+      has_active_work_item: boolean;
+      has_pending_operator_continuation: boolean;
       tmux_attach_command: string | null;
       tmux_capture_command: string | null;
     }>;

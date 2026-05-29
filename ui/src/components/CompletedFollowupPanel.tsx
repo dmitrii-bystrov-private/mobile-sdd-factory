@@ -149,7 +149,7 @@ export function CompletedFollowupPanel({
           <h3>Completed Session Recovery</h3>
         </div>
         {mrUrl ? (
-          <a className="hero-link hero-link-button completed-followup-link" href={mrUrl} rel="noreferrer" target="_blank">
+          <a className="hero-link-button completed-followup-link" href={mrUrl} rel="noreferrer" target="_blank">
             Open MR
           </a>
         ) : null}

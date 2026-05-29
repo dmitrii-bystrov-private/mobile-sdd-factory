@@ -245,8 +245,12 @@ async function buildRuntimeStateSummary(
     roles: response.roles.map((role) => ({
       roleName: role.role_name,
       status: role.status,
+      liveState: role.live_state,
       runtimeBackend: role.runtime_backend,
       runtimeHandle: role.runtime_handle,
+      isCurrentOwner: role.is_current_owner,
+      hasActiveWorkItem: role.has_active_work_item,
+      hasPendingOperatorContinuation: role.has_pending_operator_continuation,
       tmuxAttachCommand: role.tmux_attach_command,
       tmuxCaptureCommand: role.tmux_capture_command,
     })),
