@@ -5784,14 +5784,31 @@ class CoordinatorService:
                 "reason": "self_review_cycle",
                 "role_name": CODE_REVIEWER_ROLE,
                 "summary": str(source_event.payload.get("summary") or "").strip() or "self review cycle blocked",
-                "details": str(source_event.payload.get("details") or "").strip()
-                or "The reviewer reported a non-converging review cycle and stopped automatic retries.",
+                "details": self._self_review_cycle_operator_details(source_event.payload),
                 "needs_operator_input": True,
                 "review_report_paths": report_paths,
                 "current_stage": session.current_stage,
             },
         )
         return session, event
+
+    def _self_review_cycle_operator_details(self, payload: dict | None) -> str:
+        if not isinstance(payload, dict):
+            return "The reviewer reported a non-converging review cycle and stopped automatic retries."
+        explicit_details = str(payload.get("details") or "").strip()
+        if explicit_details:
+            return explicit_details
+        issues_markdown = str(payload.get("issues_markdown") or "").strip()
+        if issues_markdown:
+            cleaned_lines: list[str] = []
+            for line in issues_markdown.splitlines():
+                if not cleaned_lines and line.strip().startswith("REVIEW_RESULT:"):
+                    continue
+                cleaned_lines.append(line)
+            cleaned = "\n".join(cleaned_lines).strip()
+            if cleaned:
+                return cleaned
+        return "The reviewer reported a non-converging review cycle and stopped automatic retries."
 
     def _enqueue_verification(
         self,
@@ -7403,13 +7420,13 @@ class CoordinatorService:
                 return (
                     f"Mode: fix-only\n"
                     f"Apply verification corrections for {task_key}. "
-                    "Treat the verification report as a narrow bug-fix correction pass."
+                    "Stay aligned to the verification findings, but fix the root cause cleanly and prevent regressions."
                 )
             if stage_name == "self_review_correction_requested":
                 return (
                     f"Mode: fix-only\n"
                     f"Apply self review corrections for {task_key}. "
-                    "Treat the review findings as a narrow bug-fix correction pass."
+                    "Stay aligned to the review findings, but fix the root cause cleanly and prevent regressions."
                 )
             if stage_name == "mr_followup_requested":
                 return (
@@ -7494,7 +7511,10 @@ class CoordinatorService:
                 "Read task snapshot inputs such as `description.md`, `comments.md`, and `spec/diff.md` when they exist before deciding that no concrete implementation work is present."
             )
         if stage_name == "boy_scout_correction_requested":
-            return f"Apply Boy Scout improvements for {task_key} from the routed findings file as a narrow correction pass."
+            return (
+                f"Apply Boy Scout improvements for {task_key} from the routed findings file. "
+                "Stay aligned to the routed maintainability findings, but make any adjacent cleanup that is necessary to resolve them cleanly."
+            )
         if stage_name == "verification_requested":
             return (
                 f"Run deterministic verification for {task_key}. "

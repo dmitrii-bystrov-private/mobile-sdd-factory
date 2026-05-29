@@ -1663,10 +1663,12 @@ class SessionCreationTests(unittest.TestCase):
             [
                 "task_started",
                 "task_prepared",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "implementation_requested",
                 "implementation_completed",
                 "git_commit_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "verification_requested",
             ],
@@ -2138,6 +2140,10 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("self_review_cycle", str(followup_event.payload.get("reason") or ""))
         self.assertEqual(CODE_REVIEWER_ROLE, str(followup_event.payload.get("role_name") or ""))
         self.assertTrue(bool(followup_event.payload.get("needs_operator_input") is True))
+        self.assertIn(
+            "Previously reported issue still applies",
+            str(followup_event.payload.get("details") or ""),
+        )
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
 
         summary = self.coordinator.get_interactive_state_summary(session.id)
@@ -2145,6 +2151,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("self_review_cycle", summary["source_reason"])
         self.assertEqual(CODE_REVIEWER_ROLE, summary["role_name"])
         self.assertTrue(summary["needs_operator_input"])
+        self.assertIn("Previously reported issue still applies", str(summary["details"] or ""))
 
     def test_operator_reply_to_blocked_self_review_cycle_redirects_to_implementer(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -5037,13 +5044,16 @@ class SessionCreationTests(unittest.TestCase):
             [
                 "task_started",
                 "task_prepared",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "implementation_requested",
                 "implementation_completed",
                 "git_commit_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "verification_requested",
                 "verification_failed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "verification_correction_requested",
             ],
@@ -5056,7 +5066,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Apply verification corrections for IOS-30004.", sent_inputs[-1])
         self.assertIn("Continue from your existing implementer role context", sent_inputs[-1])
-        self.assertIn("If the routed work is a narrow correction pass", sent_inputs[-1])
+        self.assertIn("fix the real root cause cleanly and avoid regressions", sent_inputs[-1])
         self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
         self.assertTrue(verification_report.exists())
         self.assertIn("## Strategy", verification_report.read_text())
@@ -5776,7 +5786,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_correction_requested", followup_event.event_type)
         self.assertIn("Mode: fix-only", sent_inputs[-1])
         self.assertIn("Apply verification corrections for IOS-30004BUG.", sent_inputs[-1])
-        self.assertIn("narrow bug-fix correction pass", sent_inputs[-1])
+        self.assertIn("fix the root cause cleanly and prevent regressions", sent_inputs[-1])
         self.assertNotIn('"issues_file_path"', sent_inputs[-1])
         self.assertNotIn('"bug_analysis_report_path"', sent_inputs[-1])
 
@@ -6165,10 +6175,12 @@ class SessionCreationTests(unittest.TestCase):
             [
                 "task_started",
                 "task_prepared",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "implementation_requested",
                 "implementation_completed",
                 "git_commit_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "verification_requested",
                 "verification_passed",
@@ -6280,10 +6292,12 @@ class SessionCreationTests(unittest.TestCase):
             [
                 "task_started",
                 "task_prepared",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "implementation_requested",
                 "implementation_completed",
                 "git_commit_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "verification_requested",
             ],

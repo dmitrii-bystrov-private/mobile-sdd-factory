@@ -12,6 +12,18 @@ type InteractiveStatePanelProps = {
   onRefresh: () => Promise<void>;
 };
 
+function renderStructuredText(text: string, className: string): JSX.Element[] {
+  return text
+    .split(/\n\s*\n/)
+    .map((chunk) => chunk.trim())
+    .filter((chunk) => chunk.length > 0)
+    .map((chunk, index) => (
+      <p key={`${className}-${index}`} className={className}>
+        {chunk}
+      </p>
+    ));
+}
+
 export function InteractiveStatePanel({
   sessionId,
   interactiveStateSummary,
@@ -34,7 +46,12 @@ export function InteractiveStatePanel({
     return null;
   }
 
-  const questionText = interactiveStateSummary.details ?? interactiveStateSummary.summary;
+  const summaryText = interactiveStateSummary.summary?.trim() ?? "";
+  const detailsText = interactiveStateSummary.details?.trim() ?? "";
+  const suppressSummaryForCycleBlocker =
+    interactiveStateSummary.sourceReason === "self_review_cycle" && detailsText.length > 0;
+  const showSummary = summaryText.length > 0 && !suppressSummaryForCycleBlocker;
+  const showDetails = detailsText.length > 0 && detailsText !== summaryText;
   const isProtocolViolation = interactiveStateSummary.sourceReason === "role_result_protocol_violation";
   const blockingRoleName = interactiveStateSummary.roleName;
   const blockingRole =
@@ -100,9 +117,10 @@ export function InteractiveStatePanel({
       </div>
 
       <div className="interactive-question-stack">
-        {questionText ? (
+        {showSummary || showDetails ? (
           <div className="interactive-question-card">
-            <p>{questionText}</p>
+            {showSummary ? renderStructuredText(summaryText, "interactive-question-summary") : null}
+            {showDetails ? renderStructuredText(detailsText, "interactive-question-details") : null}
           </div>
         ) : null}
       </div>

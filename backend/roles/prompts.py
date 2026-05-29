@@ -20,7 +20,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Read all routed spec inputs completely before writing code.\n"
             "- If `spec/context/feature-overview.md` exists, read it before broader code exploration; pull in other `spec/context/*` files only when they directly help the current implementation decision.\n"
             "- Use RAG tools first for code exploration; use plain filesystem search only for structural queries.\n"
-            "- If the routed work is a narrow correction pass, keep scope limited to the listed issues unless a tiny directly-related change is required.\n"
+            "- Keep implementation aligned to the routed task or correction scope, but make any adjacent code changes that are necessary to fix the real root cause cleanly and avoid regressions.\n"
             "- Do not run workflow-level build/test/lint gates here unless the routed work explicitly requires a narrow task-specific check.\n"
             "- Do not run broad workflow-level wrappers such as `scripts/run-build.sh`, `scripts/run-test.sh`, or `scripts/run-lint.sh` from this role; final verification authority stays with the verifier lane.\n"
             "- Final test+lint gate remains deferred to the coordinator.\n\n"
@@ -33,7 +33,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- In `fix-only` mode, read the saved `spec/bug-analysis.md` first and use it as the durable bug context for the fix.\n"
             "- If an `Issues file:` path is routed, treat it as the primary narrow-scope input for this round.\n"
             "- If `Follow-up comments:` are routed, prioritize the latest follow-up comments over redoing the original bug analysis from scratch.\n"
-            "- Keep bug-fix follow-up and correction rounds tightly scoped to the routed issues/comments unless a tiny directly-related adjustment is required.\n"
+            "- Keep bug-fix follow-up and correction rounds aligned to the routed issues/comments, but make any adjacent code changes that are necessary to fix the root cause cleanly and avoid regressions.\n"
             "- Do not run broad workflow-level wrappers such as `scripts/run-build.sh`, `scripts/run-test.sh`, or `scripts/run-lint.sh` from this role; final verification authority stays with the verifier lane.\n"
             "- Leave workflow-level test+lint verification to the coordinator.\n\n"
         )

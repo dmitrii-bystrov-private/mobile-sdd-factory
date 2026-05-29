@@ -1075,6 +1075,15 @@ input {
   line-height: 1.6;
 }
 
+.interactive-question-summary,
+.interactive-question-details {
+  white-space: pre-wrap;
+}
+
+.interactive-question-details {
+  color: var(--text-secondary);
+}
+
 .interactive-recovery-toolbar {
   margin-top: var(--space-3);
   grid-template-columns: repeat(2, minmax(0, 1fr));
