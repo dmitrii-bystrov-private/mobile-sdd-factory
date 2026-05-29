@@ -1160,7 +1160,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Bug analysis report target:", bug_fixer_agents)
         self.assertIn("Support the routed bug modes inside one runtime identity", bug_fixer_agents)
         self.assertIn("In `analysis-only` mode, read task description/comments first", bug_fixer_agents)
-        self.assertIn("If an `Issues file:` path is routed, treat it as the primary narrow-scope input", bug_fixer_agents)
+        self.assertIn("If an `Issues file:` path is routed, treat it as the primary scoped input", bug_fixer_agents)
+        self.assertIn("fix the root cause cleanly and avoid regressions", bug_fixer_agents)
         self.assertIn("If `Follow-up comments:` are routed, prioritize the latest follow-up comments", bug_fixer_agents)
 
     def test_create_task_session_creates_role_launch_scripts(self) -> None:
@@ -1563,6 +1564,7 @@ class SessionCreationTests(unittest.TestCase):
             [
                 "task_started",
                 "task_prepared",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "implementation_requested",
             ],
@@ -1625,6 +1627,7 @@ class SessionCreationTests(unittest.TestCase):
                 "task_started",
                 "task_session_reused",
                 "task_prepared",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "bug_analysis_requested",
             ],
@@ -2140,8 +2143,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("self_review_cycle", str(followup_event.payload.get("reason") or ""))
         self.assertEqual(CODE_REVIEWER_ROLE, str(followup_event.payload.get("role_name") or ""))
         self.assertTrue(bool(followup_event.payload.get("needs_operator_input") is True))
-        self.assertIn(
-            "Previously reported issue still applies",
+        self.assertEqual(
+            "Two review passes raised the same reducer issue and the loop no longer converges.",
             str(followup_event.payload.get("details") or ""),
         )
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
@@ -2151,7 +2154,10 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("self_review_cycle", summary["source_reason"])
         self.assertEqual(CODE_REVIEWER_ROLE, summary["role_name"])
         self.assertTrue(summary["needs_operator_input"])
-        self.assertIn("Previously reported issue still applies", str(summary["details"] or ""))
+        self.assertEqual(
+            "Two review passes raised the same reducer issue and the loop no longer converges.",
+            str(summary["details"] or ""),
+        )
 
     def test_operator_reply_to_blocked_self_review_cycle_redirects_to_implementer(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -2253,7 +2259,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Authoritative operator resolutions", sent_inputs[-1])
         self.assertIn("treat .error as authoritative", sent_inputs[-1])
         self.assertIn("\"review_cycle_resolution\": \"operator_guided_recheck\"", sent_inputs[-1])
-        self.assertIn("\"operator_resolution_history\": [", sent_inputs[-1])
+        self.assertIn('"operator_resolution_history": "[', sent_inputs[-1])
 
     def test_waiting_self_review_correction_completion_is_not_ignored_as_stale(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -2607,9 +2613,11 @@ class SessionCreationTests(unittest.TestCase):
                 "task_started",
                 "task_session_reused",
                 "task_prepared",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "bug_analysis_requested",
                 "bug_analysis_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "implementation_requested",
             ],
@@ -2653,6 +2661,7 @@ class SessionCreationTests(unittest.TestCase):
                 "task_started",
                 "task_session_reused",
                 "task_prepared",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "proposal_context_requested",
             ],
@@ -2896,7 +2905,9 @@ class SessionCreationTests(unittest.TestCase):
             payload={"summary": "done"},
         )
         scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(scout_role.runtime_handle)
+        refreshed_scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
+        assert refreshed_scout_role is not None
+        sent_inputs = self.session_backend.get_sent_inputs(refreshed_scout_role.runtime_handle)
 
         self.assertEqual("boy_scout_requested", updated_session.current_stage)
         self.assertEqual("boy_scout_requested", implementation_event.event_type)
@@ -3390,21 +3401,27 @@ class SessionCreationTests(unittest.TestCase):
                 "task_started",
                 "task_session_reused",
                 "task_prepared",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "proposal_context_requested",
                 "proposal_context_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "requirements_requested",
                 "requirements_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "acceptance_criteria_requested",
                 "acceptance_criteria_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "constraints_requested",
                 "constraints_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "spec_verification_requested",
                 "spec_verification_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "task_decomposition_requested",
             ],
@@ -3499,21 +3516,27 @@ class SessionCreationTests(unittest.TestCase):
                 "task_started",
                 "task_session_reused",
                 "task_prepared",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "proposal_context_requested",
                 "proposal_context_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "requirements_requested",
                 "requirements_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "acceptance_criteria_requested",
                 "acceptance_criteria_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "constraints_requested",
                 "constraints_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "spec_verification_requested",
                 "spec_verification_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "task_decomposition_requested",
                 "story_spec_completed",
@@ -6329,9 +6352,11 @@ class SessionCreationTests(unittest.TestCase):
                 "task_started",
                 "task_session_reused",
                 "task_prepared",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "bug_analysis_requested",
                 "bug_analysis_completed",
+                "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "implementation_requested",
             ],
@@ -7889,7 +7914,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "runtime_output" for item in artifacts))
         refreshed_role = self.role_repository.get_by_name(session.id, "code-scout")
         assert refreshed_role is not None
-        self.assertEqual("stopped", refreshed_role.status.value)
+        self.assertEqual("running", refreshed_role.status.value)
 
     def test_collect_role_output_records_progress_marker_without_stage_transition(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30010")
@@ -8230,7 +8255,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "mr_followup_plan_markdown" for item in artifacts))
         analyst_role = self.role_repository.get_by_name(session.id, MR_COMMENTS_ANALYST_ROLE)
         assert analyst_role is not None
-        self.assertEqual(RoleStatus.RUNNING, analyst_role.status)
+        self.assertEqual(RoleStatus.STOPPED, analyst_role.status)
 
     def test_mr_comments_analysis_completion_falls_back_to_direct_followup_without_resolved_snapshot_subtasks(
         self,
@@ -8920,7 +8945,9 @@ class SessionCreationTests(unittest.TestCase):
 
         scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
         assert scout_role is not None
-        sent_inputs = self.session_backend.get_sent_inputs(scout_role.runtime_handle)
+        refreshed_scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
+        assert refreshed_scout_role is not None
+        sent_inputs = self.session_backend.get_sent_inputs(refreshed_scout_role.runtime_handle)
 
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("write-result.sh", sent_inputs[0])
@@ -10335,7 +10362,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("waiting_for_operator", blocked_session.status.value)
 
         retried_session, retried_event, dispatch_event = self.coordinator.retry_session(session.id)
-        sent_inputs = self.session_backend.get_sent_inputs(scout_role.runtime_handle)
+        refreshed_scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
+        assert refreshed_scout_role is not None
+        sent_inputs = self.session_backend.get_sent_inputs(refreshed_scout_role.runtime_handle)
 
         self.assertEqual("active", retried_session.status.value)
         self.assertEqual(CODE_SCOUT_ROLE, retried_session.current_owner)
@@ -10371,7 +10400,9 @@ class SessionCreationTests(unittest.TestCase):
         finally:
             ALLOWED_STAGE_ROLE_TARGETS["implementation_requested"].remove("implementer-shadow")
         work_items = self.work_item_repository.list_for_session(session.id)
-        shadow_inputs = self.session_backend.get_sent_inputs(shadow_role.runtime_handle)
+        refreshed_shadow_role = self.role_repository.get_by_name(session.id, "implementer-shadow")
+        assert refreshed_shadow_role is not None
+        shadow_inputs = self.session_backend.get_sent_inputs(refreshed_shadow_role.runtime_handle)
 
         self.assertEqual("active", redirected_session.status.value)
         self.assertEqual("implementer-shadow", redirected_session.current_owner)

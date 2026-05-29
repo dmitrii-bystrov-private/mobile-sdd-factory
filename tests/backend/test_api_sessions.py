@@ -193,6 +193,14 @@ class FakeJiraAdapter:
     def send_to_test(self, task_key: str) -> "CommandResult":
         return CommandResult(["send_to_test", task_key], 0, f"Done: {task_key} -> Ready for test\n", "")
 
+    def complete_subtask(self, subtask_key: str) -> "CommandResult":
+        return CommandResult(
+            ["complete_subtask", subtask_key],
+            0,
+            f"Done: {subtask_key} -> Ready for test\n",
+            "",
+        )
+
 
 class FakeSnapshotAdapter:
     def __init__(self, workdir_root: Path | None = None) -> None:
@@ -714,6 +722,19 @@ class SessionApiTests(unittest.TestCase):
                 ]
             ),
         )
+        plan_dir = Path(self.temp_dir.name) / "IOS-40005JS" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n"
+            "| # | Task | Depends on | Status |\n"
+            "|---|------|------------|--------|\n"
+            "| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
+        )
+        (plan_dir / "01-build-data-source.md").write_text(
+            "# Build data source\n\n"
+            "## What to implement\n"
+            "Create the feature data source.\n"
+        )
         create_subtasks_from_plan(
             CreateSubtasksFromPlanRequest(session_id=create_response.session.id),
             dependencies=self.dependencies,
@@ -1160,7 +1181,7 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertEqual("verification_requested", inject_response.followup_event_type)
         self.assertEqual("verification_requested", inject_response.session.current_stage)
-        self.assertEqual(8, len(events_response.items))
+        self.assertEqual(10, len(events_response.items))
         self.assertEqual(2, len(work_items_response.items))
 
     def test_bug_analysis_completed_event_returns_implementation_handoff(self) -> None:
@@ -1431,8 +1452,8 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        self.assertEqual("story_spec_requested", response.followup_event_type)
-        self.assertEqual("story_spec_requested", response.session.current_stage)
+        self.assertEqual("task_decomposition_requested", response.followup_event_type)
+        self.assertEqual("task_decomposition_requested", response.session.current_stage)
         spec_root = Path(self.temp_dir.name) / "IOS-40003VERIFY" / "spec"
         self.assertTrue((spec_root / "proposal.md").is_file())
         self.assertTrue((spec_root / "requirements.md").is_file())
@@ -1481,7 +1502,7 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        self.assertEqual("spec_verification_blocked", response.mapped_event_type)
+        self.assertEqual("story_planning_blocked", response.mapped_event_type)
         self.assertEqual("session_escalated_to_operator", response.followup_event_type)
         self.assertEqual("spec_verification_requested", response.session.current_stage)
         self.assertEqual("waiting_for_operator", response.session.status)
@@ -1651,9 +1672,9 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        self.assertEqual("task_decomposition_requested", response.followup_event_type)
+        self.assertIsNone(response.followup_event_type)
         self.assertEqual("task_decomposition_requested", response.session.current_stage)
-        self.assertEqual(7, len(work_items_response.items))
+        self.assertEqual(6, len(work_items_response.items))
 
     def test_task_decomposition_completed_event_returns_subtask_creation_checkpoint(self) -> None:
         prepare_response = create_session(
@@ -1736,9 +1757,9 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        self.assertEqual("implementation_requested", response.followup_event_type)
-        self.assertEqual("implementation_requested", response.session.current_stage)
-        self.assertEqual("active", response.session.status)
+        self.assertEqual("jira_subtasks_created", response.followup_event_type)
+        self.assertEqual("subtask_creation_requested", response.session.current_stage)
+        self.assertEqual("waiting_for_operator", response.session.status)
 
     def test_start_subtask_graph_route_converts_story_session(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -1847,7 +1868,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("subtask_graph_requested", response.event_type)
         self.assertEqual("subtask_implementation_requested", response.followup_event_type)
         self.assertEqual("subtask_implementation_requested", response.session.current_stage)
-        self.assertEqual(9, len(work_items_response.items))
+        self.assertEqual(8, len(work_items_response.items))
 
     def test_subtask_completed_event_keeps_story_session_in_subtask_lane(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -2136,7 +2157,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("send_to_test_completed", response.followup_event_type)
         self.assertEqual("send_to_test_completed", response.session.current_stage)
         self.assertEqual("completed", response.session.status)
-        self.assertEqual(12, len(events_response.items))
+        self.assertEqual(14, len(events_response.items))
         verification_report = Path(self.temp_dir.name) / "IOS-40005" / "spec" / "final-verification.md"
         self.assertTrue(verification_report.exists())
         self.assertIn("PASS", verification_report.read_text())
@@ -2164,7 +2185,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("implementation_completed", response.mapped_event_type)
         self.assertEqual("verification_requested", response.followup_event_type)
         self.assertEqual("verification_requested", response.session.current_stage)
-        self.assertEqual(8, len(events_response.items))
+        self.assertEqual(10, len(events_response.items))
 
     def test_artifact_detail_route_returns_content_and_metadata(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
@@ -2251,7 +2272,12 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(1, response.chunk_count)
         self.assertEqual("role_output_collected", response.event_type)
         self.assertEqual("implementation_requested", response.session.current_stage)
-        self.assertTrue(any(item.event_type == "runtime_terminal_output_echo_ignored" for item in events_response.items))
+        self.assertTrue(
+            any(
+                item.event_type in {"runtime_terminal_output_echo_ignored", "stale_role_output_ignored"}
+                for item in events_response.items
+            )
+        )
         self.assertFalse(any(item.event_type == "implementation_completed" for item in events_response.items))
 
     def test_collect_role_output_route_consumes_result_json(self) -> None:
@@ -2378,12 +2404,12 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        self.assertTrue(response.polled)
+        self.assertFalse(response.polled)
         self.assertEqual(3, response.role_count)
-        self.assertEqual(1, response.chunk_count)
-        self.assertEqual("session_output_polled", response.event_type)
-        self.assertEqual("verification_requested", response.session.current_stage)
-        self.assertFalse(result_path.exists())
+        self.assertEqual(0, response.chunk_count)
+        self.assertIsNone(response.event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertTrue(result_path.exists())
 
     def test_event_bus_recent_events_reflect_api_actions(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
@@ -2542,9 +2568,9 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
         self.assertEqual("task_decomposition_completed", response.event_type)
-        self.assertEqual("implementation_requested", response.followup_event_type)
-        self.assertEqual("implementation_requested", response.session.current_stage)
-        self.assertEqual("active", response.session.status)
+        self.assertEqual("jira_subtasks_created", response.followup_event_type)
+        self.assertEqual("subtask_creation_requested", response.session.current_stage)
+        self.assertEqual("waiting_for_operator", response.session.status)
 
     def test_send_runtime_input_route_continues_waiting_session(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
@@ -2655,8 +2681,8 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        self.assertFalse(response.available)
-        self.assertFalse(response.needs_operator_input)
+        self.assertTrue(response.available)
+        self.assertTrue(response.needs_operator_input)
 
     def test_get_interactive_state_route_clears_after_operator_runtime_input(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
@@ -2720,7 +2746,7 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
 
-        self.assertFalse(response.available)
+        self.assertTrue(response.available)
         self.assertFalse(response.needs_operator_input)
 
     def test_get_interactive_state_route_returns_resume_strategy(self) -> None:
@@ -2864,18 +2890,36 @@ class SessionApiTests(unittest.TestCase):
         )
         spec_dir = Path(self.temp_dir.name) / "IOS-40013BSKIP" / "spec"
         spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
-        self.dependencies.session_backend.simulate_output(
-            scout_role.runtime_handle,
-            'SDD_OUTPUT: {"output_type":"completed","payload":{"result":"findings_found","summary":"Found one improvement opportunity."}}',
+        (spec_dir / "diff.md").write_text(
+            "# Diff Artifact: IOS-40013BSKIP\n\n"
+            "## Changed Files\n\n"
+            "| Status | Path |\n|---|---|\n"
+            "| modified | `LegacyPresenter.swift` |\n\n"
         )
-        collect_role_output(
-            CollectRoleOutputRequest(
+        (spec_dir / "findings.md").write_text(
+            "SCOUT_RESULT: findings_found\n\n"
+            "## Finding 1: Split legacy presenter\n\n"
+            "**Files**: `LegacyPresenter.swift`\n"
+            "**Principle**: SRP\n"
+            "**Problem**: Presenter does too much.\n"
+            "**Suggestion**: Split responsibilities.\n"
+        )
+        scout_response = submit_role_output(
+            RoleOutputRequest(
                 session_id=create_response.session.id,
                 role_name="code-scout",
+                output_type="completed",
+                payload={
+                    "result": "findings_found",
+                    "summary": "Found one improvement opportunity.",
+                    "findings_path": str(spec_dir / "findings.md"),
+                    "findings_count": 1,
+                },
             ),
             dependencies=self.dependencies,
         )
+        self.assertEqual("session_escalated_to_operator", scout_response.followup_event_type)
+        self.assertEqual("waiting_for_operator", scout_response.session.status)
 
         response = skip_boy_scout(
             SkipBoyScoutRequest(
@@ -2896,7 +2940,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("verification_requested", response.session.current_stage)
         self.assertTrue(any(item.artifact_type == "boy_scout_deferred_markdown" for item in artifacts_response.items))
         self.assertTrue(deferred_path.is_file())
-        self.assertIn("Extract helper", deferred_path.read_text())
+        self.assertIn("Split legacy presenter", deferred_path.read_text())
 
     def test_resolve_boy_scout_findings_route_creates_tech_debt_and_routes_remaining_work(self) -> None:
         create_response = create_session(
@@ -2946,17 +2990,22 @@ class SessionApiTests(unittest.TestCase):
             "**Problem**: Presenter does too much.\n"
             "**Suggestion**: Split responsibilities.\n"
         )
-        self.dependencies.session_backend.simulate_output(
-            scout_role.runtime_handle,
-            'SDD_OUTPUT: {"output_type":"completed","payload":{"result":"findings_found","summary":"Found two improvement opportunities."}}',
-        )
-        collect_role_output(
-            CollectRoleOutputRequest(
+        scout_response = submit_role_output(
+            RoleOutputRequest(
                 session_id=create_response.session.id,
                 role_name="code-scout",
+                output_type="completed",
+                payload={
+                    "result": "findings_found",
+                    "summary": "Found two improvement opportunities.",
+                    "findings_path": str(spec_dir / "findings.md"),
+                    "findings_count": 2,
+                },
             ),
             dependencies=self.dependencies,
         )
+        self.assertEqual("session_escalated_to_operator", scout_response.followup_event_type)
+        self.assertEqual("waiting_for_operator", scout_response.session.status)
 
         response = resolve_boy_scout_findings(
             ResolveBoyScoutFindingsRequest(

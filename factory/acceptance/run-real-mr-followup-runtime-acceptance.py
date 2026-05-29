@@ -107,7 +107,7 @@ def main() -> None:
                 session_id=session_id,
                 role_name=VERIFICATION_COORDINATOR_ROLE,
                 output_type="passed",
-                payload={"summary": "Initial verification passed."},
+                payload={"summary": "Initial verification passed.", "result": "passed"},
             ),
             dependencies=deps,
         )

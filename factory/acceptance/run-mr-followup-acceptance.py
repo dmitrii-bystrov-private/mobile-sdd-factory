@@ -141,7 +141,7 @@ def main() -> None:
                 session_id=session_id,
                 role_name="verification-coordinator",
                 output_type="passed",
-                payload={"summary": "verification passed"},
+                payload={"summary": "verification passed", "result": "passed"},
             ),
             dependencies=deps,
         )
@@ -201,7 +201,7 @@ def main() -> None:
                 session_id=session_id,
                 role_name=IMPLEMENTER_ROLE,
                 output_type="completed",
-                payload={"summary": "mr follow-up done"},
+                payload={"summary": "mr follow-up done", "subtask_key": "IOS-90001"},
             ),
             dependencies=deps,
         )
@@ -223,7 +223,7 @@ def main() -> None:
                 session_id=session_id,
                 role_name="verification-coordinator",
                 output_type="passed",
-                payload={"summary": "verification passed after mr follow-up"},
+                payload={"summary": "verification passed after mr follow-up", "result": "passed"},
             ),
             dependencies=deps,
         )

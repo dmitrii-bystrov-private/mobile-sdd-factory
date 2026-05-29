@@ -7,8 +7,8 @@ source "${SCRIPT_DIR}/shell-run-root.sh"
 
 PORT="${SDD_FACTORY_ACCEPTANCE_PORT:-8014}"
 TASK_KEY="IOS-ACCEPT-DELIVERY-001"
-WORKDIR_ROOT="${REPO_ROOT}/workdir"
 TMP_ROOT="$(make_shell_acceptance_tmp_root "${REPO_ROOT}" "delivery-acceptance")"
+WORKDIR_ROOT="${TMP_ROOT}/workdir"
 DB_PATH="${TMP_ROOT}/acceptance.sqlite3"
 RUNTIME_ROOT="${WORKDIR_ROOT}"
 BASE_URL="http://127.0.0.1:${PORT}"
@@ -75,7 +75,7 @@ curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json'
   | jq -e '.followup_event_type == "verification_requested"' >/dev/null
 
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
-  -d "{\"session_id\":${SESSION_ID},\"role_name\":\"verification-coordinator\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"verification passed\"}}" \
+  -d "{\"session_id\":${SESSION_ID},\"role_name\":\"verification-coordinator\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"verification passed\",\"result\":\"passed\"}}" \
   | jq -e '.followup_event_type == "send_to_test_completed"' >/dev/null
 
 ARTIFACTS_RESPONSE="$(curl -fsS "${BASE_URL}/artifacts?session_id=${SESSION_ID}")"

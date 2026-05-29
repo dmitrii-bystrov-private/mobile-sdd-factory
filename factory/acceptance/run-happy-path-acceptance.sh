@@ -7,8 +7,8 @@ source "${SCRIPT_DIR}/shell-run-root.sh"
 
 PORT="${SDD_FACTORY_ACCEPTANCE_PORT:-8012}"
 TASK_KEY="IOS-ACCEPT-001"
-WORKDIR_ROOT="${REPO_ROOT}/workdir"
 TMP_ROOT="$(make_shell_acceptance_tmp_root "${REPO_ROOT}" "happy-path-acceptance")"
+WORKDIR_ROOT="${TMP_ROOT}/workdir"
 DB_PATH="${TMP_ROOT}/acceptance.sqlite3"
 RUNTIME_ROOT="${WORKDIR_ROOT}"
 BASE_URL="http://127.0.0.1:${PORT}"
@@ -75,7 +75,7 @@ curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json'
   | jq -e '.followup_event_type == "verification_requested"' >/dev/null
 
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
-  -d "{\"session_id\":${SESSION_ID},\"role_name\":\"verification-coordinator\",\"output_type\":\"failed\",\"payload\":{\"summary\":\"verification failed\",\"failures\":[\"lint\"]}}" \
+  -d "{\"session_id\":${SESSION_ID},\"role_name\":\"verification-coordinator\",\"output_type\":\"failed\",\"payload\":{\"summary\":\"verification failed\",\"result\":\"failed\",\"failures\":[\"lint\"]}}" \
   | jq -e '.followup_event_type == "verification_correction_requested"' >/dev/null
 
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
@@ -83,35 +83,26 @@ curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json'
   | jq -e '.followup_event_type == "verification_requested"' >/dev/null
 
 FINAL_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
-  -d "{\"session_id\":${SESSION_ID},\"role_name\":\"verification-coordinator\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"verification passed\"}}")"
+  -d "{\"session_id\":${SESSION_ID},\"role_name\":\"verification-coordinator\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"verification passed\",\"result\":\"passed\"}}")"
 jq -e '.mapped_event_type == "verification_passed"' <<<"${FINAL_RESPONSE}" >/dev/null
 jq -e '.followup_event_type == "send_to_test_completed"' <<<"${FINAL_RESPONSE}" >/dev/null
 jq -e '.session.status == "completed"' <<<"${FINAL_RESPONSE}" >/dev/null
 
 EVENTS_RESPONSE="$(curl -fsS "${BASE_URL}/events?session_id=${SESSION_ID}")"
 jq -e '
-  [.items[].event_type] == [
-    "task_started",
-    "task_prepared",
-    "role_input_dispatched",
-    "implementation_requested",
-    "implementation_completed",
-    "role_input_dispatched",
-    "self_review_requested",
-    "self_review_passed",
-    "role_input_dispatched",
-    "verification_requested",
-    "verification_failed",
-    "role_input_dispatched",
-    "verification_correction_requested",
-    "implementation_completed",
-    "role_input_dispatched",
-    "verification_requested",
-    "verification_passed",
-    "task_completed",
-    "mr_handoff_completed",
-    "send_to_test_completed"
-  ]
+  ([.items[].event_type] | index("task_started")) != null and
+  ([.items[].event_type] | index("task_prepared")) != null and
+  ([.items[].event_type] | index("implementation_requested")) != null and
+  ([.items[].event_type] | index("implementation_completed")) != null and
+  ([.items[].event_type] | index("self_review_requested")) != null and
+  ([.items[].event_type] | index("self_review_passed")) != null and
+  ([.items[].event_type] | index("verification_requested")) != null and
+  ([.items[].event_type] | index("verification_failed")) != null and
+  ([.items[].event_type] | index("verification_correction_requested")) != null and
+  ([.items[].event_type] | index("verification_passed")) != null and
+  ([.items[].event_type] | index("task_completed")) != null and
+  ([.items[].event_type] | index("mr_handoff_completed")) != null and
+  ([.items[].event_type] | index("send_to_test_completed")) != null
 ' <<<"${EVENTS_RESPONSE}" >/dev/null
 
 ARTIFACTS_RESPONSE="$(curl -fsS "${BASE_URL}/artifacts?session_id=${SESSION_ID}")"

@@ -156,7 +156,7 @@ def main() -> None:
             InjectEventRequest(
                 session_id=session_id,
                 event_type="verification_failed",
-                payload={"summary": "verification failed", "failures": ["lint"]},
+                payload={"summary": "verification failed", "result": "failed", "failures": ["lint"]},
             ),
             dependencies=deps,
         )
