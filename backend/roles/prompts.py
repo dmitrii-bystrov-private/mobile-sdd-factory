@@ -41,6 +41,9 @@ def role_runtime_rules(role_name: str) -> str:
         return (
             "Role-specific rules:\n"
             "- Start from the current diff and review only the touched changes.\n"
+            "- This role is static review only: do not run builds, tests, lint, simulator commands, or workflow wrappers from here.\n"
+            "- Do not invoke repository verification entry points such as `scripts/run-build.sh`, `scripts/run-test.sh`, `scripts/run-lint.sh`, `scripts/ios-verify.sh`, `scripts/android-verify.sh`, or platform-local test wrappers.\n"
+            "- If execution evidence is missing or ambiguous, note that in the review and defer runtime validation to the verification lane instead of trying to produce it yourself.\n"
             "- Write or refresh the structured review report at the routed review report path before you finish this pass.\n"
             "- Use the deterministic result writer helper for `RESULT.json`; do not hand-compose reviewer JSON.\n"
             "- If previous review reports are provided, read them first and do not re-flag already raised issues.\n"

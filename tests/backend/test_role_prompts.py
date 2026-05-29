@@ -164,6 +164,25 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("do not hand-compose verification JSON", text)
         self.assertIn('bash "/tmp/repo/scripts/write-result.sh" --work-item-id 12', text)
 
+    def test_full_prompt_for_reviewer_forbids_runtime_verification_commands(self) -> None:
+        text = role_handoff_prompt(
+            role_name="code-reviewer",
+            instruction="Review the current routed changes for IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "self_review_requested",
+                "work_item_id": 13,
+                "result_writer_path": "/tmp/repo/scripts/write-result.sh",
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("static review only", text)
+        self.assertIn("do not run builds, tests, lint, simulator commands", text)
+        self.assertIn("defer runtime validation to the verification lane", text)
+        self.assertIn("scripts/run-test.sh", text)
+        self.assertIn("scripts/ios-verify.sh", text)
+
     def test_full_prompt_restores_acceptance_criteria_format_contract(self) -> None:
         text = role_handoff_prompt(
             role_name="acceptance-criteria-worker",

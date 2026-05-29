@@ -220,6 +220,7 @@ def _role_responsibility(role_name: str) -> list[str]:
         return [
             "- You execute routed code review work for one task session.",
             "- You review only the routed task changes and produce compact review outcomes plus a durable structured review report for the current pass.",
+            "- You do not run builds, tests, lint, simulators, or verification wrappers; runtime validation belongs to the verification lane.",
             "- Across repeated passes, retain reviewer context for the same task instead of reinitializing from zero.",
         ]
     if role_name == "code-scout":
