@@ -20,7 +20,7 @@ from backend.coordinator.verification_strategy import materialize_verification_s
 from backend.coordinator.hydration import build_role_hydration
 from backend.models.event import Event
 from backend.models.artifact import Artifact
-from backend.models.enums import RoleStatus, SessionStatus, WorkItemStatus
+from backend.models.enums import DispatchStatus, RoleStatus, SessionStatus, WorkItemStatus
 from backend.models.session import Session
 from backend.models.role import Role
 from backend.models.work_item import WorkItem
@@ -49,6 +49,7 @@ from backend.session_backend.base import SessionBackend
 from backend.session_policy import infer_workflow_profile, normalize_session_policy
 from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle, RuntimeSessionHandle
 from backend.state.artifact_repository import ArtifactRepository
+from backend.state.dispatch_repository import DispatchRepository
 from backend.state.event_repository import EventRepository
 from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
@@ -90,6 +91,7 @@ class CoordinatorService:
     work_item_repository: WorkItemRepository
     session_backend: SessionBackend
     default_roles: list[str]
+    dispatch_repository: DispatchRepository | None = None
     jira_adapter: JiraAdapter | None = None
     snapshot_adapter: SnapshotAdapter | None = None
     gitlab_adapter: GitLabAdapter | None = None
@@ -2612,6 +2614,7 @@ class CoordinatorService:
             output_payload=output_payload,
         )
         if replayed_blocker is not None:
+            self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
             self._append_event(
                 session_id=session.id,
                 event_type="stale_role_output_ignored",
@@ -2633,6 +2636,7 @@ class CoordinatorService:
             output_payload=output_payload,
         )
         if output_mismatch is not None:
+            self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
             self._append_stale_role_output_ignored_once(
                 session_id=session.id,
                 payload={
@@ -2651,6 +2655,7 @@ class CoordinatorService:
             output_type=output_type,
             output_payload=output_payload,
         ):
+            self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
             self._append_stale_role_output_ignored_once(
                 session_id=session.id,
                 payload={
@@ -2663,6 +2668,7 @@ class CoordinatorService:
             self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
             return None
         if output_type == "error":
+            self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
             self._record_runtime_marker_artifact(
                 session=session,
                 role=role,
@@ -2686,7 +2692,26 @@ class CoordinatorService:
             output_type=output_type,
             payload=output_payload,
         )
+        self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
         return updated_session
+
+    def _mark_dispatch_terminal_from_payload(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        output_payload: dict,
+    ) -> None:
+        if self.dispatch_repository is None or role.id is None:
+            return
+        work_item_id = output_payload.get("work_item_id")
+        if not isinstance(work_item_id, int):
+            return
+        self.dispatch_repository.mark_terminal_for_work_item(
+            session_id=session.id,
+            role_id=role.id,
+            work_item_id=work_item_id,
+        )
 
     def _should_ignore_stale_role_output(
         self,
@@ -6806,30 +6831,40 @@ class CoordinatorService:
         ):
             return False
 
-        if self._has_dispatch_event(
-            session_id=session.id,
-            work_item_id=work_item.id,
-            stage_name=session.current_stage,
-        ):
-            return False
-
-        if self._has_recent_matching_dispatch_event(
-            session_id=session.id,
-            role_name=role.role_name,
-            work_item_id=work_item.id,
-            stage_name=session.current_stage,
-        ):
-            return False
-
-        if self._role_recently_dispatched(role):
-            latest_dispatch = self._latest_event_by_type(session.id, {"role_input_dispatched"})
-            if (
-                latest_dispatch is not None
-                and latest_dispatch.payload.get("role_name") == role.role_name
-                and latest_dispatch.payload.get("work_item_id") == work_item.id
-                and latest_dispatch.payload.get("stage_name") == session.current_stage
+        if self.dispatch_repository is not None:
+            active_dispatch = self.dispatch_repository.get_latest_active_for_target(
+                session_id=session.id,
+                role_id=role.id,
+                work_item_id=work_item.id,
+                stage_name=session.current_stage,
+            )
+            if active_dispatch is not None:
+                return False
+        else:
+            if self._has_dispatch_event(
+                session_id=session.id,
+                work_item_id=work_item.id,
+                stage_name=session.current_stage,
             ):
                 return False
+
+            if self._has_recent_matching_dispatch_event(
+                session_id=session.id,
+                role_name=role.role_name,
+                work_item_id=work_item.id,
+                stage_name=session.current_stage,
+            ):
+                return False
+
+            if self._role_recently_dispatched(role):
+                latest_dispatch = self._latest_event_by_type(session.id, {"role_input_dispatched"})
+                if (
+                    latest_dispatch is not None
+                    and latest_dispatch.payload.get("role_name") == role.role_name
+                    and latest_dispatch.payload.get("work_item_id") == work_item.id
+                    and latest_dispatch.payload.get("stage_name") == session.current_stage
+                ):
+                    return False
 
         extra_hydration: dict[str, str | int | None] | None = None
         if role.role_name == CODE_REVIEWER_ROLE and session.current_stage == "self_review_requested":
@@ -10029,21 +10064,23 @@ class CoordinatorService:
         merged_hydration = self._sanitize_dispatch_hydration(merged_hydration)
         prompt_mode = self._prompt_mode_for_dispatch(session, role)
         role = self._ensure_dispatchable_role(session, role)
+        updated_role = self.role_repository.increment_hydration_version(role.id)
         workspace = self.role_workspace_manager.ensure_role_workspace(session.task_key, role.role_name)
-        next_hydration_version = role.last_hydration_version + 1
+        hydration_version = updated_role.last_hydration_version
         merged_hydration["result_path"] = str(workspace.directory / "RESULT.json")
         merged_hydration["result_writer_path"] = str(self._repo_root() / "scripts" / "write-result.sh")
-        merged_hydration["hydration_version"] = next_hydration_version
-        merged_hydration["dispatch_token"] = f"hv{next_hydration_version}-wi{work_item.id}"
+        merged_hydration["hydration_version"] = hydration_version
+        dispatch_token = f"hv{hydration_version}-wi{work_item.id}"
+        merged_hydration["dispatch_token"] = dispatch_token
         hydration = build_role_hydration(
-            role_name=role.role_name,
+            role_name=updated_role.role_name,
             task_key=session.task_key,
             current_stage=session.current_stage,
             active_work_item=work_item,
             extra_payload=merged_hydration or None,
         )
         prompt_text = role_handoff_prompt(
-            role_name=role.role_name,
+            role_name=updated_role.role_name,
             instruction=instruction,
             hydration_payload=hydration,
             prompt_mode=prompt_mode,
@@ -10052,7 +10089,7 @@ class CoordinatorService:
             self.artifacts_root,
             session.task_key,
             stage_name,
-            f"{role.role_name}.hydration.json",
+            f"{updated_role.role_name}.hydration.json",
             json.dumps(hydration, indent=2, sort_keys=True),
         )
         workspace_hydration_path = workspace.directory / "HYDRATION.json"
@@ -10061,75 +10098,106 @@ class CoordinatorService:
             self.artifacts_root,
             session.task_key,
             stage_name,
-            f"{role.role_name}.prompt.txt",
+            f"{updated_role.role_name}.prompt.txt",
             prompt_text,
         )
         runtime_role = RuntimeRoleHandle(
-            role_id=role.runtime_handle or f"{role.runtime_backend}:{role.role_name}",
-            session_id=self._runtime_session_id_for_role(role, session),
-            backend_name=role.runtime_backend,
+            role_id=updated_role.runtime_handle or f"{updated_role.runtime_backend}:{updated_role.role_name}",
+            session_id=self._runtime_session_id_for_role(updated_role, session),
+            backend_name=updated_role.runtime_backend,
         )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=updated_role.id,
+            stage_name=stage_name,
+            artifact_type="hydration_payload",
+            path=str(hydration_path),
+            metadata={
+                "role_name": updated_role.role_name,
+                "work_item_id": work_item.id,
+                "hydration_version": hydration_version,
+                "prompt_mode": prompt_mode,
+                "dispatch_token": dispatch_token,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=updated_role.id,
+            stage_name=stage_name,
+            artifact_type="role_prompt",
+            path=str(prompt_path),
+            metadata={
+                "role_name": updated_role.role_name,
+                "work_item_id": work_item.id,
+                "hydration_version": hydration_version,
+                "prompt_mode": prompt_mode,
+                "dispatch_token": dispatch_token,
+            },
+        )
+        if self.dispatch_repository is not None:
+            self.dispatch_repository.supersede_active_for_target(
+                session_id=session.id,
+                role_id=updated_role.id,
+                work_item_id=work_item.id,
+                stage_name=stage_name,
+            )
+            self.dispatch_repository.create(
+                session_id=session.id,
+                role_id=updated_role.id,
+                work_item_id=work_item.id,
+                stage_name=stage_name,
+                dispatch_token=dispatch_token,
+                hydration_version=hydration_version,
+                runtime_handle=runtime_role.role_id,
+                status=DispatchStatus.DISPATCHING,
+            )
         try:
             self.session_backend.send_input(runtime_role, prompt_text)
         except Exception as exc:
+            if self.dispatch_repository is not None:
+                self.dispatch_repository.update_status(
+                    dispatch_token,
+                    status=DispatchStatus.STALLED,
+                    error_text=str(exc),
+                )
             self._append_event(
                 session_id=session.id,
                 event_type="role_input_delivery_stalled",
                 producer_type="coordinator",
                 payload={
-                    "role_name": role.role_name,
+                    "role_name": updated_role.role_name,
                     "work_item_id": work_item.id,
                     "stage_name": stage_name,
-                    "runtime_backend": role.runtime_backend,
+                    "runtime_backend": updated_role.runtime_backend,
                     "runtime_handle": runtime_role.role_id,
+                    "dispatch_token": dispatch_token,
                     "error": str(exc),
                 },
             )
             raise
+        if self.dispatch_repository is not None:
+            self.dispatch_repository.update_status(
+                dispatch_token,
+                status=DispatchStatus.DELIVERED,
+            )
         self._record_role_input_delivery_event(
             session=session,
-            role=role,
+            role=updated_role,
             runtime_role=runtime_role,
             work_item=work_item,
             stage_name=stage_name,
-        )
-        updated_role = self.role_repository.increment_hydration_version(role.id)
-        self.artifact_repository.create(
-            session_id=session.id,
-            role_id=role.id,
-            stage_name=stage_name,
-            artifact_type="hydration_payload",
-            path=str(hydration_path),
-            metadata={
-                "role_name": role.role_name,
-                "work_item_id": work_item.id,
-                "hydration_version": updated_role.last_hydration_version,
-                "prompt_mode": prompt_mode,
-            },
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            role_id=role.id,
-            stage_name=stage_name,
-            artifact_type="role_prompt",
-            path=str(prompt_path),
-            metadata={
-                "role_name": role.role_name,
-                "work_item_id": work_item.id,
-                "hydration_version": updated_role.last_hydration_version,
-                "prompt_mode": prompt_mode,
-            },
+            dispatch_token=dispatch_token,
         )
         return self._append_event(
             session_id=session.id,
             event_type="role_input_dispatched",
             producer_type="coordinator",
             payload={
-                "role_name": role.role_name,
+                "role_name": updated_role.role_name,
                 "work_item_id": work_item.id,
                 "stage_name": stage_name,
-                "hydration_version": updated_role.last_hydration_version,
-                "dispatch_token": f"hv{updated_role.last_hydration_version}-wi{work_item.id}",
+                "hydration_version": hydration_version,
+                "dispatch_token": dispatch_token,
                 "prompt_mode": prompt_mode,
             },
         )
@@ -10142,6 +10210,7 @@ class CoordinatorService:
         runtime_role: RuntimeRoleHandle,
         work_item: WorkItem,
         stage_name: str,
+        dispatch_token: str,
     ) -> None:
         payload = {
             "role_name": role.role_name,
@@ -10149,6 +10218,7 @@ class CoordinatorService:
             "stage_name": stage_name,
             "runtime_backend": role.runtime_backend,
             "runtime_handle": runtime_role.role_id,
+            "dispatch_token": dispatch_token,
         }
         event_type = "role_input_delivery_confirmed"
         if hasattr(self.session_backend, "get_tmux_submit_traces"):

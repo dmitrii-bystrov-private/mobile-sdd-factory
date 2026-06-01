@@ -39,6 +39,7 @@ from backend.session_backend.tmux_backend import TmuxSessionBackend
 from backend.session_backend.runtime_models import RuntimeRoleHandle, RuntimeSessionHandle
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.db import Database
+from backend.state.dispatch_repository import DispatchRepository
 from backend.state.event_repository import EventRepository
 from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
@@ -303,6 +304,7 @@ class SessionCreationTests(unittest.TestCase):
         self.event_repository = EventRepository(self.database)
         self.artifact_repository = ArtifactRepository(self.database)
         self.work_item_repository = WorkItemRepository(self.database)
+        self.dispatch_repository = DispatchRepository(self.database)
         self.session_backend = RecordingSessionBackend()
         self.event_bus = SessionEventBus()
         self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
@@ -314,6 +316,7 @@ class SessionCreationTests(unittest.TestCase):
             event_repository=self.event_repository,
             artifact_repository=self.artifact_repository,
             work_item_repository=self.work_item_repository,
+            dispatch_repository=self.dispatch_repository,
             session_backend=self.session_backend,
             default_roles=DEFAULT_SESSION_ROLES,
             jira_adapter=self.jira_adapter,
@@ -6953,6 +6956,34 @@ class SessionCreationTests(unittest.TestCase):
         stalled_event = next(item for item in events if item.event_type == "role_input_delivery_stalled")
         self.assertEqual("verification-coordinator", stalled_event.payload["role_name"])
         self.assertIn("simulated send failure", stalled_event.payload["error"])
+        self.assertIsNotNone(stalled_event.payload.get("dispatch_token"))
+
+    def test_reconcile_session_dispatch_does_not_redispatch_stalled_token(self) -> None:
+        backend = DispatchTraceRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004STALLTOKEN")
+        backend.fail_send = True
+
+        with self.assertRaisesRegex(RuntimeError, "simulated send failure"):
+            self.coordinator.handle_operator_event(
+                session_id=session.id,
+                event_type="implementation_completed",
+                payload={"summary": "implementation done"},
+            )
+
+        backend.fail_send = False
+        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        self.assertIsNotNone(verifier_role)
+        sent_before = list(self.session_backend.get_sent_inputs(verifier_role.runtime_handle))
+        refreshed_session = self.session_repository.get_by_id(session.id)
+        assert refreshed_session is not None
+
+        reconciled = self.coordinator._reconcile_session_dispatch(refreshed_session)
+
+        sent_after = self.session_backend.get_sent_inputs(verifier_role.runtime_handle)
+        self.assertFalse(reconciled)
+        self.assertEqual(sent_before, sent_after)
 
     def test_collect_role_output_normalizes_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")

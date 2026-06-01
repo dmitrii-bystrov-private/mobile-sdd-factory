@@ -7,7 +7,8 @@ import sqlite3
 
 from backend.models.artifact import Artifact
 from backend.models.checkpoint import Checkpoint
-from backend.models.enums import RoleStatus, SessionStatus, VerificationStatus, WorkItemStatus
+from backend.models.dispatch import Dispatch
+from backend.models.enums import DispatchStatus, RoleStatus, SessionStatus, VerificationStatus, WorkItemStatus
 from backend.models.event import Event
 from backend.models.role import Role
 from backend.models.session import Session
@@ -106,4 +107,21 @@ def verification_run_from_row(row: sqlite3.Row) -> VerificationRun:
         command_profile=row["command_profile"],
         artifact_group_id=row["artifact_group_id"],
         created_at=row["created_at"],
+    )
+
+
+def dispatch_from_row(row: sqlite3.Row) -> Dispatch:
+    return Dispatch(
+        id=row["id"],
+        session_id=row["session_id"],
+        role_id=row["role_id"],
+        work_item_id=row["work_item_id"],
+        stage_name=row["stage_name"],
+        dispatch_token=row["dispatch_token"],
+        hydration_version=row["hydration_version"],
+        runtime_handle=row["runtime_handle"],
+        status=DispatchStatus(row["status"]),
+        error_text=row["error_text"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
     )

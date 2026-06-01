@@ -2,8 +2,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from backend.models.enums import SessionStatus
+from backend.models.enums import DispatchStatus, SessionStatus
 from backend.state.db import Database
+from backend.state.dispatch_repository import DispatchRepository
 from backend.state.event_repository import EventRepository
 from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
@@ -112,6 +113,62 @@ class RepositoryTests(unittest.TestCase):
         items = work_item_repository.list_for_session(session.id)
 
         self.assertEqual(["high", "low"], [item.title for item in items])
+
+    def test_dispatch_repository_tracks_target_lifecycle(self) -> None:
+        session_repository = SessionRepository(self.database)
+        role_repository = RoleRepository(self.database)
+        work_item_repository = WorkItemRepository(self.database)
+        dispatch_repository = DispatchRepository(self.database)
+        session = session_repository.create(
+            task_key="IOS-20004",
+            current_stage="implementation_requested",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+        role = role_repository.create(session.id, "implementer", "recording", "recording:implementer")
+        work_item = work_item_repository.create(
+            session.id,
+            "implementation",
+            "Implement feature",
+            owner_role_id=role.id,
+        )
+
+        created = dispatch_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            work_item_id=work_item.id,
+            stage_name="implementation_requested",
+            dispatch_token="hv1-wi1",
+            hydration_version=1,
+            runtime_handle=role.runtime_handle,
+        )
+        active = dispatch_repository.get_latest_active_for_target(
+            session_id=session.id,
+            role_id=role.id,
+            work_item_id=work_item.id,
+            stage_name="implementation_requested",
+        )
+        dispatch_repository.update_status("hv1-wi1", status=DispatchStatus.DELIVERED)
+        dispatch_repository.mark_terminal_for_work_item(
+            session_id=session.id,
+            role_id=role.id,
+            work_item_id=work_item.id,
+        )
+        closed = dispatch_repository.get_latest_active_for_target(
+            session_id=session.id,
+            role_id=role.id,
+            work_item_id=work_item.id,
+            stage_name="implementation_requested",
+        )
+
+        self.assertIsNotNone(created.id)
+        self.assertIsNotNone(active)
+        self.assertEqual("hv1-wi1", active.dispatch_token)
+        self.assertIsNone(closed)
 
 if __name__ == "__main__":
     unittest.main()

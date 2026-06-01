@@ -33,3 +33,10 @@ class VerificationStatus(StrEnum):
     PASSED = "passed"
     FAILED = "failed"
 
+
+class DispatchStatus(StrEnum):
+    DISPATCHING = "dispatching"
+    DELIVERED = "delivered"
+    STALLED = "stalled"
+    TERMINAL = "terminal"
+    SUPERSEDED = "superseded"

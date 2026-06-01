@@ -17,6 +17,7 @@ from backend.session_backend.recording_backend import RecordingSessionBackend
 from backend.session_backend.tmux_backend import TmuxSessionBackend
 from backend.state.artifact_repository import ArtifactRepository
 from backend.state.db import Database
+from backend.state.dispatch_repository import DispatchRepository
 from backend.state.event_repository import EventRepository
 from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
@@ -43,6 +44,7 @@ class AppDependencies:
     event_repository: EventRepository
     artifact_repository: ArtifactRepository
     work_item_repository: WorkItemRepository
+    dispatch_repository: DispatchRepository
     session_backend: SessionBackend
     jira_adapter: JiraAdapter
     snapshot_adapter: SnapshotAdapter
@@ -65,6 +67,7 @@ def build_dependencies() -> AppDependencies:
     event_repository = EventRepository(database)
     artifact_repository = ArtifactRepository(database)
     work_item_repository = WorkItemRepository(database)
+    dispatch_repository = DispatchRepository(database)
     if config.runtime_backend == "recording":
         session_backend = RecordingSessionBackend()
     else:
@@ -89,6 +92,7 @@ def build_dependencies() -> AppDependencies:
         event_repository=event_repository,
         artifact_repository=artifact_repository,
         work_item_repository=work_item_repository,
+        dispatch_repository=dispatch_repository,
         session_backend=session_backend,
         default_roles=DEFAULT_SESSION_ROLES,
         jira_adapter=jira_adapter,
@@ -120,6 +124,7 @@ def build_dependencies() -> AppDependencies:
         event_repository=event_repository,
         artifact_repository=artifact_repository,
         work_item_repository=work_item_repository,
+        dispatch_repository=dispatch_repository,
         session_backend=session_backend,
         jira_adapter=jira_adapter,
         snapshot_adapter=snapshot_adapter,

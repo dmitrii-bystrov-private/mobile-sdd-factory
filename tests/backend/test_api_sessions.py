@@ -107,6 +107,7 @@ try:
     from backend.session_backend.recording_backend import RecordingSessionBackend
     from backend.state.artifact_repository import ArtifactRepository
     from backend.state.db import Database
+    from backend.state.dispatch_repository import DispatchRepository
     from backend.state.event_repository import EventRepository
     from backend.state.role_repository import RoleRepository
     from backend.state.session_repository import SessionRepository
@@ -277,6 +278,7 @@ class SessionApiTests(unittest.TestCase):
         event_repository = EventRepository(self.database)
         artifact_repository = ArtifactRepository(self.database)
         work_item_repository = WorkItemRepository(self.database)
+        dispatch_repository = DispatchRepository(self.database)
         session_backend = RecordingSessionBackend()
         event_bus = SessionEventBus()
         self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
@@ -287,6 +289,7 @@ class SessionApiTests(unittest.TestCase):
             event_repository=event_repository,
             artifact_repository=artifact_repository,
             work_item_repository=work_item_repository,
+            dispatch_repository=dispatch_repository,
             session_backend=session_backend,
             default_roles=DEFAULT_SESSION_ROLES,
             jira_adapter=self.jira_adapter,
@@ -318,6 +321,7 @@ class SessionApiTests(unittest.TestCase):
             event_repository=event_repository,
             artifact_repository=artifact_repository,
             work_item_repository=work_item_repository,
+            dispatch_repository=dispatch_repository,
             session_backend=session_backend,
             jira_adapter=self.jira_adapter,
             snapshot_adapter=self.snapshot_adapter,
