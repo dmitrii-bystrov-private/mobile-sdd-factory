@@ -21,6 +21,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- If `spec/context/feature-overview.md` exists, read it before broader code exploration; pull in other `spec/context/*` files only when they directly help the current implementation decision.\n"
             "- Use RAG tools first for code exploration; use plain filesystem search only for structural queries.\n"
             "- Keep implementation aligned to the routed task or correction scope, but make any adjacent code changes that are necessary to fix the real root cause cleanly and avoid regressions.\n"
+            "- If a routed correction conflicts with already-authoritative product/operator direction or cannot be resolved safely without a fresh operator decision, stop and escalate instead of forcing a local patch.\n"
             "- Do not run workflow-level build/test/lint gates here unless the routed work explicitly requires a narrow task-specific check.\n"
             "- Do not run broad workflow-level wrappers such as `scripts/run-build.sh`, `scripts/run-test.sh`, or `scripts/run-lint.sh` from this role; final verification authority stays with the verifier lane.\n"
             "- Final test+lint gate remains deferred to the coordinator.\n\n"
@@ -34,6 +35,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- If an `Issues file:` path is routed, treat it as the primary narrow-scope input for this round.\n"
             "- If `Follow-up comments:` are routed, prioritize the latest follow-up comments over redoing the original bug analysis from scratch.\n"
             "- Keep bug-fix follow-up and correction rounds aligned to the routed issues/comments, but make any adjacent code changes that are necessary to fix the root cause cleanly and avoid regressions.\n"
+            "- If a routed correction conflicts with already-authoritative product/operator direction or cannot be resolved safely without a fresh operator decision, stop and escalate instead of forcing a local patch.\n"
             "- Do not run broad workflow-level wrappers such as `scripts/run-build.sh`, `scripts/run-test.sh`, or `scripts/run-lint.sh` from this role; final verification authority stays with the verifier lane.\n"
             "- Leave workflow-level test+lint verification to the coordinator.\n\n"
         )
@@ -226,8 +228,10 @@ def role_handoff_prompt(
         "Optional console telemetry:\n"
         'SDD_PROGRESS: {"status":"in_progress","message":"short progress update","progress":25}\n'
         "- `SDD_PROGRESS` is console-only telemetry for humans; it does not drive coordinator state.\n"
-        "- Do not rely on `SDD_ERROR` to move the workflow. For blockers, failures, and operator questions, write the structured outcome to `RESULT.json`.\n"
-        "- If a direct operator reply is required, use `output_type: \"failed\"` and set `needs_operator_input: true` in the terminal payload.\n"
+        "- Use `SDD_ERROR` only for live operator escalations that must pause the current work item before a valid terminal outcome exists.\n"
+        "- For implementer/bug-fixer live escalations that need an operator decision before you can continue, emit exactly `SDD_ERROR: {\"summary\":\"...\",\"details\":\"...\",\"needs_operator_input\":true}` instead of forcing a terminal result.\n"
+        "- For normal blockers, failures, and completed outcomes that are ready to be accepted as a terminal result, write the structured outcome to `RESULT.json`.\n"
+        "- If a direct operator reply is required and the role contract explicitly says to use terminal blocked output, use `output_type: \"failed\"` and set `needs_operator_input: true` in the terminal payload.\n"
         "- For runtime/tooling failures that do not need a direct operator reply, use `output_type: \"failed\"` with a concise `summary` and optional `failures` / `details` fields.\n\n"
         "Path resolution rules:\n"
         "- Treat paths written as `spec/...`, `review/...`, or `plan/...` as paths under the task snapshot metadata root from AGENTS.md, not as paths relative to the current role workspace.\n"

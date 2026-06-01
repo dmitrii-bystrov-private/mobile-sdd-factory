@@ -1849,6 +1849,8 @@ class CoordinatorService:
             session, followup_event = self._handle_subtask_completed(session, accepted_event)
         elif mapped_event_type == "implementation_completed":
             session, followup_event = self._handle_implementation_completed(session, accepted_event)
+        elif mapped_event_type == "implementation_blocked":
+            session, followup_event = self._handle_implementation_blocked(session, accepted_event)
         elif mapped_event_type == "verification_failed":
             session, followup_event = self._handle_verification_failed(session, accepted_event)
         elif mapped_event_type == "verification_passed":
@@ -2030,6 +2032,14 @@ class CoordinatorService:
         output_type: str,
         payload: dict,
     ) -> dict:
+        if output_type == "failed":
+            if self._payload_truthy(payload.get("needs_operator_input")) and not any(
+                str(payload.get(key) or "").strip() for key in ("summary", "details")
+            ):
+                raise IntakeError(
+                    "Coding blocked output must include payload.summary or payload.details when operator input is required"
+                )
+            return payload
         if output_type != "completed":
             return payload
         if session.current_stage != "subtask_implementation_requested":
@@ -3278,6 +3288,14 @@ class CoordinatorService:
                 "work_item_id": work_item.id,
                 "current_stage": session.current_stage,
                 "input_length": len(text),
+                **(
+                    {
+                        "operator_reply": text.strip(),
+                        "continuation_stage": session.current_stage,
+                    }
+                    if session.current_stage == "self_review_correction_requested"
+                    else {}
+                ),
             },
         )
         if role.role_name not in PERSISTENT_SESSION_ROLES:
@@ -5725,7 +5743,9 @@ class CoordinatorService:
                 continue
             if event.event_type != "operator_runtime_input_sent":
                 continue
-            if str(event.payload.get("continuation_stage") or "") != "self_review_correction_requested":
+            continuation_stage = str(event.payload.get("continuation_stage") or "").strip()
+            current_stage = str(event.payload.get("current_stage") or "").strip()
+            if continuation_stage != "self_review_correction_requested" and current_stage != "self_review_correction_requested":
                 continue
             operator_reply = str(event.payload.get("operator_reply") or "").strip()
             if not operator_reply:
@@ -5787,6 +5807,43 @@ class CoordinatorService:
                 "details": self._self_review_cycle_operator_details(source_event.payload),
                 "needs_operator_input": True,
                 "review_report_paths": report_paths,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _handle_implementation_blocked(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        coding_role_name = str(source_event.producer_id or "").strip()
+        coding_role = self.role_repository.get_by_name(session.id, coding_role_name)
+        if coding_role is None:
+            raise IntakeError(f"Coding role {coding_role_name or '<unknown>'} is missing for the session")
+        active_item = self._find_active_work_item_for_role(session.id, coding_role.id)
+        if active_item is None:
+            raise IntakeError("No active coding work item found for operator escalation")
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=coding_role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "implementation_blocked",
+                "role_name": coding_role.role_name,
+                "work_item_id": active_item.id,
+                "summary": str(source_event.payload.get("summary") or "").strip()
+                or "implementation requires operator input",
+                "details": str(source_event.payload.get("details") or "").strip()
+                or "The coding lane reported a blocked pass and needs an operator decision before continuing.",
+                "needs_operator_input": True,
                 "current_stage": session.current_stage,
             },
         )
@@ -6200,6 +6257,21 @@ class CoordinatorService:
                 "qa_reopen_requested",
             }:
                 return "implementation_completed"
+        if (
+            role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE}
+            and output_type == "failed"
+            and self._payload_truthy(payload.get("needs_operator_input"))
+            and session.current_stage in {
+                "subtask_implementation_requested",
+                "implementation_requested",
+                "boy_scout_correction_requested",
+                "self_review_correction_requested",
+                "verification_correction_requested",
+                "mr_followup_requested",
+                "qa_reopen_requested",
+            }
+        ):
+            return "implementation_blocked"
         if role_name == VERIFICATION_COORDINATOR_ROLE:
             explicit_result = str(payload.get("result") or "").strip().lower()
             if (

@@ -2320,6 +2320,58 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(CODE_REVIEWER_ROLE, updated_session.current_owner)
         self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
 
+    def test_self_review_correction_failed_with_operator_input_escalates_session(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RBLOCK",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RBLOCK")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="failed",
+            payload={
+                "summary": "review issue found",
+                "details": "Needs a correction.",
+            },
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=IMPLEMENTER_ROLE,
+            output_type="failed",
+            payload={
+                "summary": "review correction conflicts with accepted direction",
+                "details": "Need operator decision before continuing this correction pass.",
+                "needs_operator_input": True,
+            },
+        )
+        correction_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "self_review_correction"
+        )
+
+        self.assertEqual("implementation_blocked", mapped_event.event_type)
+        self.assertIsNotNone(followup_event)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertEqual("self_review_correction_requested", updated_session.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertEqual(WorkItemStatus.WAITING_FOR_OPERATOR, self.work_item_repository.get_by_id(correction_item.id).status)
+        self.assertEqual("implementation_blocked", str(followup_event.payload.get("reason") or ""))
+        self.assertTrue(bool(followup_event.payload.get("needs_operator_input")))
+
     def test_reconcile_self_review_dispatch_keeps_operator_guidance(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003RRECON",
@@ -2433,8 +2485,62 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(redispatched)
         self.assertTrue(sent_inputs)
         self.assertIn("Wrong-PIN failure is a failed action and must remain .error.", sent_inputs[-1])
-        self.assertIn("Replay ownership belongs to app-level orchestration.", sent_inputs[-1])
-        self.assertIn("do not let an unrelated later reply supersede an earlier relevant resolution", sent_inputs[-1])
+
+    def test_reviewer_recheck_includes_operator_guidance_after_implementer_self_review_escalation(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RIMPLGUIDE",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RIMPLGUIDE")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="failed",
+            payload={
+                "summary": "review issues found",
+                "details": "Needs correction.",
+            },
+        )
+        self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=IMPLEMENTER_ROLE,
+            output_type="failed",
+            payload={
+                "summary": "correction conflicts with approved direction",
+                "details": "Need operator decision before continuing this correction pass.",
+                "needs_operator_input": True,
+            },
+        )
+        self.coordinator.send_operator_runtime_input(
+            session_id=prepared_session.id,
+            text="The accepted operator direction stands; do not reintroduce the old plumbing.",
+        )
+
+        updated_session, _, _ = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=IMPLEMENTER_ROLE,
+            output_type="completed",
+            payload={"summary": "correction pass completed with operator guidance"},
+        )
+
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
+
+        self.assertEqual("self_review_requested", updated_session.current_stage)
+        self.assertTrue(sent_inputs)
+        self.assertIn("Authoritative operator resolutions", sent_inputs[-1])
+        self.assertIn("The accepted operator direction stands; do not reintroduce the old plumbing.", sent_inputs[-1])
+        self.assertIn("\"review_cycle_resolution\": \"operator_guided_recheck\"", sent_inputs[-1])
 
     def test_interactive_state_treats_persisted_numeric_operator_reply_flag_as_truthy(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

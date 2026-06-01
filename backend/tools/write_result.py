@@ -162,7 +162,7 @@ def _validate_role_output_type(role_name: str, output_type: str) -> None:
         "doc-harvest-worker": {"completed", "passed", "skipped_not_needed"},
     }
     if role_name in CODING_ROLES:
-        allowed_types = {"completed"}
+        allowed_types = {"completed", "failed"}
     elif role_name in PLANNING_ROLES:
         allowed_types = {"completed", "passed", "failed"}
     else:
@@ -236,6 +236,8 @@ def _build_coding_payload(args: argparse.Namespace) -> dict[str, object]:
     _clean_optional_text(payload, "summary", args.summary)
     _clean_optional_text(payload, "details", args.details)
     _clean_optional_text(payload, "subtask_key", args.subtask_key)
+    if args.needs_operator_input:
+        payload["needs_operator_input"] = True
     return payload
 
 

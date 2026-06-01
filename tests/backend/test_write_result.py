@@ -275,6 +275,27 @@ class WriteResultScriptTests(unittest.TestCase):
             payload = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertEqual(work_item_id, payload["payload"]["work_item_id"])
 
+    def test_implementer_failed_result_can_request_operator_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="implementer")
+            result = self._run(
+                env,
+                "--work-item-id",
+                str(work_item_id),
+                "--output-type",
+                "failed",
+                "--summary",
+                "review correction conflicts with accepted product direction",
+                "--details",
+                "Operator decision is required before continuing this correction pass.",
+                "--needs-operator-input",
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual("failed", payload["output_type"])
+            self.assertEqual(True, payload["payload"]["needs_operator_input"])
+
     def test_mr_comments_analyst_completed_result_is_supported(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env, output_path, work_item_id = self._create_context(
