@@ -1212,6 +1212,9 @@ input {
 }
 
 .completed-followup-preview-body {
+  line-height: 1.45;
+  height: calc(1.45em * 3 + 5px);
+  overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--ink-soft);
