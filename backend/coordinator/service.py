@@ -2457,6 +2457,30 @@ class CoordinatorService:
             )
         if result_path is not None:
             result_path.unlink(missing_ok=True)
+        if (
+            session.current_owner != role.role_name
+            and self._find_active_work_item_for_role(session.id, role.id) is None
+            and not self._has_pending_operator_continuation(
+                session_id=session.id,
+                role_name=role.role_name,
+                work_item_id=None,
+                stage_name=session.current_stage,
+            )
+        ):
+            self._append_event(
+                session_id=session.id,
+                event_type="stale_role_result_protocol_violation_ignored",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "current_stage": session.current_stage,
+                    "current_owner": session.current_owner,
+                    "details": error_message,
+                    "result_path": str(result_path) if result_path is not None else None,
+                },
+            )
+            self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
+            return session
         self._append_event(
             session_id=session.id,
             event_type="role_result_protocol_violation_reported",
@@ -3617,8 +3641,8 @@ class CoordinatorService:
     def _protocol_recovery_retry_instruction(self, session: Session, work_item: WorkItem) -> str:
         return (
             f"Do not rerun the substantive {work_item.work_type.replace('_', ' ')} work for {session.task_key}. "
-            "Rewrite RESULT.json only for the current routed work item using the deterministic writer helper. "
-            "Reuse the work you already completed, preserve the same outcome, and stop after the terminal result file is valid."
+            "Resubmit only the terminal outcome for the current routed work item using the deterministic writer helper. "
+            "Reuse the work you already completed, preserve the same outcome, do not use manual files or fallback scripts, and stop immediately after the helper succeeds."
         )
 
     def redirect_session(

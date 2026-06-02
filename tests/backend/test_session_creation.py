@@ -5428,6 +5428,55 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(escalations)
         self.assertEqual("role_result_protocol_violation", escalations[-1].payload.get("reason"))
 
+    def test_collect_role_output_ignores_stale_verification_protocol_violation_after_handoff(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERSTALE")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="self_review_passed",
+            payload={"summary": "review passed"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="boy_scout_clean",
+            payload={"summary": "boy scout clean"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "verification passed"},
+        )
+
+        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        assert verifier_role is not None
+        verifier_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            VERIFICATION_COORDINATOR_ROLE,
+        )
+        result_path = verifier_workspace / "RESULT.json"
+        result_path.write_text("hi", encoding="utf-8")
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=VERIFICATION_COORDINATOR_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertNotEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertFalse(result_path.exists())
+        self.assertTrue(
+            any(item.event_type == "stale_role_result_protocol_violation_ignored" for item in events)
+        )
+        self.assertFalse(
+            any(item.event_type == "session_escalated_to_operator" for item in events)
+        )
+
     def test_enqueue_verification_respawns_stopped_verification_role(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERSTOP")
         verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
@@ -10510,7 +10559,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("protocol_recovery", retried_event.payload.get("retry_mode"))
         self.assertEqual("role_input_dispatched", dispatch_event.event_type)
         self.assertEqual(active_scout_item.id, dispatch_event.payload.get("work_item_id"))
-        self.assertIn("Rewrite RESULT.json only", sent_inputs[-1])
+        self.assertIn("Resubmit only the terminal outcome", sent_inputs[-1])
 
     def test_redirect_session_reroutes_escalated_work_item_to_allowed_role(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30023")
