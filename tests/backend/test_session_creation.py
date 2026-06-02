@@ -10502,7 +10502,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("role_input_dispatched", dispatch_event.event_type)
         self.assertEqual(2, len(work_items))
         self.assertEqual(
-            ["assigned", "waiting_for_operator"],
+            ["assigned", "completed"],
             sorted(item.status.value for item in work_items),
         )
         self.assertTrue(
@@ -10593,6 +10593,90 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("role_input_dispatched", dispatch_event.event_type)
         self.assertEqual(active_scout_item.id, dispatch_event.payload.get("work_item_id"))
         self.assertIn("Resubmit only the terminal outcome", sent_inputs[-1])
+
+    def test_retry_session_picks_latest_operator_pending_item(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022LATEST")
+        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        assert verifier_role is not None
+        older_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification",
+            title=f"Verification for {session.task_key}",
+            owner_role_id=verifier_role.id,
+            source_event_id=None,
+            priority=90,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        newer_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification",
+            title=f"Retry: Verification for {session.task_key}",
+            owner_role_id=verifier_role.id,
+            source_event_id=None,
+            priority=90,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_requested",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+
+        retried_session, retried_event, dispatch_event = self.coordinator.retry_session(session.id)
+        refreshed_items = {item.id: item for item in self.work_item_repository.list_for_session(session.id)}
+
+        self.assertEqual("active", retried_session.status.value)
+        self.assertEqual(newer_item.id, retried_event.payload.get("previous_work_item_id"))
+        self.assertEqual("role_input_dispatched", dispatch_event.event_type)
+        self.assertEqual(WorkItemStatus.COMPLETED, refreshed_items[older_item.id].status)
+        self.assertEqual(WorkItemStatus.COMPLETED, refreshed_items[newer_item.id].status)
+
+    def test_verification_passed_completes_retry_item_from_payload_work_item_id(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022VERRETRY")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        assert verifier_role is not None
+        original_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "verification"
+        )
+        self.work_item_repository.update_status(original_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_requested",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+
+        retried_session, _retried_event, _dispatch_event = self.coordinator.retry_session(session.id)
+        retry_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "verification" and item.status == WorkItemStatus.ASSIGNED
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=retried_session.id,
+            role_name=VERIFICATION_COORDINATOR_ROLE,
+            output_type="passed",
+            payload={
+                "result": "passed",
+                "summary": "verification passed",
+                "work_item_id": retry_item.id,
+            },
+        )
+        refreshed_items = {item.id: item for item in self.work_item_repository.list_for_session(session.id)}
+
+        self.assertEqual("verification_passed", mapped_event.event_type)
+        self.assertNotEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual(WorkItemStatus.COMPLETED, refreshed_items[original_item.id].status)
+        self.assertEqual(WorkItemStatus.COMPLETED, refreshed_items[retry_item.id].status)
 
     def test_redirect_session_reroutes_escalated_work_item_to_allowed_role(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30023")
@@ -10712,6 +10796,65 @@ class SessionCreationTests(unittest.TestCase):
         summary = self.coordinator.get_runtime_state_summary(session.id)
         self.assertIsNotNone(summary["last_auto_recovery"])
         self.assertEqual("implementer", summary["last_auto_recovery"]["role_name"])
+
+    def test_run_loop_once_reconciles_stale_story_planning_owner_without_recovery(self) -> None:
+        backend = AutoRecoveryRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004PLANOWNER",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        constraints_role = self.role_repository.get_by_name(session.id, CONSTRAINTS_WORKER_ROLE)
+        spec_verifier_role = self.role_repository.get_by_name(session.id, SPEC_VERIFIER_WORKER_ROLE)
+        assert constraints_role is not None
+        assert spec_verifier_role is not None
+        constraints_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="constraints",
+            title=f"Constraints for {session.task_key}",
+            owner_role_id=constraints_role.id,
+            priority=100,
+        )
+        spec_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="spec_verification",
+            title=f"Spec verification for {session.task_key}",
+            owner_role_id=spec_verifier_role.id,
+            priority=99,
+        )
+        self.work_item_repository.update_status(constraints_item.id, WorkItemStatus.COMPLETED)
+        self.work_item_repository.update_status(spec_item.id, WorkItemStatus.ASSIGNED)
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="spec_verification_requested",
+            current_owner=CONSTRAINTS_WORKER_ROLE,
+        )
+        dead_handle = constraints_role.runtime_handle
+        assert dead_handle is not None
+        backend.mark_dead(dead_handle)
+
+        event, session_count, chunk_count = self.coordinator.run_loop_once()
+
+        self.assertEqual("coordinator_loop_ran", event.event_type)
+        self.assertEqual(1, session_count)
+        self.assertEqual(0, chunk_count)
+        refreshed_session = self.session_repository.get_by_id(session.id)
+        refreshed_constraints_role = self.role_repository.get_by_name(session.id, CONSTRAINTS_WORKER_ROLE)
+        assert refreshed_session is not None
+        assert refreshed_constraints_role is not None
+        self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, refreshed_session.current_owner)
+        self.assertEqual(RoleStatus.STOPPED, refreshed_constraints_role.status)
+        events = self.event_repository.list_for_session(session.id)
+        self.assertTrue(any(item.event_type == "session_owner_reconciled" for item in events))
+        self.assertFalse(
+            any(
+                item.event_type == "runtime_role_auto_recovery_attempted"
+                and item.payload.get("role_name") == CONSTRAINTS_WORKER_ROLE
+                for item in events
+            )
+        )
 
     def test_run_loop_once_escalates_when_auto_recovery_fails(self) -> None:
         backend = AutoRecoveryRecordingBackend()

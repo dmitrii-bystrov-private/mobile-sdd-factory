@@ -70,6 +70,27 @@ _STORY_PLANNING_WORK_TYPE_BY_STAGE = {
     "spec_verification_requested": "spec_verification",
     "task_decomposition_requested": "task_decomposition",
 }
+_ACTIVE_WORK_TYPE_BY_STAGE = {
+    "bug_analysis_requested": "bug_analysis",
+    "proposal_context_requested": "proposal_context",
+    "requirements_requested": "requirements",
+    "boy_scout_requested": "boy_scout",
+    "doc_harvest_requested": "doc_harvest",
+    "acceptance_criteria_requested": "acceptance_criteria",
+    "constraints_requested": "constraints",
+    "spec_verification_requested": "spec_verification",
+    "task_decomposition_requested": "task_decomposition",
+    "subtask_implementation_requested": "subtask_implementation",
+    "implementation_requested": "implementation",
+    "boy_scout_correction_requested": "boy_scout_correction",
+    "mr_comments_analysis_requested": "mr_comments_analysis",
+    "self_review_requested": "self_review",
+    "self_review_correction_requested": "self_review_correction",
+    "verification_requested": "verification",
+    "verification_correction_requested": "verification_correction",
+    "mr_followup_requested": "followup_implementation",
+    "qa_reopen_requested": "followup_implementation",
+}
 _STORY_PLANNING_ROLES = {
     PROPOSAL_CONTEXT_WORKER_ROLE,
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
@@ -3057,6 +3078,11 @@ class CoordinatorService:
         if role is None or role.runtime_handle is None or role.status != RoleStatus.RUNNING:
             return session
 
+        if role.role_name in _STORY_PLANNING_ROLES:
+            active_item = self._find_active_work_item_for_role(session.id, role.id)
+            if active_item is None:
+                return self._reconcile_stale_story_planning_owner(session, role)
+
         runtime_role = RuntimeRoleHandle(
             role_id=role.runtime_handle,
             session_id=self._runtime_session_id_for_role(role, session),
@@ -3069,6 +3095,37 @@ class CoordinatorService:
             return session
 
         return self._attempt_dead_owner_runtime_recovery(session, role)
+
+    def _reconcile_stale_story_planning_owner(self, session: Session, role: Role) -> Session:
+        if role.status == RoleStatus.RUNNING:
+            self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+
+        expected_item = self._find_active_work_item_for_current_stage(session)
+        if expected_item is None or expected_item.owner_role_id is None:
+            return self._get_session_or_raise(session.id)
+
+        expected_role = self.role_repository.get_by_id(expected_item.owner_role_id)
+        if expected_role is None or expected_role.role_name == session.current_owner:
+            return self._get_session_or_raise(session.id)
+
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=expected_role.role_name,
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="session_owner_reconciled",
+            producer_type="coordinator",
+            payload={
+                "previous_owner": role.role_name,
+                "current_owner": expected_role.role_name,
+                "current_stage": session.current_stage,
+                "work_item_id": expected_item.id,
+                "reason": "stale_story_planning_owner_without_active_work",
+            },
+        )
+        return session
 
     def _auto_recovery_already_attempted(self, session_id: int, role_name: str, dead_runtime_handle: str) -> bool:
         for event in reversed(self.event_repository.list_for_session(session_id)):
@@ -3591,6 +3648,21 @@ class CoordinatorService:
             raise IntakeError(
                 f"Owner role {previous_work_item.owner_role_id} is missing for session {session_id}"
             )
+
+        for stale_item in self.work_item_repository.list_for_session(session.id):
+            if stale_item.owner_role_id != previous_work_item.owner_role_id:
+                continue
+            if stale_item.work_type != previous_work_item.work_type:
+                continue
+            if stale_item.status != WorkItemStatus.WAITING_FOR_OPERATOR:
+                continue
+            self.work_item_repository.update_status(stale_item.id, WorkItemStatus.COMPLETED)
+            if self.dispatch_repository is not None and role.id is not None:
+                self.dispatch_repository.mark_terminal_for_work_item(
+                    session_id=session.id,
+                    role_id=role.id,
+                    work_item_id=stale_item.id,
+                )
 
         retry_item = self.work_item_repository.create(
             session_id=session.id,
@@ -5408,6 +5480,7 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
+        payload_work_item_id = source_event.payload.get("work_item_id")
         verification_items = [
             item
             for item in self.work_item_repository.list_for_session(session.id)
@@ -5416,7 +5489,14 @@ class CoordinatorService:
         if not verification_items:
             raise IntakeError("No active verification work item found for the session")
 
-        active_item = verification_items[0]
+        active_item = next(
+            (
+                item
+                for item in verification_items
+                if isinstance(payload_work_item_id, int) and item.id == payload_work_item_id
+            ),
+            verification_items[0],
+        )
         self._materialize_verification_outcome_file(session=session, source_event=source_event)
         self._materialize_final_verification_file(session=session, source_event=source_event)
         session = self._get_session_or_raise(session.id)
@@ -7178,6 +7258,18 @@ class CoordinatorService:
             return item
         return None
 
+    def _find_active_work_item_for_current_stage(self, session: Session) -> WorkItem | None:
+        work_type = _ACTIVE_WORK_TYPE_BY_STAGE.get(session.current_stage)
+        if work_type is None:
+            return None
+        for item in reversed(self.work_item_repository.list_for_session(session.id)):
+            if item.work_type != work_type:
+                continue
+            if item.status != WorkItemStatus.ASSIGNED:
+                continue
+            return item
+        return None
+
     def _find_active_primary_coding_work_item(
         self,
         session: Session,
@@ -7516,7 +7608,7 @@ class CoordinatorService:
         return payload
 
     def _find_operator_pending_work_item(self, session_id: int) -> WorkItem | None:
-        for item in self.work_item_repository.list_for_session(session_id):
+        for item in reversed(self.work_item_repository.list_for_session(session_id)):
             if item.status != WorkItemStatus.WAITING_FOR_OPERATOR:
                 continue
             if item.owner_role_id is None:
@@ -7773,26 +7865,7 @@ class CoordinatorService:
         return role
 
     def _primary_coding_role_for_stage(self, session: Session) -> Role | None:
-        stage_to_work_type = {
-            "bug_analysis_requested": "bug_analysis",
-            "proposal_context_requested": "proposal_context",
-            "requirements_requested": "requirements",
-            "boy_scout_requested": "boy_scout",
-            "doc_harvest_requested": "doc_harvest",
-            "acceptance_criteria_requested": "acceptance_criteria",
-            "constraints_requested": "constraints",
-            "spec_verification_requested": "spec_verification",
-            "task_decomposition_requested": "task_decomposition",
-            "subtask_implementation_requested": "subtask_implementation",
-            "implementation_requested": "implementation",
-            "boy_scout_correction_requested": "boy_scout_correction",
-            "mr_comments_analysis_requested": "mr_comments_analysis",
-            "self_review_correction_requested": "self_review_correction",
-            "verification_correction_requested": "verification_correction",
-            "mr_followup_requested": "followup_implementation",
-            "qa_reopen_requested": "followup_implementation",
-        }
-        work_type = stage_to_work_type.get(session.current_stage)
+        work_type = _ACTIVE_WORK_TYPE_BY_STAGE.get(session.current_stage)
         if work_type is None:
             return None
         try:
