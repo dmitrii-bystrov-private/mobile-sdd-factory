@@ -6845,7 +6845,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("IOS-30008C", hydration["task_key"])
         self.assertEqual("implementation_requested", hydration["current_stage"])
         self.assertEqual("implementer", hydration["role_name"])
-        self.assertEqual(str(role_workspace / "RESULT.json"), hydration["result_path"])
+        self.assertNotIn("result_path", hydration)
+        self.assertNotIn("result_writer_path", hydration)
 
     def test_runtime_state_summary_exposes_tmux_visibility_commands(self) -> None:
         tmux_backend = TmuxSessionBackend(mode="tmux", runtime_root=Path(self.temp_dir.name))

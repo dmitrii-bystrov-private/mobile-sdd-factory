@@ -47,7 +47,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Do not invoke repository verification entry points such as `scripts/run-build.sh`, `scripts/run-test.sh`, `scripts/run-lint.sh`, `scripts/ios-verify.sh`, `scripts/android-verify.sh`, or platform-local test wrappers.\n"
             "- If execution evidence is missing or ambiguous, note that in the review and defer runtime validation to the verification lane instead of trying to produce it yourself.\n"
             "- Write or refresh the structured review report at the routed review report path before you finish this pass.\n"
-            "- Use the deterministic result writer helper for `RESULT.json`; do not hand-compose reviewer JSON.\n"
+            "- Use the deterministic result writer helper for terminal submission; do not hand-compose reviewer result JSON.\n"
             "- If previous review reports are provided, read them first and do not re-flag already raised issues.\n"
             "- If the review loop is no longer converging and you would otherwise repeat the same issues again, emit `blocked_review_cycle` instead of another normal failed pass.\n"
             "- Read only the convention sources relevant to the touched diff area.\n"
@@ -60,7 +60,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Start from the routed diff input when it is provided as an absolute path; otherwise resolve `spec/diff.md` relative to the task snapshot metadata root from AGENTS.md, not relative to the current role workspace.\n"
             "- If signals are weak or no real maintainability issues are found, report a clean result and stop.\n"
             "- If real maintainability findings exist, write them to the routed findings target when it is provided as an absolute path; otherwise resolve `spec/findings.md` relative to the task snapshot metadata root from AGENTS.md.\n"
-            "- Always use the deterministic result writer helper for `RESULT.json` instead of hand-writing JSON.\n"
+            "- Always use the deterministic result writer helper for terminal submission instead of hand-writing JSON.\n"
             "- Always write a deterministic terminal payload with `result` set to `clean` or `findings_found`.\n"
             "- When `result` is `findings_found`, also include a positive `findings_count` and the exact `findings_path` you wrote.\n\n"
         )
@@ -155,7 +155,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Treat every verification round as a fresh gate and refresh the verification evidence.\n"
             "- Always write or refresh `spec/final-verification.md` for the current round; on failure include the failed checks and their relevant command output.\n"
             "- If the verification loop is no longer converging and you would otherwise repeat the same correction guidance again, emit `blocked_verification_cycle` instead of another normal failed pass.\n"
-            "- Use the deterministic result writer helper for `RESULT.json`; do not hand-compose verification JSON.\n"
+            "- Use the deterministic result writer helper for terminal submission; do not hand-compose verification JSON.\n"
             "- For normal rounds, always write `result=passed` or `result=failed` explicitly.\n"
             "- Do not modify code, tests, docs, or prompts; summarize failures and stop without attempting fixes.\n\n"
         )
@@ -168,16 +168,10 @@ def role_handoff_prompt(
     hydration_payload: dict[str, str | int | None],
     prompt_mode: str = "full",
 ) -> str:
-    result_writer_path = hydration_payload.get("result_writer_path")
-    result_writer_path_text = (
-        str(result_writer_path).strip() if isinstance(result_writer_path, str) else ""
-    )
     work_item_id = hydration_payload.get("work_item_id")
     work_item_id_text = str(work_item_id).strip() if work_item_id is not None else ""
     helper_example_prefix = (
-        f'bash "{result_writer_path_text}" --work-item-id {work_item_id_text or "<work_item_id>"}'
-        if result_writer_path_text
-        else 'bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh" --work-item-id <work_item_id>'
+        f'bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh" --work-item-id {work_item_id_text or "<work_item_id>"}'
     )
     if prompt_mode == "live_bootstrap":
         return (
@@ -212,13 +206,7 @@ def role_handoff_prompt(
     else:
         prefix = f"{base_role_prompt(role_name)}\n"
     helper_line = (
-        (
-            f'- Submit the terminal result with the deterministic helper: `bash "{result_writer_path_text}" --work-item-id {work_item_id_text} ...`.\n'
-            if work_item_id_text
-            else f'- Submit the terminal result with the deterministic helper: `bash "{result_writer_path_text}" --work-item-id <work_item_id> ...`.\n'
-        )
-        if result_writer_path_text
-        else ""
+        f'- Submit the terminal result with the deterministic helper: `bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh" --work-item-id {work_item_id_text or "<work_item_id>"} ...`.\n'
     )
     return (
         f"{prefix}"
@@ -230,7 +218,7 @@ def role_handoff_prompt(
         "- `SDD_PROGRESS` is console-only telemetry for humans; it does not drive coordinator state.\n"
         "- Use `SDD_ERROR` only for live operator escalations that must pause the current work item before a valid terminal outcome exists.\n"
         "- For implementer/bug-fixer live escalations that need an operator decision before you can continue, emit exactly `SDD_ERROR: {\"summary\":\"...\",\"details\":\"...\",\"needs_operator_input\":true}` instead of forcing a terminal result.\n"
-        "- For normal blockers, failures, and completed outcomes that are ready to be accepted as a terminal result, write the structured outcome to `RESULT.json`.\n"
+        "- For normal blockers, failures, and completed outcomes that are ready to be accepted as a terminal result, submit the structured outcome with the deterministic helper.\n"
         "- If a direct operator reply is required and the role contract explicitly says to use terminal blocked output, use `output_type: \"failed\"` and set `needs_operator_input: true` in the terminal payload.\n"
         "- For runtime/tooling failures that do not need a direct operator reply, use `output_type: \"failed\"` with a concise `summary` and optional `failures` / `details` fields.\n\n"
         "Path resolution rules:\n"
@@ -238,10 +226,14 @@ def role_handoff_prompt(
         "- When the hydration payload below includes explicit absolute `*_path` fields, prefer those exact paths over reconstructing task paths yourself.\n\n"
         "Required terminal outcome submission:\n"
         f"{helper_line}"
-        "- Do not hand-write `RESULT.json` and do not choose the output path yourself; the helper resolves the canonical target from `work_item_id`.\n"
+        "- Do not hand-write terminal output files and do not choose output paths yourself; the helper resolves submission context from `work_item_id`.\n"
+        "- Do not call `scripts/write-result.py` directly.\n"
+        "- Do not override `SDD_FACTORY_BACKEND_URL`, `SDD_FACTORY_BACKEND_HOST`, or `SDD_FACTORY_BACKEND_PORT`, and do not attempt transport or fallback debugging from inside the role.\n"
         "- Always copy `work_item_id` from the hydration payload below into the helper call unchanged when it is present.\n"
         "- If the hydration payload below includes `subtask_key`, copy that `subtask_key` into the terminal payload unchanged as well.\n"
         "- Use the helper instead of hand-writing JSON; only pass the minimum role-specific fields required by the routed contract.\n"
+        "- After the helper exits successfully, stop immediately and do not submit the same work item again.\n"
+        "- If the helper exits non-zero or the routed stage has already moved on, stop and wait for fresh routed work; do not retry via alternate scripts, alternate environment variables, or manual files.\n"
         f"- Example: `{helper_example_prefix} --summary \"short result\"`\n"
         f"- Subtask example: `{helper_example_prefix} --summary \"short result\" --subtask-key \"IOS-12345\"`\n"
         f"- Verification failure example: `{helper_example_prefix} --result failed --failure \"xcodebuild exited 65\"`\n\n"

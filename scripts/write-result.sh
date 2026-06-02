@@ -3,7 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-BACKEND_BASE="${SDD_FACTORY_BACKEND_URL:-http://${SDD_FACTORY_BACKEND_HOST:-127.0.0.1}:${SDD_FACTORY_BACKEND_PORT:-8000}}"
+BACKEND_HOST="${SDD_FACTORY_BACKEND_HOST:-127.0.0.1}"
+BACKEND_PORT="${SDD_FACTORY_BACKEND_PORT:-8000}"
+BACKEND_BASE="http://${BACKEND_HOST}:${BACKEND_PORT}"
 
 python_cmd() {
   if command -v python3 >/dev/null 2>&1; then
@@ -56,25 +58,14 @@ PY
   return 20
 }
 
-submit_via_ingress "$@"
-submit_status=$?
+submit_status=0
+submit_via_ingress "$@" || submit_status=$?
 if [[ "${submit_status}" -eq 0 ]]; then
   exit 0
 fi
-if [[ "${submit_status}" -ne 10 ]]; then
-  exit "${submit_status}"
+if [[ "${submit_status}" -eq 10 ]]; then
+  echo "SDD_RESULT_INGRESS_ERROR: transport failure; do not retry via manual RESULT.json or direct writer scripts" >&2
+  exit 10
 fi
 
-echo "SDD_RESULT_INGRESS_FALLBACK: transport failure; falling back to file-based RESULT.json write" >&2
-export SDD_RESULT_SUBMISSION_PATH="file-fallback"
-
-if command -v python3 >/dev/null 2>&1; then
-  exec python3 "${REPO_ROOT}/scripts/write-result.py" "$@"
-fi
-
-if command -v python >/dev/null 2>&1; then
-  exec python "${REPO_ROOT}/scripts/write-result.py" "$@"
-fi
-
-echo "Missing required interpreter: python3 (or python)" >&2
-exit 127
+exit "${submit_status}"

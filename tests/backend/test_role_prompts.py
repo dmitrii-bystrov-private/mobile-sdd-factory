@@ -81,13 +81,14 @@ class RolePromptTests(unittest.TestCase):
                 "current_stage": "subtask_implementation_requested",
                 "work_item_id": 42,
                 "subtask_key": "IOS-55555",
-                "result_path": "/tmp/roles/implementer/RESULT.json",
             },
             prompt_mode="full",
         )
 
-        self.assertIn('bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh" --work-item-id <work_item_id>', text)
-        self.assertIn("Do not hand-write `RESULT.json`", text)
+        self.assertIn('bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh" --work-item-id 42', text)
+        self.assertIn("Do not hand-write terminal output files", text)
+        self.assertIn("Do not call `scripts/write-result.py` directly", text)
+        self.assertIn("do not submit the same work item again", text)
         self.assertIn("Do not run broad workflow-level wrappers", text)
         self.assertIn("Always copy `work_item_id` from the hydration payload below", text)
         self.assertIn("If the hydration payload below includes `subtask_key`", text)
@@ -117,7 +118,6 @@ class RolePromptTests(unittest.TestCase):
                 "task_key": "IOS-123",
                 "current_stage": "implementation_requested",
                 "work_item_id": 10,
-                "result_path": "/tmp/roles/implementer/RESULT.json",
             },
             prompt_mode="full",
         )
@@ -135,15 +135,13 @@ class RolePromptTests(unittest.TestCase):
                 "work_item_id": 11,
                 "diff_path": "/tmp/IOS-123/spec/diff.md",
                 "findings_path": "/tmp/IOS-123/spec/findings.md",
-                "result_path": "/tmp/roles/code-scout/RESULT.json",
-                "result_writer_path": "/tmp/repo/scripts/write-result.sh",
             },
             prompt_mode="full",
         )
 
         self.assertIn("Start from the routed diff input when it is provided as an absolute path", text)
         self.assertIn("write them to the routed findings target when it is provided as an absolute path", text)
-        self.assertIn('bash "/tmp/repo/scripts/write-result.sh" --work-item-id 11', text)
+        self.assertIn('bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh" --work-item-id 11', text)
         self.assertIn("`result` set to `clean` or `findings_found`", text)
         self.assertIn("positive `findings_count`", text)
 
@@ -155,14 +153,13 @@ class RolePromptTests(unittest.TestCase):
                 "task_key": "IOS-123",
                 "current_stage": "verification_requested",
                 "work_item_id": 12,
-                "result_path": "/tmp/roles/verifier/RESULT.json",
-                "result_writer_path": "/tmp/repo/scripts/write-result.sh",
             },
             prompt_mode="full",
         )
 
         self.assertIn("do not hand-compose verification JSON", text)
-        self.assertIn('bash "/tmp/repo/scripts/write-result.sh" --work-item-id 12', text)
+        self.assertIn('bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh" --work-item-id 12', text)
+        self.assertIn("Do not override `SDD_FACTORY_BACKEND_URL`", text)
 
     def test_full_prompt_for_reviewer_forbids_runtime_verification_commands(self) -> None:
         text = role_handoff_prompt(
@@ -172,7 +169,6 @@ class RolePromptTests(unittest.TestCase):
                 "task_key": "IOS-123",
                 "current_stage": "self_review_requested",
                 "work_item_id": 13,
-                "result_writer_path": "/tmp/repo/scripts/write-result.sh",
             },
             prompt_mode="full",
         )

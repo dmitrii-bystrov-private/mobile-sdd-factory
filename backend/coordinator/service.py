@@ -10067,8 +10067,6 @@ class CoordinatorService:
         updated_role = self.role_repository.increment_hydration_version(role.id)
         workspace = self.role_workspace_manager.ensure_role_workspace(session.task_key, role.role_name)
         hydration_version = updated_role.last_hydration_version
-        merged_hydration["result_path"] = str(workspace.directory / "RESULT.json")
-        merged_hydration["result_writer_path"] = str(self._repo_root() / "scripts" / "write-result.sh")
         merged_hydration["hydration_version"] = hydration_version
         dispatch_token = f"hv{hydration_version}-wi{work_item.id}"
         merged_hydration["dispatch_token"] = dispatch_token

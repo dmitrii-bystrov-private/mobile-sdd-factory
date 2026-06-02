@@ -17,6 +17,7 @@ from backend.state.work_item_repository import WorkItemRepository
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "write-result.py"
+SHELL_SCRIPT_PATH = REPO_ROOT / "scripts" / "write-result.sh"
 
 
 class WriteResultScriptTests(unittest.TestCase):
@@ -259,6 +260,32 @@ class WriteResultScriptTests(unittest.TestCase):
             payload = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertEqual("completed", payload["output_type"])
             self.assertEqual("IOS-55555", payload["payload"]["subtask_key"])
+
+    def test_shell_helper_does_not_fallback_to_file_when_ingress_transport_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, output_path, work_item_id = self._create_context(
+                temp_dir,
+                role_name="verification-coordinator",
+            )
+            env["SDD_FACTORY_BACKEND_PORT"] = "1"
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(SHELL_SCRIPT_PATH),
+                    "--work-item-id",
+                    str(work_item_id),
+                    "--result",
+                    "passed",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(10, result.returncode)
+            self.assertIn("SDD_RESULT_INGRESS_ERROR", result.stderr)
+            self.assertFalse(output_path.exists())
 
     def test_bug_fixer_completed_result_is_supported(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
