@@ -170,6 +170,7 @@ class SessionRepository:
             connection.execute("DELETE FROM checkpoints WHERE session_id = ?", (session_id,))
             connection.execute("DELETE FROM verification_runs WHERE session_id = ?", (session_id,))
             connection.execute("DELETE FROM artifacts WHERE session_id = ?", (session_id,))
+            connection.execute("DELETE FROM dispatches WHERE session_id = ?", (session_id,))
             connection.execute("DELETE FROM work_items WHERE session_id = ?", (session_id,))
             connection.execute("DELETE FROM events WHERE session_id = ?", (session_id,))
             connection.execute("DELETE FROM roles WHERE session_id = ?", (session_id,))
