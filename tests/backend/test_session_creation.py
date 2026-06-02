@@ -2143,13 +2143,45 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(outcome_path.exists())
         self.assertEqual("blocked", json.loads(outcome_path.read_text())["status"])
         self.assertEqual(CODE_REVIEWER_ROLE, updated_session.current_owner)
+
+    def test_reviewer_blocked_cycle_uses_report_text_when_details_missing(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RBLOCKREPORT",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RBLOCKREPORT")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="blocked_review_cycle",
+            payload={
+                "summary": "Review loop is repeating the same unresolved invalidation race.",
+            },
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("self_review_blocked", mapped_event.event_type)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertIn("## Issues", str(followup_event.payload.get("details") or ""))
+        self.assertIn(
+            "Review loop is repeating the same unresolved invalidation race.",
+            str(followup_event.payload.get("details") or ""),
+        )
         self.assertEqual("self_review_cycle", str(followup_event.payload.get("reason") or ""))
         self.assertEqual(CODE_REVIEWER_ROLE, str(followup_event.payload.get("role_name") or ""))
         self.assertTrue(bool(followup_event.payload.get("needs_operator_input") is True))
-        self.assertEqual(
-            "Two review passes raised the same reducer issue and the loop no longer converges.",
-            str(followup_event.payload.get("details") or ""),
-        )
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
 
         summary = self.coordinator.get_interactive_state_summary(session.id)
@@ -2157,8 +2189,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("self_review_cycle", summary["source_reason"])
         self.assertEqual(CODE_REVIEWER_ROLE, summary["role_name"])
         self.assertTrue(summary["needs_operator_input"])
-        self.assertEqual(
-            "Two review passes raised the same reducer issue and the loop no longer converges.",
+        self.assertIn("## Issues", str(summary["details"] or ""))
+        self.assertIn(
+            "Review loop is repeating the same unresolved invalidation race.",
             str(summary["details"] or ""),
         )
 

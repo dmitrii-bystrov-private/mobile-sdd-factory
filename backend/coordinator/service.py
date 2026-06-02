@@ -5853,7 +5853,10 @@ class CoordinatorService:
                 "reason": "self_review_cycle",
                 "role_name": CODE_REVIEWER_ROLE,
                 "summary": str(source_event.payload.get("summary") or "").strip() or "self review cycle blocked",
-                "details": self._self_review_cycle_operator_details(source_event.payload),
+                "details": self._self_review_cycle_operator_details(
+                    source_event.payload,
+                    report_paths=report_paths,
+                ),
                 "needs_operator_input": True,
                 "review_report_paths": report_paths,
                 "current_stage": session.current_stage,
@@ -5898,7 +5901,12 @@ class CoordinatorService:
         )
         return session, event
 
-    def _self_review_cycle_operator_details(self, payload: dict | None) -> str:
+    def _self_review_cycle_operator_details(
+        self,
+        payload: dict | None,
+        *,
+        report_paths: list[str] | None = None,
+    ) -> str:
         if not isinstance(payload, dict):
             return "The reviewer reported a non-converging review cycle and stopped automatic retries."
         explicit_details = str(payload.get("details") or "").strip()
@@ -5908,6 +5916,21 @@ class CoordinatorService:
         if issues_markdown:
             cleaned_lines: list[str] = []
             for line in issues_markdown.splitlines():
+                if not cleaned_lines and line.strip().startswith("REVIEW_RESULT:"):
+                    continue
+                cleaned_lines.append(line)
+            cleaned = "\n".join(cleaned_lines).strip()
+            if cleaned:
+                return cleaned
+        for path_str in reversed(report_paths or []):
+            if not path_str:
+                continue
+            try:
+                report_text = Path(path_str).read_text(encoding="utf-8")
+            except OSError:
+                continue
+            cleaned_lines: list[str] = []
+            for line in report_text.splitlines():
                 if not cleaned_lines and line.strip().startswith("REVIEW_RESULT:"):
                     continue
                 cleaned_lines.append(line)
