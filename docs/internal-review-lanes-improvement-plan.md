@@ -129,55 +129,37 @@ Last synchronized: 2026-06-03
      - `status`
      - `work_item_id`
    - reviewer and Code Scout outcomes now share the same family contract
-9. Metadata-first correction/history lookup started
-   - self-review history lookup can resolve via internal-review metadata
-   - Code Scout correction lookup can resolve via internal-review metadata
-   - Code Scout escalation now carries explicit `review_report_paths`
+9. Metadata-first correction/history lookup completed
+   - self-review history lookup resolves via internal-review metadata
+   - Code Scout correction lookup resolves via internal-review metadata
+   - Code Scout escalation carries explicit `review_report_paths`
+   - review pass numbering now counts via metadata
+   - review reports now carry `artifact_role = report`
 10. UI presentation cleanup
    - correction-family labels are clearer in worker/session UI
    - operator wording across review lanes is more consistent
    - artifact log now surfaces internal-review family context
+11. Optional structured sections standardized
+   - reviewer and Code Scout findings now preserve:
+     - `Evidence`
+     - `Suggested approach`
+     - `Test expectations`
+   - these sections stay optional and are omitted when not grounded
+12. Shared review-family operator/correction handling tightened further
+   - interactive-state now exposes shared internal-review context
+   - reviewer and Code Scout operator surfaces branch less on lane-specific reason strings
+13. Review-lane metrics instrumentation added
+   - session-level `internal_review_metrics_json` is materialized
+   - metrics cover:
+     - self-review report/correction counts
+     - Code Scout run and correction counts
+     - internal-review operator escalation clarity
 
-### Partially Completed
+### Remaining Follow-up
 
-1. Artifact/history lookup migration
-   - some downstream flows now use metadata-first lookup
-   - other code paths still depend on concrete artifact types
-2. UI/operator review-family presentation
-   - artifact panel and operator wording are improved
-   - broader review-family navigation/filtering is still pending
-
-### Not Started
-
-1. Unified `Evidence` / `Suggested approach` / `Test expectations` handling
-   - current structured contract covers the most important fields
-   - optional sections are not yet standardized across both lanes
-2. Shared correction/operator flow for multi-lane findings
-   - reviewer and scout are closer, but not yet fully abstracted as one review subsystem
-3. Metrics / rollout instrumentation for review-lane quality
-   - no explicit counters yet for:
-     - repeat blocked cycles
-     - correction-loop convergence
-     - finding reuse quality
-
-### Current Recommended Next Steps
-
-1. Finish metadata-first review-family lookup
-   - remove more direct dependency on:
-     - `self_review_report_markdown`
-     - `boy_scout_report_markdown`
-     - `boy_scout_actionable_markdown`
-   - keep compatibility fallbacks until old history can be ignored
-2. Standardize optional structured sections
-   - `Evidence`
-   - `Suggested approach`
-   - `Test expectations`
-3. Unify operator/correction handling further
-   - continue reducing lane-specific branching where reviewer and Code Scout now share equivalent semantics
-4. Add explicit success metrics
-   - repeated-cycle rate
-   - operator-escalation clarity
-   - correction convergence after first reroute
+1. Live observation and tuning
+   - validate that the richer findings improve real-task convergence over time
+   - tune wording if the new optional sections become noisy in practice
 
 ## Unified Finding Contract
 
