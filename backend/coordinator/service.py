@@ -7413,27 +7413,7 @@ class CoordinatorService:
                 return story_payload
             if role.role_name == IMPLEMENTER_ROLE:
                 payload = dict(story_payload)
-                if stage_name == "boy_scout_correction_requested":
-                    payload["issues_file_path"] = self._existing_file_path(
-                        self._latest_artifact_path(
-                            session.id,
-                            "boy_scout_actionable_markdown",
-                        )
-                    )
-                if stage_name == "verification_correction_requested":
-                    payload["issues_file_path"] = self._existing_file_path(
-                        self._latest_artifact_path(
-                            session.id,
-                            "final_verification_markdown",
-                        )
-                    )
-                if stage_name == "self_review_correction_requested":
-                    payload["issues_file_path"] = self._existing_file_path(
-                        self._latest_artifact_path(
-                            session.id,
-                            "self_review_report_markdown",
-                        )
-                    )
+                payload.update(self._correction_dispatch_hydration(session.id, stage_name))
                 return payload
         if role.role_name == REQUIREMENTS_CLARIFIER_WORKER_ROLE and stage_name == "requirements_requested":
             return {
@@ -7441,27 +7421,7 @@ class CoordinatorService:
             }
         if role.role_name == IMPLEMENTER_ROLE:
             payload: dict[str, str | int | None] = {}
-            if stage_name == "boy_scout_correction_requested":
-                payload["issues_file_path"] = self._existing_file_path(
-                    self._latest_artifact_path(
-                        session.id,
-                        "boy_scout_actionable_markdown",
-                    )
-                )
-            if stage_name == "verification_correction_requested":
-                payload["issues_file_path"] = self._existing_file_path(
-                    self._latest_artifact_path(
-                        session.id,
-                        "final_verification_markdown",
-                    )
-                )
-            if stage_name == "self_review_correction_requested":
-                payload["issues_file_path"] = self._existing_file_path(
-                    self._latest_artifact_path(
-                        session.id,
-                        "self_review_report_markdown",
-                    )
-                )
+            payload.update(self._correction_dispatch_hydration(session.id, stage_name))
             if payload:
                 return payload
         if session.workflow_profile != "bug_full" or role.role_name != BUG_FIXER_ROLE:
@@ -7489,28 +7449,6 @@ class CoordinatorService:
             payload["bug_mode"] = mode_by_stage[stage_name]
         if stage_name == "bug_analysis_requested":
             payload["primary_bug_inputs"] = "description.md + comments.md"
-        if stage_name == "verification_correction_requested":
-            payload["issues_file_path"] = self._existing_file_path(
-                self._latest_artifact_path(
-                    session.id,
-                    "role_output_summary",
-                    role_name=VERIFICATION_COORDINATOR_ROLE,
-                )
-            )
-        if stage_name == "self_review_correction_requested":
-            payload["issues_file_path"] = self._existing_file_path(
-                self._latest_artifact_path(
-                    session.id,
-                    "self_review_report_markdown",
-                )
-            )
-        if stage_name == "boy_scout_correction_requested":
-            payload["issues_file_path"] = self._existing_file_path(
-                self._latest_artifact_path(
-                    session.id,
-                    "boy_scout_actionable_markdown",
-                )
-            )
         if stage_name == "mr_followup_requested":
             payload["followup_comments_path"] = self._existing_file_path(
                 self._latest_artifact_path(
@@ -7542,6 +7480,40 @@ class CoordinatorService:
                 )
             )
         return payload
+
+    def _correction_dispatch_hydration(
+        self,
+        session_id: int,
+        stage_name: str,
+    ) -> dict[str, str | int | None]:
+        config_by_stage = {
+            "self_review_correction_requested": {
+                "source": "self_review",
+                "artifact_type": "self_review_report_markdown",
+            },
+            "boy_scout_correction_requested": {
+                "source": "code_scout",
+                "artifact_type": "boy_scout_actionable_markdown",
+            },
+            "verification_correction_requested": {
+                "source": "verification",
+                "artifact_type": "final_verification_markdown",
+            },
+        }
+        config = config_by_stage.get(stage_name)
+        if config is None:
+            return {}
+        report_path = self._existing_file_path(
+            self._latest_artifact_path(
+                session_id,
+                str(config["artifact_type"]),
+            )
+        )
+        return {
+            "correction_source": str(config["source"]),
+            "correction_report_path": report_path,
+            "issues_file_path": report_path,
+        }
 
     def _requirements_clarification_mode(self, policy: dict[str, str] | None) -> str:
         return (policy or {}).get("requirements_clarification_mode", "ask-selectively")

@@ -2078,6 +2078,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("implementer", updated_session.current_owner)
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
         self.assertIn('"issues_file_path"', sent_inputs[-1])
+        self.assertIn('"correction_source": "self_review"', sent_inputs[-1])
+        self.assertIn('"correction_report_path"', sent_inputs[-1])
         self.assertIn("pass-01.md", sent_inputs[-1])
         review_report = (Path(self.temp_dir.name) / "IOS-30003RF" / "review" / "pass-01.md").read_text()
         self.assertIn("- Why it matters: Keeping the duplicate state path makes future regressions more likely.", review_report)
@@ -9391,6 +9393,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("**Required direction**: Consolidate the mapping path behind one shared helper.", scout_report)
         self.assertIn("**Non-goals**: Do not broaden this pass into unrelated presenter cleanup.", scout_report)
         self.assertIn('"issues_file_path"', sent_inputs[-1])
+        self.assertIn('"correction_source": "code_scout"', sent_inputs[-1])
+        self.assertIn('"correction_report_path"', sent_inputs[-1])
         self.assertIn("boy-scout-actionable.md", sent_inputs[-1])
         scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
         assert scout_role is not None
@@ -9972,6 +9976,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.work_type == "self_review_correction" for item in work_items))
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
         self.assertIn('"issues_file_path"', sent_inputs[-1])
+        self.assertIn('"correction_source": "self_review"', sent_inputs[-1])
+        self.assertIn('"correction_report_path"', sent_inputs[-1])
         self.assertIn("pass-01.md", sent_inputs[-1])
 
     def test_complete_self_review_is_rejected_when_policy_required(self) -> None:
