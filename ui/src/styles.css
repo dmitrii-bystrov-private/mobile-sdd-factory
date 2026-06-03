@@ -857,6 +857,13 @@ input {
   line-height: 1.4;
 }
 
+.operator-action-inline-heading .form-help {
+  color: var(--ink-soft);
+  font-size: 0.98rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
 .form-help-error {
   color: var(--gold);
 }
@@ -1380,16 +1387,23 @@ input {
 }
 
 .workflow-pulse-role-name {
-  font-size: 0.96rem;
-  font-weight: 500;
+  font-size: 1rem;
+  font-weight: 600;
   letter-spacing: 0;
+  line-height: 1.35;
+  color: var(--ink-strong);
 }
 
 .progress-card-title {
-  color: rgba(233, 240, 247, 0.82);
-  font-size: 0.84rem;
-  font-weight: 500;
+  color: var(--ink-soft);
+  font-size: 0.98rem;
+  font-weight: 400;
   line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  min-height: calc(0.98rem * 1.4 * 2);
 }
 
 .workflow-pulse-runtime {
@@ -1399,15 +1413,15 @@ input {
 }
 
 .workflow-pulse-runtime-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: var(--space-2);
+  position: relative;
   margin-top: auto;
+  padding-right: 46px;
 }
 
 .workflow-pulse-menu-anchor {
-  position: relative;
+  position: absolute;
+  right: 0;
+  bottom: 0;
 }
 
 .workflow-pulse-menu-button {
