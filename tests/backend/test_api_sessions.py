@@ -1594,7 +1594,16 @@ class SessionApiTests(unittest.TestCase):
                 output_type="blocked_review_cycle",
                 payload={
                     "summary": "Repeated reducer violation remains unresolved.",
-                    "details": "Two review passes raised the same reducer issue and the loop no longer converges.",
+                    "issues": [
+                        {
+                            "severity": "error",
+                            "file": "Sources/Feature/Reducer.swift",
+                            "problem": "The mutation still bypasses the reducer boundary.",
+                            "why_it_matters": "The same reducer violation will continue to bounce between passes.",
+                            "required_direction": "Route the touched mutation back through the reducer path.",
+                            "non_goals": "Do not redesign unrelated feature slices in this loop.",
+                        }
+                    ],
                 },
             ),
             dependencies=self.dependencies,
@@ -1609,6 +1618,9 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("self_review_cycle", response.source_reason)
         self.assertEqual(CODE_REVIEWER_ROLE, response.role_name)
         self.assertTrue(response.needs_operator_input)
+        self.assertIn("## Issues", response.details or "")
+        self.assertIn("Why it matters", response.details or "")
+        self.assertIn("Required direction", response.details or "")
 
     def test_story_spec_completed_event_returns_task_decomposition_handoff(self) -> None:
         prepare_response = create_session(

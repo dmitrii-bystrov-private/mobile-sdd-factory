@@ -2191,6 +2191,16 @@ class SessionCreationTests(unittest.TestCase):
             output_type="blocked_review_cycle",
             payload={
                 "summary": "Review loop is repeating the same unresolved invalidation race.",
+                "issues": [
+                    {
+                        "severity": "error",
+                        "file": "Sources/Feature/RetryCoordinator.swift",
+                        "problem": "The invalidation race still leaves the retry branch live after cancel.",
+                        "why_it_matters": "The same race will continue to reappear across correction passes.",
+                        "required_direction": "Collapse the cancel path and retry invalidation onto one authoritative branch.",
+                        "non_goals": "Do not refactor unrelated retry UX in this cycle.",
+                    }
+                ],
             },
         )
         artifacts = self.artifact_repository.list_for_session(session.id)
@@ -2201,6 +2211,18 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("## Issues", str(followup_event.payload.get("details") or ""))
         self.assertIn(
             "Review loop is repeating the same unresolved invalidation race.",
+            str(followup_event.payload.get("details") or ""),
+        )
+        self.assertIn(
+            "- Why it matters: The same race will continue to reappear across correction passes.",
+            str(followup_event.payload.get("details") or ""),
+        )
+        self.assertIn(
+            "- Required direction: Collapse the cancel path and retry invalidation onto one authoritative branch.",
+            str(followup_event.payload.get("details") or ""),
+        )
+        self.assertIn(
+            "- Non-goals: Do not refactor unrelated retry UX in this cycle.",
             str(followup_event.payload.get("details") or ""),
         )
         self.assertEqual("self_review_cycle", str(followup_event.payload.get("reason") or ""))
@@ -2216,6 +2238,10 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("## Issues", str(summary["details"] or ""))
         self.assertIn(
             "Review loop is repeating the same unresolved invalidation race.",
+            str(summary["details"] or ""),
+        )
+        self.assertIn(
+            "- Why it matters: The same race will continue to reappear across correction passes.",
             str(summary["details"] or ""),
         )
 

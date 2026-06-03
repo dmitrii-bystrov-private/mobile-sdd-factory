@@ -6002,6 +6002,14 @@ class CoordinatorService:
             cleaned = "\n".join(cleaned_lines).strip()
             if cleaned:
                 return cleaned
+        issues = payload.get("issues")
+        if isinstance(issues, list) and issues:
+            rendered = self._render_self_review_issues_markdown(issues).strip()
+            if rendered:
+                summary = str(payload.get("summary") or "").strip()
+                if summary:
+                    return "\n".join([summary, "", rendered]).strip()
+                return rendered
         for path_str in reversed(report_paths or []):
             if not path_str:
                 continue
@@ -6018,6 +6026,40 @@ class CoordinatorService:
             if cleaned:
                 return cleaned
         return "The reviewer reported a non-converging review cycle and stopped automatic retries."
+
+    def _render_self_review_issues_markdown(self, issues: list[object]) -> str:
+        lines: list[str] = ["## Issues", ""]
+        for raw_issue in issues:
+            if isinstance(raw_issue, dict):
+                severity = str(raw_issue.get("severity") or "warning").strip()
+                file_path = str(raw_issue.get("file") or "unknown").strip()
+                convention = str(raw_issue.get("convention") or "").strip()
+                problem = str(raw_issue.get("problem") or "").strip()
+                required_change = str(raw_issue.get("required_change") or "").strip()
+                why_it_matters = str(raw_issue.get("why_it_matters") or "").strip()
+                required_direction = str(raw_issue.get("required_direction") or "").strip()
+                non_goals = str(raw_issue.get("non_goals") or "").strip()
+                lines.extend([f"### [{severity}] {file_path}"])
+                if convention:
+                    lines.append(f"- Convention: {convention}")
+                if problem:
+                    lines.append(f"- Problem: {problem}")
+                if required_change:
+                    lines.append(f"- Required change: {required_change}")
+                if why_it_matters:
+                    lines.append(f"- Why it matters: {why_it_matters}")
+                if required_direction:
+                    lines.append(f"- Required direction: {required_direction}")
+                if non_goals:
+                    lines.append(f"- Non-goals: {non_goals}")
+                lines.append("")
+            else:
+                rendered = str(raw_issue).strip()
+                if rendered:
+                    lines.append(f"- {rendered}")
+        if lines and lines[-1] == "":
+            lines.pop()
+        return "\n".join(lines)
 
     def _enqueue_verification(
         self,
@@ -9459,37 +9501,7 @@ class CoordinatorService:
                 if issues_markdown:
                     lines.extend(["", issues_markdown])
                 elif isinstance(issues, list) and issues:
-                    lines.extend(["", "## Issues", ""])
-                    for raw_issue in issues:
-                        if isinstance(raw_issue, dict):
-                            severity = str(raw_issue.get("severity") or "warning").strip()
-                            file_path = str(raw_issue.get("file") or "unknown").strip()
-                            convention = str(raw_issue.get("convention") or "").strip()
-                            problem = str(raw_issue.get("problem") or "").strip()
-                            required_change = str(raw_issue.get("required_change") or "").strip()
-                            why_it_matters = str(raw_issue.get("why_it_matters") or "").strip()
-                            required_direction = str(raw_issue.get("required_direction") or "").strip()
-                            non_goals = str(raw_issue.get("non_goals") or "").strip()
-                            lines.extend([f"### [{severity}] {file_path}"])
-                            if convention:
-                                lines.append(f"- Convention: {convention}")
-                            if problem:
-                                lines.append(f"- Problem: {problem}")
-                            if required_change:
-                                lines.append(f"- Required change: {required_change}")
-                            if why_it_matters:
-                                lines.append(f"- Why it matters: {why_it_matters}")
-                            if required_direction:
-                                lines.append(f"- Required direction: {required_direction}")
-                            if non_goals:
-                                lines.append(f"- Non-goals: {non_goals}")
-                            lines.append("")
-                        else:
-                            rendered = str(raw_issue).strip()
-                            if rendered:
-                                lines.append(f"- {rendered}")
-                    if lines and lines[-1] == "":
-                        lines.pop()
+                    lines.extend(["", self._render_self_review_issues_markdown(issues)])
                 elif summary:
                     lines.extend(["", "## Issues", "", f"- {summary}"])
             content = "\n".join(lines).rstrip() + "\n"
