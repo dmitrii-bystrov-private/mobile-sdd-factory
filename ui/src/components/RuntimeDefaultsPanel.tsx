@@ -64,7 +64,7 @@ const POLICY_DEFAULT_DESCRIPTIONS: Record<
   boy_scout_policy:
     "Choose whether the Code Scout lane is disabled, auto-started with agent skip semantics, or required.",
   doc_harvest_policy:
-    "Choose whether doc harvest is disabled, auto-started with agent skip semantics, or required.",
+    "Choose whether the Docs Writer lane is disabled, auto-started with agent skip semantics, or required.",
 };
 
 const CLARIFICATION_MODE_DESCRIPTIONS: Record<RequirementsClarificationMode, string> = {
@@ -425,7 +425,7 @@ export function RuntimeDefaultsPanel({
               </label>
             </div>
             <label className="form-field">
-              <span>Doc Harvest</span>
+              <span>Docs Writer</span>
               <select
                 className="select-input"
                 disabled={busy}
@@ -508,7 +508,7 @@ export function RuntimeDefaultsPanel({
                 </select>
               </label>
               <label className="form-field">
-                <span>Doc Harvest</span>
+                <span>Docs Writer</span>
                 <select
                   className="select-input"
                   disabled={busy}
@@ -574,7 +574,7 @@ export function RuntimeDefaultsPanel({
             </div>
             <div className="followup-form-grid">
               <label className="form-field">
-                <span>Doc Harvest</span>
+                <span>Docs Writer</span>
                 <select
                   className="select-input"
                   disabled={busy}

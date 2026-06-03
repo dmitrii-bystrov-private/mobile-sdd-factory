@@ -72,7 +72,7 @@ const FOLLOWUP_STAGE_EVENT_TYPES: Record<"mr" | "qa", readonly string[]> = {
 const PLANNING_STEP_DEFINITIONS = [
   {
     stageName: "proposal_context_requested",
-    label: "Proposal & Context",
+    label: "Context Builder",
     completedEventType: "proposal_context_completed",
   },
   {
@@ -87,7 +87,7 @@ const PLANNING_STEP_DEFINITIONS = [
   },
   {
     stageName: "constraints_requested",
-    label: "Constraints",
+    label: "Design Constraints",
     completedEventType: "constraints_completed",
   },
   {

@@ -23,7 +23,7 @@ const SESSION_POLICY_LABELS: Record<string, string> = {
   test_policy: "Test Policy",
   self_review_policy: "Self Review",
   boy_scout_policy: "Code Scout",
-  doc_harvest_policy: "Doc Harvest",
+  doc_harvest_policy: "Docs Writer",
   requirements_clarification_mode: "Requirements Clarification",
 };
 
