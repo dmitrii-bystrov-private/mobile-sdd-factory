@@ -128,7 +128,7 @@ class RolePromptTests(unittest.TestCase):
     def test_full_prompt_restores_code_scout_absolute_path_rules(self) -> None:
         text = role_handoff_prompt(
             role_name="code-scout",
-            instruction="Run a Boy Scout pass for IOS-123.",
+            instruction="Run a Code Scout pass for IOS-123.",
             hydration_payload={
                 "task_key": "IOS-123",
                 "current_stage": "boy_scout_requested",

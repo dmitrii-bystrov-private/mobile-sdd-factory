@@ -49,7 +49,7 @@ Most of the time the workflow should progress automatically through:
 - decomposition
 - implementation
 - self-review
-- Boy Scout
+- Code Scout
 - verification
 - MR handoff
 - send-to-test
@@ -61,7 +61,7 @@ Operator input is expected only when the workflow genuinely cannot continue safe
 Typical cases:
 
 - requirements clarification
-- Boy Scout findings that include old-code candidates and need a tech-debt decision
+- Code Scout findings that include old-code candidates and need a tech-debt decision
 - blocked review cycles
 - blocked verification cycles
 

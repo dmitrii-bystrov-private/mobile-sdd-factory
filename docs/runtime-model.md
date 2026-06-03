@@ -122,7 +122,7 @@ Optional lanes follow this model:
 This applies to optional quality/documentation lanes such as:
 
 - self-review
-- Boy Scout
+- Code Scout
 - doc harvest
 
 ## Follow-Up Flows

@@ -5767,14 +5767,14 @@ class SessionCreationTests(unittest.TestCase):
         correction_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="boy_scout_correction",
-            title="Boy Scout improvements for IOS-30004BSCOUTPAYLOAD",
+            title="Code Scout improvements for IOS-30004BSCOUTPAYLOAD",
             owner_role_id=implementer_role.id,
             status=WorkItemStatus.ASSIGNED,
         )
         stale_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="boy_scout_correction",
-            title="Boy Scout improvements for IOS-30004BSCOUTPAYLOAD",
+            title="Code Scout improvements for IOS-30004BSCOUTPAYLOAD",
             owner_role_id=implementer_role.id,
             status=WorkItemStatus.ASSIGNED,
         )
@@ -9136,7 +9136,7 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             role_name=CODE_SCOUT_ROLE,
             output_type="skipped_not_needed",
-            payload={"summary": "The change is too small to justify a meaningful Boy Scout pass."},
+            payload={"summary": "The change is too small to justify a meaningful Code Scout pass."},
         )
 
         self.assertEqual("boy_scout_completed", mapped_event.event_type)
@@ -9240,13 +9240,13 @@ class SessionCreationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             IntakeError,
-            "Boy Scout cannot be skipped when boy_scout_policy is required",
+            "Code Scout cannot be skipped when boy_scout_policy is required",
         ):
             self.coordinator.handle_role_output(
                 session_id=session.id,
                 role_name=CODE_SCOUT_ROLE,
                 output_type="skipped_not_needed",
-                payload={"summary": "The change is too small to justify a meaningful Boy Scout pass."},
+                payload={"summary": "The change is too small to justify a meaningful Code Scout pass."},
             )
 
     def test_default_hydration_refreshes_diff_for_boy_scout(self) -> None:
@@ -9408,7 +9408,7 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             role_name=CODE_SCOUT_ROLE,
             output_type="completed",
-            payload={"result": "clean", "summary": "Clean Boy Scout pass."},
+            payload={"result": "clean", "summary": "Clean Code Scout pass."},
         )
 
         self.assertEqual("boy_scout_completed", mapped_event.event_type)
@@ -9501,13 +9501,13 @@ class SessionCreationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             IntakeError,
-            "Boy Scout output must include payload.result set to 'clean' or 'findings_found'",
+            "Code Scout output must include payload.result set to 'clean' or 'findings_found'",
         ):
             self.coordinator.handle_role_output(
                 session_id=session.id,
                 role_name=CODE_SCOUT_ROLE,
                 output_type="completed",
-                payload={"summary": "Clean Boy Scout pass: no real maintainability findings in the highest-signal changed files"},
+                payload={"summary": "Clean Code Scout pass: no real maintainability findings in the highest-signal changed files"},
             )
 
         self.assertEqual("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n", findings_path.read_text(encoding="utf-8"))
@@ -9531,7 +9531,7 @@ class SessionCreationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             IntakeError,
-            "Boy Scout output must include payload.result set to 'clean' or 'findings_found'",
+            "Code Scout output must include payload.result set to 'clean' or 'findings_found'",
         ):
             self.coordinator.handle_role_output(
                 session_id=session.id,
@@ -9563,7 +9563,7 @@ class SessionCreationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             IntakeError,
-            "Boy Scout output must include payload.result set to 'clean' or 'findings_found'",
+            "Code Scout output must include payload.result set to 'clean' or 'findings_found'",
         ):
             self.coordinator.handle_role_output(
                 session_id=session.id,
@@ -9628,7 +9628,7 @@ class SessionCreationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             IntakeError,
-            "Boy Scout findings output must include payload.findings_path",
+            "Code Scout findings output must include payload.findings_path",
         ):
             self.coordinator.handle_role_output(
                 session_id=session.id,
@@ -9642,7 +9642,7 @@ class SessionCreationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             IntakeError,
-            "Boy Scout findings output must include a positive payload.findings_count",
+            "Code Scout findings output must include a positive payload.findings_count",
         ):
             self.coordinator.handle_role_output(
                 session_id=session.id,
@@ -9767,9 +9767,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("boy_scout_findings", summary["source_reason"])
         self.assertEqual("boy_scout_requested", summary["current_stage"])
         self.assertFalse(summary["needs_operator_input"])
-        self.assertIn("Boy Scout found", str(summary["details"]))
+        self.assertIn("Code Scout found", str(summary["details"]))
         self.assertIn("Extract helper", str(summary["details"]))
-        self.assertNotIn("Clean Boy Scout pass", str(summary["details"]))
+        self.assertNotIn("Clean Code Scout pass", str(summary["details"]))
 
     def test_active_runtime_output_is_hidden_for_boy_scout_operator_gate_without_live_blocker_role(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -9843,7 +9843,7 @@ class SessionCreationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             IntakeError,
-            "Manual Boy Scout skip is only allowed when boy_scout_policy is enabled",
+            "Manual Code Scout skip is only allowed when boy_scout_policy is enabled",
         ):
             self.coordinator.skip_boy_scout(
                 session_id=session.id,
@@ -10563,7 +10563,7 @@ class SessionCreationTests(unittest.TestCase):
         active_scout_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="boy_scout",
-            title=f"Boy Scout pass for {session.task_key}",
+            title=f"Code Scout pass for {session.task_key}",
             owner_role_id=scout_role.id,
             source_event_id=None,
             priority=91,

@@ -4,7 +4,7 @@ const ROLE_LABELS: Record<string, string> = {
   "bug-fixer": "Bug Fixer",
   "code-reviewer": "Code Reviewer",
   "final-verifier": "Final Verifier",
-  "code-scout": "Boy Scout",
+  "code-scout": "Code Scout",
   "mr-comments-analyst": "MR Comments Analyst",
   "doc-harvest-worker": "Doc Harvest",
   "doc-harvest": "Doc Harvest",

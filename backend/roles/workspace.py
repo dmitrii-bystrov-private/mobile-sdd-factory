@@ -225,7 +225,7 @@ def _role_responsibility(role_name: str) -> list[str]:
         ]
     if role_name == "code-scout":
         return [
-            "- You execute one bounded Boy Scout pass for one completed coding session.",
+            "- You execute one bounded Code Scout pass for one completed coding session.",
             "- You inspect only the changed code area for real maintainability improvements and do not modify product code yourself.",
             "- You stop after writing either a clean result or structured findings for operator review.",
         ]
@@ -341,9 +341,9 @@ def _role_operating_rules(role_name: str) -> list[str]:
         ]
     if role_name == "code-scout":
         return [
-            "- Start from `spec/diff.md` and use it to decide whether the branch has strong enough maintainability signals for a Boy Scout pass.",
+            "- Start from `spec/diff.md` and use it to decide whether the branch has strong enough maintainability signals for a Code Scout pass.",
             "- Read full current files only for the most promising changed code paths; do not analyze raw diff hunks alone.",
-            "- If signals are weak or no real findings exist, return a clean Boy Scout result and stop.",
+            "- If signals are weak or no real findings exist, return a clean Code Scout result and stop.",
             "- If real maintainability findings exist, write `spec/findings.md`, summarize the findings, and stop without changing product code.",
             "- Skip style nits, convention-only feedback, and speculative improvements.",
         ]

@@ -65,7 +65,7 @@ export function BoyScoutDecisionPanel({
     event.preventDefault();
     const normalizedReason = skipReason.trim();
     if (normalizedReason.length === 0) {
-      setError("Boy Scout skip reason is required");
+      setError("Code Scout skip reason is required");
       return;
     }
     await run(async () => {
@@ -79,7 +79,7 @@ export function BoyScoutDecisionPanel({
       <div className="panel-header">
         <div>
           <p className="eyebrow">Waiting for Operator</p>
-          <h3>Boy Scout Decision</h3>
+          <h3>Code Scout Decision</h3>
         </div>
       </div>
 
@@ -98,10 +98,10 @@ export function BoyScoutDecisionPanel({
               className="action-button"
               disabled={busy}
               onClick={() => void handleResolution("implement_now")}
-              title="Send every Boy Scout finding back to the coding lane immediately."
+              title="Send every Code Scout finding back to the coding lane immediately."
               type="button"
             >
-              Implement Boy Scout findings
+              Implement Code Scout findings
             </button>
             <button
               className="action-button"
@@ -131,10 +131,10 @@ export function BoyScoutDecisionPanel({
             <button
               className="action-button"
               disabled={busy}
-              title="Skip the optional Boy Scout lane for this session and continue with the downstream flow."
+              title="Skip the optional Code Scout lane for this session and continue with the downstream flow."
               type="submit"
             >
-              Skip Boy Scout lane
+              Skip Code Scout lane
             </button>
           </form>
         ) : null}

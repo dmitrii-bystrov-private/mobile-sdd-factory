@@ -409,7 +409,7 @@ export function SessionStartForm({
                 </label>
 
                 <label className="form-field">
-                  <span>Boy Scout</span>
+                  <span>Code Scout</span>
                     <select
                       className="select-input"
                       onChange={(event) => updatePolicy("boy_scout_policy", event.target.value as SessionPolicyValue)}

@@ -62,7 +62,7 @@ const POLICY_DEFAULT_DESCRIPTIONS: Record<
   self_review_policy:
     "Choose whether the self-review lane is disabled, auto-started with agent skip semantics, or required.",
   boy_scout_policy:
-    "Choose whether the Boy Scout lane is disabled, auto-started with agent skip semantics, or required.",
+    "Choose whether the Code Scout lane is disabled, auto-started with agent skip semantics, or required.",
   doc_harvest_policy:
     "Choose whether doc harvest is disabled, auto-started with agent skip semantics, or required.",
 };
@@ -406,7 +406,7 @@ export function RuntimeDefaultsPanel({
                 </select>
               </label>
               <label className="form-field">
-                <span>Boy Scout</span>
+                <span>Code Scout</span>
                 <select
                   className="select-input"
                   disabled={busy}
@@ -490,7 +490,7 @@ export function RuntimeDefaultsPanel({
             </div>
             <div className="followup-form-grid">
               <label className="form-field">
-                <span>Boy Scout</span>
+                <span>Code Scout</span>
                 <select
                   className="select-input"
                   disabled={busy}
@@ -554,7 +554,7 @@ export function RuntimeDefaultsPanel({
                 </select>
               </label>
               <label className="form-field">
-                <span>Boy Scout</span>
+                <span>Code Scout</span>
                 <select
                   className="select-input"
                   disabled={busy}

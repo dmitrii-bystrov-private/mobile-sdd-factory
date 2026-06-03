@@ -945,13 +945,13 @@ class CoordinatorService:
         session = self._get_session_or_raise(session_id)
         normalized_reason = reason.strip()
         if not normalized_reason:
-            raise IntakeError("Boy Scout skip reason must not be empty")
+            raise IntakeError("Code Scout skip reason must not be empty")
         if session.current_stage != "boy_scout_requested":
-            raise IntakeError(f"Session {session_id} is not waiting on Boy Scout")
+            raise IntakeError(f"Session {session_id} is not waiting on Code Scout")
         if session.status != SessionStatus.WAITING_FOR_OPERATOR:
-            raise IntakeError(f"Session {session_id} does not have skippable Boy Scout findings")
+            raise IntakeError(f"Session {session_id} does not have skippable Code Scout findings")
         if self._optional_lane_policy_mode(session.policy, "boy_scout_policy") != "enabled":
-            raise IntakeError("Manual Boy Scout skip is only allowed when boy_scout_policy is enabled")
+            raise IntakeError("Manual Code Scout skip is only allowed when boy_scout_policy is enabled")
 
         pending_items = [
             item
@@ -959,7 +959,7 @@ class CoordinatorService:
             if item.work_type == "boy_scout_review" and item.status != WorkItemStatus.COMPLETED
         ]
         if not pending_items:
-            raise IntakeError(f"Session {session_id} has no pending Boy Scout review decision")
+            raise IntakeError(f"Session {session_id} has no pending Code Scout review decision")
         self.work_item_repository.update_status(pending_items[0].id, WorkItemStatus.COMPLETED)
         deferred_findings = self._active_boy_scout_findings(session)
         self._materialize_boy_scout_deferred_entries(
@@ -1000,11 +1000,11 @@ class CoordinatorService:
     ) -> tuple[Session, Event, Event]:
         session = self._get_session_or_raise(session_id)
         if session.current_stage != "boy_scout_requested":
-            raise IntakeError(f"Session {session_id} is not waiting on Boy Scout")
+            raise IntakeError(f"Session {session_id} is not waiting on Code Scout")
         if session.status != SessionStatus.WAITING_FOR_OPERATOR:
-            raise IntakeError(f"Session {session_id} does not have resolvable Boy Scout findings")
+            raise IntakeError(f"Session {session_id} does not have resolvable Code Scout findings")
         if resolution not in {"implement_now", "create_tech_debt"}:
-            raise IntakeError("Boy Scout resolution must be 'implement_now' or 'create_tech_debt'")
+            raise IntakeError("Code Scout resolution must be 'implement_now' or 'create_tech_debt'")
 
         pending_items = [
             item
@@ -1012,12 +1012,12 @@ class CoordinatorService:
             if item.work_type == "boy_scout_review" and item.status != WorkItemStatus.COMPLETED
         ]
         if not pending_items:
-            raise IntakeError(f"Session {session_id} has no pending Boy Scout review decision")
+            raise IntakeError(f"Session {session_id} has no pending Code Scout review decision")
         self.work_item_repository.update_status(pending_items[0].id, WorkItemStatus.COMPLETED)
 
         implement_now_findings, tech_debt_findings = self._classify_boy_scout_findings(session)
         if resolution == "create_tech_debt" and not tech_debt_findings:
-            raise IntakeError("No tech-debt-eligible Boy Scout findings are available")
+            raise IntakeError("No tech-debt-eligible Code Scout findings are available")
 
         created_issues: list[dict[str, str]] = []
         chosen_findings = list(implement_now_findings)
@@ -1948,7 +1948,7 @@ class CoordinatorService:
         explicit_result = str(payload.get("result") or "").strip().lower()
         if explicit_result not in {"clean", "findings_found"}:
             raise IntakeError(
-                "Boy Scout output must include payload.result set to 'clean' or 'findings_found'"
+                "Code Scout output must include payload.result set to 'clean' or 'findings_found'"
             )
         payload["result"] = explicit_result
 
@@ -1956,14 +1956,14 @@ class CoordinatorService:
             findings_path = str(payload.get("findings_path") or "").strip()
             if not findings_path:
                 raise IntakeError(
-                    "Boy Scout findings output must include payload.findings_path"
+                    "Code Scout findings output must include payload.findings_path"
                 )
             payload["findings_path"] = findings_path
 
             findings_count = payload.get("findings_count")
             if not isinstance(findings_count, int) or findings_count <= 0:
                 raise IntakeError(
-                    "Boy Scout findings output must include a positive payload.findings_count"
+                    "Code Scout findings output must include a positive payload.findings_count"
                 )
         return payload
 
@@ -5551,7 +5551,7 @@ class CoordinatorService:
             if item.work_type == "boy_scout" and item.status != WorkItemStatus.COMPLETED
         ]
         if not scout_items:
-            raise IntakeError("No active Boy Scout work item found for the session")
+            raise IntakeError("No active Code Scout work item found for the session")
 
         active_item = scout_items[0]
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
@@ -5595,7 +5595,7 @@ class CoordinatorService:
             self.work_item_repository.create(
                 session_id=session.id,
                 work_type="boy_scout_review",
-                title=f"Boy Scout review decision for {session.task_key}",
+                title=f"Code Scout review decision for {session.task_key}",
                 owner_role_id=None,
                 source_event_id=source_event.id,
                 priority=91,
@@ -5614,7 +5614,7 @@ class CoordinatorService:
                 payload={
                     "role_name": CODE_SCOUT_ROLE,
                     "reason": "boy_scout_findings",
-                    "summary": "boy scout findings need operator decision",
+                    "summary": "code scout findings need operator decision",
                     "details": self._render_boy_scout_operator_details(
                         implement_now_findings=implement_now_findings,
                         tech_debt_findings=tech_debt_findings,
@@ -5799,7 +5799,7 @@ class CoordinatorService:
         correction_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="boy_scout_correction",
-            title=f"Boy Scout improvements for {session.task_key}",
+            title=f"Code Scout improvements for {session.task_key}",
             owner_role_id=coding_role.id,
             source_event_id=source_event.id,
             priority=93,
@@ -5826,7 +5826,7 @@ class CoordinatorService:
         )
         if instruction is None:
             raise IntakeError(
-                f"No Boy Scout correction instruction is available for role {coding_role.role_name}"
+                f"No Code Scout correction instruction is available for role {coding_role.role_name}"
             )
         self._dispatch_role_work(
             session=session,
@@ -6318,7 +6318,7 @@ class CoordinatorService:
         scout_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="boy_scout",
-            title=f"Boy Scout pass for {session.task_key}",
+            title=f"Code Scout pass for {session.task_key}",
             owner_role_id=scout_role.id,
             source_event_id=source_event.id,
             priority=91,
@@ -6345,7 +6345,7 @@ class CoordinatorService:
             work_item=scout_item,
             stage_name="boy_scout_requested",
             instruction=(
-                f"Run a Boy Scout maintainability pass for {session.task_key}. "
+                f"Run a Code Scout maintainability pass for {session.task_key}. "
                 "Start from the routed diff input, inspect only the highest-signal changed files, "
                 "write the routed findings target only when real maintainability findings exist, "
                 "and otherwise return a clean result."
@@ -6458,7 +6458,7 @@ class CoordinatorService:
                 return "boy_scout_completed"
             if output_type == "skipped_not_needed":
                 if self._optional_lane_policy_mode(session.policy, "boy_scout_policy") != "enabled":
-                    raise IntakeError("Boy Scout cannot be skipped when boy_scout_policy is required")
+                    raise IntakeError("Code Scout cannot be skipped when boy_scout_policy is required")
                 return "boy_scout_completed"
         if role_name == DOC_HARVEST_ROLE and session.current_stage == "doc_harvest_requested":
             if output_type in {"passed", "completed"}:
@@ -7711,14 +7711,14 @@ class CoordinatorService:
             policy_mode = self._optional_lane_policy_mode(session_policy, "boy_scout_policy")
             if policy_mode == "required":
                 return (
-                    f"Run a Boy Scout maintainability pass for {task_key}. "
+                    f"Run a Code Scout maintainability pass for {task_key}. "
                     "Start from the routed diff input, inspect only the highest-signal changed files, "
                     "write the routed findings target only when real maintainability findings exist, "
                     "and otherwise report a clean result. "
-                    "This Boy Scout lane is required for this session, so do not emit skipped_not_needed."
+                    "This Code Scout lane is required for this session, so do not emit skipped_not_needed."
                 )
             return (
-                f"Run a Boy Scout maintainability pass for {task_key}. "
+                f"Run a Code Scout maintainability pass for {task_key}. "
                 "Start from the routed diff input, inspect only the highest-signal changed files, "
                 "write the routed findings target only when real maintainability findings exist, "
                 "and otherwise report a clean result. "
@@ -7758,7 +7758,7 @@ class CoordinatorService:
             )
         if stage_name == "boy_scout_correction_requested":
             return (
-                f"Apply Boy Scout improvements for {task_key} from the routed findings file. "
+                f"Apply Code Scout improvements for {task_key} from the routed findings file. "
                 "Stay aligned to the routed maintainability findings, but make any adjacent cleanup that is necessary to resolve them cleanly."
             )
         if stage_name == "verification_requested":
@@ -9862,12 +9862,12 @@ class CoordinatorService:
         tech_debt_count = len(tech_debt_findings)
         total_count = implement_now_count + tech_debt_count
         lines = [
-            f"Boy Scout found {total_count} maintainability finding{'' if total_count == 1 else 's'}.",
+            f"Code Scout found {total_count} maintainability finding{'' if total_count == 1 else 's'}.",
             "",
         ]
 
         if implement_now_findings:
-            lines.append("Will be implemented now if you choose `Implement Boy Scout Findings`:")
+            lines.append("Will be implemented now if you choose `Implement Code Scout Findings`:")
             for finding in implement_now_findings[:5]:
                 title = str(finding.get("title") or "Finding").strip()
                 files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
@@ -9888,7 +9888,7 @@ class CoordinatorService:
                 lines.append(f"- ...and {len(tech_debt_findings) - 5} more")
             lines.append("")
 
-        lines.append("Use `Skip Boy Scout` only if you want to continue without addressing these findings in this run.")
+        lines.append("Use `Skip Code Scout` only if you want to continue without addressing these findings in this run.")
         return "\n".join(lines).strip()
 
     def _render_boy_scout_findings_markdown(self, findings: list[dict[str, object]]) -> str:
@@ -9932,7 +9932,7 @@ class CoordinatorService:
         return target_path
 
     def _render_boy_scout_issue_description(self, finding: dict[str, object]) -> str:
-        title = str(finding.get("title") or "Boy Scout finding").strip()
+        title = str(finding.get("title") or "Code Scout finding").strip()
         files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
         principle = str(finding.get("principle") or "").strip()
         problem = str(finding.get("problem") or "").strip()
@@ -9956,7 +9956,7 @@ class CoordinatorService:
         findings: list[dict[str, object]],
     ) -> list[dict[str, str]]:
         if self.jira_adapter is None or self.workdir_root is None:
-            raise IntakeError("Jira adapter is required to create Boy Scout tech-debt stories")
+            raise IntakeError("Jira adapter is required to create Code Scout tech-debt stories")
         if not findings:
             return []
         project = session.task_key.split("-", 1)[0]
@@ -9964,7 +9964,7 @@ class CoordinatorService:
         tmp_dir.mkdir(parents=True, exist_ok=True)
         created: list[dict[str, str]] = []
         for index, finding in enumerate(findings, start=1):
-            title = str(finding.get("title") or f"Boy Scout finding {index}").strip()
+            title = str(finding.get("title") or f"Code Scout finding {index}").strip()
             description_path = tmp_dir / f"{index:02d}-description.md"
             description_path.write_text(
                 self._render_boy_scout_issue_description(finding),
@@ -9977,7 +9977,7 @@ class CoordinatorService:
                 description_file=description_path,
             )
             if result.returncode != 0:
-                raise IntakeError(f"Failed to create Boy Scout tech-debt story for '{title}'")
+                raise IntakeError(f"Failed to create Code Scout tech-debt story for '{title}'")
             issue_key = ""
             issue_url = ""
             for part in result.stdout.split():
@@ -10014,7 +10014,7 @@ class CoordinatorService:
             if str(entry.get("fingerprint") or "").strip()
         }
         for finding in findings:
-            title = str(finding.get("title") or "Boy Scout finding").strip()
+            title = str(finding.get("title") or "Code Scout finding").strip()
             fingerprint = str(finding.get("fingerprint") or self._boy_scout_finding_fingerprint(finding)).strip()
             files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
             entries_by_fingerprint[fingerprint] = {
@@ -10041,7 +10041,7 @@ class CoordinatorService:
 
         deferred_path = spec_root / "scout-deferred.md"
         lines = [
-            "# Deferred Boy Scout Findings",
+            "# Deferred Code Scout Findings",
             "",
             f"Deferred by operator decision: {decision}",
             "",
@@ -10050,7 +10050,7 @@ class CoordinatorService:
             lines.extend(["## Reason", "", reason.strip(), ""])
         lines.extend(["## Deferred Findings", ""])
         for entry in registry_entries:
-            title = str(entry.get("title") or "Boy Scout finding").strip()
+            title = str(entry.get("title") or "Code Scout finding").strip()
             issue_key = str(entry.get("issue_key") or "").strip()
             files = [str(item).strip() for item in entry.get("files", []) if str(item).strip()]
             suffix_parts: list[str] = []

@@ -61,7 +61,7 @@ function standbyExpectation(roleName: string, workflowProfile: Session["workflow
     case "code-reviewer":
       return "Waiting for self-review handoff.";
     case "code-scout":
-      return "Waiting for Boy Scout handoff.";
+      return "Waiting for Code Scout handoff.";
     case "doc-harvest-worker":
       return "Waiting for doc-harvest handoff.";
     case "mr-comments-analyst-worker":
@@ -212,7 +212,7 @@ function orchestratorTraceMessage(
     case "self_review_requested":
       return "Handed the task off to self-review.";
     case "boy_scout_requested":
-      return "Handed the task off to Boy Scout review.";
+      return "Handed the task off to Code Scout review.";
     case "verification_requested":
       return "Handed the task off to verification.";
     case "doc_harvest_requested":
