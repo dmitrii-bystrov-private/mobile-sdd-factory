@@ -1,12 +1,27 @@
 import type { Artifact, EventItem } from "../types";
 import { stageDisplayName } from "../stageDisplay";
 
+const ARTIFACT_LABELS: Record<string, string> = {
+  self_review_report_markdown: "Self Review Report",
+  self_review_outcome_json: "Self Review Outcome",
+  boy_scout_report_markdown: "Code Scout Report",
+  boy_scout_outcome_json: "Code Scout Outcome",
+  boy_scout_actionable_markdown: "Code Scout Actionable Findings",
+  boy_scout_deferred_markdown: "Deferred Code Scout Findings",
+  boy_scout_findings: "Code Scout Findings Source",
+  final_verification_markdown: "Verification Report",
+};
+
 function humanizeEventType(value: string): string {
   return value
     .split("_")
     .filter((part) => part.length > 0)
     .map((part) => part[0].toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function artifactDisplayName(value: string): string {
+  return ARTIFACT_LABELS[value] ?? humanizeEventType(value);
 }
 
 function producerDisplayName(value: string): string {
@@ -50,7 +65,7 @@ export function ArtifactPanel({
             {artifacts.map((artifact) => (
               <div className="table-row" key={artifact.id}>
                 <div>
-                  <strong>{humanizeEventType(artifact.artifact_type)}</strong>
+                  <strong>{artifactDisplayName(artifact.artifact_type)}</strong>
                   <p>{stageDisplayName(artifact.stage_name)}</p>
                 </div>
                 <small className="path-label">{artifact.path}</small>
