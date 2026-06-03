@@ -41,6 +41,12 @@ function workTypeSummary(workType: string): string {
   switch (workType) {
     case "implementation":
       return "Implementation work is active.";
+    case "self_review_correction":
+      return "A self-review correction pass is active.";
+    case "boy_scout_correction":
+      return "A Code Scout correction pass is active.";
+    case "verification_correction":
+      return "A verification correction pass is active.";
     case "correction":
       return "A correction pass is active.";
     case "followup":
@@ -49,6 +55,10 @@ function workTypeSummary(workType: string): string {
       return "Verification work is active.";
     case "review":
       return "Review work is active.";
+    case "self_review":
+      return "Self-review work is active.";
+    case "boy_scout":
+      return "Code Scout work is active.";
     default:
       return `${humanizeEventType(workType)} is active.`;
   }
