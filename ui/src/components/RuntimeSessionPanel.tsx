@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { apiClient } from "../api/client";
-import { roleDisplayName } from "../roleDisplay";
+import { roleDescription, roleDisplayName } from "../roleDisplay";
 import { stageDisplayName } from "../stageDisplay";
 import { useToast } from "./ToastProvider";
 import type { RuntimeSessionStateSummary, Session } from "../types";
@@ -188,19 +188,13 @@ export function RuntimeSessionPanel({
                           <strong>{roleDisplayName(role.roleName)}</strong>
                         </div>
                         <p className="artifact-path">
-                          {role.roleName === "mr-comments-analyst-worker"
-                            ? role.status === "stopped"
-                              ? "This on-demand lane stays sleeping until MR follow-up analysis is requested."
-                              : "This on-demand lane has a live runtime and will only run when MR follow-up analysis is requested."
-                            : role.liveState === "owner-active"
-                              ? "This lane is currently owning the active workflow stage."
-                              : role.liveState === "live-idle" || role.status === "running"
-                                ? "This lane currently has a live reusable runtime."
-                                : role.liveState === "dead-stale"
-                                  ? "This lane has stale runtime state and may need restart."
-                                  : role.status === "stopped"
-                                    ? "This lane is currently stopped."
-                                    : "This lane is waiting on runtime or orchestration state."}
+                          {role.liveState === "owner-active"
+                            ? "This lane currently owns the active workflow stage."
+                            : role.liveState === "dead-stale"
+                              ? "This lane has stale runtime state and may need restart."
+                              : role.roleName === "mr-comments-analyst-worker" && role.status === "stopped"
+                                ? "This on-demand lane stays sleeping until MR follow-up analysis is requested."
+                                : roleDescription(role.roleName)}
                         </p>
                         <div className="actions-grid runtime-role-actions">
                           <button

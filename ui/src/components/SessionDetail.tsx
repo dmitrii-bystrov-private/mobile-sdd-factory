@@ -7,7 +7,7 @@ import { CompletedFollowupPanel } from "./CompletedFollowupPanel";
 import { InteractiveStatePanel } from "./InteractiveStatePanel";
 import { OperatorActions } from "./OperatorActions";
 import { useToast } from "./ToastProvider";
-import { roleDisplayName } from "../roleDisplay";
+import { roleDescription, roleDisplayName } from "../roleDisplay";
 import {
   workflowProfileDisplayName,
 } from "../sessionDisplay";
@@ -64,36 +64,6 @@ function workTypeSummary(workType: string): string {
   }
 }
 
-function standbyExpectation(roleName: string, workflowProfile: Session["workflow_profile"]): string {
-  switch (roleName) {
-    case "verification-coordinator":
-      return "Waiting for verification handoff.";
-    case "code-reviewer":
-      return "Waiting for self-review handoff.";
-    case "code-scout":
-      return "Waiting for Code Scout handoff.";
-    case "doc-harvest-worker":
-      return "Waiting for doc-harvest handoff.";
-    case "mr-comments-analyst-worker":
-      return "Waiting for MR follow-up input.";
-    case "bug-fixer":
-      return "Waiting for bug-fix handoff.";
-    case "proposal-context-worker":
-    case "requirements-clarifier-worker":
-    case "acceptance-criteria-worker":
-    case "constraints-worker":
-    case "spec-verifier-worker":
-    case "task-decomposer-worker":
-      return "Waiting for story-planning handoff.";
-    case "implementer":
-      return workflowProfile === "story_full"
-        ? "Waiting for subtask execution handoff."
-        : "Waiting for the next coding handoff.";
-    default:
-      return "Waiting for the next handoff.";
-  }
-}
-
 function laneSummary(
   role: Role,
   workItems: WorkItem[],
@@ -121,22 +91,22 @@ function laneSummary(
   switch (role.status) {
     case "running":
       return {
-        title: standbyExpectation(role.role_name, session.workflow_profile),
-        body: "This lane is live and ready for the next handoff.",
+        title: roleDescription(role.role_name),
+        body: "This lane is live and ready for its next routed pass.",
       };
     case "waiting":
       return {
-        title: "Waiting for the next handoff",
+        title: roleDescription(role.role_name),
         body: "This lane is waiting on upstream progress or operator input.",
       };
     case "stopped":
       return {
-        title: "Stopped",
-        body: "This lane is not currently running.",
+        title: roleDescription(role.role_name),
+        body: "This lane is currently stopped.",
       };
     case "completed":
       return {
-        title: "Completed",
+        title: roleDescription(role.role_name),
         body: "This lane has already finished its current work.",
       };
     default:
