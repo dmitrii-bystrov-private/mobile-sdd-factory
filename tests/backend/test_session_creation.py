@@ -2086,6 +2086,7 @@ class SessionCreationTests(unittest.TestCase):
         report_artifact = next(item for item in artifacts if item.artifact_type == "self_review_report_markdown")
         self.assertEqual("internal_review", report_artifact.metadata["report_family"])
         self.assertEqual("self_review", report_artifact.metadata["review_lane"])
+        self.assertEqual("report", report_artifact.metadata["artifact_role"])
         self.assertEqual("issues_found", report_artifact.metadata["status"])
         self.assertIn('"issues_file_path"', sent_inputs[-1])
         self.assertIn('"correction_source": "self_review"', sent_inputs[-1])
@@ -9463,6 +9464,7 @@ class SessionCreationTests(unittest.TestCase):
         report_artifact = next(item for item in artifacts if item.artifact_type == "boy_scout_report_markdown")
         self.assertEqual("internal_review", report_artifact.metadata["report_family"])
         self.assertEqual("code_scout", report_artifact.metadata["review_lane"])
+        self.assertEqual("report", report_artifact.metadata["artifact_role"])
         self.assertEqual("findings_found", report_artifact.metadata["status"])
         scout_report_path = Path(self.temp_dir.name) / "IOS-30021BSAUTO" / "scout" / "pass-01.md"
         self.assertTrue(scout_report_path.is_file())

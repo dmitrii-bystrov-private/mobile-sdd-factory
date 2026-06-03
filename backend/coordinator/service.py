@@ -9590,6 +9590,7 @@ class CoordinatorService:
             "source_path": source_path,
             "report_family": "internal_review",
             "review_lane": review_lane,
+            "artifact_role": "report",
             "status": status,
             "work_item_id": work_item_id,
         }
