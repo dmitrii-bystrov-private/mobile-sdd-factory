@@ -10019,6 +10019,78 @@ class SessionCreationTests(unittest.TestCase):
             any("pass-01.md" in str(path) for path in (followup_event.payload.get("review_report_paths") or []))
         )
 
+    def test_internal_review_metrics_artifact_tracks_reviewer_and_scout_progress(self) -> None:
+        scout_session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021METRICSSCOUT",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021METRICSSCOUT")
+        self.coordinator.handle_operator_event(
+            session_id=scout_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=scout_session.id,
+            role_name=CODE_SCOUT_ROLE,
+            output_type="completed",
+            payload={"result": "clean", "summary": "No actionable maintainability findings."},
+        )
+
+        reviewer_session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021METRICSREVIEW",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "disabled", "self_review_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021METRICSREVIEW")
+        self.coordinator.handle_operator_event(
+            session_id=reviewer_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=reviewer_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="blocked_review_cycle",
+            payload={
+                "summary": "Blocked review cycle: reducer invariant still unresolved",
+                "details": "The same reducer invariant keeps failing across correction passes.",
+                "issues": [
+                    {
+                        "severity": "error",
+                        "file": "Sources/Feature/Reducer.swift",
+                        "problem": "Retry invalidation still bypasses the reducer.",
+                        "required_change": "Move the invalidation back behind the reducer path.",
+                    }
+                ],
+            },
+        )
+
+        scout_metrics_artifact = next(
+            item
+            for item in self.artifact_repository.list_for_session(scout_session.id)
+            if item.artifact_type == "internal_review_metrics_json"
+        )
+        scout_metrics = json.loads(Path(scout_metrics_artifact.path).read_text(encoding="utf-8"))
+        reviewer_metrics_artifact = next(
+            item
+            for item in self.artifact_repository.list_for_session(reviewer_session.id)
+            if item.artifact_type == "internal_review_metrics_json"
+        )
+        reviewer_metrics = json.loads(Path(reviewer_metrics_artifact.path).read_text(encoding="utf-8"))
+
+        self.assertEqual("IOS-30021METRICSSCOUT", scout_metrics["task_key"])
+        self.assertEqual(1, scout_metrics["code_scout"]["report_count"])
+        self.assertEqual(1, scout_metrics["code_scout"]["clean_count"])
+        self.assertEqual(0, scout_metrics["self_review"]["report_count"])
+
+        self.assertEqual("IOS-30021METRICSREVIEW", reviewer_metrics["task_key"])
+        self.assertEqual(1, reviewer_metrics["self_review"]["report_count"])
+        self.assertEqual(1, reviewer_metrics["self_review"]["blocked_count"])
+        self.assertEqual(1, reviewer_metrics["operator_escalations"]["internal_review_count"])
+        self.assertEqual(1, reviewer_metrics["operator_escalations"]["structured_details_count"])
+
     def test_active_runtime_output_is_hidden_for_boy_scout_operator_gate_without_live_blocker_role(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021BSOUTPUT",

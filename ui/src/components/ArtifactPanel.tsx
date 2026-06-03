@@ -9,6 +9,7 @@ const ARTIFACT_LABELS: Record<string, string> = {
   boy_scout_actionable_markdown: "Code Scout Actionable Findings",
   boy_scout_deferred_markdown: "Deferred Code Scout Findings",
   boy_scout_findings: "Code Scout Findings Source",
+  internal_review_metrics_json: "Internal Review Metrics",
   final_verification_markdown: "Verification Report",
 };
 

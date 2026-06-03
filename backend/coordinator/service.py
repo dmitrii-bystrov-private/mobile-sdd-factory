@@ -99,6 +99,19 @@ _STORY_PLANNING_ROLES = {
     SPEC_VERIFIER_WORKER_ROLE,
     TASK_DECOMPOSER_WORKER_ROLE,
 }
+_INTERNAL_REVIEW_METRIC_EVENT_TYPES = {
+    "self_review_requested",
+    "self_review_passed",
+    "self_review_issues_found",
+    "self_review_blocked",
+    "self_review_correction_requested",
+    "boy_scout_completed",
+    "boy_scout_skipped_by_operator",
+    "boy_scout_implement_now_selected",
+    "boy_scout_tech_debt_created",
+    "boy_scout_correction_requested",
+    "session_escalated_to_operator",
+}
 
 
 @dataclass
@@ -10924,4 +10937,94 @@ class CoordinatorService:
         )
         if self.event_bus is not None:
             self.event_bus.publish(event)
+        if event_type in _INTERNAL_REVIEW_METRIC_EVENT_TYPES:
+            self._refresh_internal_review_metrics_artifact(session_id)
         return event
+
+    def _refresh_internal_review_metrics_artifact(self, session_id: int) -> None:
+        if self.artifacts_root is None:
+            return
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            return
+        summary = self._internal_review_metrics_summary(session_id)
+        rendered = json.dumps(summary, indent=2, sort_keys=True) + "\n"
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "internal-review",
+            "metrics.json",
+            rendered,
+        )
+        existing_path = self._latest_artifact_path(session_id, "internal_review_metrics_json")
+        if existing_path is None:
+            self.artifact_repository.create(
+                session_id=session_id,
+                stage_name="internal-review",
+                artifact_type="internal_review_metrics_json",
+                path=str(artifact_path),
+                metadata={"report_family": "internal_review", "artifact_role": "metrics"},
+            )
+
+    def _internal_review_metrics_summary(self, session_id: int) -> dict[str, object]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} does not exist")
+        events = self.event_repository.list_for_session(session_id)
+        work_items = self.work_item_repository.list_for_session(session_id)
+        self_review_passed_count = sum(1 for event in events if event.event_type == "self_review_passed")
+        self_review_issues_found_count = sum(1 for event in events if event.event_type == "self_review_issues_found")
+        self_review_blocked_count = sum(1 for event in events if event.event_type == "self_review_blocked")
+        code_scout_completed_events = [event for event in events if event.event_type == "boy_scout_completed"]
+        code_scout_clean_count = sum(
+            1
+            for event in code_scout_completed_events
+            if str((event.payload or {}).get("result") or "").strip() != "findings_found"
+        )
+        code_scout_findings_count = sum(
+            1
+            for event in code_scout_completed_events
+            if str((event.payload or {}).get("result") or "").strip() == "findings_found"
+        )
+
+        internal_review_escalations = [
+            event
+            for event in events
+            if event.event_type == "session_escalated_to_operator"
+            and self._interactive_review_context(event.payload)[0] == "internal_review"
+        ]
+        structured_escalations = [
+            event
+            for event in internal_review_escalations
+            if str((event.payload or {}).get("details") or "").strip()
+        ]
+        code_scout_skip_count = sum(1 for event in events if event.event_type == "boy_scout_skipped_by_operator")
+        code_scout_findings_decision_count = sum(
+            1
+            for event in events
+            if event.event_type in {"boy_scout_implement_now_selected", "boy_scout_tech_debt_created"}
+        )
+
+        return {
+            "task_key": session.task_key,
+            "self_review": {
+                "report_count": self_review_passed_count + self_review_issues_found_count + self_review_blocked_count,
+                "clean_count": self_review_passed_count,
+                "issues_found_count": self_review_issues_found_count,
+                "blocked_count": self_review_blocked_count,
+                "correction_round_count": sum(1 for item in work_items if item.work_type == "self_review_correction"),
+            },
+            "code_scout": {
+                "report_count": len(code_scout_completed_events),
+                "clean_count": code_scout_clean_count,
+                "findings_count": code_scout_findings_count,
+                "operator_skip_count": code_scout_skip_count,
+                "operator_resolution_count": code_scout_findings_decision_count,
+                "correction_round_count": sum(1 for item in work_items if item.work_type == "boy_scout_correction"),
+            },
+            "operator_escalations": {
+                "internal_review_count": len(internal_review_escalations),
+                "structured_details_count": len(structured_escalations),
+                "unstructured_details_count": len(internal_review_escalations) - len(structured_escalations),
+            },
+        }
