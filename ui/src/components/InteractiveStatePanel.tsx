@@ -168,7 +168,7 @@ export function InteractiveStatePanel({
               className="text-area-input"
               disabled={busy}
               onChange={(event) => setRuntimeInput(event.target.value)}
-              placeholder="Reply to the worker here."
+              placeholder="Send an authoritative operator reply here."
               rows={3}
               value={runtimeInput}
             />
@@ -179,7 +179,7 @@ export function InteractiveStatePanel({
             title="Send a direct reply into the live runtime session."
             type="submit"
           >
-            Send reply
+            Send operator reply
           </button>
         </form>
       ) : null}

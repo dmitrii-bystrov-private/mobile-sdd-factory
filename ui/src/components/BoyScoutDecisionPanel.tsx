@@ -79,11 +79,14 @@ export function BoyScoutDecisionPanel({
       <div className="panel-header">
         <div>
           <p className="eyebrow">Waiting for Operator</p>
-          <h3>Code Scout Decision</h3>
+          <h3>Code Scout Findings</h3>
         </div>
       </div>
 
       <div className="operator-followup-stack">
+        <p className="path-label">
+          Decide whether these maintainability findings should be fixed now, deferred into tech debt, or skipped for this run.
+        </p>
         {details ? (
           <div className="interactive-question-stack">
             <div className="interactive-question-card">
@@ -98,16 +101,16 @@ export function BoyScoutDecisionPanel({
               className="action-button"
               disabled={busy}
               onClick={() => void handleResolution("implement_now")}
-              title="Send every Code Scout finding back to the coding lane immediately."
+              title="Route the actionable Code Scout findings back to the coding lane now."
               type="button"
             >
-              Implement Code Scout findings
+              Fix in coding lane
             </button>
             <button
               className="action-button"
               disabled={busy}
               onClick={() => void handleResolution("create_tech_debt")}
-              title="Create tech-debt stories for the old-code findings and route the remaining actionable findings back to the coder."
+              title="Create tech-debt stories for the deferred findings and keep the actionable findings in this run."
               type="button"
             >
               Create tech debt and continue
@@ -131,10 +134,10 @@ export function BoyScoutDecisionPanel({
             <button
               className="action-button"
               disabled={busy}
-              title="Skip the optional Code Scout lane for this session and continue with the downstream flow."
+              title="Skip the optional Code Scout lane for this run and continue with the downstream flow."
               type="submit"
             >
-              Skip Code Scout lane
+              Skip for this run
             </button>
           </form>
         ) : null}
