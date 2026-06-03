@@ -47,6 +47,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Do not invoke repository verification entry points such as `scripts/run-build.sh`, `scripts/run-test.sh`, `scripts/run-lint.sh`, `scripts/ios-verify.sh`, `scripts/android-verify.sh`, or platform-local test wrappers.\n"
             "- If execution evidence is missing or ambiguous, note that in the review and defer runtime validation to the verification lane instead of trying to produce it yourself.\n"
             "- Write or refresh the structured review report at the routed review report path before you finish this pass.\n"
+            "- When you report issues, make them actionable: include the finding title or affected file/component, why it matters, the required direction for the fix, and any non-goals that should not be expanded in this pass.\n"
             "- Use the deterministic result writer helper for terminal submission; do not hand-compose reviewer result JSON.\n"
             "- If previous review reports are provided, read them first and do not re-flag already raised issues.\n"
             "- If the review loop is no longer converging and you would otherwise repeat the same issues again, emit `blocked_review_cycle` instead of another normal failed pass.\n"

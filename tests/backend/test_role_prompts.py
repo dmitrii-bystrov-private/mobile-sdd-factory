@@ -176,6 +176,9 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("static review only", text)
         self.assertIn("do not run builds, tests, lint, simulator commands", text)
         self.assertIn("defer runtime validation to the verification lane", text)
+        self.assertIn("why it matters", text)
+        self.assertIn("required direction", text)
+        self.assertIn("non-goals", text)
         self.assertIn("scripts/run-test.sh", text)
         self.assertIn("scripts/ios-verify.sh", text)
 

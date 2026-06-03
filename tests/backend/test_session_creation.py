@@ -2053,7 +2053,20 @@ class SessionCreationTests(unittest.TestCase):
             session_id=prepared_session.id,
             role_name=CODE_REVIEWER_ROLE,
             output_type="failed",
-            payload={"summary": "issues remain"},
+            payload={
+                "summary": "issues remain",
+                "issues": [
+                    {
+                        "severity": "warning",
+                        "file": "Sources/Feature/FlowController.swift",
+                        "problem": "Retry state is still duplicated across two branches.",
+                        "required_change": "Consolidate the retry state handling behind one branch.",
+                        "why_it_matters": "Keeping the duplicate state path makes future regressions more likely.",
+                        "required_direction": "Use one shared retry path for the touched flow instead of parallel branches.",
+                        "non_goals": "Do not broaden this correction into unrelated flow-controller cleanup.",
+                    }
+                ],
+            },
         )
         artifacts = self.artifact_repository.list_for_session(session.id)
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
@@ -2066,6 +2079,10 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
         self.assertIn('"issues_file_path"', sent_inputs[-1])
         self.assertIn("pass-01.md", sent_inputs[-1])
+        review_report = (Path(self.temp_dir.name) / "IOS-30003RF" / "review" / "pass-01.md").read_text()
+        self.assertIn("- Why it matters: Keeping the duplicate state path makes future regressions more likely.", review_report)
+        self.assertIn("- Required direction: Use one shared retry path for the touched flow instead of parallel branches.", review_report)
+        self.assertIn("- Non-goals: Do not broaden this correction into unrelated flow-controller cleanup.", review_report)
         outcome_path = Path(self.temp_dir.name) / "IOS-30003RF" / "review" / "self-review-outcome.json"
         self.assertTrue(outcome_path.exists())
         self.assertEqual("issues_found", json.loads(outcome_path.read_text())["status"])
@@ -2129,6 +2146,9 @@ class SessionCreationTests(unittest.TestCase):
                         "convention": "Feature template",
                         "problem": "State mutation still bypasses the reducer.",
                         "required_change": "Route the mutation through the reducer path.",
+                        "why_it_matters": "The repeated bypass keeps violating the core reducer invariant.",
+                        "required_direction": "Move the touched mutation path back behind the reducer boundary.",
+                        "non_goals": "Do not redesign the surrounding feature architecture in this cycle.",
                     }
                 ],
             },
@@ -2139,6 +2159,10 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("session_escalated_to_operator", followup_event.event_type)
         self.assertEqual("waiting_for_operator", updated_session.status.value)
         self.assertEqual("self_review_requested", updated_session.current_stage)
+        review_report = (Path(self.temp_dir.name) / "IOS-30003RBLOCK" / "review" / "pass-01.md").read_text()
+        self.assertIn("- Why it matters: The repeated bypass keeps violating the core reducer invariant.", review_report)
+        self.assertIn("- Required direction: Move the touched mutation path back behind the reducer boundary.", review_report)
+        self.assertIn("- Non-goals: Do not redesign the surrounding feature architecture in this cycle.", review_report)
         outcome_path = Path(self.temp_dir.name) / "IOS-30003RBLOCK" / "review" / "self-review-outcome.json"
         self.assertTrue(outcome_path.exists())
         self.assertEqual("blocked", json.loads(outcome_path.read_text())["status"])

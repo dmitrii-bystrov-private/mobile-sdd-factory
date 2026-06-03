@@ -334,6 +334,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Review only the routed diff and conventions relevant to that diff.",
             "- Write or refresh the structured review report for the current pass before you finish.",
+            "- Structure real findings with enough direction to act: include the finding title or affected file/component, why it matters, required direction, and non-goals when they help keep the fix scoped.",
             "- Read previous review reports first when they are provided and do not re-flag the same issue twice.",
             "- Read only the convention files relevant to the touched diff area; do not broaden the review scope speculatively.",
             "- Keep outputs compact and fixer-oriented.",
