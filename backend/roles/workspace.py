@@ -345,6 +345,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Read full current files only for the most promising changed code paths; do not analyze raw diff hunks alone.",
             "- If signals are weak or no real findings exist, return a clean Code Scout result and stop.",
             "- If real maintainability findings exist, write `spec/findings.md`, summarize the findings, and stop without changing product code.",
+            "- Structure each finding with a clear title, why it matters, required direction, and non-goals; affected files and additional context should be included when grounded by the diff.",
             "- Skip style nits, convention-only feedback, and speculative improvements.",
         ]
     if role_name == "mr-comments-analyst-worker":

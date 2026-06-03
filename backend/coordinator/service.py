@@ -9779,6 +9779,9 @@ class CoordinatorService:
             principle_match = re.search(r"^\*\*Principle\*\*:\s+(.+)$", section, re.MULTILINE)
             problem_match = re.search(r"^\*\*Problem\*\*:\s+(.+)$", section, re.MULTILINE)
             suggestion_match = re.search(r"^\*\*Suggestion\*\*:\s+(.+)$", section, re.MULTILINE)
+            why_match = re.search(r"^\*\*Why it matters\*\*:\s+(.+)$", section, re.MULTILINE)
+            direction_match = re.search(r"^\*\*Required direction\*\*:\s+(.+)$", section, re.MULTILINE)
+            non_goals_match = re.search(r"^\*\*Non-goals\*\*:\s+(.+)$", section, re.MULTILINE)
             raw_files = files_match.group(1).strip() if files_match else ""
             files = [
                 item.strip().strip("`")
@@ -9792,6 +9795,9 @@ class CoordinatorService:
                     "principle": principle_match.group(1).strip() if principle_match else "",
                     "problem": problem_match.group(1).strip() if problem_match else "",
                     "suggestion": suggestion_match.group(1).strip() if suggestion_match else "",
+                    "why_it_matters": why_match.group(1).strip() if why_match else "",
+                    "required_direction": direction_match.group(1).strip() if direction_match else "",
+                    "non_goals": non_goals_match.group(1).strip() if non_goals_match else "",
                 }
             )
         return findings
@@ -9858,6 +9864,9 @@ class CoordinatorService:
             "principle": self._normalize_boy_scout_finding_text(finding.get("principle")),
             "problem": self._normalize_boy_scout_finding_text(finding.get("problem")),
             "suggestion": self._normalize_boy_scout_finding_text(finding.get("suggestion")),
+            "why_it_matters": self._normalize_boy_scout_finding_text(finding.get("why_it_matters")),
+            "required_direction": self._normalize_boy_scout_finding_text(finding.get("required_direction")),
+            "non_goals": self._normalize_boy_scout_finding_text(finding.get("non_goals")),
         }
         return hashlib.sha1(json.dumps(identity, sort_keys=True).encode("utf-8")).hexdigest()[:16]
 
@@ -9966,6 +9975,9 @@ class CoordinatorService:
             principle = str(finding.get("principle") or "").strip()
             problem = str(finding.get("problem") or "").strip()
             suggestion = str(finding.get("suggestion") or "").strip()
+            why_it_matters = str(finding.get("why_it_matters") or "").strip()
+            required_direction = str(finding.get("required_direction") or "").strip()
+            non_goals = str(finding.get("non_goals") or "").strip()
             lines.append(f"## Finding {index}: {title}")
             lines.append("")
             if files:
@@ -9976,6 +9988,12 @@ class CoordinatorService:
                 lines.append(f"**Problem**: {problem}")
             if suggestion:
                 lines.append(f"**Suggestion**: {suggestion}")
+            if why_it_matters:
+                lines.append(f"**Why it matters**: {why_it_matters}")
+            if required_direction:
+                lines.append(f"**Required direction**: {required_direction}")
+            if non_goals:
+                lines.append(f"**Non-goals**: {non_goals}")
             lines.append("")
             lines.append("---")
             lines.append("")
@@ -9995,7 +10013,12 @@ class CoordinatorService:
         spec_root = self.workdir_root / session.task_key / "spec"
         spec_root.mkdir(parents=True, exist_ok=True)
         target_path = spec_root / filename
-        target_path.write_text(self._render_boy_scout_findings_markdown(findings), encoding="utf-8")
+        rendered_findings = []
+        for index, finding in enumerate(findings):
+            rendered_findings.append(self._render_boy_scout_issue_description(finding).rstrip())
+            if index < len(findings) - 1:
+                rendered_findings.append("\n---\n")
+        target_path.write_text("\n".join(rendered_findings).rstrip() + "\n", encoding="utf-8")
         return target_path
 
     def _render_boy_scout_issue_description(self, finding: dict[str, object]) -> str:
@@ -10004,6 +10027,9 @@ class CoordinatorService:
         principle = str(finding.get("principle") or "").strip()
         problem = str(finding.get("problem") or "").strip()
         suggestion = str(finding.get("suggestion") or "").strip()
+        why_it_matters = str(finding.get("why_it_matters") or "").strip()
+        required_direction = str(finding.get("required_direction") or "").strip()
+        non_goals = str(finding.get("non_goals") or "").strip()
         lines = [f"# {title}", ""]
         if files:
             lines.extend(["## Files", ""])
@@ -10015,6 +10041,12 @@ class CoordinatorService:
             lines.extend(["## Problem", "", problem, ""])
         if suggestion:
             lines.extend(["## Suggested change", "", suggestion, ""])
+        if why_it_matters:
+            lines.extend(["## Why It Matters", "", why_it_matters, ""])
+        if required_direction:
+            lines.extend(["## Required Direction", "", required_direction, ""])
+        if non_goals:
+            lines.extend(["## Non-goals", "", non_goals, ""])
         return "\n".join(lines).rstrip() + "\n"
 
     def _create_boy_scout_tech_debt_stories(

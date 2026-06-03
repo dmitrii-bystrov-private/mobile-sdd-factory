@@ -60,6 +60,8 @@ def role_runtime_rules(role_name: str) -> str:
             "- Start from the routed diff input when it is provided as an absolute path; otherwise resolve `spec/diff.md` relative to the task snapshot metadata root from AGENTS.md, not relative to the current role workspace.\n"
             "- If signals are weak or no real maintainability issues are found, report a clean result and stop.\n"
             "- If real maintainability findings exist, write them to the routed findings target when it is provided as an absolute path; otherwise resolve `spec/findings.md` relative to the task snapshot metadata root from AGENTS.md.\n"
+            "- Each finding must be structured and actionable: include the finding title, affected files when known, why it matters, the required direction for cleanup, and non-goals that should not be expanded in this pass.\n"
+            "- Prefer grounded maintainability observations over style preferences or speculative rewrites.\n"
             "- Always use the deterministic result writer helper for terminal submission instead of hand-writing JSON.\n"
             "- Always write a deterministic terminal payload with `result` set to `clean` or `findings_found`.\n"
             "- When `result` is `findings_found`, also include a positive `findings_count` and the exact `findings_path` you wrote.\n\n"

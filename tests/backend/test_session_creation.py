@@ -9301,6 +9301,9 @@ class SessionCreationTests(unittest.TestCase):
             "**Principle**: DRY\n"
             "**Problem**: Duplicate mapping logic exists.\n"
             "**Suggestion**: Extract a shared helper.\n"
+            "**Why it matters**: The duplicate mapper flow can drift during future edits.\n"
+            "**Required direction**: Consolidate the mapping path behind one shared helper.\n"
+            "**Non-goals**: Do not broaden this pass into unrelated presenter cleanup.\n"
         )
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
@@ -9331,8 +9334,12 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "boy_scout_report_markdown" for item in artifacts))
         scout_report_path = Path(self.temp_dir.name) / "IOS-30021BSAUTO" / "scout" / "pass-01.md"
         self.assertTrue(scout_report_path.is_file())
-        self.assertIn("SCOUT_RESULT: findings_found", scout_report_path.read_text(encoding="utf-8"))
-        self.assertIn("Extract a shared helper.", scout_report_path.read_text(encoding="utf-8"))
+        scout_report = scout_report_path.read_text(encoding="utf-8")
+        self.assertIn("SCOUT_RESULT: findings_found", scout_report)
+        self.assertIn("Extract a shared helper.", scout_report)
+        self.assertIn("**Why it matters**: The duplicate mapper flow can drift during future edits.", scout_report)
+        self.assertIn("**Required direction**: Consolidate the mapping path behind one shared helper.", scout_report)
+        self.assertIn("**Non-goals**: Do not broaden this pass into unrelated presenter cleanup.", scout_report)
         self.assertIn('"issues_file_path"', sent_inputs[-1])
         self.assertIn("boy-scout-actionable.md", sent_inputs[-1])
         scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
@@ -9452,6 +9459,9 @@ class SessionCreationTests(unittest.TestCase):
             "**Principle**: SRP\n"
             "**Problem**: Presenter does too much.\n"
             "**Suggestion**: Extract a helper.\n"
+            "**Why it matters**: Leaving the extra responsibility in place makes future fixes riskier.\n"
+            "**Required direction**: Isolate the helper logic behind a narrower collaborator.\n"
+            "**Non-goals**: Do not refactor unrelated screens in this pass.\n"
         )
 
         waiting_session, _, followup_event = self.coordinator.handle_role_output(
@@ -9696,12 +9706,18 @@ class SessionCreationTests(unittest.TestCase):
             "**Principle**: DRY\n"
             "**Problem**: Duplicate helper logic exists.\n"
             "**Suggestion**: Extract a shared helper.\n\n"
+            "**Why it matters**: The duplicated helper logic can drift between the new code paths.\n\n"
+            "**Required direction**: Route both builder branches through one helper implementation.\n\n"
+            "**Non-goals**: Do not rework unrelated builder APIs.\n\n"
             "---\n\n"
             "## Finding 2: Split legacy presenter\n\n"
             "**Files**: `LegacyPresenter.swift`\n"
             "**Principle**: SRP\n"
             "**Problem**: Presenter does too much.\n"
             "**Suggestion**: Split responsibilities.\n"
+            "**Why it matters**: The legacy presenter already carries too many unrelated responsibilities.\n"
+            "**Required direction**: Separate the new branch from the existing presenter responsibilities.\n"
+            "**Non-goals**: Do not redesign the full presenter module graph in this task.\n"
         )
 
         updated_session, _, followup_event = self.coordinator.handle_role_output(
@@ -9740,6 +9756,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(actionable_path.is_file())
         actionable_text = actionable_path.read_text()
         self.assertIn("Extract builder helper", actionable_text)
+        self.assertIn("## Why It Matters", actionable_text)
+        self.assertIn("## Required Direction", actionable_text)
+        self.assertIn("## Non-goals", actionable_text)
         self.assertNotIn("Split legacy presenter", actionable_text)
         outcome_path = Path(self.temp_dir.name) / "IOS-30021BSMIX" / "spec" / "boy-scout-outcome.json"
         self.assertTrue(outcome_path.exists())
