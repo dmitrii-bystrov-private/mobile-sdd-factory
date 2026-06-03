@@ -8171,9 +8171,6 @@ class CoordinatorService:
                 "content": "",
             }
 
-        roles = self.role_repository.list_for_session(session_id)
-        candidate_roles: list[Role] = []
-
         if session.status == SessionStatus.WAITING_FOR_OPERATOR and session.current_owner is None:
             interactive_state = self.get_interactive_state_summary(session_id)
             blocker_role_name = (
@@ -8207,31 +8204,27 @@ class CoordinatorService:
                 "content": "",
             }
 
+        active_role: Role | None = None
         if session.current_owner is not None:
             current_owner_role = self.role_repository.get_by_name(session_id, session.current_owner)
-            if current_owner_role is not None:
-                candidate_roles.append(current_owner_role)
+            if (
+                current_owner_role is not None
+                and current_owner_role.runtime_handle is not None
+                and current_owner_role.status == RoleStatus.RUNNING
+            ):
+                active_role = current_owner_role
 
-        owned_role_ids = {
-            item.owner_role_id
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.owner_role_id is not None and item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
-        }
-        candidate_roles.extend(
-            role
-            for role in roles
-            if role.id in owned_role_ids and role not in candidate_roles
-        )
-        candidate_roles.extend(
-            role
-            for role in roles
-            if role.status == RoleStatus.RUNNING and role not in candidate_roles
-        )
+        if active_role is None:
+            active_work_item = self._find_active_work_item_for_current_stage(session)
+            if active_work_item is not None and active_work_item.owner_role_id is not None:
+                owner_role = self.role_repository.get_by_id(active_work_item.owner_role_id)
+                if (
+                    owner_role is not None
+                    and owner_role.runtime_handle is not None
+                    and owner_role.status == RoleStatus.RUNNING
+                ):
+                    active_role = owner_role
 
-        active_role = next(
-            (role for role in candidate_roles if role.runtime_handle is not None and role.status == RoleStatus.RUNNING),
-            None,
-        )
         if active_role is None:
             return {
                 "available": False,

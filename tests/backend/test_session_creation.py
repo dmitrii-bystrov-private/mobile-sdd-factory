@@ -10148,6 +10148,36 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIsNone(summary["role_name"])
         self.assertEqual("", summary["content"])
 
+    def test_active_runtime_output_ignores_standby_runtime_without_active_owner_or_stage_item(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021ACTIVEOUTPUT",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "disabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021ACTIVEOUTPUT")
+
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        assert implementer_role is not None
+        assert verifier_role is not None
+        assert implementer_role.runtime_handle is not None
+        assert verifier_role.runtime_handle is not None
+
+        self.session_backend.simulate_output(implementer_role.runtime_handle, "stale implementer output")
+        self.session_backend.simulate_output(verifier_role.runtime_handle, "stale verifier output")
+
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="doc_harvest_requested",
+            current_owner=DOC_HARVEST_ROLE,
+        )
+
+        summary = self.coordinator.get_active_runtime_output_summary(session.id)
+
+        self.assertFalse(summary["available"])
+        self.assertIsNone(summary["role_name"])
+        self.assertEqual("", summary["content"])
+
     def test_boy_scout_manual_skip_is_rejected_when_policy_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021BS2R",
