@@ -77,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--missing-input", action="append", default=[])
     parser.add_argument("--pending-decision", action="append", default=[])
     parser.add_argument("--blocker-question", action="append", default=[])
+    parser.add_argument("--conflict-point")
+    parser.add_argument("--reviewer-premise")
+    parser.add_argument("--preferred-direction")
+    parser.add_argument("--requested-decision")
+    parser.add_argument("--supporting-evidence")
     parser.add_argument("--next-step")
     parser.add_argument("--verified-focus")
     return parser
@@ -236,6 +241,11 @@ def _build_coding_payload(args: argparse.Namespace) -> dict[str, object]:
     _clean_optional_text(payload, "summary", args.summary)
     _clean_optional_text(payload, "details", args.details)
     _clean_optional_text(payload, "subtask_key", args.subtask_key)
+    _clean_optional_text(payload, "conflict_point", args.conflict_point)
+    _clean_optional_text(payload, "reviewer_premise", args.reviewer_premise)
+    _clean_optional_text(payload, "preferred_direction", args.preferred_direction)
+    _clean_optional_text(payload, "requested_decision", args.requested_decision)
+    _clean_optional_text(payload, "supporting_evidence", args.supporting_evidence)
     if args.needs_operator_input:
         payload["needs_operator_input"] = True
     return payload

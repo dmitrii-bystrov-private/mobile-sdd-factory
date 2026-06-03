@@ -22,6 +22,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- Use RAG tools first for code exploration; use plain filesystem search only for structural queries.\n"
             "- Keep implementation aligned to the routed task or correction scope, but make any adjacent code changes that are necessary to fix the real root cause cleanly and avoid regressions.\n"
             "- If a routed correction conflicts with already-authoritative product/operator direction or cannot be resolved safely without a fresh operator decision, stop and escalate instead of forcing a local patch.\n"
+            "- In that escalation, state the concrete conflict, the reviewer or task premise you believe is wrong or outdated, your preferred technical direction, and the exact operator decision needed to unblock the task correctly.\n"
             "- Do not run workflow-level build/test/lint gates here unless the routed work explicitly requires a narrow task-specific check.\n"
             "- Do not run broad workflow-level wrappers such as `scripts/run-build.sh`, `scripts/run-test.sh`, or `scripts/run-lint.sh` from this role; final verification authority stays with the verifier lane.\n"
             "- Final test+lint gate remains deferred to the coordinator.\n\n"
@@ -36,6 +37,7 @@ def role_runtime_rules(role_name: str) -> str:
             "- If `Follow-up comments:` are routed, prioritize the latest follow-up comments over redoing the original bug analysis from scratch.\n"
             "- Keep bug-fix follow-up and correction rounds aligned to the routed issues/comments, but make any adjacent code changes that are necessary to fix the root cause cleanly and avoid regressions.\n"
             "- If a routed correction conflicts with already-authoritative product/operator direction or cannot be resolved safely without a fresh operator decision, stop and escalate instead of forcing a local patch.\n"
+            "- In that escalation, state the concrete conflict, the reviewer or task premise you believe is wrong or outdated, your preferred technical direction, and the exact operator decision needed to unblock the task correctly.\n"
             "- Do not run broad workflow-level wrappers such as `scripts/run-build.sh`, `scripts/run-test.sh`, or `scripts/run-lint.sh` from this role; final verification authority stays with the verifier lane.\n"
             "- Leave workflow-level test+lint verification to the coordinator.\n\n"
         )
@@ -223,6 +225,7 @@ def role_handoff_prompt(
         "- `SDD_PROGRESS` is console-only telemetry for humans; it does not drive coordinator state.\n"
         "- Use `SDD_ERROR` only for live operator escalations that must pause the current work item before a valid terminal outcome exists.\n"
         "- For implementer/bug-fixer live escalations that need an operator decision before you can continue, emit exactly `SDD_ERROR: {\"summary\":\"...\",\"details\":\"...\",\"needs_operator_input\":true}` instead of forcing a terminal result.\n"
+        "- For coding-lane disagreements, include structured fields in the terminal blocked payload whenever you can ground them: `conflict_point`, `reviewer_premise`, `preferred_direction`, `requested_decision`, and optional `supporting_evidence`.\n"
         "- For normal blockers, failures, and completed outcomes that are ready to be accepted as a terminal result, submit the structured outcome with the deterministic helper.\n"
         "- If a direct operator reply is required and the role contract explicitly says to use terminal blocked output, use `output_type: \"failed\"` and set `needs_operator_input: true` in the terminal payload.\n"
         "- For runtime/tooling failures that do not need a direct operator reply, use `output_type: \"failed\"` with a concise `summary` and optional `failures` / `details` fields.\n\n"

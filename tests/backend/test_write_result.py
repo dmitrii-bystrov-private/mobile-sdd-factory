@@ -316,12 +316,38 @@ class WriteResultScriptTests(unittest.TestCase):
                 "--details",
                 "Operator decision is required before continuing this correction pass.",
                 "--needs-operator-input",
+                "--conflict-point",
+                "Reviewer asked for a revert that would restore the old warning haptic.",
+                "--reviewer-premise",
+                "The review assumes wrong-PIN should still map to warning.",
+                "--preferred-direction",
+                "Keep the .error mapping and remove the stale revert request.",
+                "--requested-decision",
+                "Confirm whether the accepted task direction still requires .error.",
+                "--supporting-evidence",
+                "The current acceptance criteria and follow-up task both require failed actions to map to .error.",
             )
 
             self.assertEqual(0, result.returncode, result.stderr)
             payload = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertEqual("failed", payload["output_type"])
             self.assertEqual(True, payload["payload"]["needs_operator_input"])
+            self.assertEqual(
+                "Reviewer asked for a revert that would restore the old warning haptic.",
+                payload["payload"]["conflict_point"],
+            )
+            self.assertEqual(
+                "The review assumes wrong-PIN should still map to warning.",
+                payload["payload"]["reviewer_premise"],
+            )
+            self.assertEqual(
+                "Keep the .error mapping and remove the stale revert request.",
+                payload["payload"]["preferred_direction"],
+            )
+            self.assertEqual(
+                "Confirm whether the accepted task direction still requires .error.",
+                payload["payload"]["requested_decision"],
+            )
 
     def test_mr_comments_analyst_completed_result_is_supported(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

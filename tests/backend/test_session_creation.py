@@ -2464,6 +2464,11 @@ class SessionCreationTests(unittest.TestCase):
                 "summary": "review correction conflicts with accepted direction",
                 "details": "Need operator decision before continuing this correction pass.",
                 "needs_operator_input": True,
+                "conflict_point": "The requested revert would restore the stale warning haptic behavior.",
+                "reviewer_premise": "The review assumes wrong-PIN must still preserve the legacy warning mapping.",
+                "preferred_direction": "Keep the .error mapping and reject the revert request.",
+                "requested_decision": "Confirm whether the accepted task direction still requires .error for failed actions.",
+                "supporting_evidence": "The current acceptance criteria and follow-up scope both define wrong-PIN as a failed-action outcome.",
             },
         )
         correction_item = next(
@@ -2481,6 +2486,16 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(WorkItemStatus.WAITING_FOR_OPERATOR, self.work_item_repository.get_by_id(correction_item.id).status)
         self.assertEqual("implementation_blocked", str(followup_event.payload.get("reason") or ""))
         self.assertTrue(bool(followup_event.payload.get("needs_operator_input")))
+        self.assertEqual(
+            "The requested revert would restore the stale warning haptic behavior.",
+            str(followup_event.payload.get("conflict_point") or ""),
+        )
+        self.assertEqual(
+            "Keep the .error mapping and reject the revert request.",
+            str(followup_event.payload.get("preferred_direction") or ""),
+        )
+        self.assertIn("## Reasoned Disagreement", str(followup_event.payload.get("details") or ""))
+        self.assertIn("Premise to challenge", str(followup_event.payload.get("details") or ""))
 
     def test_reconcile_self_review_dispatch_keeps_operator_guidance(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

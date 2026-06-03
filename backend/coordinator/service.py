@@ -6013,13 +6013,45 @@ class CoordinatorService:
                 "work_item_id": active_item.id,
                 "summary": str(source_event.payload.get("summary") or "").strip()
                 or "implementation requires operator input",
-                "details": str(source_event.payload.get("details") or "").strip()
-                or "The coding lane reported a blocked pass and needs an operator decision before continuing.",
+                "details": self._implementation_blocked_operator_details(source_event.payload),
                 "needs_operator_input": True,
+                "conflict_point": str(source_event.payload.get("conflict_point") or "").strip(),
+                "reviewer_premise": str(source_event.payload.get("reviewer_premise") or "").strip(),
+                "preferred_direction": str(source_event.payload.get("preferred_direction") or "").strip(),
+                "requested_decision": str(source_event.payload.get("requested_decision") or "").strip(),
+                "supporting_evidence": str(source_event.payload.get("supporting_evidence") or "").strip(),
                 "current_stage": session.current_stage,
             },
         )
         return session, event
+
+    def _implementation_blocked_operator_details(self, payload: object) -> str:
+        if not isinstance(payload, dict):
+            return "The coding lane reported a blocked pass and needs an operator decision before continuing."
+        explicit_details = str(payload.get("details") or "").strip()
+        conflict_point = str(payload.get("conflict_point") or "").strip()
+        reviewer_premise = str(payload.get("reviewer_premise") or "").strip()
+        preferred_direction = str(payload.get("preferred_direction") or "").strip()
+        requested_decision = str(payload.get("requested_decision") or "").strip()
+        supporting_evidence = str(payload.get("supporting_evidence") or "").strip()
+        lines: list[str] = []
+        if explicit_details:
+            lines.extend([explicit_details, ""])
+        if any((conflict_point, reviewer_premise, preferred_direction, requested_decision, supporting_evidence)):
+            lines.extend(["## Reasoned Disagreement", ""])
+            if conflict_point:
+                lines.append(f"- Conflict: {conflict_point}")
+            if reviewer_premise:
+                lines.append(f"- Premise to challenge: {reviewer_premise}")
+            if preferred_direction:
+                lines.append(f"- Preferred direction: {preferred_direction}")
+            if requested_decision:
+                lines.append(f"- Operator decision needed: {requested_decision}")
+            if supporting_evidence:
+                lines.append(f"- Supporting evidence: {supporting_evidence}")
+        if not lines:
+            return "The coding lane reported a blocked pass and needs an operator decision before continuing."
+        return "\n".join(lines).strip()
 
     def _self_review_cycle_operator_details(
         self,
