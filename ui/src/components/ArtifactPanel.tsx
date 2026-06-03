@@ -24,6 +24,34 @@ function artifactDisplayName(value: string): string {
   return ARTIFACT_LABELS[value] ?? humanizeEventType(value);
 }
 
+function reviewLaneDisplayName(value: string): string {
+  switch (value) {
+    case "self_review":
+      return "Self Review";
+    case "code_scout":
+      return "Code Scout";
+    default:
+      return humanizeEventType(value);
+  }
+}
+
+function artifactContextLine(artifact: Artifact): string {
+  const metadata = artifact.metadata ?? null;
+  if (metadata && metadata["report_family"] === "internal_review") {
+    const reviewLane = typeof metadata["review_lane"] === "string" ? metadata["review_lane"] : "";
+    const artifactRole = typeof metadata["artifact_role"] === "string" ? metadata["artifact_role"] : "";
+    const parts = ["Internal Review"];
+    if (reviewLane) {
+      parts.push(reviewLaneDisplayName(reviewLane));
+    }
+    if (artifactRole) {
+      parts.push(humanizeEventType(artifactRole));
+    }
+    return parts.join(" · ");
+  }
+  return stageDisplayName(artifact.stage_name);
+}
+
 function producerDisplayName(value: string): string {
   if (value === "coordinator") {
     return "Coordinator";
@@ -66,7 +94,7 @@ export function ArtifactPanel({
               <div className="table-row" key={artifact.id}>
                 <div>
                   <strong>{artifactDisplayName(artifact.artifact_type)}</strong>
-                  <p>{stageDisplayName(artifact.stage_name)}</p>
+                  <p>{artifactContextLine(artifact)}</p>
                 </div>
                 <small className="path-label">{artifact.path}</small>
               </div>
