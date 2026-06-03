@@ -5607,6 +5607,7 @@ class CoordinatorService:
                 current_owner=None,
             )
             session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            report_paths = self._previous_code_scout_report_paths(session.id)[-2:]
             event = self._append_event(
                 session_id=session.id,
                 event_type="session_escalated_to_operator",
@@ -5622,6 +5623,7 @@ class CoordinatorService:
                     "needs_operator_input": False,
                     "implement_now_count": len(implement_now_findings),
                     "tech_debt_candidate_count": len(tech_debt_findings),
+                    "review_report_paths": report_paths,
                     "current_stage": session.current_stage,
                 },
             )
@@ -7353,6 +7355,14 @@ class CoordinatorService:
             review_lane="self_review",
             artifact_role="report",
             fallback_artifact_types={"self_review_report_markdown"},
+        )
+
+    def _previous_code_scout_report_paths(self, session_id: int) -> list[str]:
+        return self._internal_review_artifact_paths(
+            session_id,
+            review_lane="code_scout",
+            artifact_role="report",
+            fallback_artifact_types={"boy_scout_report_markdown"},
         )
 
     def _latest_artifact_path(

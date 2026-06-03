@@ -9913,7 +9913,7 @@ class SessionCreationTests(unittest.TestCase):
             "**Required direction**: Consolidate the retry helper behind one shared implementation.\n"
             "**Non-goals**: Do not refactor unrelated flow wiring in this pass.\n"
         )
-        self.coordinator.handle_role_output(
+        _, _, followup_event = self.coordinator.handle_role_output(
             session_id=session.id,
             role_name=CODE_SCOUT_ROLE,
             output_type="completed",
@@ -9937,6 +9937,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Why it matters", str(summary["details"]))
         self.assertIn("Required direction", str(summary["details"]))
         self.assertNotIn("Clean Code Scout pass", str(summary["details"]))
+        self.assertTrue(
+            any("pass-01.md" in str(path) for path in (followup_event.payload.get("review_report_paths") or []))
+        )
 
     def test_active_runtime_output_is_hidden_for_boy_scout_operator_gate_without_live_blocker_role(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

@@ -2936,6 +2936,11 @@ class SessionApiTests(unittest.TestCase):
         )
         self.assertEqual("session_escalated_to_operator", scout_response.followup_event_type)
         self.assertEqual("waiting_for_operator", scout_response.session.status)
+        events = self.dependencies.event_repository.list_for_session(create_response.session.id)
+        escalation = next(item for item in reversed(events) if item.event_type == "session_escalated_to_operator")
+        self.assertTrue(
+            any("pass-01.md" in str(path) for path in (escalation.payload.get("review_report_paths") or []))
+        )
 
         response = skip_boy_scout(
             SkipBoyScoutRequest(
