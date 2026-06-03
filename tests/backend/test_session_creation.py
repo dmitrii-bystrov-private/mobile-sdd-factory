@@ -9328,6 +9328,11 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(outcome_path.exists())
         self.assertEqual("findings_found", json.loads(outcome_path.read_text())["status"])
         self.assertTrue(any(item.artifact_type == "boy_scout_actionable_markdown" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "boy_scout_report_markdown" for item in artifacts))
+        scout_report_path = Path(self.temp_dir.name) / "IOS-30021BSAUTO" / "scout" / "pass-01.md"
+        self.assertTrue(scout_report_path.is_file())
+        self.assertIn("SCOUT_RESULT: findings_found", scout_report_path.read_text(encoding="utf-8"))
+        self.assertIn("Extract a shared helper.", scout_report_path.read_text(encoding="utf-8"))
         self.assertIn('"issues_file_path"', sent_inputs[-1])
         self.assertIn("boy-scout-actionable.md", sent_inputs[-1])
         scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
@@ -9416,6 +9421,14 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
         self.assertEqual("SCOUT_RESULT: clean\n", findings_path.read_text(encoding="utf-8"))
+        artifacts = self.artifact_repository.list_for_session(session.id)
+        self.assertTrue(any(item.artifact_type == "boy_scout_report_markdown" for item in artifacts))
+        scout_report_path = Path(self.temp_dir.name) / "IOS-30021BSCLEAN" / "scout" / "pass-01.md"
+        self.assertTrue(scout_report_path.is_file())
+        scout_report = scout_report_path.read_text(encoding="utf-8")
+        self.assertIn("SCOUT_RESULT: clean", scout_report)
+        self.assertIn("## Summary", scout_report)
+        self.assertIn("Clean Code Scout pass.", scout_report)
 
     def test_skipped_boy_scout_findings_do_not_escalate_again_on_next_run(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

@@ -9312,6 +9312,11 @@ class CoordinatorService:
             },
         )
         self._materialize_boy_scout_findings_state(session=session, status=status)
+        self._materialize_boy_scout_report(
+            session=session,
+            source_event=source_event,
+            status=status,
+        )
 
     def _materialize_boy_scout_findings_state(self, *, session: Session, status: str) -> None:
         if self.workdir_root is None:
@@ -9320,6 +9325,68 @@ class CoordinatorService:
         if status == "clean":
             findings_path.parent.mkdir(parents=True, exist_ok=True)
             findings_path.write_text("SCOUT_RESULT: clean\n", encoding="utf-8")
+
+    def _materialize_boy_scout_report(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+        status: str,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        target_path = self._next_boy_scout_report_target_path(session)
+        if target_path is None:
+            return
+
+        findings_path = self.workdir_root / session.task_key / "spec" / "findings.md"
+        if status == "findings_found" and findings_path.is_file():
+            content = findings_path.read_text(encoding="utf-8").rstrip() + "\n"
+        else:
+            summary = str(payload.get("summary") or "").strip()
+            details = str(payload.get("details") or "").strip()
+            lines = [f"SCOUT_RESULT: {status}"]
+            if summary:
+                lines.extend(["", "## Summary", "", summary])
+            if details:
+                lines.extend(["", "## Details", "", details])
+            content = "\n".join(lines).rstrip() + "\n"
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(content, encoding="utf-8")
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "code-scout",
+            target_path.name,
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="code-scout",
+            artifact_type="boy_scout_report_markdown",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": status,
+                "source_event_id": source_event.id,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+
+    def _next_boy_scout_report_target_path(self, session: Session) -> Path | None:
+        if self.workdir_root is None:
+            return None
+        scout_dir = self.workdir_root / session.task_key / "scout"
+        pass_count = sum(
+            1
+            for artifact in self.artifact_repository.list_for_session(session.id)
+            if artifact.artifact_type == "boy_scout_report_markdown"
+        )
+        return scout_dir / f"pass-{pass_count + 1:02d}.md"
 
     def _verification_gate_required_for_delivery(self, session: Session) -> bool:
         events = self.event_repository.list_for_session(session.id)
