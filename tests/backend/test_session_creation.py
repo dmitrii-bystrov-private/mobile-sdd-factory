@@ -9829,7 +9829,15 @@ class SessionCreationTests(unittest.TestCase):
 
         spec_dir = Path(self.temp_dir.name) / "IOS-30021BSREASON" / "spec"
         spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
+        (spec_dir / "findings.md").write_text(
+            "SCOUT_RESULT: findings_found\n\n"
+            "## Finding 1: Extract helper\n\n"
+            "**Files**: `Sources/Feature/RetryFlow.swift`\n"
+            "**Problem**: Retry helper logic is duplicated across two branches.\n"
+            "**Why it matters**: The duplicate path can drift and regress independently.\n"
+            "**Required direction**: Consolidate the retry helper behind one shared implementation.\n"
+            "**Non-goals**: Do not refactor unrelated flow wiring in this pass.\n"
+        )
         self.coordinator.handle_role_output(
             session_id=session.id,
             role_name=CODE_SCOUT_ROLE,
@@ -9851,6 +9859,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(summary["needs_operator_input"])
         self.assertIn("Code Scout found", str(summary["details"]))
         self.assertIn("Extract helper", str(summary["details"]))
+        self.assertIn("Why it matters", str(summary["details"]))
+        self.assertIn("Required direction", str(summary["details"]))
         self.assertNotIn("Clean Code Scout pass", str(summary["details"]))
 
     def test_active_runtime_output_is_hidden_for_boy_scout_operator_gate_without_live_blocker_role(self) -> None:

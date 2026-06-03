@@ -9964,23 +9964,51 @@ class CoordinatorService:
         ]
 
         if implement_now_findings:
-            lines.append("Will be implemented now if you choose `Implement Code Scout Findings`:")
+            lines.extend(["## Implement Now", "", "These findings will be routed back to the coding lane if you choose `Implement Code Scout Findings`.", ""])
             for finding in implement_now_findings[:5]:
                 title = str(finding.get("title") or "Finding").strip()
                 files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
-                file_suffix = f" ({', '.join(files[:2])})" if files else ""
-                lines.append(f"- {title}{file_suffix}")
+                problem = str(finding.get("problem") or "").strip()
+                why_it_matters = str(finding.get("why_it_matters") or "").strip()
+                required_direction = str(finding.get("required_direction") or "").strip() or str(finding.get("suggestion") or "").strip()
+                non_goals = str(finding.get("non_goals") or "").strip()
+                lines.append(f"### {title}")
+                if files:
+                    lines.append(f"- Files: {', '.join(f'`{item}`' for item in files[:3])}")
+                if problem:
+                    lines.append(f"- Problem: {problem}")
+                if why_it_matters:
+                    lines.append(f"- Why it matters: {why_it_matters}")
+                if required_direction:
+                    lines.append(f"- Required direction: {required_direction}")
+                if non_goals:
+                    lines.append(f"- Non-goals: {non_goals}")
+                lines.append("")
             if len(implement_now_findings) > 5:
                 lines.append(f"- ...and {len(implement_now_findings) - 5} more")
             lines.append("")
 
         if tech_debt_findings:
-            lines.append("Will become tech debt if you choose `Create Tech Debt And Continue`:")
+            lines.extend(["## Tech Debt Candidates", "", "These findings will be deferred into follow-up work if you choose `Create Tech Debt And Continue`.", ""])
             for finding in tech_debt_findings[:5]:
                 title = str(finding.get("title") or "Finding").strip()
                 files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
-                file_suffix = f" ({', '.join(files[:2])})" if files else ""
-                lines.append(f"- {title}{file_suffix}")
+                problem = str(finding.get("problem") or "").strip()
+                why_it_matters = str(finding.get("why_it_matters") or "").strip()
+                required_direction = str(finding.get("required_direction") or "").strip() or str(finding.get("suggestion") or "").strip()
+                non_goals = str(finding.get("non_goals") or "").strip()
+                lines.append(f"### {title}")
+                if files:
+                    lines.append(f"- Files: {', '.join(f'`{item}`' for item in files[:3])}")
+                if problem:
+                    lines.append(f"- Problem: {problem}")
+                if why_it_matters:
+                    lines.append(f"- Why it matters: {why_it_matters}")
+                if required_direction:
+                    lines.append(f"- Required direction: {required_direction}")
+                if non_goals:
+                    lines.append(f"- Non-goals: {non_goals}")
+                lines.append("")
             if len(tech_debt_findings) > 5:
                 lines.append(f"- ...and {len(tech_debt_findings) - 5} more")
             lines.append("")

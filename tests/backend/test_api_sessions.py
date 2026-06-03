@@ -2999,12 +2999,18 @@ class SessionApiTests(unittest.TestCase):
             "**Principle**: DRY\n"
             "**Problem**: Duplicate helper logic exists.\n"
             "**Suggestion**: Extract a shared helper.\n\n"
+            "**Why it matters**: The duplicate helper logic can drift between the touched branches.\n\n"
+            "**Required direction**: Route both touched builder paths through one helper implementation.\n\n"
+            "**Non-goals**: Do not redesign unrelated builder APIs in this pass.\n\n"
             "---\n\n"
             "## Finding 2: Split legacy presenter\n\n"
             "**Files**: `LegacyPresenter.swift`\n"
             "**Principle**: SRP\n"
             "**Problem**: Presenter does too much.\n"
             "**Suggestion**: Split responsibilities.\n"
+            "**Why it matters**: The presenter already carries unrelated responsibilities that will keep growing.\n"
+            "**Required direction**: Separate the touched branch from the legacy presenter responsibilities.\n"
+            "**Non-goals**: Do not redesign the entire presenter graph in this task.\n"
         )
         scout_response = submit_role_output(
             RoleOutputRequest(
@@ -3022,6 +3028,13 @@ class SessionApiTests(unittest.TestCase):
         )
         self.assertEqual("session_escalated_to_operator", scout_response.followup_event_type)
         self.assertEqual("waiting_for_operator", scout_response.session.status)
+        interactive_state = get_interactive_state(
+            create_response.session.id,
+            dependencies=self.dependencies,
+        )
+        self.assertIn("## Implement Now", interactive_state.details or "")
+        self.assertIn("Why it matters", interactive_state.details or "")
+        self.assertIn("## Tech Debt Candidates", interactive_state.details or "")
 
         response = resolve_boy_scout_findings(
             ResolveBoyScoutFindingsRequest(
