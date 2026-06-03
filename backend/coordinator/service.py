@@ -6046,6 +6046,9 @@ class CoordinatorService:
                 why_it_matters = str(raw_issue.get("why_it_matters") or "").strip()
                 required_direction = str(raw_issue.get("required_direction") or "").strip()
                 non_goals = str(raw_issue.get("non_goals") or "").strip()
+                evidence = str(raw_issue.get("evidence") or "").strip()
+                suggested_approach = str(raw_issue.get("suggested_approach") or "").strip()
+                test_expectations = str(raw_issue.get("test_expectations") or "").strip()
                 lines.extend([f"### [{severity}] {file_path}"])
                 if convention:
                     lines.append(f"- Convention: {convention}")
@@ -6059,6 +6062,12 @@ class CoordinatorService:
                     lines.append(f"- Required direction: {required_direction}")
                 if non_goals:
                     lines.append(f"- Non-goals: {non_goals}")
+                if evidence:
+                    lines.append(f"- Evidence: {evidence}")
+                if suggested_approach:
+                    lines.append(f"- Suggested approach: {suggested_approach}")
+                if test_expectations:
+                    lines.append(f"- Test expectations: {test_expectations}")
                 lines.append("")
             else:
                 rendered = str(raw_issue).strip()
@@ -9910,6 +9919,9 @@ class CoordinatorService:
             why_match = re.search(r"^\*\*Why it matters\*\*:\s+(.+)$", section, re.MULTILINE)
             direction_match = re.search(r"^\*\*Required direction\*\*:\s+(.+)$", section, re.MULTILINE)
             non_goals_match = re.search(r"^\*\*Non-goals\*\*:\s+(.+)$", section, re.MULTILINE)
+            evidence_match = re.search(r"^\*\*Evidence\*\*:\s+(.+)$", section, re.MULTILINE)
+            approach_match = re.search(r"^\*\*Suggested approach\*\*:\s+(.+)$", section, re.MULTILINE)
+            test_expectations_match = re.search(r"^\*\*Test expectations\*\*:\s+(.+)$", section, re.MULTILINE)
             raw_files = files_match.group(1).strip() if files_match else ""
             files = [
                 item.strip().strip("`")
@@ -9926,6 +9938,9 @@ class CoordinatorService:
                     "why_it_matters": why_match.group(1).strip() if why_match else "",
                     "required_direction": direction_match.group(1).strip() if direction_match else "",
                     "non_goals": non_goals_match.group(1).strip() if non_goals_match else "",
+                    "evidence": evidence_match.group(1).strip() if evidence_match else "",
+                    "suggested_approach": approach_match.group(1).strip() if approach_match else "",
+                    "test_expectations": test_expectations_match.group(1).strip() if test_expectations_match else "",
                 }
             )
         return findings
@@ -9995,6 +10010,9 @@ class CoordinatorService:
             "why_it_matters": self._normalize_boy_scout_finding_text(finding.get("why_it_matters")),
             "required_direction": self._normalize_boy_scout_finding_text(finding.get("required_direction")),
             "non_goals": self._normalize_boy_scout_finding_text(finding.get("non_goals")),
+            "evidence": self._normalize_boy_scout_finding_text(finding.get("evidence")),
+            "suggested_approach": self._normalize_boy_scout_finding_text(finding.get("suggested_approach")),
+            "test_expectations": self._normalize_boy_scout_finding_text(finding.get("test_expectations")),
         }
         return hashlib.sha1(json.dumps(identity, sort_keys=True).encode("utf-8")).hexdigest()[:16]
 
@@ -10079,6 +10097,9 @@ class CoordinatorService:
                 why_it_matters = str(finding.get("why_it_matters") or "").strip()
                 required_direction = str(finding.get("required_direction") or "").strip() or str(finding.get("suggestion") or "").strip()
                 non_goals = str(finding.get("non_goals") or "").strip()
+                evidence = str(finding.get("evidence") or "").strip()
+                suggested_approach = str(finding.get("suggested_approach") or "").strip()
+                test_expectations = str(finding.get("test_expectations") or "").strip()
                 lines.append(f"### {title}")
                 if files:
                     lines.append(f"- Files: {', '.join(f'`{item}`' for item in files[:3])}")
@@ -10090,6 +10111,12 @@ class CoordinatorService:
                     lines.append(f"- Required direction: {required_direction}")
                 if non_goals:
                     lines.append(f"- Non-goals: {non_goals}")
+                if evidence:
+                    lines.append(f"- Evidence: {evidence}")
+                if suggested_approach:
+                    lines.append(f"- Suggested approach: {suggested_approach}")
+                if test_expectations:
+                    lines.append(f"- Test expectations: {test_expectations}")
                 lines.append("")
             if len(implement_now_findings) > 5:
                 lines.append(f"- ...and {len(implement_now_findings) - 5} more")
@@ -10104,6 +10131,9 @@ class CoordinatorService:
                 why_it_matters = str(finding.get("why_it_matters") or "").strip()
                 required_direction = str(finding.get("required_direction") or "").strip() or str(finding.get("suggestion") or "").strip()
                 non_goals = str(finding.get("non_goals") or "").strip()
+                evidence = str(finding.get("evidence") or "").strip()
+                suggested_approach = str(finding.get("suggested_approach") or "").strip()
+                test_expectations = str(finding.get("test_expectations") or "").strip()
                 lines.append(f"### {title}")
                 if files:
                     lines.append(f"- Files: {', '.join(f'`{item}`' for item in files[:3])}")
@@ -10115,6 +10145,12 @@ class CoordinatorService:
                     lines.append(f"- Required direction: {required_direction}")
                 if non_goals:
                     lines.append(f"- Non-goals: {non_goals}")
+                if evidence:
+                    lines.append(f"- Evidence: {evidence}")
+                if suggested_approach:
+                    lines.append(f"- Suggested approach: {suggested_approach}")
+                if test_expectations:
+                    lines.append(f"- Test expectations: {test_expectations}")
                 lines.append("")
             if len(tech_debt_findings) > 5:
                 lines.append(f"- ...and {len(tech_debt_findings) - 5} more")
@@ -10134,6 +10170,9 @@ class CoordinatorService:
             why_it_matters = str(finding.get("why_it_matters") or "").strip()
             required_direction = str(finding.get("required_direction") or "").strip()
             non_goals = str(finding.get("non_goals") or "").strip()
+            evidence = str(finding.get("evidence") or "").strip()
+            suggested_approach = str(finding.get("suggested_approach") or "").strip()
+            test_expectations = str(finding.get("test_expectations") or "").strip()
             lines.append(f"## Finding {index}: {title}")
             lines.append("")
             if files:
@@ -10150,6 +10189,12 @@ class CoordinatorService:
                 lines.append(f"**Required direction**: {required_direction}")
             if non_goals:
                 lines.append(f"**Non-goals**: {non_goals}")
+            if evidence:
+                lines.append(f"**Evidence**: {evidence}")
+            if suggested_approach:
+                lines.append(f"**Suggested approach**: {suggested_approach}")
+            if test_expectations:
+                lines.append(f"**Test expectations**: {test_expectations}")
             lines.append("")
             lines.append("---")
             lines.append("")
@@ -10186,6 +10231,9 @@ class CoordinatorService:
         why_it_matters = str(finding.get("why_it_matters") or "").strip()
         required_direction = str(finding.get("required_direction") or "").strip()
         non_goals = str(finding.get("non_goals") or "").strip()
+        evidence = str(finding.get("evidence") or "").strip()
+        suggested_approach = str(finding.get("suggested_approach") or "").strip()
+        test_expectations = str(finding.get("test_expectations") or "").strip()
         lines = [f"# {title}", ""]
         if files:
             lines.extend(["## Files", ""])
@@ -10203,6 +10251,12 @@ class CoordinatorService:
             lines.extend(["## Required Direction", "", required_direction, ""])
         if non_goals:
             lines.extend(["## Non-goals", "", non_goals, ""])
+        if evidence:
+            lines.extend(["## Evidence", "", evidence, ""])
+        if suggested_approach:
+            lines.extend(["## Suggested Approach", "", suggested_approach, ""])
+        if test_expectations:
+            lines.extend(["## Test Expectations", "", test_expectations, ""])
         return "\n".join(lines).rstrip() + "\n"
 
     def _create_boy_scout_tech_debt_stories(

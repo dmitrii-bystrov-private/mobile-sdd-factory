@@ -220,6 +220,7 @@ def _role_responsibility(role_name: str) -> list[str]:
         return [
             "- You execute routed code review work for one task session.",
             "- You review only the routed task changes and produce compact review outcomes plus a durable structured review report for the current pass.",
+            "- For real findings, include optional `Evidence`, `Suggested approach`, and `Test expectations` sections only when they are grounded by the touched diff and likely to help the next correction pass.",
             "- You do not run builds, tests, lint, simulators, or verification wrappers; runtime validation belongs to the verification lane.",
             "- Across repeated passes, retain reviewer context for the same task instead of reinitializing from zero.",
         ]
@@ -227,6 +228,7 @@ def _role_responsibility(role_name: str) -> list[str]:
         return [
             "- You execute one bounded Code Scout pass for one completed coding session.",
             "- You inspect only the changed code area for real maintainability improvements and do not modify product code yourself.",
+            "- For real findings, include optional `Evidence`, `Suggested approach`, and `Test expectations` sections only when they are grounded by the touched code and likely to help the next cleanup pass.",
             "- You stop after writing either a clean result or structured findings for operator review.",
         ]
     if role_name == "mr-comments-analyst-worker":

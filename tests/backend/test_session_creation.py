@@ -2068,6 +2068,9 @@ class SessionCreationTests(unittest.TestCase):
                         "why_it_matters": "Keeping the duplicate state path makes future regressions more likely.",
                         "required_direction": "Use one shared retry path for the touched flow instead of parallel branches.",
                         "non_goals": "Do not broaden this correction into unrelated flow-controller cleanup.",
+                        "evidence": "The touched branch now stores retry state both before and after the shared helper call.",
+                        "suggested_approach": "Route both call sites back through the existing shared retry helper instead of carrying a second local branch.",
+                        "test_expectations": "Re-run the retry-state unit coverage and confirm both branches still converge on one state path.",
                     }
                 ],
             },
@@ -2092,6 +2095,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("- Why it matters: Keeping the duplicate state path makes future regressions more likely.", review_report)
         self.assertIn("- Required direction: Use one shared retry path for the touched flow instead of parallel branches.", review_report)
         self.assertIn("- Non-goals: Do not broaden this correction into unrelated flow-controller cleanup.", review_report)
+        self.assertIn("- Evidence: The touched branch now stores retry state both before and after the shared helper call.", review_report)
+        self.assertIn("- Suggested approach: Route both call sites back through the existing shared retry helper instead of carrying a second local branch.", review_report)
+        self.assertIn("- Test expectations: Re-run the retry-state unit coverage and confirm both branches still converge on one state path.", review_report)
         outcome_path = Path(self.temp_dir.name) / "IOS-30003RF" / "review" / "self-review-outcome.json"
         self.assertTrue(outcome_path.exists())
         self.assertEqual("issues_found", json.loads(outcome_path.read_text())["status"])
@@ -2158,6 +2164,9 @@ class SessionCreationTests(unittest.TestCase):
                         "why_it_matters": "The repeated bypass keeps violating the core reducer invariant.",
                         "required_direction": "Move the touched mutation path back behind the reducer boundary.",
                         "non_goals": "Do not redesign the surrounding feature architecture in this cycle.",
+                        "evidence": "The touched view-model path still mutates retry state directly before the reducer event is emitted.",
+                        "suggested_approach": "Move the new mutation into the existing reducer-owned event path rather than patching another bypass.",
+                        "test_expectations": "Re-run the reducer test covering cancel plus retry invalidation to prove the invariant is restored.",
                     }
                 ],
             },
@@ -2172,6 +2181,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("- Why it matters: The repeated bypass keeps violating the core reducer invariant.", review_report)
         self.assertIn("- Required direction: Move the touched mutation path back behind the reducer boundary.", review_report)
         self.assertIn("- Non-goals: Do not redesign the surrounding feature architecture in this cycle.", review_report)
+        self.assertIn("- Evidence: The touched view-model path still mutates retry state directly before the reducer event is emitted.", review_report)
+        self.assertIn("- Suggested approach: Move the new mutation into the existing reducer-owned event path rather than patching another bypass.", review_report)
+        self.assertIn("- Test expectations: Re-run the reducer test covering cancel plus retry invalidation to prove the invariant is restored.", review_report)
         outcome_path = Path(self.temp_dir.name) / "IOS-30003RBLOCK" / "review" / "self-review-outcome.json"
         self.assertTrue(outcome_path.exists())
         self.assertEqual("blocked", json.loads(outcome_path.read_text())["status"])
@@ -9416,6 +9428,9 @@ class SessionCreationTests(unittest.TestCase):
             "**Why it matters**: The duplicate mapper flow can drift during future edits.\n"
             "**Required direction**: Consolidate the mapping path behind one shared helper.\n"
             "**Non-goals**: Do not broaden this pass into unrelated presenter cleanup.\n"
+            "**Evidence**: Both builder branches duplicate the same mapper setup.\n"
+            "**Suggested approach**: Extract one mapper factory and route both builders through it.\n"
+            "**Test expectations**: Re-run the touched builder tests and verify both branches still map identically.\n"
         )
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
@@ -9455,6 +9470,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("**Why it matters**: The duplicate mapper flow can drift during future edits.", scout_report)
         self.assertIn("**Required direction**: Consolidate the mapping path behind one shared helper.", scout_report)
         self.assertIn("**Non-goals**: Do not broaden this pass into unrelated presenter cleanup.", scout_report)
+        self.assertIn("**Evidence**: Both builder branches duplicate the same mapper setup.", scout_report)
+        self.assertIn("**Suggested approach**: Extract one mapper factory and route both builders through it.", scout_report)
+        self.assertIn("**Test expectations**: Re-run the touched builder tests and verify both branches still map identically.", scout_report)
         self.assertIn('"issues_file_path"', sent_inputs[-1])
         self.assertIn('"correction_source": "code_scout"', sent_inputs[-1])
         self.assertIn('"correction_report_path"', sent_inputs[-1])
