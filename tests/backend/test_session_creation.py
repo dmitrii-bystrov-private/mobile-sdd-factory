@@ -2009,6 +2009,10 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
         self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
+        outcome_artifact = next(item for item in artifacts if item.artifact_type == "self_review_outcome_json")
+        self.assertEqual("internal_review", outcome_artifact.metadata["report_family"])
+        self.assertEqual("self_review", outcome_artifact.metadata["review_lane"])
+        self.assertEqual("passed", outcome_artifact.metadata["status"])
         outcome_path = Path(self.temp_dir.name) / "IOS-30003RP" / "review" / "self-review-outcome.json"
         self.assertTrue(outcome_path.exists())
         self.assertEqual("passed", json.loads(outcome_path.read_text())["status"])
@@ -9490,6 +9494,10 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("SCOUT_RESULT: clean\n", findings_path.read_text(encoding="utf-8"))
         artifacts = self.artifact_repository.list_for_session(session.id)
         self.assertTrue(any(item.artifact_type == "boy_scout_report_markdown" for item in artifacts))
+        outcome_artifact = next(item for item in artifacts if item.artifact_type == "boy_scout_outcome_json")
+        self.assertEqual("internal_review", outcome_artifact.metadata["report_family"])
+        self.assertEqual("code_scout", outcome_artifact.metadata["review_lane"])
+        self.assertEqual("clean", outcome_artifact.metadata["status"])
         scout_report_path = Path(self.temp_dir.name) / "IOS-30021BSCLEAN" / "scout" / "pass-01.md"
         self.assertTrue(scout_report_path.is_file())
         scout_report = scout_report_path.read_text(encoding="utf-8")

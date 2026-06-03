@@ -9107,13 +9107,14 @@ class CoordinatorService:
             stage_name="self-review",
             artifact_type="self_review_outcome_json",
             path=str(artifact_path),
-            metadata={
-                "task_key": session.task_key,
-                "source_path": str(target_path),
-                "status": status,
-                "source_event_id": source_event.id,
-                "work_item_id": payload.get("work_item_id"),
-            },
+            metadata=self._review_outcome_metadata(
+                task_key=session.task_key,
+                source_path=str(target_path),
+                review_lane="self_review",
+                status=status,
+                source_event_id=source_event.id,
+                work_item_id=payload.get("work_item_id"),
+            ),
         )
 
     def _materialize_story_planning_outcome_file(
@@ -9317,13 +9318,14 @@ class CoordinatorService:
             stage_name="boy-scout",
             artifact_type="boy_scout_outcome_json",
             path=str(artifact_path),
-            metadata={
-                "task_key": session.task_key,
-                "source_path": str(target_path),
-                "status": status,
-                "source_event_id": source_event.id,
-                "work_item_id": payload.get("work_item_id"),
-            },
+            metadata=self._review_outcome_metadata(
+                task_key=session.task_key,
+                source_path=str(target_path),
+                review_lane="code_scout",
+                status=status,
+                source_event_id=source_event.id,
+                work_item_id=payload.get("work_item_id"),
+            ),
         )
         self._materialize_boy_scout_findings_state(session=session, status=status)
         self._materialize_boy_scout_report(
@@ -9534,6 +9536,26 @@ class CoordinatorService:
         if output_type is not None:
             metadata["output_type"] = output_type
         return metadata
+
+    def _review_outcome_metadata(
+        self,
+        *,
+        task_key: str,
+        source_path: str,
+        review_lane: str,
+        status: str,
+        source_event_id: int,
+        work_item_id: object | None = None,
+    ) -> dict[str, object]:
+        return {
+            "task_key": task_key,
+            "source_path": source_path,
+            "report_family": "internal_review",
+            "review_lane": review_lane,
+            "status": status,
+            "source_event_id": source_event_id,
+            "work_item_id": work_item_id,
+        }
 
     def _next_self_review_report_target_path(self, session: Session) -> Path | None:
         if self.workdir_root is None:
