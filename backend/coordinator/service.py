@@ -9382,13 +9382,14 @@ class CoordinatorService:
             stage_name="code-scout",
             artifact_type="boy_scout_report_markdown",
             path=str(artifact_path),
-            metadata={
-                "task_key": session.task_key,
-                "source_path": str(target_path),
-                "status": status,
-                "source_event_id": source_event.id,
-                "work_item_id": payload.get("work_item_id"),
-            },
+            metadata=self._review_report_metadata(
+                task_key=session.task_key,
+                source_path=str(target_path),
+                review_lane="code_scout",
+                status=status,
+                work_item_id=payload.get("work_item_id"),
+                source_event_id=source_event.id,
+            ),
         )
 
     def _next_boy_scout_report_target_path(self, session: Session) -> Path | None:
@@ -9492,12 +9493,47 @@ class CoordinatorService:
             stage_name="self-review",
             artifact_type="self_review_report_markdown",
             path=str(artifact_path),
-            metadata={
-                "task_key": session.task_key,
-                "source_path": str(target_path),
-                "output_type": output_type,
-            },
+            metadata=self._review_report_metadata(
+                task_key=session.task_key,
+                source_path=str(target_path),
+                review_lane="self_review",
+                status=self._self_review_report_status(output_type),
+                work_item_id=payload.get("work_item_id"),
+                output_type=output_type,
+            ),
         )
+
+    def _self_review_report_status(self, output_type: str) -> str:
+        if output_type == "passed":
+            return "clean"
+        if output_type == "blocked_review_cycle":
+            return "blocked"
+        return "issues_found"
+
+    def _review_report_metadata(
+        self,
+        *,
+        task_key: str,
+        source_path: str,
+        review_lane: str,
+        status: str,
+        work_item_id: object | None = None,
+        source_event_id: int | None = None,
+        output_type: str | None = None,
+    ) -> dict[str, object]:
+        metadata: dict[str, object] = {
+            "task_key": task_key,
+            "source_path": source_path,
+            "report_family": "internal_review",
+            "review_lane": review_lane,
+            "status": status,
+            "work_item_id": work_item_id,
+        }
+        if source_event_id is not None:
+            metadata["source_event_id"] = source_event_id
+        if output_type is not None:
+            metadata["output_type"] = output_type
+        return metadata
 
     def _next_self_review_report_target_path(self, session: Session) -> Path | None:
         if self.workdir_root is None:
