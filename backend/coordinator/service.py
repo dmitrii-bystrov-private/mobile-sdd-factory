@@ -9428,10 +9428,13 @@ class CoordinatorService:
         if self.workdir_root is None:
             return None
         scout_dir = self.workdir_root / session.task_key / "scout"
-        pass_count = sum(
-            1
-            for artifact in self.artifact_repository.list_for_session(session.id)
-            if artifact.artifact_type == "boy_scout_report_markdown"
+        pass_count = len(
+            self._internal_review_artifact_paths(
+                session.id,
+                review_lane="code_scout",
+                artifact_role="report",
+                fallback_artifact_types={"boy_scout_report_markdown"},
+            )
         )
         return scout_dir / f"pass-{pass_count + 1:02d}.md"
 
@@ -9632,10 +9635,13 @@ class CoordinatorService:
         if self.workdir_root is None:
             return None
         review_dir = self.workdir_root / session.task_key / "review"
-        pass_count = sum(
-            1
-            for artifact in self.artifact_repository.list_for_session(session.id)
-            if artifact.artifact_type == "self_review_report_markdown"
+        pass_count = len(
+            self._internal_review_artifact_paths(
+                session.id,
+                review_lane="self_review",
+                artifact_role="report",
+                fallback_artifact_types={"self_review_report_markdown"},
+            )
         )
         return review_dir / f"pass-{pass_count + 1:02d}.md"
 
