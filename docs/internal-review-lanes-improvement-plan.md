@@ -88,6 +88,97 @@ After this plan:
 4. Blocked-cycle escalation always includes meaningful technical context.
 5. Operator replies can be routed against clearly identified findings, not generic issue labels.
 
+## Progress Checkpoint
+
+Last synchronized: 2026-06-03
+
+### Completed
+
+1. User-facing rename from `Boy Scout` to `Code Scout`
+   - user-facing UI/runtime labels switched to `Code Scout`
+   - internal ids remain backward compatible (`boy_scout_*`)
+2. `Code Scout` durable report trail
+   - `boy_scout_report_markdown` is now first-class and materialized for clean/finding passes
+3. Structured finding contract for `code-scout`
+   - findings now carry:
+     - title
+     - why it matters
+     - required direction
+     - non-goals
+   - actionable findings materialize in correction-ready markdown
+4. Structured finding contract for `code-reviewer`
+   - reviewer findings now preserve the same richer shape in report materialization
+5. Reviewer blocked-cycle payload improvement
+   - operator-facing blocker details now preserve:
+     - short summary
+     - structured unresolved finding body
+6. `Code Scout` operator-detail improvement
+   - operator-facing scout escalation now shows:
+     - implement-now findings
+     - tech-debt candidates
+     - why it matters / required direction / non-goals
+7. Unified implementer correction hydration
+   - implementer correction rounds now receive a common payload shape across:
+     - self-review corrections
+     - Code Scout corrections
+     - verification corrections
+8. Review-family metadata alignment
+   - reviewer and Code Scout reports now share:
+     - `report_family = internal_review`
+     - `review_lane`
+     - `status`
+     - `work_item_id`
+   - reviewer and Code Scout outcomes now share the same family contract
+9. Metadata-first correction/history lookup started
+   - self-review history lookup can resolve via internal-review metadata
+   - Code Scout correction lookup can resolve via internal-review metadata
+   - Code Scout escalation now carries explicit `review_report_paths`
+10. UI presentation cleanup
+   - correction-family labels are clearer in worker/session UI
+   - operator wording across review lanes is more consistent
+   - artifact log now surfaces internal-review family context
+
+### Partially Completed
+
+1. Artifact/history lookup migration
+   - some downstream flows now use metadata-first lookup
+   - other code paths still depend on concrete artifact types
+2. UI/operator review-family presentation
+   - artifact panel and operator wording are improved
+   - broader review-family navigation/filtering is still pending
+
+### Not Started
+
+1. Unified `Evidence` / `Suggested approach` / `Test expectations` handling
+   - current structured contract covers the most important fields
+   - optional sections are not yet standardized across both lanes
+2. Shared correction/operator flow for multi-lane findings
+   - reviewer and scout are closer, but not yet fully abstracted as one review subsystem
+3. Metrics / rollout instrumentation for review-lane quality
+   - no explicit counters yet for:
+     - repeat blocked cycles
+     - correction-loop convergence
+     - finding reuse quality
+
+### Current Recommended Next Steps
+
+1. Finish metadata-first review-family lookup
+   - remove more direct dependency on:
+     - `self_review_report_markdown`
+     - `boy_scout_report_markdown`
+     - `boy_scout_actionable_markdown`
+   - keep compatibility fallbacks until old history can be ignored
+2. Standardize optional structured sections
+   - `Evidence`
+   - `Suggested approach`
+   - `Test expectations`
+3. Unify operator/correction handling further
+   - continue reducing lane-specific branching where reviewer and Code Scout now share equivalent semantics
+4. Add explicit success metrics
+   - repeated-cycle rate
+   - operator-escalation clarity
+   - correction convergence after first reroute
+
 ## Unified Finding Contract
 
 Both `code-reviewer` and `code-scout` should use the same finding structure when issues exist.
