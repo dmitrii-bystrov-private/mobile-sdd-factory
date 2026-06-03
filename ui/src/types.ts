@@ -101,6 +101,8 @@ export type InteractiveStateSummary = {
   details: string | null;
   sourceEventType: string | null;
   sourceReason: string | null;
+  reviewFamily: string | null;
+  reviewLane: string | null;
   needsOperatorInput: boolean;
   resumeStrategy: string | null;
 };

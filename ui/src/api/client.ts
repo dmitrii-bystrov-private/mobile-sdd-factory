@@ -206,6 +206,8 @@ export const apiClient = {
     details: string | null;
     source_event_type: string | null;
     source_reason: string | null;
+    review_family: string | null;
+    review_lane: string | null;
     needs_operator_input: boolean;
     resume_strategy: string | null;
   }> {

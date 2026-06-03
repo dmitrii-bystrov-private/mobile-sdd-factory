@@ -544,6 +544,8 @@ class CoordinatorService:
                 "details": None,
                 "source_event_type": None,
                 "source_reason": None,
+                "review_family": None,
+                "review_lane": None,
                 "needs_operator_input": False,
                 "resume_strategy": None,
             }
@@ -586,10 +588,13 @@ class CoordinatorService:
                 "details": None,
                 "source_event_type": None,
                 "source_reason": None,
+                "review_family": None,
+                "review_lane": None,
                 "needs_operator_input": False,
                 "resume_strategy": None,
             }
 
+        review_family, review_lane = self._interactive_review_context(source_event.payload)
         return {
             "available": True,
             "role_name": source_event.payload.get("role_name"),
@@ -598,9 +603,24 @@ class CoordinatorService:
             "details": source_event.payload.get("details"),
             "source_event_type": source_event.event_type,
             "source_reason": source_event.payload.get("reason"),
+            "review_family": review_family,
+            "review_lane": review_lane,
             "needs_operator_input": self._payload_truthy(source_event.payload.get("needs_operator_input")),
             "resume_strategy": source_event.payload.get("resume_strategy"),
         }
+
+    def _interactive_review_context(self, payload: object) -> tuple[str | None, str | None]:
+        if not isinstance(payload, dict):
+            return None, None
+        review_lane = str(payload.get("review_lane") or "").strip()
+        if review_lane:
+            return "internal_review", review_lane
+        reason = str(payload.get("reason") or "").strip()
+        if reason == "self_review_cycle":
+            return "internal_review", "self_review"
+        if reason == "boy_scout_findings":
+            return "internal_review", "code_scout"
+        return None, None
 
     def _payload_truthy(self, value: object) -> bool:
         if isinstance(value, bool):

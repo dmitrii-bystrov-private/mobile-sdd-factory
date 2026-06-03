@@ -41,7 +41,8 @@ export function InteractiveStatePanel({
 
   if (
     !interactiveStateSummary.needsOperatorInput &&
-    interactiveStateSummary.sourceReason === "boy_scout_findings"
+    interactiveStateSummary.reviewFamily === "internal_review" &&
+    interactiveStateSummary.reviewLane === "code_scout"
   ) {
     return null;
   }
@@ -49,7 +50,9 @@ export function InteractiveStatePanel({
   const summaryText = interactiveStateSummary.summary?.trim() ?? "";
   const detailsText = interactiveStateSummary.details?.trim() ?? "";
   const suppressSummaryForCycleBlocker =
-    interactiveStateSummary.sourceReason === "self_review_cycle" && detailsText.length > 0;
+    interactiveStateSummary.reviewFamily === "internal_review" &&
+    interactiveStateSummary.reviewLane === "self_review" &&
+    detailsText.length > 0;
   const showSummary = summaryText.length > 0 && !suppressSummaryForCycleBlocker;
   const showDetails = detailsText.length > 0 && detailsText !== summaryText;
   const isProtocolViolation = interactiveStateSummary.sourceReason === "role_result_protocol_violation";

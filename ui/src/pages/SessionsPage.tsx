@@ -215,6 +215,8 @@ async function buildInteractiveStateSummary(
     details: response.details,
     sourceEventType: response.source_event_type,
     sourceReason: response.source_reason,
+    reviewFamily: response.review_family,
+    reviewLane: response.review_lane,
     needsOperatorInput: response.needs_operator_input,
     resumeStrategy: response.resume_strategy,
   };

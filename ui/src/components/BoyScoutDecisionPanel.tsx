@@ -23,12 +23,14 @@ export function BoyScoutDecisionPanel({
   const canSkip =
     session.current_stage === "boy_scout_requested" &&
     session.status === "waiting_for_operator" &&
-    interactiveStateSummary?.sourceReason === "boy_scout_findings" &&
+    interactiveStateSummary?.reviewFamily === "internal_review" &&
+    interactiveStateSummary?.reviewLane === "code_scout" &&
     session.policy["boy_scout_policy"] === "enabled";
   const canResolve =
     session.current_stage === "boy_scout_requested" &&
     session.status === "waiting_for_operator" &&
-    interactiveStateSummary?.sourceReason === "boy_scout_findings";
+    interactiveStateSummary?.reviewFamily === "internal_review" &&
+    interactiveStateSummary?.reviewLane === "code_scout";
 
   if (!canSkip && !canResolve) {
     return null;
