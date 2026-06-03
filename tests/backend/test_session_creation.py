@@ -2781,6 +2781,32 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("previous_review_report_paths", sent_inputs[-1])
         self.assertIn("review_report_path", sent_inputs[-1])
 
+    def test_previous_self_review_report_paths_accept_internal_review_metadata(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RMETA",
+            workflow_profile="oneshot",
+            policy={"self_review_policy": "enabled"},
+        )
+        review_dir = Path(self.temp_dir.name) / "IOS-30003RMETA" / "review"
+        review_dir.mkdir(parents=True, exist_ok=True)
+        custom_report = review_dir / "pass-custom.md"
+        custom_report.write_text("REVIEW_RESULT: issues_found\n", encoding="utf-8")
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="self-review",
+            artifact_type="custom_internal_review_report",
+            path=str(custom_report),
+            metadata={
+                "report_family": "internal_review",
+                "review_lane": "self_review",
+                "artifact_role": "report",
+            },
+        )
+
+        paths = self.coordinator._previous_self_review_report_paths(session.id)  # noqa: SLF001
+
+        self.assertEqual([str(custom_report)], paths)
+
     def test_bug_analysis_completed_moves_session_to_implementation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003BUG",
@@ -9409,6 +9435,37 @@ class SessionCreationTests(unittest.TestCase):
         scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
         assert scout_role is not None
         self.assertEqual(RoleStatus.RUNNING, scout_role.status)
+
+    def test_code_scout_correction_hydration_accepts_internal_review_metadata(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021BSMETA",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSMETA" / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        actionable_path = spec_dir / "code-scout-actionable-v2.md"
+        actionable_path.write_text("# Extract helper\n", encoding="utf-8")
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="code-scout",
+            artifact_type="custom_internal_review_actionable",
+            path=str(actionable_path),
+            metadata={
+                "report_family": "internal_review",
+                "review_lane": "code_scout",
+                "artifact_role": "actionable",
+            },
+        )
+
+        hydration = self.coordinator._correction_dispatch_hydration(  # noqa: SLF001
+            session.id,
+            "boy_scout_correction_requested",
+        )
+
+        self.assertEqual("code_scout", hydration["correction_source"])
+        self.assertEqual(str(actionable_path), hydration["correction_report_path"])
+        self.assertEqual(str(actionable_path), hydration["issues_file_path"])
 
     def test_boy_scout_findings_can_be_skipped_into_verification(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

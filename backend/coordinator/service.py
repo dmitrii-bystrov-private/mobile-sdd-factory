@@ -5809,7 +5809,12 @@ class CoordinatorService:
             stage_name="boy-scout",
             artifact_type="boy_scout_actionable_markdown",
             path=str(actionable_findings_path),
-            metadata={"source_event_id": source_event.id},
+            metadata={
+                "source_event_id": source_event.id,
+                "report_family": "internal_review",
+                "review_lane": "code_scout",
+                "artifact_role": "actionable",
+            },
         )
         session = self.session_repository.update_stage_and_owner(
             session.id,
@@ -7343,12 +7348,12 @@ class CoordinatorService:
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
 
     def _previous_self_review_report_paths(self, session_id: int) -> list[str]:
-        paths: list[str] = []
-        for artifact in self.artifact_repository.list_for_session(session_id):
-            if artifact.artifact_type != "self_review_report_markdown":
-                continue
-            paths.append(artifact.path)
-        return paths
+        return self._internal_review_artifact_paths(
+            session_id,
+            review_lane="self_review",
+            artifact_role="report",
+            fallback_artifact_types={"self_review_report_markdown"},
+        )
 
     def _latest_artifact_path(
         self,
@@ -7489,11 +7494,15 @@ class CoordinatorService:
         config_by_stage = {
             "self_review_correction_requested": {
                 "source": "self_review",
-                "artifact_type": "self_review_report_markdown",
+                "review_lane": "self_review",
+                "artifact_role": "report",
+                "fallback_artifact_types": {"self_review_report_markdown"},
             },
             "boy_scout_correction_requested": {
                 "source": "code_scout",
-                "artifact_type": "boy_scout_actionable_markdown",
+                "review_lane": "code_scout",
+                "artifact_role": "actionable",
+                "fallback_artifact_types": {"boy_scout_actionable_markdown"},
             },
             "verification_correction_requested": {
                 "source": "verification",
@@ -7503,12 +7512,23 @@ class CoordinatorService:
         config = config_by_stage.get(stage_name)
         if config is None:
             return {}
-        report_path = self._existing_file_path(
-            self._latest_artifact_path(
-                session_id,
-                str(config["artifact_type"]),
+        report_path = None
+        if "review_lane" in config:
+            report_path = self._existing_file_path(
+                self._latest_internal_review_artifact_path(
+                    session_id,
+                    review_lane=str(config["review_lane"]),
+                    artifact_role=str(config["artifact_role"]),
+                    fallback_artifact_types=set(config["fallback_artifact_types"]),
+                )
             )
-        )
+        else:
+            report_path = self._existing_file_path(
+                self._latest_artifact_path(
+                    session_id,
+                    str(config["artifact_type"]),
+                )
+            )
         return {
             "correction_source": str(config["source"]),
             "correction_report_path": report_path,
@@ -9552,10 +9572,51 @@ class CoordinatorService:
             "source_path": source_path,
             "report_family": "internal_review",
             "review_lane": review_lane,
+            "artifact_role": "outcome",
             "status": status,
             "source_event_id": source_event_id,
             "work_item_id": work_item_id,
         }
+
+    def _internal_review_artifact_paths(
+        self,
+        session_id: int,
+        *,
+        review_lane: str,
+        artifact_role: str,
+        fallback_artifact_types: set[str],
+    ) -> list[str]:
+        paths: list[str] = []
+        for artifact in self.artifact_repository.list_for_session(session_id):
+            metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+            if (
+                str(metadata.get("report_family") or "").strip() == "internal_review"
+                and str(metadata.get("review_lane") or "").strip() == review_lane
+                and str(metadata.get("artifact_role") or "").strip() == artifact_role
+            ):
+                paths.append(artifact.path)
+                continue
+            if artifact.artifact_type in fallback_artifact_types:
+                paths.append(artifact.path)
+        return paths
+
+    def _latest_internal_review_artifact_path(
+        self,
+        session_id: int,
+        *,
+        review_lane: str,
+        artifact_role: str,
+        fallback_artifact_types: set[str],
+    ) -> str | None:
+        latest_path: str | None = None
+        for path in self._internal_review_artifact_paths(
+            session_id,
+            review_lane=review_lane,
+            artifact_role=artifact_role,
+            fallback_artifact_types=fallback_artifact_types,
+        ):
+            latest_path = path
+        return latest_path
 
     def _next_self_review_report_target_path(self, session: Session) -> Path | None:
         if self.workdir_root is None:
