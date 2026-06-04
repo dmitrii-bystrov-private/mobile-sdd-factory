@@ -59,6 +59,13 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _non_negative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be a non-negative integer")
+    return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Write deterministic RESULT.json files for routed role outcomes."
@@ -66,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--work-item-id", required=True, type=_positive_int)
     parser.add_argument("--output-type", default="completed", choices=sorted(OUTPUT_TYPE_CHOICES))
     parser.add_argument("--result")
-    parser.add_argument("--findings-count", type=_positive_int)
+    parser.add_argument("--findings-count", type=_non_negative_int)
     parser.add_argument("--findings-path")
     parser.add_argument("--summary")
     parser.add_argument("--details")
@@ -193,6 +200,8 @@ def _build_code_scout_payload(args: argparse.Namespace) -> dict[str, object]:
             raise ResultWriterError("code-scout findings results require --findings-path")
         if args.findings_count is None:
             raise ResultWriterError("code-scout findings results require --findings-count")
+        if args.findings_count <= 0:
+            raise ResultWriterError("code-scout findings results require a positive --findings-count")
         payload["findings_count"] = args.findings_count
         payload["findings_path"] = findings_path
     return payload

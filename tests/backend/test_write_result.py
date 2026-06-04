@@ -175,6 +175,50 @@ class WriteResultScriptTests(unittest.TestCase):
             self.assertEqual("failed", payload["output_type"])
             self.assertEqual("Issue 1", payload["payload"]["issues_markdown"])
 
+    def test_code_reviewer_passed_result_tolerates_zero_findings_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-reviewer")
+            result = self._run(
+                env,
+                "--work-item-id",
+                str(work_item_id),
+                "--output-type",
+                "passed",
+                "--summary",
+                "No findings in self-review pass.",
+                "--findings-count",
+                "0",
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual("passed", payload["output_type"])
+            self.assertEqual(
+                {
+                    "work_item_id": work_item_id,
+                    "summary": "No findings in self-review pass.",
+                },
+                payload["payload"],
+            )
+
+    def test_code_scout_findings_reject_zero_findings_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, _, work_item_id = self._create_context(temp_dir, role_name="code-scout")
+            result = self._run(
+                env,
+                "--work-item-id",
+                str(work_item_id),
+                "--result",
+                "findings_found",
+                "--findings-count",
+                "0",
+                "--findings-path",
+                "/tmp/findings.md",
+            )
+
+            self.assertEqual(2, result.returncode)
+            self.assertIn("positive --findings-count", result.stderr)
+
     def test_story_planning_blocked_result_can_carry_operator_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env, output_path, work_item_id = self._create_context(
