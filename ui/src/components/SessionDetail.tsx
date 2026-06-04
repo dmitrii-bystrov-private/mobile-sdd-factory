@@ -12,7 +12,7 @@ import {
   workflowProfileDisplayName,
 } from "../sessionDisplay";
 import { stageDisplayName } from "../stageDisplay";
-import type { Role, RuntimeRoleStateSummary, Session, SessionBundle, WorkItem } from "../types";
+import type { Role, RuntimeRoleStateSummary, Session, SessionBundle } from "../types";
 
 type SessionDetailProps = {
   session: Session | null;
@@ -36,84 +36,10 @@ function humanizeEventType(value: string): string {
     .join(" ");
 }
 
-function workTypeSummary(workType: string): string {
-  switch (workType) {
-    case "implementation":
-      return "Implementation work is active.";
-    case "self_review_correction":
-      return "A self-review correction pass is active.";
-    case "boy_scout_correction":
-      return "A Code Scout correction pass is active.";
-    case "verification_correction":
-      return "A verification correction pass is active.";
-    case "correction":
-      return "A correction pass is active.";
-    case "followup":
-      return "Follow-up work is active.";
-    case "verification":
-      return "Verification work is active.";
-    case "review":
-      return "Review work is active.";
-    case "self_review":
-      return "Self-review work is active.";
-    case "boy_scout":
-      return "Code Scout work is active.";
-    default:
-      return `${humanizeEventType(workType)} is active.`;
-  }
-}
-
-function laneSummary(
-  role: Role,
-  workItems: WorkItem[],
-  session: Session,
-): { title: string; body: string } {
-  const ownedWorkItem =
-    workItems.find((item) => item.owner_role_id === role.id && item.status === "active") ??
-    workItems.find((item) => item.owner_role_id === role.id && item.status === "pending") ??
-    null;
-
-  if (ownedWorkItem) {
-    return {
-      title: ownedWorkItem.title,
-      body: workTypeSummary(ownedWorkItem.work_type),
-    };
-  }
-
-  if (session.current_owner === role.role_name) {
-    return {
-      title: `Owning ${stageDisplayName(session.current_stage)}`,
-      body: "This lane currently owns the live workflow stage.",
-    };
-  }
-
-  switch (role.status) {
-    case "running":
-      return {
-        title: roleDescription(role.role_name),
-        body: "This lane is live and ready for its next routed pass.",
-      };
-    case "waiting":
-      return {
-        title: roleDescription(role.role_name),
-        body: "This lane is waiting on upstream progress or operator input.",
-      };
-    case "stopped":
-      return {
-        title: roleDescription(role.role_name),
-        body: "This lane is currently stopped.",
-      };
-    case "completed":
-      return {
-        title: roleDescription(role.role_name),
-        body: "This lane has already finished its current work.",
-      };
-    default:
-      return {
-        title: humanizeEventType(role.status),
-        body: "This lane reported a non-standard runtime state.",
-      };
-  }
+function laneSummary(role: Role): { title: string } {
+  return {
+    title: roleDescription(role.role_name),
+  };
 }
 
 function runtimeConfigSummary(roleName: string, session: Session): string {
@@ -560,7 +486,7 @@ export function SessionDetail({
           {visibleWorkerColumns.map((column, columnIndex) => (
             <div className="workflow-pulse-column" key={`worker-column-${columnIndex}`}>
               {column.map((role) => {
-                const summary = laneSummary(role, bundle.workItems, session);
+                const summary = laneSummary(role);
                 const isActive = activeRoleIds.has(role.id);
                 const runtimeRole = runtimeRoleIndex.get(role.role_name) ?? null;
                 const hasWorkerActions =
