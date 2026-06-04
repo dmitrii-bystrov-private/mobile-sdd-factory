@@ -62,7 +62,10 @@ from backend.tools.snapshot_adapter import SnapshotAdapter
 _CLOSED_JIRA_STATUSES = {"resolved", "done", "closed", "cancelled"}
 _TASK_KEY_PATTERN = re.compile(r"^[A-Z]+-\d+$")
 _EXPLICIT_URL_PATTERN = re.compile(r"https?://[^\s)>\]]+")
-_RUNTIME_ERROR_WORK_ITEM_PATTERN = re.compile(r"\bwork(?:_item_id| item)\s+(\d+)\b", re.IGNORECASE)
+_RUNTIME_ERROR_WORK_ITEM_PATTERN = re.compile(
+    r"(?:--)?work[-_ ]item(?:[-_ ]id)?\s+(\d+)\b",
+    re.IGNORECASE,
+)
 _STORY_PLANNING_WORK_TYPE_BY_STAGE = {
     "proposal_context_requested": "proposal_context",
     "requirements_requested": "requirements",

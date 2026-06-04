@@ -8458,6 +8458,61 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(any(item.artifact_type == "runtime_error_json" for item in artifacts))
         self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(retry_item.id).status)
 
+    def test_collect_role_output_ignores_stale_error_for_cli_work_item_flag(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30014E",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30014E")
+        updated_session, _ = self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.assertEqual("boy_scout_requested", updated_session.current_stage)
+        self.assertEqual("code-scout", updated_session.current_owner)
+
+        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
+        assert scout_role is not None
+        original_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "boy_scout" and item.status == WorkItemStatus.ASSIGNED
+        )
+        self.work_item_repository.update_status(original_item.id, WorkItemStatus.COMPLETED)
+        retry_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="boy_scout",
+            title="Retry Code Scout pass",
+            owner_role_id=scout_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        self.session_backend.simulate_output(
+            scout_role.runtime_handle,
+            (
+                "SDD_ERROR: "
+                '{"summary":"Verification result submission blocked by stage transition",'
+                f'"details":"write-result.sh --work-item-id {original_item.id} now fails with Unsupported role output."}}'
+            ),
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=CODE_SCOUT_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("boy_scout_requested", updated_session.current_stage)
+        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
+        self.assertEqual(CODE_SCOUT_ROLE, updated_session.current_owner)
+        self.assertFalse(any(item.event_type == "role_runtime_error_reported" for item in events))
+        self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
+        self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(retry_item.id).status)
+
     def test_event_bus_receives_published_session_events(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30015")
         self.coordinator.handle_role_output(
