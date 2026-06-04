@@ -62,6 +62,7 @@ from backend.tools.snapshot_adapter import SnapshotAdapter
 _CLOSED_JIRA_STATUSES = {"resolved", "done", "closed", "cancelled"}
 _TASK_KEY_PATTERN = re.compile(r"^[A-Z]+-\d+$")
 _EXPLICIT_URL_PATTERN = re.compile(r"https?://[^\s)>\]]+")
+_RUNTIME_ERROR_WORK_ITEM_PATTERN = re.compile(r"\bwork(?:_item_id| item)\s+(\d+)\b", re.IGNORECASE)
 _STORY_PLANNING_WORK_TYPE_BY_STAGE = {
     "proposal_context_requested": "proposal_context",
     "requirements_requested": "requirements",
@@ -6764,6 +6765,23 @@ class CoordinatorService:
                     )
                     continue
                 if marker_type == "error":
+                    stale_runtime_error = self._stale_runtime_error_mismatch(
+                        session=session,
+                        role=role,
+                        payload=payload,
+                    )
+                    if stale_runtime_error is not None:
+                        self._append_stale_role_output_ignored_once(
+                            session_id=session.id,
+                            payload={
+                                "role_name": role.role_name,
+                                "output_type": "error",
+                                "current_stage": session.current_stage,
+                                "current_owner": session.current_owner,
+                                **stale_runtime_error,
+                            },
+                        )
+                        continue
                     if self._should_ignore_stale_role_output(
                         session=session,
                         role_name=role.role_name,
@@ -7055,6 +7073,41 @@ class CoordinatorService:
             },
         )
         return session
+
+    def _stale_runtime_error_mismatch(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        payload: dict,
+    ) -> dict[str, object] | None:
+        payload_work_item_id = self._runtime_error_payload_work_item_id(payload)
+        if payload_work_item_id is None:
+            return None
+        active_item = self._find_active_work_item_for_role(session.id, role.id)
+        if active_item is None:
+            return None
+        if payload_work_item_id == active_item.id:
+            return None
+        return {
+            "reason": "address_mismatch",
+            "expected_work_item_id": active_item.id,
+            "payload_work_item_id": payload_work_item_id,
+        }
+
+    def _runtime_error_payload_work_item_id(self, payload: dict) -> int | None:
+        direct_value = payload.get("work_item_id")
+        if isinstance(direct_value, int):
+            return direct_value
+        for field in ("details", "summary"):
+            raw_value = payload.get(field)
+            if not isinstance(raw_value, str):
+                continue
+            match = _RUNTIME_ERROR_WORK_ITEM_PATTERN.search(raw_value)
+            if match is None:
+                continue
+            return int(match.group(1))
+        return None
 
     def _reconcile_session_dispatch(self, session: Session) -> bool:
         if session.current_owner is None:

@@ -11,6 +11,9 @@ from typing import Iterator
 class Database:
     """Simple SQLite connection manager for the local backend."""
 
+    _CONNECT_TIMEOUT_SECONDS = 30.0
+    _BUSY_TIMEOUT_MILLISECONDS = 30000
+
     def __init__(self, path: Path) -> None:
         self.path = path
         self.migrations_dir = Path(__file__).resolve().parent / "migrations"
@@ -18,8 +21,13 @@ class Database:
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.path)
+        connection = sqlite3.connect(
+            self.path,
+            timeout=self._CONNECT_TIMEOUT_SECONDS,
+        )
         connection.row_factory = sqlite3.Row
+        connection.execute(f"PRAGMA busy_timeout = {self._BUSY_TIMEOUT_MILLISECONDS}")
+        connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA foreign_keys = ON")
         try:
             yield connection

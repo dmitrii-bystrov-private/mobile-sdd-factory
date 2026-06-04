@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -2363,6 +2364,26 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("verification_requested", response.followup_event_type)
         self.assertEqual("verification_requested", response.session.current_stage)
         self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts_response.items))
+
+    def test_submit_role_result_route_returns_503_for_transient_sqlite_failure(self) -> None:
+        from fastapi import HTTPException
+
+        with patch.object(
+            self.dependencies.coordinator_service,
+            "submit_role_result_document",
+            side_effect=sqlite3.OperationalError("database is locked"),
+        ):
+            with self.assertRaises(HTTPException) as captured:
+                submit_role_result(
+                    SubmitRoleResultRequest(
+                        output_type="completed",
+                        payload={"work_item_id": 999, "summary": "done from ingress"},
+                    ),
+                    dependencies=self.dependencies,
+                )
+
+        self.assertEqual(503, captured.exception.status_code)
+        self.assertIn("Transient backend persistence failure", str(captured.exception.detail))
 
     def test_poll_session_output_route_collects_all_role_chunks(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

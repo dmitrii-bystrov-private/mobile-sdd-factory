@@ -6,6 +6,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BACKEND_HOST="${SDD_FACTORY_BACKEND_HOST:-127.0.0.1}"
 BACKEND_PORT="${SDD_FACTORY_BACKEND_PORT:-8000}"
 BACKEND_BASE="http://${BACKEND_HOST}:${BACKEND_PORT}"
+INGRESS_MAX_ATTEMPTS="${SDD_RESULT_INGRESS_MAX_ATTEMPTS:-4}"
+INGRESS_RETRY_DELAY_SECONDS="${SDD_RESULT_INGRESS_RETRY_DELAY_SECONDS:-1}"
 
 python_cmd() {
   if command -v python3 >/dev/null 2>&1; then
@@ -55,11 +57,32 @@ PY
     return 0
   fi
   cat "${response_file}" >&2 || true
+  if [[ "${http_code}" =~ ^5 ]]; then
+    return 30
+  fi
   return 20
 }
 
 submit_status=0
-submit_via_ingress "$@" || submit_status=$?
+attempt=1
+while true; do
+  submit_status=0
+  submit_via_ingress "$@" || submit_status=$?
+  if [[ "${submit_status}" -eq 0 ]]; then
+    exit 0
+  fi
+  if [[ "${submit_status}" -ne 30 || "${attempt}" -ge "${INGRESS_MAX_ATTEMPTS}" ]]; then
+    break
+  fi
+  echo "SDD_RESULT_INGRESS_RETRY: backend returned 5xx, retrying (${attempt}/${INGRESS_MAX_ATTEMPTS})" >&2
+  sleep "${INGRESS_RETRY_DELAY_SECONDS}"
+  attempt=$((attempt + 1))
+done
+
+if [[ "${submit_status}" -eq 30 ]]; then
+  submit_status=20
+fi
+
 if [[ "${submit_status}" -eq 0 ]]; then
   exit 0
 fi

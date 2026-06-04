@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from backend.api.routes_sessions import to_session_response
@@ -106,6 +108,14 @@ def submit_role_result(
         )
     except IntakeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except sqlite3.OperationalError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Transient backend persistence failure while accepting the terminal role result. "
+                "Retry the same write-result helper call."
+            ),
+        ) from exc
 
     return SubmitRoleResultResponse(
         accepted=True,
