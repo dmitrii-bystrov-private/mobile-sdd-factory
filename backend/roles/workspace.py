@@ -293,6 +293,8 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Read all routed spec inputs before writing code.",
             "- For implementation work, read the task snapshot inputs (`description.md`, `comments.md`, and `spec/diff.md`) when they exist before concluding that no concrete work was routed.",
+            "- When you add or edit tests, follow the existing local test conventions in the touched area instead of inventing new fixture, assertion, naming, or helper patterns.",
+            "- Use the closest existing test file as the reference implementation for structure, setup, and expectations before introducing a new style.",
             "- Use RAG tools first for code exploration; fall back to filesystem search only for structural queries.",
             "- Keep implementation aligned to the routed task or correction scope, but make any adjacent code changes that are necessary to fix the real root cause cleanly and avoid regressions.",
             "- If a routed correction conflicts with already-authoritative product/operator direction or cannot be resolved safely without a fresh operator decision, stop and escalate instead of forcing a local patch.",
@@ -341,6 +343,8 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Structure real findings with enough direction to act: include the finding title or affected file/component, why it matters, required direction, and non-goals when they help keep the fix scoped.",
             "- Read previous review reports first when they are provided and do not re-flag the same issue twice.",
             "- Read only the convention files relevant to the touched diff area; do not broaden the review scope speculatively.",
+            "- When the diff adds or edits tests, verify that the tests follow the existing local test conventions for naming, fixtures, setup, helpers, and assertion style in that area.",
+            "- Treat unnecessary test self-activity or ad-hoc testing patterns as real review findings when they diverge from established project conventions.",
             "- Keep outputs compact and fixer-oriented.",
             "- Do not re-flag issues that were already raised in previous review passes when that context is provided.",
         ]

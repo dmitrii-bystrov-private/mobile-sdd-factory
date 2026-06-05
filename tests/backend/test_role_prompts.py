@@ -93,6 +93,8 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("Always copy `work_item_id` from the hydration payload below", text)
         self.assertIn("If the hydration payload below includes `subtask_key`", text)
         self.assertIn('--subtask-key "IOS-12345"', text)
+        self.assertIn("When you add or edit tests, follow the existing local test conventions", text)
+        self.assertIn("Prefer the closest existing test file as the reference implementation", text)
 
     def test_full_prompt_restores_proposal_context_fetch_and_conflict_rules(self) -> None:
         text = role_handoff_prompt(
@@ -179,6 +181,8 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("why it matters", text)
         self.assertIn("required direction", text)
         self.assertIn("non-goals", text)
+        self.assertIn("When the diff adds or edits tests, verify that the tests follow the existing local test conventions", text)
+        self.assertIn("Treat unnecessary test self-activity or ad-hoc testing patterns as real review findings", text)
         self.assertIn("scripts/run-test.sh", text)
         self.assertIn("scripts/ios-verify.sh", text)
 
