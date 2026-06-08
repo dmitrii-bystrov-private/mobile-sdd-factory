@@ -40,6 +40,39 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { err "Missing required command: $1"; exit 1; }
 }
 
+resolve_mise_cmd() {
+  local repo_dir="$1"
+  if [[ -x "$repo_dir/bin/mise" ]]; then
+    printf '%s\n' "$repo_dir/bin/mise"
+    return 0
+  fi
+  if command -v mise >/dev/null 2>&1; then
+    printf '%s\n' "mise"
+    return 0
+  fi
+  return 1
+}
+
+seed_repo_local_mise() {
+  local source_repo_dir="$1"
+  local target_repo_dir="$2"
+  local source_mise_dir="$source_repo_dir/.mise"
+  local target_mise_dir="$target_repo_dir/.mise"
+
+  if [[ ! -d "$source_mise_dir" || -e "$target_mise_dir" ]]; then
+    return 0
+  fi
+
+  echo "  Seeding repo-local .mise from $source_repo_dir..."
+  if cp -cR "$source_mise_dir" "$target_mise_dir" 2>/dev/null; then
+    echo "  .mise seed: APFS clone OK"
+    return 0
+  fi
+
+  cp -R "$source_mise_dir" "$target_mise_dir"
+  echo "  .mise seed: fallback copy OK"
+}
+
 # 1. Positional argument
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
@@ -279,23 +312,31 @@ fi
 
 if [[ "$PLATFORM" == "ios" ]] && $WORKTREE_CREATED; then
   echo "Running iOS bootstrap in $WORKTREE_PATH..."
+  MISE_CMD=""
+
+  seed_repo_local_mise "$PLATFORM_DIR" "$WORKTREE_PATH"
+
+  if ! MISE_CMD="$(resolve_mise_cmd "$WORKTREE_PATH")"; then
+    err "iOS bootstrap: mise not found (expected $WORKTREE_PATH/bin/mise or a global mise)"
+    exit 1
+  fi
 
   # 1. mise trust
-  if ! (cd "$WORKTREE_PATH" && mise trust); then
+  if ! (cd "$WORKTREE_PATH" && "$MISE_CMD" trust); then
     err "iOS bootstrap: 'mise trust' failed in $WORKTREE_PATH"
     exit 1
   fi
   echo "  mise trust: OK"
 
   # 3. mise install (installs pinned toolchain versions before tuist generate)
-  if ! (cd "$WORKTREE_PATH" && mise install); then
+  if ! (cd "$WORKTREE_PATH" && "$MISE_CMD" install); then
     err "iOS bootstrap: 'mise install' failed in $WORKTREE_PATH"
     exit 1
   fi
   echo "  mise install: OK"
 
   # 4. tuist install (fetches SPM dependencies for this worktree)
-  if ! (cd "$WORKTREE_PATH" && GIT_TERMINAL_PROMPT=0 mise exec -- tuist install); then
+  if ! (cd "$WORKTREE_PATH" && GIT_TERMINAL_PROMPT=0 "$MISE_CMD" exec -- tuist install); then
     err "iOS bootstrap: 'tuist install' failed in $WORKTREE_PATH"
     exit 1
   fi
@@ -316,7 +357,7 @@ if [[ "$PLATFORM" == "ios" ]] && $WORKTREE_CREATED; then
     done < "$WORKTREE_PATH/.env.local"
     echo "  Loaded .env.local for Tuist generation"
   fi
-  if ! (cd "$WORKTREE_PATH" && mise exec -- tuist generate --no-open); then
+  if ! (cd "$WORKTREE_PATH" && "$MISE_CMD" exec -- tuist generate --no-open); then
     err "iOS bootstrap: 'tuist generate' failed in $WORKTREE_PATH"
     exit 1
   fi

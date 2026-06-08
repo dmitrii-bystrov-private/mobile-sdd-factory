@@ -46,6 +46,9 @@ verification_prepare_android_context() {
 
 verification_source_ios_env() {
   local repo_dir="$1"
+  if [[ -d "$repo_dir/bin" ]]; then
+    export PATH="$repo_dir/bin:$PATH"
+  fi
   local loader="$repo_dir/Tools/buildscripts/load-tuist-env.sh"
   if [[ -f "$loader" ]]; then
     # shellcheck source=/dev/null
