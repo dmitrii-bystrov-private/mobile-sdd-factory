@@ -34,16 +34,9 @@ export function InteractiveStatePanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runtimeInput, setRuntimeInput] = useState("");
+  const [skipReason, setSkipReason] = useState("");
 
   if (interactiveStateSummary === null || !interactiveStateSummary.available) {
-    return null;
-  }
-
-  if (
-    !interactiveStateSummary.needsOperatorInput &&
-    interactiveStateSummary.reviewFamily === "internal_review" &&
-    interactiveStateSummary.reviewLane === "code_scout"
-  ) {
     return null;
   }
 
@@ -61,6 +54,9 @@ export function InteractiveStatePanel({
     blockingRoleName !== null
       ? runtimeStateSummary?.roles.find((role) => role.roleName === blockingRoleName) ?? null
       : null;
+  const isCodeScoutDecision =
+    interactiveStateSummary.sourceReason === "boy_scout_findings" &&
+    !interactiveStateSummary.needsOperatorInput;
   const title = interactiveStateSummary.needsOperatorInput
     ? `${roleDisplayName(interactiveStateSummary.roleName)} needs a reply`
     : isProtocolViolation
@@ -108,6 +104,31 @@ export function InteractiveStatePanel({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleCodeScoutResolution(
+    resolution: "implement_now" | "create_tech_debt",
+  ): Promise<void> {
+    await runRecoveryAction(
+      () => apiClient.resolveBoyScoutFindings(sessionId, resolution),
+      resolution === "implement_now" ? "Routing Code Scout findings…" : "Creating tech debt…",
+    );
+  }
+
+  async function handleCodeScoutSkip(event: React.FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const normalizedReason = skipReason.trim();
+    if (normalizedReason.length === 0) {
+      setError("Code Scout skip reason is required");
+      return;
+    }
+    await runRecoveryAction(
+      async () => {
+        await apiClient.skipBoyScout(sessionId, normalizedReason);
+        setSkipReason("");
+      },
+      "Skipping Code Scout…",
+    );
   }
 
   return (
@@ -185,6 +206,53 @@ export function InteractiveStatePanel({
             Send operator reply
           </button>
         </form>
+      ) : null}
+
+      {isCodeScoutDecision ? (
+        <div className="operator-followup-stack interactive-code-scout-actions">
+          <div className="operator-actions-toolbar operator-actions-toolbar-horizontal">
+            <button
+              className="action-button"
+              disabled={busy}
+              onClick={() => void handleCodeScoutResolution("implement_now")}
+              title="Route the actionable Code Scout findings back to the coding lane now."
+              type="button"
+            >
+              Fix in coding lane
+            </button>
+            <button
+              className="action-button"
+              disabled={busy}
+              onClick={() => void handleCodeScoutResolution("create_tech_debt")}
+              title="Create tech-debt follow-up work and continue this run."
+              type="button"
+            >
+              Create tech debt and continue
+            </button>
+          </div>
+
+          <form className="followup-form followup-form-plain" onSubmit={(event) => void handleCodeScoutSkip(event)}>
+            <label className="form-field">
+              <span>Skip reason</span>
+              <textarea
+                className="text-area-input"
+                disabled={busy}
+                onChange={(event) => setSkipReason(event.target.value)}
+                placeholder="Example: Findings acknowledged; continue with final verification and track refactors separately."
+                rows={3}
+                value={skipReason}
+              />
+            </label>
+            <button
+              className="action-button"
+              disabled={busy}
+              title="Skip the optional Code Scout lane for this run and continue with the downstream flow."
+              type="submit"
+            >
+              Skip for this run
+            </button>
+          </form>
+        </div>
       ) : null}
 
       {error ? <p className="error-banner">{error}</p> : null}

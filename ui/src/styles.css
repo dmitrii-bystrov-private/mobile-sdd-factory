@@ -1122,6 +1122,10 @@ input {
   border-top: 0;
 }
 
+.interactive-code-scout-actions {
+  margin-top: var(--space-3);
+}
+
 .completed-followup-stack {
   display: grid;
   gap: var(--space-3);

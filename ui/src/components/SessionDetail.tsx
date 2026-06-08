@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 
 import { apiClient } from "../api/client";
 import { ActiveRuntimeOutputPanel } from "./ActiveRuntimeOutputPanel";
-import { BoyScoutDecisionPanel } from "./BoyScoutDecisionPanel";
 import { CompletedFollowupPanel } from "./CompletedFollowupPanel";
 import { InteractiveStatePanel } from "./InteractiveStatePanel";
 import { OperatorActions } from "./OperatorActions";
@@ -426,12 +425,6 @@ export function SessionDetail({
         runtimeStateSummary={bundle.runtimeStateSummary}
         onRefresh={onRefresh}
         sessionId={session.id}
-      />
-
-      <BoyScoutDecisionPanel
-        interactiveStateSummary={bundle.interactiveStateSummary}
-        onRefresh={onRefresh}
-        session={session}
       />
 
       <CompletedFollowupPanel
