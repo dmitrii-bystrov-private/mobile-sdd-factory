@@ -13,6 +13,17 @@ cd "$REPO_DIR"
 verification_prepare_ios_context "$KEY"
 verification_source_ios_env "$REPO_DIR"
 
+if [[ -z "${TESTING_DEVICE_ID:-}" ]]; then
+  echo "⚠️  TESTING_DEVICE_ID is not set"
+  echo ""
+  echo "  Run the following to find your simulator ID:"
+  echo "  xcrun simctl list devices available | grep iPhone"
+  echo ""
+  echo "  Then add to your ~/.zshrc or ~/.bashrc:"
+  echo "  export TESTING_DEVICE_ID=\"your-device-uuid\""
+  exit 1
+fi
+
 BUILD_LOG="$SDD_IOS_VERIFICATION_LOGS_PATH/build-for-testing.log"
 RESULT_BUNDLE="$SDD_IOS_XCRESULT_ROOT/build-for-testing.xcresult"
 BUILD_MARKER="$SDD_IOS_VERIFICATION_CONTEXT_ROOT/build-for-testing.marker.json"
@@ -36,7 +47,7 @@ echo "⏳ Building for testing with task-local Xcode context..."
 if xcodebuild \
   -workspace Finom-Tuist.xcworkspace \
   -scheme "$SCHEME" \
-  -destination 'generic/platform=iOS Simulator' \
+  -destination "platform=iOS Simulator,id=$TESTING_DEVICE_ID" \
   -derivedDataPath "$SDD_IOS_DERIVED_DATA_PATH" \
   -clonedSourcePackagesDirPath "$SDD_IOS_CLONED_SOURCE_PACKAGES_PATH" \
   -resultBundlePath "$RESULT_BUNDLE" \
