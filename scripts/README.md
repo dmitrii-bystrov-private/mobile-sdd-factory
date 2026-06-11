@@ -158,7 +158,7 @@ Returns the Jira issue type name (e.g. `Story`, `Bug`) for a given key:
 bash scripts/get-issue-type.sh <KEY>
 ```
 
-Prints the type name to stdout. Used by skills to route tasks.
+Prints the type name to stdout. Used by workflow helpers to route tasks.
 
 #### `get-issue-parent.sh`
 
@@ -168,7 +168,7 @@ Resolves the story/bug key for a given issue:
 bash scripts/get-issue-parent.sh <KEY>
 ```
 
-Prints the parent key if `<KEY>` is a subtask/sub-bug, or `<KEY>` itself otherwise. Used by skills to handle subtask inputs gracefully.
+Prints the parent key if `<KEY>` is a subtask/sub-bug, or `<KEY>` itself otherwise. Used by workflow helpers to handle subtask inputs gracefully.
 
 #### `run-build.sh` / `run-test.sh` / `run-lint.sh`
 
@@ -177,7 +177,7 @@ Platform-aware wrappers for building, testing, and linting a task worktree. Dete
 ```bash
 bash scripts/run-test.sh  <KEY>   # default workflow verification gate
 bash scripts/run-lint.sh  <KEY>   # default workflow verification gate
-bash scripts/run-build.sh <KEY>   # legacy/manual wrapper, not part of the default workflow gate
+bash scripts/run-build.sh <KEY>   # manual wrapper, not part of the default workflow gate
 ```
 
 Platform is detected by checking for `Tools/buildscripts/` in `$SDD_WORKDIR/<KEY>/repo/`:

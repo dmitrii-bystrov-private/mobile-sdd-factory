@@ -4,7 +4,7 @@
 
 **Constellation: Agent Runtime** is the current orchestration platform for the mobile SDD workflow. It runs a backend + UI operator surface, launches persistent tmux-backed role runtimes, and drives Jira tasks from snapshot through implementation, review, verification, MR handoff, and send-to-test.
 
-The current implementation supports both Claude and Codex runners, project-local runtime defaults, task cleanup, runtime recovery, and live operator intervention when the workflow genuinely needs a human decision. Legacy slash-command flows still exist as a compatibility surface, but they are no longer the primary product model.
+The current implementation supports both Claude and Codex runners, project-local runtime defaults, task cleanup, runtime recovery, and live operator intervention when the workflow genuinely needs a human decision.
 
 This repository is intentionally specialized for a concrete mobile SDD workflow and a specific iOS/Android/frontend repository layout. It can be reused as a foundation for another workflow or another set of repositories, but it is not a generic drop-in orchestrator. At minimum, expect to adapt the platform bootstrap, build/verification commands, Jira/GitLab helpers, role baselines, and workflow policies to match the target environment.
 
@@ -118,7 +118,7 @@ Human checkpoints still exist, but only where the workflow actually needs a pers
 ## Design Principles
 
 **Orchestrator never touches code.**
-CLAUDE.md instructs Claude to delegate. The main agent is a router, not an implementer. Skills and subagents do the actual work. This separation keeps the orchestrator predictable and the subagents focused.
+The backend routes specialized roles through task-local role contracts. The coordinator is a router, not an implementer, which keeps orchestration predictable and role work focused.
 
 **Self-contained task files.**
 Each `plan/NN-task-name.md` includes all context inline — acceptance criteria, constraints, relevant code snippets. The implementing agent has no access to the spec package. If the task file is complete, the implementation will be correct.
@@ -153,28 +153,6 @@ The current pipeline is composed of specialized long-running or on-demand roles:
 | `verification-coordinator` | Persistent verification lane that runs the workflow gate and can request corrections or block a non-converging verification cycle. |
 | `mr-comments-analyst-worker` | Groups unresolved MR discussions into actionable themes and a follow-up subtask plan. |
 | `doc-harvest-worker` | Produces or updates documentation when the diff justifies it. |
-
----
-
-## Legacy Skill Reference
-
-The legacy slash-command surface still exists only as deprecated compatibility and migration reference:
-
-| Skill | Trigger condition |
-|-------|------------------|
-| `/jira-task <KEY>` | Auto-routes by issue type (Story → `/jira-story`, Bug → `/jira-bug`) |
-| `/jira-story <KEY>` | Full story flow end-to-end |
-| `/jira-bug <KEY>` | Full bug-fix flow end-to-end |
-| `/oneshot <KEY>` | Skip spec/planning — snapshot then implement directly. For small, self-contained tasks. |
-| `/snapshot <KEY>` | Fetch Jira data, create worktree |
-| `/self-review <KEY>` | Run the optional convention-focused diff review as a standalone step; generates a structured diff, calls `code-reviewer`, and routes fixes through `implementer`. |
-| `/final-verification <KEY>` | Run the workflow-level `test + lint` gate as a standalone step; calls `final-verifier`, routes verification fixes through `implementer`, and manages retry attempts. |
-| `/create-mr` | Commit, push, open GitLab MR, and prepare a Slack-ready review message |
-| `/handle-mr-comments <MR>` | Group unresolved MR discussions into plan files and Jira subtasks; can auto-detect the Jira key from the MR when needed |
-| `/send-to-test <KEY>` | Commit local changes and transition the task to "Ready for test" |
-| `/create-task` | Create a new Jira Bug or Story |
-| `/doc-harvest <KEY>` | Create or enrich feature README from structured branch diff (runs automatically at the end of story / bug / oneshot flows when enabled; also available standalone) |
-| `/cleanup` | Remove resolved task workspaces from `$SDD_WORKDIR` |
 
 ---
 
@@ -241,7 +219,7 @@ MCP access is role-scoped for Claude launcher sessions. Built-in baselines curre
 - `implementer` and `bug-fixer`: `ios-rag`, `android-rag`, `frontend-rag`
 - `proposal-context-worker`: `ios-rag`, `android-rag`, `frontend-rag`
 
-Other roles receive an empty scoped MCP config by default. `.claude/settings.json` and `.claude/settings.local.json` may still provide launcher-side permission source material, but legacy `env` entries from those files are not copied into role-scoped worker settings.
+Other roles receive an empty scoped MCP config by default. `.claude/settings.json` and `.claude/settings.local.json` may still provide launcher-side permission source material, but `env` entries from those files are not copied into role-scoped worker settings.
 
 ### Environment variables
 
@@ -343,15 +321,6 @@ From there the UI exposes:
 - environment doctor, bootstrap guidance, and runtime capabilities
 - task cleanup controls
 
-The legacy slash-command entrypoints still exist only as deprecated compatibility entrypoints:
-
-```bash
-/jira-task IOS-1234
-/jira-story IOS-1234
-/jira-bug IOS-1234
-/oneshot IOS-1234
-```
-
 When a workflow writes follow-up artifacts into an existing `plan/` directory and only the newly added files should become Jira subtasks, use selective batch creation:
 
 ```bash
@@ -366,17 +335,6 @@ bash scripts/create-subtasks-batch.sh \
 
 When a task comes back from QA (status: Reopened), resume the normal task flow for that Jira key. The workflow should treat the latest comments as the highest-priority follow-up input instead of routing to a separate dedicated skill.
 
-### Individual steps
-
-Deprecated/manual steps can still be run standalone only when you explicitly need legacy compatibility or migration reference behavior:
-
-```bash
-/snapshot IOS-1234       # re-fetch Jira data
-/create-mr               # open MR from current worktree
-/send-to-test IOS-1234   # transition to QA
-/cleanup                 # remove Resolved workspaces from $SDD_WORKDIR
-```
-
 ### Standalone script toolbox
 
 The repo also exposes direct shell entry points for automation and debugging:
@@ -385,7 +343,7 @@ The repo also exposes direct shell entry points for automation and debugging:
 - `bash scripts/run-supported-tests.sh --live` — include the high-signal live runtime acceptance harnesses
 - `bash scripts/snapshot.sh <KEY>` — fetch Jira data, create/update the task worktree, and refresh snapshot files
 - `bash scripts/run-test.sh <KEY>` / `run-lint.sh <KEY>` — platform-aware wrappers used by the current workflow-level verification gate
-- `bash scripts/run-build.sh <KEY>` — legacy wrapper kept for manual use; no longer part of the default workflow gate
+- `bash scripts/run-build.sh <KEY>` — manual wrapper; no longer part of the default workflow gate
 - `bash scripts/create-mr.sh <KEY>` — push the task branch and open a GitLab MR
 - `bash scripts/send-to-test.sh <KEY>` — transition Jira status to testing-ready after MR handoff
 - `bash scripts/create-issue.sh ...` / `create-subtask.sh ...` / `create-subtasks-batch.sh ...` — Jira creation helpers
@@ -404,17 +362,11 @@ For newly created task worktrees, `scripts/snapshot.sh` also runs platform boots
 backend/          # backend API, coordinator, runtime, repositories, session logic
 factory/          # doctor, cleanup, acceptance harnesses, local stack helpers
 ui/               # operator console frontend
-.claude/
-├── agents/       # legacy agent definitions and role metadata
-├── commands/     # legacy slash-command entry points
-├── hooks/        # assistant runtime hooks
-├── memory/       # persistent Claude memory
-└── skills/       # legacy workflow skills
+.claude/          # Claude launcher settings source material
 tests/            # backend test suite
 scripts/          # bash automation and standalone helpers
 │   └── tests/    # shell regression tests + golden fixtures
 AGENTS.md         # repository-specific coding and workflow rules
-CLAUDE.md         # runner guidance and legacy orchestration context
 README.md         # high-level workflow and setup guide
 index.html        # local static presentation deck for the SDD workflow
 ```
@@ -423,9 +375,7 @@ index.html        # local static presentation deck for the SDD workflow
 
 - [`scripts/README.md`](scripts/README.md) — direct CLI reference for every helper script
 - [`docs/setup.md`](docs/setup.md) — supported setup for the backend/UI/tmux runtime model
-- [`DEVELOPERS_GUIDE.md`](DEVELOPERS_GUIDE.md) — contributor-oriented guide for the supported platform, testing layers, defaults, and legacy boundaries
+- [`DEVELOPERS_GUIDE.md`](DEVELOPERS_GUIDE.md) — contributor-oriented guide for the supported platform, testing layers, and defaults
 - [`docs/operator-guide.md`](docs/operator-guide.md) — practical operator workflow for the supported backend/UI runtime model
 - [`docs/runtime-model.md`](docs/runtime-model.md) — supported session, role, quality-loop, recovery, and cleanup model
-- [`docs/deprecated-surface.md`](docs/deprecated-surface.md) — deprecated slash-command compatibility inventory and retirement criteria
-- [`.claude/skills/README.md`](.claude/skills/README.md) — slash-command catalog and task workspace layout
 - [`AGENTS.md`](AGENTS.md) — repository conventions for contributors and coding agents

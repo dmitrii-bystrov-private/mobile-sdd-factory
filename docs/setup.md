@@ -3,7 +3,6 @@
 This guide describes the supported setup for the current Constellation: Agent Runtime platform.
 
 Use this guide for the backend/UI runtime model.
-Do not treat the deprecated slash-command surface as the primary setup target.
 
 ## Required Tools
 
@@ -66,7 +65,7 @@ Current built-in MCP access is:
 - `proposal-context-worker`: `ios-rag`, `android-rag`, `frontend-rag`
 
 Roles such as Code Reviewer, Code Scout, Verification Coordinator, and Doc Harvest receive an empty scoped MCP config by default.
-Legacy `env` values from `.claude/settings.json` or `.claude/settings.local.json` are not copied into role-scoped worker settings.
+`env` values from `.claude/settings.json` or `.claude/settings.local.json` are not copied into role-scoped worker settings.
 
 If they are unavailable because of authentication, VPN, or network problems, the platform should stop and move the session to `waiting_for_operator` until access is restored.
 
@@ -154,13 +153,3 @@ Supported setup also includes clean lifecycle handling:
 - task runtime residue should be cleaned through the platform cleanup actions
 - closed-task cleanup should use the project cleanup flow
 - acceptance/test residue should stay under project-scoped runtime roots
-
-## Deprecated Surface
-
-The deprecated slash-command compatibility layer may still mention older env-flag patterns or manual flow assumptions.
-
-Use that surface only when you explicitly need legacy compatibility or migration reference material.
-
-See:
-
-- [deprecated-surface.md](deprecated-surface.md)

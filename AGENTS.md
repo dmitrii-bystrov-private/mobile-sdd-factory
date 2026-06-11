@@ -10,7 +10,7 @@ The supported product model is:
 - `scripts/` for direct shell helpers and compatibility automation
 
 Treat the backend/UI/tmux runtime model as the source of truth.
-The `.claude/commands/`, `.claude/skills/`, and `.claude/agents/` trees are a deprecated compatibility surface unless the task explicitly targets that layer.
+`.claude/settings.json` is only launcher-side Claude configuration source material.
 
 ## Project Structure
 
@@ -21,10 +21,8 @@ The `.claude/commands/`, `.claude/skills/`, and `.claude/agents/` trees are a de
 - `scripts/` — direct CLI helpers, snapshot/build/test/lint wrappers, Jira/MR utilities
 - `scripts/tests/` — shell regression tests for script behavior
 - `docs/` — supported platform docs
-- `.claude/` — deprecated slash-command and legacy role reference surface
 
 Add new product behavior to `backend/`, `ui/`, or `factory/` as appropriate.
-Do not add new primary workflow logic to deprecated `.claude/` entrypoints.
 
 ## Key Commands
 Run commands from the repository root.
@@ -82,7 +80,6 @@ General:
 
 - prefer ASCII unless the file already uses Unicode
 - keep generated artifacts deterministic
-- do not mix deprecated compatibility cleanup with supported-path feature work unless the change is explicitly about legacy retirement
 
 ## Testing Expectations
 
@@ -124,5 +121,3 @@ Use concise conventional commits such as:
 - `refactor: ...`
 - `docs: ...`
 - `test: ...`
-
-Do not describe deprecated slash-command behavior as if it were the primary product path.

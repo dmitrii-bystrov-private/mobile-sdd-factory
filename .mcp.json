@@ -11,10 +11,6 @@
     "frontend-rag": {
       "type": "http",
       "url": "https://mcp.finom.world/mcp/frontend"
-    },
-    "notion": {
-      "type": "http",
-      "url": "https://mcp.notion.com/mcp"
-    }    
+    }
   }
 }

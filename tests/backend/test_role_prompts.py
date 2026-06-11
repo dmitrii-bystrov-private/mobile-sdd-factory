@@ -110,7 +110,6 @@ class RolePromptTests(unittest.TestCase):
 
         self.assertIn("Read `description.md` and `comments.md` first; comments take precedence", text)
         self.assertIn("treat external links as operator-provided context references", text)
-        self.assertNotIn("Notion MCP", text)
 
     def test_full_prompt_restores_task_snapshot_path_resolution_rules(self) -> None:
         text = role_handoff_prompt(

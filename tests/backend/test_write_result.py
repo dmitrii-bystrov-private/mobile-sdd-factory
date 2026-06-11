@@ -34,7 +34,7 @@ class WriteResultScriptTests(unittest.TestCase):
         session = sessions.create(
             task_key="IOS-12345",
             current_stage="verification_requested",
-            workflow_profile="legacy",
+            workflow_profile="oneshot",
             policy={},
         )
         role = roles.create(

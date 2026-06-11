@@ -343,7 +343,7 @@ def build_result_document(
     args: argparse.Namespace,
     role_name: str | None = None,
 ) -> dict[str, object]:
-    resolved_role_name = role_name or str(getattr(args, "role", "") or getattr(args, "legacy_role", "")).strip()
+    resolved_role_name = role_name or str(getattr(args, "role", "")).strip()
     if not resolved_role_name:
         raise ResultWriterError("role name is required to build a terminal result document")
     _validate_role_output_type(resolved_role_name, args.output_type)

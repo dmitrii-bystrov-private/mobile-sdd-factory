@@ -1,10 +1,5 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "env": {
-    "BOY_SCOUT_ENABLED": "false",
-    "DOC_HARVEST_ENABLED": "false",
-    "SELF_REVIEW_ENABLED": "false"
-  },
   "permissions": {
     "allow": [
       "Bash(glab *)",

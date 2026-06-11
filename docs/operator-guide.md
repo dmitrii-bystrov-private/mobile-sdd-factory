@@ -3,7 +3,6 @@
 This guide describes the supported day-to-day workflow for the current Constellation: Agent Runtime platform.
 
 Use this document for the backend/UI runtime model.
-Do not use the deprecated slash-command skill surface as the primary operational reference.
 
 ## Primary Entry Point
 
@@ -110,7 +109,7 @@ This is the supported place for:
 
 This is not the same thing as `.claude/settings.json` or `.claude/settings.local.json`.
 Those Claude files are only used as Claude-specific permission/MCP source material for scoped launcher sessions.
-The launcher filters MCP servers and MCP permissions per role, and it does not copy legacy `env` values into worker-local Claude settings.
+The launcher filters MCP servers and MCP permissions per role, and it does not copy `env` values into worker-local Claude settings.
 
 These defaults apply to future sessions.
 Per-session overrides in the session creation form only affect the session being created.
@@ -143,13 +142,3 @@ There are two supported cleanup levels in the UI:
 
 There is also project-level closed-task cleanup automation for definitely closed tasks.
 Forced full cleanup remains an internal emergency seam rather than a normal supported operator action.
-
-## Deprecated Surface
-
-The old slash-command skills remain in the repository only as deprecated compatibility surface and migration reference.
-
-See:
-
-- [deprecated-surface.md](deprecated-surface.md)
-
-Do not use the deprecated surface as the source of truth for current backend/UI runtime behavior.

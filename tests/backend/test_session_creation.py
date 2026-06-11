@@ -1257,13 +1257,13 @@ class SessionCreationTests(unittest.TestCase):
                             "Bash(git status)",
                             "mcp__ios-rag__search",
                             "mcp__frontend-rag__read_file",
-                            "mcp__notion__search",
+                            "mcp__extra-docs__search",
                         ]
                     },
                     "enabledMcpjsonServers": [
                         "ios-rag",
                         "frontend-rag",
-                        "notion",
+                        "extra-docs",
                     ],
                 }
             )
@@ -1274,7 +1274,7 @@ class SessionCreationTests(unittest.TestCase):
                     "mcpServers": {
                         "ios-rag": {"type": "http", "url": "https://example.com/ios"},
                         "frontend-rag": {"type": "http", "url": "https://example.com/frontend"},
-                        "notion": {"type": "http", "url": "https://example.com/notion"},
+                        "extra-docs": {"type": "http", "url": "https://example.com/extra-docs"},
                     }
                 }
             )
@@ -1315,7 +1315,7 @@ class SessionCreationTests(unittest.TestCase):
                     "model: sonnet",
                     "effort: medium",
                     "mcpServers:",
-                    "  - notion",
+                    "  - extra-docs",
                     "---",
                     "",
                 ]
@@ -2961,7 +2961,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Read `description.md` and `comments.md`", sent_inputs[0])
         self.assertIn("comments take precedence over description when they conflict", sent_inputs[0])
         self.assertIn("treat external links as operator-provided context references", sent_inputs[0])
-        self.assertNotIn("Notion MCP", sent_inputs[0])
         self.assertIn("Role-specific rules:", sent_inputs[0])
         launch_script = (
             Path(self.temp_dir.name)
@@ -2988,7 +2987,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("bounded one-shot worker", proposal_agents)
         self.assertIn("comments.md` as the fresher source", proposal_agents)
         self.assertIn("operator-provided context references rather than mandatory fetched inputs", proposal_agents)
-        self.assertNotIn("Notion MCP", proposal_agents)
         self.assertIn("SDD_FACTORY_ROLE_LIFECYCLE=one-shot", launch_script_text)
         self.assertIn("lifecycle=%s", launch_script_text)
 

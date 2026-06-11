@@ -19,7 +19,7 @@ The supported platform is the backend/UI/tmux runtime model:
 - `factory/` owns doctor, cleanup, local stack helpers, and acceptance harnesses
 - `scripts/` remains useful for direct helpers and compatibility automation
 
-The `.claude/` tree is deprecated compatibility surface unless you are explicitly working on legacy retirement or migration support.
+`.claude/settings.json` remains Claude launcher source material only; supported role contracts live in backend code.
 
 ## Directory Map
 
@@ -31,7 +31,7 @@ tests/backend/          backend regression suite
 scripts/                direct shell helpers and wrappers
 scripts/tests/          shell regression tests
 docs/                   supported platform documentation
-.claude/                deprecated compatibility surface
+.claude/settings.json   Claude launcher permission source material
 ```
 
 ## Local Development Loop
@@ -128,7 +128,6 @@ backend/role_baselines.py
 ```
 
 This is the current supported source of truth for default role baselines used by backend and UI.
-Do not reintroduce `.claude/agents/*.md` as the baseline source.
 Role baselines also own built-in MCP visibility for Claude launcher sessions. Keep MCP server lists scoped to roles that actually need those tools; `.claude/settings*.json` is only filtered launcher source material, not the baseline authority.
 
 ## Acceptance Runtime Defaults
@@ -182,17 +181,3 @@ If you change supported behavior, keep these aligned:
 - `docs/setup.md`
 - `docs/operator-guide.md`
 - `docs/runtime-model.md`
-
-If behavior is only deprecated compatibility, document it under:
-
-- `docs/deprecated-surface.md`
-
-## When To Touch Legacy Surface
-
-Touch `.claude/` only when:
-
-- fixing compatibility drift that still matters
-- marking remaining legacy material as deprecated
-- preparing final retirement/removal
-
-Do not add new primary workflow capabilities there.

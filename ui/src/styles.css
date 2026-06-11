@@ -1249,6 +1249,15 @@ input {
   gap: var(--space-3);
 }
 
+.doctor-issue-section {
+  margin-top: var(--space-4);
+  gap: var(--space-3);
+}
+
+.doctor-issue-section > .eyebrow {
+  margin: 0;
+}
+
 .artifact-card {
   display: grid;
   gap: var(--space-3);

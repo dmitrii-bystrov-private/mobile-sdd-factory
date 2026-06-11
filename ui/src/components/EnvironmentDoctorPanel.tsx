@@ -79,10 +79,10 @@ export function EnvironmentDoctorPanel({
         </div>
       ) : (
         <>
-          <div className="artifact-stack">
-            <p className="eyebrow">Required Attention</p>
-            {requiredIssues.length > 0 ? (
-              requiredIssues.map((check) => (
+          {requiredIssues.length > 0 ? (
+            <div className="artifact-stack doctor-issue-section">
+              <p className="eyebrow">Required Attention</p>
+              {requiredIssues.map((check) => (
                 <article className="artifact-card" key={check.id}>
                   <div className="artifact-meta">
                     <span>{check.category}</span>
@@ -91,13 +91,11 @@ export function EnvironmentDoctorPanel({
                   <p className="artifact-path">{check.details}</p>
                   {check.hint ? <p className="path-label">Do next: {check.hint}</p> : null}
                 </article>
-              ))
-            ) : (
-              <p className="path-label">No required issues are currently blocking the environment.</p>
-            )}
-          </div>
+              ))}
+            </div>
+          ) : null}
 
-          <div className="artifact-stack">
+          <div className="artifact-stack doctor-issue-section">
             <p className="eyebrow">Optional Warnings</p>
             {optionalIssues.length > 0 ? (
               optionalIssues.map((check) => (
