@@ -638,7 +638,7 @@ class TmuxSessionBackend(SessionBackend):
                 if (
                     candidate
                     and re.fullmatch(r"[a-z0-9][a-z0-9_-]*", candidate)
-                    and ("-" in candidate or candidate == "notion")
+                    and "-" in candidate
                 ):
                     server_names.add(candidate)
         if not server_names:

@@ -62,5 +62,5 @@ class RuntimeCapabilitiesTests(unittest.TestCase):
         self.assertEqual(["low", "medium", "high", "xhigh"], codex_runner["models"][0]["supported_efforts"])
         proposal_context = next(item for item in report["role_defaults"] if item["role_name"] == "proposal-context-worker")
         spec_verifier = next(item for item in report["role_defaults"] if item["role_name"] == "spec-verifier-worker")
-        self.assertEqual(["notion", "ios-rag", "android-rag", "frontend-rag"], proposal_context["mcp_servers"])
+        self.assertEqual(["ios-rag", "android-rag", "frontend-rag"], proposal_context["mcp_servers"])
         self.assertEqual("opus", spec_verifier["model"])

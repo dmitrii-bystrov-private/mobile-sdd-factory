@@ -1,16 +1,26 @@
 # Terminal Result Contract
 
-This document fixes the minimum deterministic contract for role `RESULT.json` files.
+This document fixes the minimum deterministic contract for routed role terminal results.
 
 The goal is simple:
 - orchestration must depend only on a small structured payload
 - markdown reports, summaries, and console output stay human-facing
-- roles should not hand-assemble large JSON objects when only a few fields drive state transitions
+- roles should not hand-assemble JSON objects when only a few fields drive state transitions
 - `work_item_id` should be the only coordinator-owned context key a role needs for terminal submission
 
 ## General Rules
 
-Every terminal result file must be a single valid JSON object:
+Roles submit terminal outcomes through the deterministic helper:
+
+```bash
+bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh" --work-item-id <work_item_id> ...
+```
+
+The helper builds the structured result document, validates the role-specific contract, resolves the canonical role/workspace context from `work_item_id`, and submits it to the backend `/roles/submit-result` ingress.
+The backend records the accepted document as a `role_result_json` artifact.
+Worker-local `runtime/role-workspaces/<role>/RESULT.json` files are compatibility input files for older or interrupted sessions; roles should not create them manually.
+
+The canonical submitted document has this shape:
 
 ```json
 {
@@ -27,10 +37,12 @@ Universal required fields:
 - `payload.work_item_id`
 
 Universal rules:
-- `RESULT.json` is the only terminal state input for orchestration.
+- `scripts/write-result.sh` is the supported terminal submission path.
+- roles must not write `RESULT.json` manually or call `scripts/write-result.py` directly.
 - Free-form console output, `summary`, markdown files, and telemetry never decide state transitions.
 - Role-specific reports such as `spec/final-verification.md`, `spec/findings.md`, and review markdown stay derivative artifacts.
 - Extra payload fields are allowed only when they are part of a documented role contract.
+- If helper submission fails with a backend transport error, stop and escalate; do not retry by manually creating `RESULT.json`.
 
 ## Output Types
 
@@ -225,7 +237,19 @@ Useful but derivative:
 - `issues_markdown`
 - report file paths
 
-The routed review markdown file is still required as an artifact, but orchestration does not need it inside `RESULT.json`.
+The routed review markdown file is still required as an artifact, but orchestration does not require the markdown body inline.
+If markdown must be submitted in the payload, prefer:
+
+```bash
+bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh" \
+  --work-item-id 210 \
+  --output-type failed \
+  --summary "review issues found" \
+  --issues-markdown-file review/pass-01.md
+```
+
+Use `--issues-markdown-file` for markdown that contains backticks, parentheses, shell-sensitive characters, or paths with spaces.
+Do not pass both `--issues-markdown` and `--issues-markdown-file`.
 
 ### Story Planning Workers
 
@@ -369,7 +393,7 @@ Example:
 }
 ```
 
-## Fields That Should Move Out Of RESULT.json
+## Fields That Should Stay Out Of Terminal Payloads
 
 These fields are often useful for humans or artifacts, but they should not be required for terminal routing:
 - long prose summaries
@@ -384,9 +408,7 @@ Keep those in dedicated files under `spec/`, `review/`, `plan/`, or task-local v
 
 ## Next Migration Step
 
-To make this contract deterministic in practice:
-- roles should stop writing JSON manually
-- a shared writer helper should resolve role and canonical output path from `work_item_id`
-- prompts should ask roles for the minimum fields only and invoke the helper with `--work-item-id`
+The supported path is already the shared writer helper plus backend ingress.
+Remaining compatibility collection of runtime-authored `RESULT.json` files exists only so older or interrupted sessions can be recovered.
 
-This document defines the target schema for that helper migration.
+New role guidance, tests, and runtime work should treat helper submission as the product behavior.

@@ -6,6 +6,38 @@
 
 The current implementation supports both Claude and Codex runners, project-local runtime defaults, task cleanup, runtime recovery, and live operator intervention when the workflow genuinely needs a human decision. Legacy slash-command flows still exist as a compatibility surface, but they are no longer the primary product model.
 
+This repository is intentionally specialized for a concrete mobile SDD workflow and a specific iOS/Android/frontend repository layout. It can be reused as a foundation for another workflow or another set of repositories, but it is not a generic drop-in orchestrator. At minimum, expect to adapt the platform bootstrap, build/verification commands, Jira/GitLab helpers, role baselines, and workflow policies to match the target environment.
+
+---
+
+## Quick Start
+
+From the repository root, start the supported local operator stack:
+
+```bash
+bash factory/open-local-ui.sh
+```
+
+This starts both the backend API and the Vite UI, waits until the UI is ready, opens the operator console in your browser, and keeps both processes attached until you press `Ctrl+C`.
+
+If you want to start backend + UI without opening a browser:
+
+```bash
+bash factory/run-local-stack.sh
+```
+
+Default local URLs:
+
+- backend API: `http://127.0.0.1:8000`
+- operator UI: `http://127.0.0.1:4173`
+
+Useful aliases:
+
+```bash
+bash scripts/dev.sh ui      # same as factory/open-local-ui.sh
+bash scripts/dev.sh stack   # same as factory/run-local-stack.sh
+```
+
 ---
 
 ## The Core Idea
@@ -204,6 +236,13 @@ For subtasks: there is no separate `repo/`; they reuse the parent issue's worktr
 
 For codebase semantic search, the `ios-rag`, `android-rag`, and `frontend-rag` MCP servers should be available in the runner environment. The operator console exposes Environment Doctor, Bootstrap Guidance, and Runtime Capabilities to make missing setup visible before sessions start.
 
+MCP access is role-scoped for Claude launcher sessions. Built-in baselines currently expose codebase MCP servers only to roles that need code exploration:
+
+- `implementer` and `bug-fixer`: `ios-rag`, `android-rag`, `frontend-rag`
+- `proposal-context-worker`: `ios-rag`, `android-rag`, `frontend-rag`
+
+Other roles receive an empty scoped MCP config by default. `.claude/settings.json` and `.claude/settings.local.json` may still provide launcher-side permission source material, but legacy `env` entries from those files are not copied into role-scoped worker settings.
+
 ### Environment variables
 
 Set these in `.claude/.env` (or your shell profile):
@@ -287,7 +326,12 @@ To launch the local backend/UI stack and open the operator console in a browser:
 
 ```bash
 bash factory/open-local-ui.sh
-bash scripts/dev.sh ui
+```
+
+To keep the stack attached without opening a browser:
+
+```bash
+bash factory/run-local-stack.sh
 ```
 
 From there the UI exposes:
@@ -351,6 +395,8 @@ The repo also exposes direct shell entry points for automation and debugging:
 - `bash scripts/cleanup.sh` — remove resolved workspaces from `$SDD_WORKDIR`
 
 Detailed CLI usage lives in [`scripts/README.md`](scripts/README.md).
+
+For newly created task worktrees, `scripts/snapshot.sh` also runs platform bootstrap. It seeds heavy iOS and Android dependency directories such as iOS `.mise`, `Tuist/.build`, `Pods`, and Android `.gradle` with APFS copy-on-write when available before running the platform install/generate commands.
 
 ## Project Layout
 

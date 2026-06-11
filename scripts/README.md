@@ -69,8 +69,8 @@ bash scripts/snapshot.sh <PARENT-KEY>
 1. Fetches Jira data (parent + subtasks) and renders ADF descriptions/comments to Markdown.
 2. Creates a git worktree at `$SDD_WORKDIR/<KEY>/repo/` on `feature/<KEY>` (or `bugfix/<KEY>` for Bug type). Skips creation if the worktree already exists.
 3. Runs platform bootstrap for new worktrees:
-   - **iOS** (`IOS_DIR`): symlinks `swift_format`, runs `mise trust`, `mise install`, `tuist install`, `tuist generate`, `pod install`.
-   - **Android** (`ANDROID_DIR`): copies `.gradle`, symlinks `local.properties`, then runs `./gradlew clean`.
+   - **iOS** (`IOS_DIR`): seeds repo-local `.mise`, `Tuist/.build`, and `Pods` with APFS copy-on-write when available, then runs `mise trust`, `mise install`, `tuist install`, `tuist generate`, `pod install`.
+   - **Android** (`ANDROID_DIR`): seeds `.gradle` with APFS copy-on-write when available, symlinks `local.properties`, then runs `./gradlew clean`.
 4. Transitions the task to **In Progress** only for Bugs currently in **To Do**.
 5. Writes snapshot artifacts:
 

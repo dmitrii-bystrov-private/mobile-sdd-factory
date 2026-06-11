@@ -61,6 +61,7 @@ from backend.tools.snapshot_adapter import SnapshotAdapter
 
 _CLOSED_JIRA_STATUSES = {"resolved", "done", "closed", "cancelled"}
 _TASK_KEY_PATTERN = re.compile(r"^[A-Z]+-\d+$")
+_INLINE_TASK_KEY_PATTERN = re.compile(r"\b[A-Z]+-\d+\b")
 _EXPLICIT_URL_PATTERN = re.compile(r"https?://[^\s)>\]]+")
 _RUNTIME_ERROR_WORK_ITEM_PATTERN = re.compile(
     r"(?:--)?work[-_ ]item(?:[-_ ]id)?\s+(\d+)\b",
@@ -612,18 +613,32 @@ class CoordinatorService:
             }
 
         review_family, review_lane = self._interactive_review_context(source_event.payload)
+        details = source_event.payload.get("details")
+        implement_now_count = source_event.payload.get("implement_now_count")
+        tech_debt_candidate_count = source_event.payload.get("tech_debt_candidate_count")
+        if source_event.payload.get("reason") == "boy_scout_findings":
+            implement_now_findings, tech_debt_findings = self._classify_boy_scout_findings(session)
+            if implement_now_findings or tech_debt_findings:
+                details = self._render_boy_scout_operator_details(
+                    implement_now_findings=implement_now_findings,
+                    tech_debt_findings=tech_debt_findings,
+                )
+                implement_now_count = len(implement_now_findings)
+                tech_debt_candidate_count = len(tech_debt_findings)
         return {
             "available": True,
             "role_name": source_event.payload.get("role_name"),
             "current_stage": source_event.payload.get("current_stage", session.current_stage),
             "summary": source_event.payload.get("summary") or source_event.payload.get("reason"),
-            "details": source_event.payload.get("details"),
+            "details": details,
             "source_event_type": source_event.event_type,
             "source_reason": source_event.payload.get("reason"),
             "review_family": review_family,
             "review_lane": review_lane,
             "needs_operator_input": self._payload_truthy(source_event.payload.get("needs_operator_input")),
             "resume_strategy": source_event.payload.get("resume_strategy"),
+            "implement_now_count": implement_now_count,
+            "tech_debt_candidate_count": tech_debt_candidate_count,
         }
 
     def _interactive_review_context(self, payload: object) -> tuple[str | None, str | None]:
@@ -2848,12 +2863,32 @@ class CoordinatorService:
             and output_type in {"passed", "completed", "failed", "blocked_review_cycle", "error"}
             and session.current_owner != CODE_REVIEWER_ROLE
         ):
+            payload_work_item_id = output_payload.get("work_item_id") if isinstance(output_payload, dict) else None
+            if isinstance(payload_work_item_id, int):
+                matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
+                if (
+                    matching_item is not None
+                    and matching_item.session_id == session.id
+                    and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+                    and matching_item.work_type == "self_review"
+                ):
+                    return False
             return True
         if (
             role_name == CODE_SCOUT_ROLE
             and output_type in {"passed", "completed", "skipped_not_needed", "error"}
             and session.current_owner != CODE_SCOUT_ROLE
         ):
+            payload_work_item_id = output_payload.get("work_item_id") if isinstance(output_payload, dict) else None
+            if isinstance(payload_work_item_id, int):
+                matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
+                if (
+                    matching_item is not None
+                    and matching_item.session_id == session.id
+                    and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+                    and matching_item.work_type == "boy_scout"
+                ):
+                    return False
             return True
         if (
             role_name == DOC_HARVEST_ROLE
@@ -3533,6 +3568,13 @@ class CoordinatorService:
 
     def _resume_paused_session(self, session: Session) -> tuple[Session, Event, Event]:
         if session.current_owner is None:
+            pending_work_item = self._find_operator_pending_work_item(session.id)
+            if pending_work_item is not None:
+                waiting_session = self.session_repository.update_status(
+                    session.id,
+                    SessionStatus.WAITING_FOR_OPERATOR,
+                )
+                return self._resume_waiting_session(waiting_session)
             raise IntakeError(
                 f"Paused session {session.id} has no current owner and cannot be resumed"
             )
@@ -7085,11 +7127,15 @@ class CoordinatorService:
         payload: dict,
     ) -> dict[str, object] | None:
         payload_work_item_id = self._runtime_error_payload_work_item_id(payload)
-        if payload_work_item_id is None:
-            return None
         active_item = self._find_active_work_item_for_role(session.id, role.id)
         if active_item is None:
             return None
+        if payload_work_item_id is None:
+            return self._stale_runtime_error_subtask_mismatch(
+                session=session,
+                active_item=active_item,
+                payload=payload,
+            )
         if payload_work_item_id == active_item.id:
             return None
         return {
@@ -7111,6 +7157,41 @@ class CoordinatorService:
                 continue
             return int(match.group(1))
         return None
+
+    def _stale_runtime_error_subtask_mismatch(
+        self,
+        *,
+        session: Session,
+        active_item: WorkItem,
+        payload: dict,
+    ) -> dict[str, object] | None:
+        if active_item.work_type != "subtask_implementation":
+            return None
+        expected_subtask_key = self._parse_subtask_work_item_title(active_item.title)["key"]
+        if expected_subtask_key is None:
+            return None
+
+        payload_task_keys = self._runtime_error_payload_task_keys(payload)
+        candidate_subtask_keys = sorted(key for key in payload_task_keys if key != session.task_key)
+        if not candidate_subtask_keys or expected_subtask_key in candidate_subtask_keys:
+            return None
+
+        return {
+            "reason": "subtask_key_mismatch",
+            "expected_work_item_id": active_item.id,
+            "payload_work_item_id": None,
+            "expected_subtask_key": expected_subtask_key,
+            "payload_subtask_keys": candidate_subtask_keys,
+        }
+
+    def _runtime_error_payload_task_keys(self, payload: dict) -> set[str]:
+        task_keys: set[str] = set()
+        for field in ("summary", "details", "missing_input", "pending_decision"):
+            raw_value = payload.get(field)
+            if not isinstance(raw_value, str):
+                continue
+            task_keys.update(_INLINE_TASK_KEY_PATTERN.findall(raw_value))
+        return task_keys
 
     def _reconcile_session_dispatch(self, session: Session) -> bool:
         if session.current_owner is None:
@@ -7474,10 +7555,16 @@ class CoordinatorService:
         reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
         if reviewer_role is None:
             raise IntakeError("Code reviewer role is missing for the session")
-        active_item = self._find_active_work_item_for_role(session.id, reviewer_role.id)
-        if active_item is None or active_item.work_type not in {"self_review", "self_review_cycle_review"}:
+        review_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.owner_role_id == reviewer_role.id
+            and item.status != WorkItemStatus.COMPLETED
+            and item.work_type in {"self_review", "self_review_cycle_review"}
+        ]
+        if not review_items:
             raise IntakeError("No active self review work item found for the session")
-        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self.work_item_repository.update_status(review_items[0].id, WorkItemStatus.COMPLETED)
 
     def _previous_self_review_report_paths(self, session_id: int) -> list[str]:
         return self._internal_review_artifact_paths(
@@ -7869,8 +7956,8 @@ class CoordinatorService:
             return (
                 f"Collect proposal and context foundations for story {task_key}. "
                 "Read `description.md` and `comments.md`, treat comments as the fresher source when they conflict, "
-                "resolve explicit local file references from the snapshot, use Notion MCP for `notion.so` links when needed, "
-                "treat other external links as operator-provided context references, "
+                "resolve explicit local file references from the snapshot, "
+                "treat external links as operator-provided context references, "
                 "and extract the compact problem statement, key clarifications, and the smallest useful project/context findings for later planning and decomposition."
             )
         if stage_name == "requirements_requested":
@@ -8316,7 +8403,7 @@ class CoordinatorService:
         )
         self.session_backend.stop_role(runtime_role)
         self.role_repository.update_status(role.id, RoleStatus.STOPPED)
-        session = self.session_repository.update_status(session_id, SessionStatus.PAUSED)
+        session = self._pause_session_for_runtime_stop_if_resumable(session)
         event = self._append_event(
             session_id=session.id,
             event_type="runtime_role_stopped_by_operator",
@@ -8336,7 +8423,7 @@ class CoordinatorService:
         self.session_backend.stop_session(runtime_session)
         for role in self.role_repository.list_for_session(session_id):
             self.role_repository.update_status(role.id, RoleStatus.STOPPED)
-        session = self.session_repository.update_status(session_id, SessionStatus.PAUSED)
+        session = self._pause_session_for_runtime_stop_if_resumable(session)
         event = self._append_event(
             session_id=session.id,
             event_type="runtime_session_stopped_by_operator",
@@ -8346,6 +8433,15 @@ class CoordinatorService:
             },
         )
         return session, event
+
+    def _pause_session_for_runtime_stop_if_resumable(self, session: Session) -> Session:
+        if session.status in {
+            SessionStatus.CREATED,
+            SessionStatus.ACTIVE,
+            SessionStatus.PAUSED,
+        }:
+            return self.session_repository.update_status(session.id, SessionStatus.PAUSED)
+        return session
 
     def _refresh_session_role_runtime_config(
         self,
@@ -10009,6 +10105,68 @@ class CoordinatorService:
                     seen.add(candidate)
         return keys
 
+    def _parse_boy_scout_labeled_fields(self, section: str) -> dict[str, str]:
+        label_keys = {
+            "files": "files",
+            "affected files": "files",
+            "principle": "principle",
+            "problem": "problem",
+            "suggestion": "suggestion",
+            "why it matters": "why_it_matters",
+            "required direction": "required_direction",
+            "non-goals": "non_goals",
+            "evidence": "evidence",
+            "suggested approach": "suggested_approach",
+            "test expectations": "test_expectations",
+        }
+        label_pattern = re.compile(
+            r"^(?:\*\*(?P<bold_label>[^*]+)\*\*|(?P<label>[A-Za-z][A-Za-z -]+)):\s*(?P<value>.*)$"
+        )
+        fields: dict[str, str] = {}
+        current_key: str | None = None
+        current_lines: list[str] = []
+
+        def flush_current() -> None:
+            nonlocal current_key, current_lines
+            if current_key is None:
+                return
+            value = "\n".join(current_lines).strip()
+            if value:
+                fields[current_key] = value
+            current_key = None
+            current_lines = []
+
+        for raw_line in section.splitlines():
+            line = raw_line.strip()
+            match = label_pattern.match(line)
+            raw_label = ""
+            if match:
+                raw_label = str(match.group("bold_label") or match.group("label") or "").strip().lower()
+            key = label_keys.get(raw_label)
+            if key:
+                flush_current()
+                current_key = key
+                initial_value = str(match.group("value") or "").strip() if match else ""
+                current_lines = [initial_value] if initial_value else []
+                continue
+            if current_key is not None:
+                current_lines.append(raw_line.rstrip())
+        flush_current()
+        return fields
+
+    def _parse_boy_scout_files(self, raw_files: str) -> list[str]:
+        files: list[str] = []
+        for raw_line in raw_files.splitlines():
+            line = raw_line.strip().lstrip("-*").strip()
+            if not line:
+                continue
+            backticked = re.findall(r"`([^`]+)`", line)
+            if backticked:
+                files.extend(item.strip() for item in backticked if item.strip())
+                continue
+            files.extend(item.strip().strip("`") for item in line.split(",") if item.strip().strip("`"))
+        return files
+
     def _parse_boy_scout_findings(self, session: Session) -> list[dict[str, object]]:
         if self.workdir_root is None:
             return []
@@ -10027,35 +10185,21 @@ class CoordinatorService:
             title_match = re.search(r"^## Finding \d+:\s+(.+)$", section, re.MULTILINE)
             if not title_match:
                 continue
-            files_match = re.search(r"^\*\*Files\*\*:\s+(.+)$", section, re.MULTILINE)
-            principle_match = re.search(r"^\*\*Principle\*\*:\s+(.+)$", section, re.MULTILINE)
-            problem_match = re.search(r"^\*\*Problem\*\*:\s+(.+)$", section, re.MULTILINE)
-            suggestion_match = re.search(r"^\*\*Suggestion\*\*:\s+(.+)$", section, re.MULTILINE)
-            why_match = re.search(r"^\*\*Why it matters\*\*:\s+(.+)$", section, re.MULTILINE)
-            direction_match = re.search(r"^\*\*Required direction\*\*:\s+(.+)$", section, re.MULTILINE)
-            non_goals_match = re.search(r"^\*\*Non-goals\*\*:\s+(.+)$", section, re.MULTILINE)
-            evidence_match = re.search(r"^\*\*Evidence\*\*:\s+(.+)$", section, re.MULTILINE)
-            approach_match = re.search(r"^\*\*Suggested approach\*\*:\s+(.+)$", section, re.MULTILINE)
-            test_expectations_match = re.search(r"^\*\*Test expectations\*\*:\s+(.+)$", section, re.MULTILINE)
-            raw_files = files_match.group(1).strip() if files_match else ""
-            files = [
-                item.strip().strip("`")
-                for item in raw_files.split(",")
-                if item.strip().strip("`")
-            ]
+            fields = self._parse_boy_scout_labeled_fields(section)
+            files = self._parse_boy_scout_files(fields.get("files", ""))
             findings.append(
                 {
                     "title": title_match.group(1).strip(),
                     "files": files,
-                    "principle": principle_match.group(1).strip() if principle_match else "",
-                    "problem": problem_match.group(1).strip() if problem_match else "",
-                    "suggestion": suggestion_match.group(1).strip() if suggestion_match else "",
-                    "why_it_matters": why_match.group(1).strip() if why_match else "",
-                    "required_direction": direction_match.group(1).strip() if direction_match else "",
-                    "non_goals": non_goals_match.group(1).strip() if non_goals_match else "",
-                    "evidence": evidence_match.group(1).strip() if evidence_match else "",
-                    "suggested_approach": approach_match.group(1).strip() if approach_match else "",
-                    "test_expectations": test_expectations_match.group(1).strip() if test_expectations_match else "",
+                    "principle": fields.get("principle", ""),
+                    "problem": fields.get("problem", ""),
+                    "suggestion": fields.get("suggestion", ""),
+                    "why_it_matters": fields.get("why_it_matters", ""),
+                    "required_direction": fields.get("required_direction", ""),
+                    "non_goals": fields.get("non_goals", ""),
+                    "evidence": fields.get("evidence", ""),
+                    "suggested_approach": fields.get("suggested_approach", ""),
+                    "test_expectations": fields.get("test_expectations", ""),
                 }
             )
         return findings
@@ -10195,6 +10339,15 @@ class CoordinatorService:
         implement_now_findings: list[dict[str, object]],
         tech_debt_findings: list[dict[str, object]],
     ) -> str:
+        def append_field(lines: list[str], label: str, value: str) -> None:
+            if not value:
+                return
+            if "\n" not in value:
+                lines.append(f"- {label}: {value}")
+                return
+            lines.append(f"- {label}:")
+            lines.extend(f"  {line}" if line.strip() else "" for line in value.splitlines())
+
         implement_now_count = len(implement_now_findings)
         tech_debt_count = len(tech_debt_findings)
         total_count = implement_now_count + tech_debt_count
@@ -10218,20 +10371,13 @@ class CoordinatorService:
                 lines.append(f"### {title}")
                 if files:
                     lines.append(f"- Files: {', '.join(f'`{item}`' for item in files[:3])}")
-                if problem:
-                    lines.append(f"- Problem: {problem}")
-                if why_it_matters:
-                    lines.append(f"- Why it matters: {why_it_matters}")
-                if required_direction:
-                    lines.append(f"- Required direction: {required_direction}")
-                if non_goals:
-                    lines.append(f"- Non-goals: {non_goals}")
-                if evidence:
-                    lines.append(f"- Evidence: {evidence}")
-                if suggested_approach:
-                    lines.append(f"- Suggested approach: {suggested_approach}")
-                if test_expectations:
-                    lines.append(f"- Test expectations: {test_expectations}")
+                append_field(lines, "Problem", problem)
+                append_field(lines, "Why it matters", why_it_matters)
+                append_field(lines, "Required direction", required_direction)
+                append_field(lines, "Non-goals", non_goals)
+                append_field(lines, "Evidence", evidence)
+                append_field(lines, "Suggested approach", suggested_approach)
+                append_field(lines, "Test expectations", test_expectations)
                 lines.append("")
             if len(implement_now_findings) > 5:
                 lines.append(f"- ...and {len(implement_now_findings) - 5} more")
@@ -10252,20 +10398,13 @@ class CoordinatorService:
                 lines.append(f"### {title}")
                 if files:
                     lines.append(f"- Files: {', '.join(f'`{item}`' for item in files[:3])}")
-                if problem:
-                    lines.append(f"- Problem: {problem}")
-                if why_it_matters:
-                    lines.append(f"- Why it matters: {why_it_matters}")
-                if required_direction:
-                    lines.append(f"- Required direction: {required_direction}")
-                if non_goals:
-                    lines.append(f"- Non-goals: {non_goals}")
-                if evidence:
-                    lines.append(f"- Evidence: {evidence}")
-                if suggested_approach:
-                    lines.append(f"- Suggested approach: {suggested_approach}")
-                if test_expectations:
-                    lines.append(f"- Test expectations: {test_expectations}")
+                append_field(lines, "Problem", problem)
+                append_field(lines, "Why it matters", why_it_matters)
+                append_field(lines, "Required direction", required_direction)
+                append_field(lines, "Non-goals", non_goals)
+                append_field(lines, "Evidence", evidence)
+                append_field(lines, "Suggested approach", suggested_approach)
+                append_field(lines, "Test expectations", test_expectations)
                 lines.append("")
             if len(tech_debt_findings) > 5:
                 lines.append(f"- ...and {len(tech_debt_findings) - 5} more")
@@ -10532,8 +10671,7 @@ class CoordinatorService:
         if self.artifacts_root is None:
             return
         explicit_links = self._extract_snapshot_explicit_links(session.task_key)
-        non_notion_links = [link for link in explicit_links if "notion.so" not in link]
-        if not non_notion_links:
+        if not explicit_links:
             return
 
         artifact_body = "\n".join(
@@ -10545,7 +10683,7 @@ class CoordinatorService:
                 "",
                 "## Links",
                 "",
-                *[f"- {link}" for link in non_notion_links],
+                *[f"- {link}" for link in explicit_links],
                 "",
             ]
         )
@@ -10561,7 +10699,7 @@ class CoordinatorService:
             stage_name="story-planning",
             artifact_type="proposal_external_links_warning",
             path=str(artifact_path),
-            metadata={"link_count": len(non_notion_links)},
+            metadata={"link_count": len(explicit_links)},
         )
         self._append_event(
             session_id=session.id,
@@ -10569,10 +10707,10 @@ class CoordinatorService:
             producer_type="coordinator",
             payload={
                 "task_key": session.task_key,
-                "link_count": len(non_notion_links),
+                "link_count": len(explicit_links),
                 "summary": (
                     "External links were found in the snapshot; their contents are not automatically included "
-                    "in the proposal unless they are Notion pages handled through MCP."
+                    "in the proposal."
                 ),
             },
         )

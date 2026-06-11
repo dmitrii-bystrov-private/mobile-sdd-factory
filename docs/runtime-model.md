@@ -99,7 +99,10 @@ They define:
 
 These defaults are surfaced and edited through the UI.
 
-They are distinct from `.claude/settings.json` or `.claude/settings.local.json`, which remain Claude-specific launcher inputs for scoped permissions and MCP visibility rather than the supported runtime-defaults store.
+They are distinct from `.claude/settings.json` or `.claude/settings.local.json`, which remain Claude-specific launcher source material for scoped permissions and MCP visibility rather than the supported runtime-defaults store.
+The launcher filters those Claude settings per role and does not copy legacy `env` values into worker-local settings.
+
+MCP visibility is role-scoped for Claude sessions. Current built-in baselines expose `ios-rag`, `android-rag`, and `frontend-rag` to `implementer`, `bug-fixer`, and `proposal-context-worker`; other roles receive an empty scoped MCP config by default.
 
 ## Policy Semantics
 

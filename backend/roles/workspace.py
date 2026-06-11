@@ -248,7 +248,7 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You execute one bounded proposal/context preparation task for one story session.",
             "- Produce `spec/proposal.md` plus the `spec/context/` package, then stop; you do not remain the owner of later planning or implementation work.",
             "- Read `description.md` and `comments.md` first; when they conflict, treat `comments.md` as the fresher source and record the conflict explicitly in the proposal.",
-            "- Resolve explicit HTTP/HTTPS links from the snapshot; use Notion MCP for `notion.so` content, and otherwise treat non-Notion external links as operator-provided context references rather than mandatory fetched inputs.",
+            "- Resolve explicit HTTP/HTTPS links from the snapshot as operator-provided context references rather than mandatory fetched inputs.",
             "- Resolve only explicit local file references from the snapshot before broadening to any narrower repo exploration.",
             "- You should not assume persistence across unrelated tasks or later implementation rounds.",
         ]
@@ -473,6 +473,7 @@ def build_role_agents_md(
             "- Paths written as `spec/...`, `review/...`, or `plan/...` refer to the task snapshot metadata root listed above, not to this role workspace current directory.",
             "- When hydration or the relevant-path list provides explicit absolute `*_path` values, use those exact paths directly instead of reconstructing task paths relative to the current directory.",
             "- For terminal outcomes, call `bash \"$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh\" --work-item-id <work_item_id> ...` instead of hand-writing JSON or managing terminal files directly.",
+            "- For markdown payloads that contain backticks, parentheses, or paths with spaces, write the markdown to a file first and pass it with helper file flags such as `--issues-markdown-file <path>` instead of inline shell arguments.",
             "- Do not call `scripts/write-result.py` directly, do not choose terminal output paths yourself, and do not try to recreate fallback files manually.",
             "- Do not override `SDD_FACTORY_BACKEND_URL`, `SDD_FACTORY_BACKEND_HOST`, or `SDD_FACTORY_BACKEND_PORT`, and do not debug transport or fallback behavior from inside the role.",
             "- When the routed hydration payload includes `work_item_id`, pass that same `work_item_id` into the helper unchanged. When it also includes `subtask_key`, pass that same `subtask_key` unchanged too.",

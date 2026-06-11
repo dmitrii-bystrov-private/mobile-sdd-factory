@@ -173,6 +173,7 @@ class RoleLauncherManager:
         allowed_servers: list[str],
     ) -> dict:
         payload = self._load_json_file(self._resolve_settings_source(task_key)) or {}
+        payload.pop("env", None)
         enabled_servers = list(allowed_servers)
         payload["enabledMcpjsonServers"] = enabled_servers
 

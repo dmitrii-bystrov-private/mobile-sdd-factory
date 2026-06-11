@@ -28,7 +28,7 @@ ROLE_BASELINES: tuple[RoleBaseline, ...] = (
         "proposal-context-worker",
         "sonnet",
         "high",
-        ["notion", "ios-rag", "android-rag", "frontend-rag"],
+        ["ios-rag", "android-rag", "frontend-rag"],
         _BASELINE_SOURCE,
     ),
     RoleBaseline("requirements-clarifier-worker", "sonnet", "high", [], _BASELINE_SOURCE),

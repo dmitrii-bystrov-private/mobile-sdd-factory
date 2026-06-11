@@ -110,6 +110,7 @@ This is the supported place for:
 
 This is not the same thing as `.claude/settings.json` or `.claude/settings.local.json`.
 Those Claude files are only used as Claude-specific permission/MCP source material for scoped launcher sessions.
+The launcher filters MCP servers and MCP permissions per role, and it does not copy legacy `env` values into worker-local Claude settings.
 
 These defaults apply to future sessions.
 Per-session overrides in the session creation form only affect the session being created.

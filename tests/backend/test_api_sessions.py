@@ -3310,6 +3310,58 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("runtime_session_stopped_by_operator", response.event_type)
         self.assertEqual("paused", response.session.status)
 
+    def test_stop_runtime_session_route_keeps_completed_session_completed(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013TCOMPLETE"),
+            dependencies=self.dependencies,
+        )
+        self.dependencies.session_repository.update_status(
+            prepare_response.session.id,
+            SessionStatus.COMPLETED,
+        )
+
+        response = stop_runtime_session(
+            StopRuntimeSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.stopped)
+        self.assertEqual("runtime_session_stopped_by_operator", response.event_type)
+        self.assertEqual("completed", response.session.status)
+
+    def test_stop_runtime_session_route_keeps_waiting_session_waiting(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013TWAITING"),
+            dependencies=self.dependencies,
+        )
+        active_item = next(
+            item
+            for item in self.dependencies.work_item_repository.list_for_session(prepare_response.session.id)
+            if item.work_type == "implementation"
+        )
+        self.dependencies.work_item_repository.update_status(
+            active_item.id,
+            WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        self.dependencies.session_repository.update_stage_and_owner(
+            prepare_response.session.id,
+            current_stage=prepare_response.session.current_stage,
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(
+            prepare_response.session.id,
+            SessionStatus.WAITING_FOR_OPERATOR,
+        )
+
+        response = stop_runtime_session(
+            StopRuntimeSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.stopped)
+        self.assertEqual("runtime_session_stopped_by_operator", response.event_type)
+        self.assertEqual("waiting_for_operator", response.session.status)
+
     def test_restart_runtime_role_route_restarts_owner_and_redispatches_work(self) -> None:
         self.dependencies.loop_runner.stop()
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

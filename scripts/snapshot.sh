@@ -59,18 +59,46 @@ seed_repo_local_mise() {
   local source_mise_dir="$source_repo_dir/.mise"
   local target_mise_dir="$target_repo_dir/.mise"
 
-  if [[ ! -d "$source_mise_dir" || -e "$target_mise_dir" ]]; then
+  seed_directory_cow_first "$source_mise_dir" "$target_mise_dir" ".mise" "missing-ok"
+}
+
+seed_directory_cow_first() {
+  local source_dir="$1"
+  local target_dir="$2"
+  local label="$3"
+  local missing_policy="${4:-warn}"
+
+  if [[ ! -d "$source_dir" ]]; then
+    if [[ "$missing_policy" == "missing-ok" ]]; then
+      return 0
+    fi
+    echo "  WARN: $label source not found at $source_dir — bootstrap will rebuild it if needed."
     return 0
   fi
 
-  echo "  Seeding repo-local .mise from $source_repo_dir..."
-  if cp -cR "$source_mise_dir" "$target_mise_dir" 2>/dev/null; then
-    echo "  .mise seed: APFS clone OK"
+  if [[ -e "$target_dir" ]]; then
     return 0
   fi
 
-  cp -R "$source_mise_dir" "$target_mise_dir"
-  echo "  .mise seed: fallback copy OK"
+  local target_parent
+  target_parent="$(dirname "$target_dir")"
+  if [[ ! -d "$target_parent" ]]; then
+    echo "  WARN: $label target parent not found at $target_parent — bootstrap will rebuild it if needed."
+    return 0
+  fi
+
+  echo "  Seeding $label from $source_dir..."
+  if cp -cR "$source_dir" "$target_dir" 2>/dev/null; then
+    echo "  $label seed: APFS clone OK"
+    return 0
+  fi
+
+  echo "  WARN: $label APFS clone failed — falling back to full copy."
+  if ! cp -R "$source_dir" "$target_dir"; then
+    err "$label seed: fallback copy failed"
+    exit 1
+  fi
+  echo "  $label seed: fallback copy OK"
 }
 
 # 1. Positional argument
@@ -315,6 +343,8 @@ if [[ "$PLATFORM" == "ios" ]] && $WORKTREE_CREATED; then
   MISE_CMD=""
 
   seed_repo_local_mise "$PLATFORM_DIR" "$WORKTREE_PATH"
+  seed_directory_cow_first "$PLATFORM_DIR/Tuist/.build" "$WORKTREE_PATH/Tuist/.build" "Tuist/.build"
+  seed_directory_cow_first "$PLATFORM_DIR/Pods" "$WORKTREE_PATH/Pods" "Pods"
 
   if ! MISE_CMD="$(resolve_mise_cmd "$WORKTREE_PATH")"; then
     err "iOS bootstrap: mise not found (expected $WORKTREE_PATH/bin/mise or a global mise)"
@@ -378,14 +408,9 @@ fi
 if [[ "$PLATFORM" == "android" ]] && $WORKTREE_CREATED; then
   echo "Running Android bootstrap in $WORKTREE_PATH..."
 
-  # 1. Copy .gradle cache from the main Android repo to avoid re-downloading dependencies.
+  # 1. Seed .gradle from the main Android repo to avoid re-downloading dependencies.
   # Copying (not symlinking) so parallel worktree builds don't share mutable lock files.
-  if [[ -d "$ANDROID_DIR/.gradle" ]]; then
-    cp -r "$ANDROID_DIR/.gradle" "$WORKTREE_PATH/.gradle"
-    echo "  .gradle copied from $ANDROID_DIR/.gradle"
-  else
-    echo "  WARN: $ANDROID_DIR/.gradle not found — skipping copy (dependencies will be downloaded on first build)."
-  fi
+  seed_directory_cow_first "$ANDROID_DIR/.gradle" "$WORKTREE_PATH/.gradle" ".gradle"
 
   # 2. Symlink local.properties from the main Android repo (contains SDK path required for builds)
   if [[ -f "$ANDROID_DIR/local.properties" ]]; then

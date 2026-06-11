@@ -175,6 +175,55 @@ class WriteResultScriptTests(unittest.TestCase):
             self.assertEqual("failed", payload["output_type"])
             self.assertEqual("Issue 1", payload["payload"]["issues_markdown"])
 
+    def test_code_reviewer_failed_result_can_read_issues_markdown_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-reviewer")
+            issues_path = Path(temp_dir) / "issues.md"
+            issues_path.write_text(
+                "- `FinomCore/FinomCore/App Core/Service.swift`: `handleActivation()` issue\n",
+                encoding="utf-8",
+            )
+
+            result = self._run(
+                env,
+                "--work-item-id",
+                str(work_item_id),
+                "--output-type",
+                "failed",
+                "--summary",
+                "review issues found",
+                "--issues-markdown-file",
+                str(issues_path),
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual("failed", payload["output_type"])
+            self.assertEqual(issues_path.read_text(encoding="utf-8").strip(), payload["payload"]["issues_markdown"])
+
+    def test_code_reviewer_failed_result_rejects_inline_and_file_issues_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, _output_path, work_item_id = self._create_context(temp_dir, role_name="code-reviewer")
+            issues_path = Path(temp_dir) / "issues.md"
+            issues_path.write_text("- Issue 1\n", encoding="utf-8")
+
+            result = self._run(
+                env,
+                "--work-item-id",
+                str(work_item_id),
+                "--output-type",
+                "failed",
+                "--summary",
+                "review issues found",
+                "--issues-markdown",
+                "Issue 1",
+                "--issues-markdown-file",
+                str(issues_path),
+            )
+
+            self.assertEqual(2, result.returncode)
+            self.assertIn("Use either --issues-markdown or --issues-markdown-file", result.stderr)
+
     def test_code_reviewer_passed_result_tolerates_zero_findings_count(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-reviewer")

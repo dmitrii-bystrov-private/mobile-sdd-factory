@@ -59,6 +59,15 @@ Important MCP surfaces include:
 - `android-rag`
 - `frontend-rag`
 
+For Claude launcher sessions, MCP visibility is scoped per role from `backend/role_baselines.py`.
+Current built-in MCP access is:
+
+- `implementer` and `bug-fixer`: `ios-rag`, `android-rag`, `frontend-rag`
+- `proposal-context-worker`: `ios-rag`, `android-rag`, `frontend-rag`
+
+Roles such as Code Reviewer, Code Scout, Verification Coordinator, and Doc Harvest receive an empty scoped MCP config by default.
+Legacy `env` values from `.claude/settings.json` or `.claude/settings.local.json` are not copied into role-scoped worker settings.
+
 If they are unavailable because of authentication, VPN, or network problems, the platform should stop and move the session to `waiting_for_operator` until access is restored.
 
 ## Runtime Defaults

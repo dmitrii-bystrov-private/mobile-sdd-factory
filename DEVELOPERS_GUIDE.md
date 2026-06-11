@@ -129,6 +129,7 @@ backend/role_baselines.py
 
 This is the current supported source of truth for default role baselines used by backend and UI.
 Do not reintroduce `.claude/agents/*.md` as the baseline source.
+Role baselines also own built-in MCP visibility for Claude launcher sessions. Keep MCP server lists scoped to roles that actually need those tools; `.claude/settings*.json` is only filtered launcher source material, not the baseline authority.
 
 ## Acceptance Runtime Defaults
 

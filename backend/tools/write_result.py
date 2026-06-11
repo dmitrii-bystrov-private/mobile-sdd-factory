@@ -79,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--details")
     parser.add_argument("--failure", action="append", default=[])
     parser.add_argument("--issues-markdown")
+    parser.add_argument("--issues-markdown-file")
     parser.add_argument("--subtask-key")
     parser.add_argument("--needs-operator-input", action="store_true")
     parser.add_argument("--missing-input", action="append", default=[])
@@ -104,6 +105,32 @@ def _clean_optional_text(payload: dict[str, object], key: str, value: str | None
 
 def _normalized_list(values: Sequence[str]) -> list[str]:
     return [item.strip() for item in values if item.strip()]
+
+
+def _read_text_file_argument(path_value: str | None, label: str) -> str | None:
+    if path_value is None:
+        return None
+    path_text = path_value.strip()
+    if not path_text:
+        return None
+    path = Path(path_text)
+    if not path.is_file():
+        raise ResultWriterError(f"{label} file does not exist: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+def _resolve_optional_text_or_file(
+    *,
+    inline_value: str | None,
+    file_value: str | None,
+    label: str,
+) -> str | None:
+    if inline_value is not None and inline_value.strip() and file_value is not None and file_value.strip():
+        raise ResultWriterError(f"Use either --{label} or --{label}-file, not both")
+    file_text = _read_text_file_argument(file_value, label)
+    if file_text is not None:
+        return file_text
+    return inline_value
 
 
 def _load_database() -> Database:
@@ -237,9 +264,14 @@ def _build_code_reviewer_payload(args: argparse.Namespace) -> dict[str, object]:
     payload: dict[str, object] = {
         "work_item_id": args.work_item_id,
     }
+    issues_markdown = _resolve_optional_text_or_file(
+        inline_value=args.issues_markdown,
+        file_value=args.issues_markdown_file,
+        label="issues-markdown",
+    )
     _clean_optional_text(payload, "summary", args.summary)
     _clean_optional_text(payload, "details", args.details)
-    _clean_optional_text(payload, "issues_markdown", args.issues_markdown)
+    _clean_optional_text(payload, "issues_markdown", issues_markdown)
     return payload
 
 
