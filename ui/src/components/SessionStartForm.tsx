@@ -426,7 +426,7 @@ export function SessionStartForm({
 
               <div className="form-section-compact">
                 <label className="form-field">
-                  <span>Docs Writer</span>
+                  <span>Documentation Writer</span>
                   <select
                     className="select-input"
                     onChange={(event) => updatePolicy("doc_harvest_policy", event.target.value as SessionPolicyValue)}

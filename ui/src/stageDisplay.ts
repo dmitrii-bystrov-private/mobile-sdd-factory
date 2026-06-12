@@ -22,7 +22,7 @@ const STAGE_LABELS: Record<string, string> = {
   qa_reopen_requested: "QA Reopen",
   mr_comments_analysis_requested: "Comments Analysis",
   mr_followup_requested: "MR Follow-up",
-  doc_harvest_requested: "Docs Writer",
+  doc_harvest_requested: "Documentation Writer",
   mr_handoff_completed: "MR Handoff Complete",
   mr_handoff_failed: "MR Handoff Failed",
   send_to_test_completed: "Sent To Test",
