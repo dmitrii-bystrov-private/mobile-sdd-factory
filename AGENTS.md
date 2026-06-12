@@ -109,6 +109,7 @@ Keep these files aligned with supported behavior:
 - `docs/setup.md`
 - `docs/operator-guide.md`
 - `docs/runtime-model.md`
+- `docs/terminal-result-contract.md`
 
 If the supported platform changes, update those docs in the same slice unless the change is clearly internal-only.
 

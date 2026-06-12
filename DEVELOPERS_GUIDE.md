@@ -181,3 +181,4 @@ If you change supported behavior, keep these aligned:
 - `docs/setup.md`
 - `docs/operator-guide.md`
 - `docs/runtime-model.md`
+- `docs/terminal-result-contract.md`

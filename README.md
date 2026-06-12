@@ -378,4 +378,5 @@ index.html        # local static presentation deck for the SDD workflow
 - [`DEVELOPERS_GUIDE.md`](DEVELOPERS_GUIDE.md) — contributor-oriented guide for the supported platform, testing layers, and defaults
 - [`docs/operator-guide.md`](docs/operator-guide.md) — practical operator workflow for the supported backend/UI runtime model
 - [`docs/runtime-model.md`](docs/runtime-model.md) — supported session, role, quality-loop, recovery, and cleanup model
+- [`docs/terminal-result-contract.md`](docs/terminal-result-contract.md) — deterministic terminal result submission contract for routed roles
 - [`AGENTS.md`](AGENTS.md) — repository conventions for contributors and coding agents
