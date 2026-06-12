@@ -18,6 +18,7 @@ from backend.roles.contracts import (
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
     CODE_SCOUT_ROLE,
+    DOCUMENTATION_REVIEWER_ROLE,
     DOC_HARVEST_ROLE,
     DEFAULT_SESSION_ROLES,
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
@@ -1937,7 +1938,7 @@ class SessionCreationTests(unittest.TestCase):
         verification_report = task_root / "spec" / "final-verification.md"
         report_text = verification_report.read_text()
 
-        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("send_to_test_completed", followup_event.event_type)
         self.assertIn("### Impact Mapping", report_text)
         self.assertIn("Impacted areas: FinomCore", report_text)
@@ -5249,8 +5250,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(reconciled)
         self.assertIsNotNone(updated_session)
         assert updated_session is not None
-        self.assertEqual("send_to_test_completed", updated_session.current_stage)
-        self.assertEqual(SessionStatus.COMPLETED, updated_session.status)
+        self.assertEqual("documentation_review_requested", updated_session.current_stage)
+        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
         self.assertTrue(any(item.event_type == "session_outcome_reconciled" for item in events))
 
     def test_reconcile_session_dispatch_advances_completed_verification_correction(self) -> None:
@@ -6608,7 +6609,7 @@ class SessionCreationTests(unittest.TestCase):
         verification_report = Path(self.temp_dir.name) / "IOS-30005" / "spec" / "final-verification.md"
         verification_outcome = Path(self.temp_dir.name) / "IOS-30005" / "spec" / "verification-outcome.json"
 
-        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertIsNone(updated_session.current_owner)
         self.assertEqual("completed", updated_session.status.value)
         self.assertEqual("send_to_test_completed", followup_event.event_type)
@@ -7709,6 +7710,35 @@ class SessionCreationTests(unittest.TestCase):
             interactive["details"],
         )
 
+    def test_collect_role_output_escalates_malformed_error_marker(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRMALFORMED")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            '\n'.join(
+                [
+                    'SDD_ERROR: {"summary":"Verifier environment is broken",',
+                    '  "details":"mise ERROR "tuist" could not exec process",',
+                    '  "needs_operator_input":true}',
+                ]
+            ),
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        events = self.event_repository.list_for_session(session.id)
+        interactive = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertTrue(any(item.event_type == "role_runtime_error_reported" for item in events))
+        self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertEqual("runtime emitted malformed SDD_ERROR marker", interactive["summary"])
+        self.assertIn('"tuist"', interactive["details"])
+
     def test_collect_role_output_consumes_result_json_from_role_workspace(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009B")
         active_item = next(
@@ -8323,6 +8353,73 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "subtask_transition_completed" for item in events))
         self.assertEqual(["IOS-30096"], self.jira_adapter.completed_subtasks)
         self.assertEqual([("IOS-30009ESUB4", "subtask IOS-30096")], self.gitlab_adapter.commit_requests)
+
+    def test_collect_role_output_accepts_retry_subtask_completion_with_matching_address(
+        self,
+    ) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009ESUBRETRY",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        active_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Retry: Subtask implementation for IOS-30096R: First chunk",
+            owner_role_id=implementer_role.id,
+            priority=100,
+        )
+        active_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        self.session_repository.update_status(active_session.id, SessionStatus.ACTIVE)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            producer_type="coordinator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": active_item.id,
+                "stage_name": "subtask_implementation_requested",
+                "hydration_version": 1,
+                "prompt_mode": "live_continuation",
+            },
+        )
+        result_path = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            IMPLEMENTER_ROLE,
+        ) / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {
+                        "work_item_id": active_item.id,
+                        "subtask_key": "IOS-30096R",
+                        "summary": "matched retry subtask result",
+                    },
+                }
+            )
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        refreshed_active = self.work_item_repository.get_by_id(active_item.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("completed", refreshed_active.status.value)
+        self.assertTrue(any(item.event_type == "subtask_completed" for item in events))
+        self.assertFalse(any(item.event_type == "stale_role_output_ignored" for item in events))
+        self.assertEqual(["IOS-30096R"], self.jira_adapter.completed_subtasks)
 
     def test_poll_session_output_ignores_stale_implementer_runtime_marker_after_handoff_to_reviewer(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -10669,8 +10766,8 @@ class SessionCreationTests(unittest.TestCase):
         )
         artifacts = self.artifact_repository.list_for_session(session.id)
 
-        self.assertEqual("completed", updated_session.status.value)
-        self.assertEqual("doc_harvest_completed", updated_session.current_stage)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("documentation_review_requested", updated_session.current_stage)
         self.assertEqual("doc_harvest_completed", event.event_type)
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
         outcome_path = Path(self.temp_dir.name) / "IOS-30021F" / "spec" / "doc-harvest-outcome.json"
@@ -10708,6 +10805,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(
             [
                 call("IOS-30021FDIFF", mode="source"),
+                call("IOS-30021FDIFF", mode="docs"),
+                call("IOS-30021FDIFF", mode="full"),
                 call("IOS-30021FDIFF", mode="docs"),
                 call("IOS-30021FDIFF", mode="full"),
             ],
@@ -10770,9 +10869,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("doc_harvest_completed", mapped_event.event_type)
         self.assertIsNotNone(followup_event)
         assert followup_event is not None
-        self.assertEqual("send_to_test_completed", followup_event.event_type)
-        self.assertEqual("completed", updated_session.status.value)
-        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertEqual("documentation_review_requested", followup_event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("documentation_review_requested", updated_session.current_stage)
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
         self.assertEqual(
             [
@@ -10814,11 +10913,11 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("doc_harvest_completed", mapped_event.event_type)
         self.assertIsNotNone(followup_event)
         assert followup_event is not None
-        self.assertEqual("send_to_test_completed", followup_event.event_type)
-        self.assertEqual("completed", updated_session.status.value)
-        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertEqual("documentation_review_requested", followup_event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("documentation_review_requested", updated_session.current_stage)
         self.assertTrue(any(item.event_type == "git_commit_completed" for item in events))
-        self.assertTrue(any(item.event_type == "mr_handoff_completed" for item in events))
+        self.assertFalse(any(item.event_type == "mr_handoff_completed" for item in events))
 
     def test_doc_harvest_completion_parks_when_delivery_gate_is_blocked(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -10867,9 +10966,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("doc_harvest_completed", mapped_event.event_type)
         self.assertIsNotNone(followup_event)
         assert followup_event is not None
-        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
-        self.assertEqual("doc_harvest_requested", updated_session.current_stage)
+        self.assertEqual("documentation_review_requested", followup_event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("documentation_review_requested", updated_session.current_stage)
         self.assertTrue(any(item.event_type == "git_commit_completed" for item in events))
         self.assertFalse(any(item.event_type == "send_to_test_completed" for item in events))
 
@@ -10905,6 +11004,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn(CODE_REVIEWER_ROLE, PERSISTENT_SESSION_ROLES)
         self.assertIn(CODE_SCOUT_ROLE, PERSISTENT_SESSION_ROLES)
         self.assertIn(DOC_HARVEST_ROLE, PERSISTENT_SESSION_ROLES)
+        self.assertIn(DOCUMENTATION_REVIEWER_ROLE, PERSISTENT_SESSION_ROLES)
         self.assertNotIn(MR_COMMENTS_ANALYST_ROLE, PERSISTENT_SESSION_ROLES)
 
     def test_stale_runtime_cleanup_keeps_persistent_optional_roles_running(self) -> None:
@@ -10916,14 +11016,18 @@ class SessionCreationTests(unittest.TestCase):
 
         self.coordinator._maybe_stop_stale_runtime_role(session=session, role_name=CODE_SCOUT_ROLE)
         self.coordinator._maybe_stop_stale_runtime_role(session=session, role_name=DOC_HARVEST_ROLE)
+        self.coordinator._maybe_stop_stale_runtime_role(session=session, role_name=DOCUMENTATION_REVIEWER_ROLE)
 
         scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
         doc_role = self.role_repository.get_by_name(session.id, DOC_HARVEST_ROLE)
+        documentation_reviewer_role = self.role_repository.get_by_name(session.id, DOCUMENTATION_REVIEWER_ROLE)
         assert scout_role is not None
         assert doc_role is not None
+        assert documentation_reviewer_role is not None
 
         self.assertEqual(RoleStatus.RUNNING, scout_role.status)
         self.assertEqual(RoleStatus.RUNNING, doc_role.status)
+        self.assertEqual(RoleStatus.RUNNING, documentation_reviewer_role.status)
 
     def test_stale_runtime_cleanup_stops_mr_comments_analyst_worker(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -10967,9 +11071,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("doc_harvest_completed", mapped_event.event_type)
         self.assertIsNotNone(followup_event)
         assert followup_event is not None
-        self.assertEqual("send_to_test_completed", followup_event.event_type)
-        self.assertEqual("completed", updated_session.status.value)
-        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertEqual("documentation_review_requested", followup_event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual("documentation_review_requested", updated_session.current_stage)
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
         self.assertEqual(
             [
@@ -11007,6 +11111,137 @@ class SessionCreationTests(unittest.TestCase):
                 output_type="skipped_not_needed",
                 payload={"summary": "No grounded README target was affected by this change."},
             )
+
+    def test_documentation_review_passed_continues_delivery_after_doc_harvest(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021DOCREVIEWPASS",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021DOCREVIEWPASS")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=DOC_HARVEST_ROLE,
+            output_type="completed",
+            payload={"summary": "README remains current."},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=DOCUMENTATION_REVIEWER_ROLE,
+            output_type="passed",
+            payload={"summary": "Documentation follows the guide."},
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("documentation_review_passed", mapped_event.event_type)
+        self.assertIsNotNone(followup_event)
+        assert followup_event is not None
+        self.assertEqual("send_to_test_completed", followup_event.event_type)
+        self.assertEqual("completed", updated_session.status.value)
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertTrue(any(item.artifact_type == "documentation_review_report_markdown" for item in artifacts))
+
+    def test_documentation_review_failed_routes_docs_only_correction(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021DOCREVIEWFAIL",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021DOCREVIEWFAIL")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=DOC_HARVEST_ROLE,
+            output_type="completed",
+            payload={"summary": "README updated."},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=DOCUMENTATION_REVIEWER_ROLE,
+            output_type="failed",
+            payload={
+                "summary": "Production README contains Jira history.",
+                "issues_markdown": "Remove IOS-12345 from README text.",
+            },
+        )
+        artifacts = self.artifact_repository.list_for_session(session.id)
+
+        self.assertEqual("documentation_review_issues_found", mapped_event.event_type)
+        self.assertIsNotNone(followup_event)
+        assert followup_event is not None
+        self.assertEqual("documentation_review_correction_requested", followup_event.event_type)
+        self.assertEqual("documentation_review_correction_requested", updated_session.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertTrue(any(item.artifact_type == "documentation_review_report_markdown" for item in artifacts))
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        self.assertIn("Edit only production documentation and comments", sent_inputs[-1])
+        self.assertIn("documentation_review", sent_inputs[-1])
+
+    def test_documentation_review_correction_returns_to_documentation_review(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021DOCREVIEWROUND",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021DOCREVIEWROUND")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=DOC_HARVEST_ROLE,
+            output_type="completed",
+            payload={"summary": "README updated."},
+        )
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=DOCUMENTATION_REVIEWER_ROLE,
+            output_type="failed",
+            payload={"summary": "Docs need cleanup."},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+            output_type="completed",
+            payload={"summary": "Docs cleanup applied."},
+        )
+
+        self.assertEqual("implementation_completed", mapped_event.event_type)
+        self.assertIsNotNone(followup_event)
+        assert followup_event is not None
+        self.assertEqual("documentation_review_requested", followup_event.event_type)
+        self.assertEqual("documentation_review_requested", updated_session.current_stage)
 
     def test_followup_implementation_completed_reenters_verification_loop(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022")

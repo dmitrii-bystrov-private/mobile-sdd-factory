@@ -28,6 +28,7 @@ SUPPORTED_ROLES = {
     "code-reviewer",
     "spec-verifier-worker",
     "doc-harvest-worker",
+    "documentation-reviewer",
     *CODING_ROLES,
     *PLANNING_ROLES,
 }
@@ -199,6 +200,7 @@ def _validate_role_output_type(role_name: str, output_type: str) -> None:
         },
         "spec-verifier-worker": {"completed", "passed", "failed"},
         "doc-harvest-worker": {"completed", "passed", "skipped_not_needed"},
+        "documentation-reviewer": {"completed", "passed", "failed", "skipped_not_needed"},
     }
     if role_name in CODING_ROLES:
         allowed_types = {"completed", "failed"}
@@ -339,6 +341,17 @@ def _build_doc_harvest_payload(args: argparse.Namespace) -> dict[str, object]:
     return payload
 
 
+def _build_documentation_review_payload(args: argparse.Namespace) -> dict[str, object]:
+    payload = _build_doc_harvest_payload(args)
+    issues_markdown = _resolve_optional_text_or_file(
+        inline_value=args.issues_markdown,
+        file_value=args.issues_markdown_file,
+        label="issues-markdown",
+    )
+    _clean_optional_text(payload, "issues_markdown", issues_markdown)
+    return payload
+
+
 def build_result_document(
     args: argparse.Namespace,
     role_name: str | None = None,
@@ -362,6 +375,8 @@ def build_result_document(
         payload = _build_spec_verifier_payload(args)
     elif resolved_role_name == "doc-harvest-worker":
         payload = _build_doc_harvest_payload(args)
+    elif resolved_role_name == "documentation-reviewer":
+        payload = _build_documentation_review_payload(args)
     else:
         raise ResultWriterError(f"unsupported role: {resolved_role_name}")
 

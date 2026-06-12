@@ -7,6 +7,7 @@ CODE_REVIEWER_ROLE = "code-reviewer"
 CODE_SCOUT_ROLE = "code-scout"
 MR_COMMENTS_ANALYST_ROLE = "mr-comments-analyst-worker"
 DOC_HARVEST_ROLE = "doc-harvest-worker"
+DOCUMENTATION_REVIEWER_ROLE = "documentation-reviewer"
 PROPOSAL_CONTEXT_WORKER_ROLE = "proposal-context-worker"
 REQUIREMENTS_CLARIFIER_WORKER_ROLE = "requirements-clarifier-worker"
 ACCEPTANCE_CRITERIA_WORKER_ROLE = "acceptance-criteria-worker"
@@ -25,6 +26,7 @@ PERSISTENT_SESSION_ROLES = [
     CODE_REVIEWER_ROLE,
     CODE_SCOUT_ROLE,
     DOC_HARVEST_ROLE,
+    DOCUMENTATION_REVIEWER_ROLE,
     BUG_FIXER_ROLE,
 ]
 
@@ -76,6 +78,13 @@ ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     },
     "doc_harvest_requested": {
         DOC_HARVEST_ROLE,
+    },
+    "documentation_review_requested": {
+        DOCUMENTATION_REVIEWER_ROLE,
+    },
+    "documentation_review_correction_requested": {
+        IMPLEMENTER_ROLE,
+        BUG_FIXER_ROLE,
     },
     "mr_comments_analysis_requested": {
         MR_COMMENTS_ANALYST_ROLE,

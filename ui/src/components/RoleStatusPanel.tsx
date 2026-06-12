@@ -1,4 +1,5 @@
 import { roleDisplayName } from "../roleDisplay";
+import { shouldShowRoleOnDashboardByDefault } from "../roleVisibility";
 import type { Role, WorkItem } from "../types";
 
 type RoleStatusPanelProps = {
@@ -29,6 +30,10 @@ function workTypeDisplayName(workType: string): string {
       return "Self Review Correction";
     case "boy_scout_correction":
       return "Code Scout Correction";
+    case "documentation_review":
+      return "Documentation Review";
+    case "documentation_review_correction":
+      return "Documentation Review Correction";
     case "verification_correction":
       return "Verification Correction";
     case "correction":
@@ -90,7 +95,9 @@ export function RoleStatusPanel({
   roles,
   workItems,
 }: RoleStatusPanelProps): JSX.Element {
-  const visibleRoles = roles.filter((role) => role.role_name !== "task-coordinator");
+  const visibleRoles = roles.filter((role) =>
+    shouldShowRoleOnDashboardByDefault(role, { workItems }),
+  );
 
   return (
     <section className="panel">

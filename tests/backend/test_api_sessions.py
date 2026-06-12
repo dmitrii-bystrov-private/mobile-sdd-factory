@@ -3849,8 +3849,8 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertTrue(response.completed)
         self.assertEqual("doc_harvest_completed", response.event_type)
-        self.assertEqual("doc_harvest_completed", response.session.current_stage)
-        self.assertEqual("completed", response.session.status)
+        self.assertEqual("documentation_review_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts_response.items))
 
     def test_reopen_from_qa_route_reactivates_completed_session(self) -> None:

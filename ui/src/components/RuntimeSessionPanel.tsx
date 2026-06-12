@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { apiClient } from "../api/client";
 import { roleDescription, roleDisplayName } from "../roleDisplay";
+import { isOnDemandDashboardRole, shouldShowRuntimeRoleByDefault } from "../roleVisibility";
 import { stageDisplayName } from "../stageDisplay";
 import { useToast } from "./ToastProvider";
 import type { RuntimeSessionStateSummary, Session } from "../types";
@@ -19,6 +20,7 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
     "verification-coordinator",
     "code-scout",
     "doc-harvest-worker",
+    "documentation-reviewer",
     "mr-comments-analyst-worker",
   ];
   const bugFullOrder = [
@@ -28,6 +30,7 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
     "verification-coordinator",
     "code-scout",
     "doc-harvest-worker",
+    "documentation-reviewer",
     "mr-comments-analyst-worker",
   ];
   const storyFullOrder = [
@@ -42,6 +45,7 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
     "verification-coordinator",
     "code-scout",
     "doc-harvest-worker",
+    "documentation-reviewer",
     "mr-comments-analyst-worker",
   ];
 
@@ -72,7 +76,7 @@ function runtimeRoleStatusLabel(status: string): string {
 function runtimeRoleDisplayLabel(
   role: RuntimeSessionStateSummary["roles"][number],
 ): string {
-  if (role.roleName === "mr-comments-analyst-worker") {
+  if (isOnDemandDashboardRole(role.roleName)) {
     if (role.status === "stopped") {
       return "Sleeping";
     }
@@ -141,7 +145,7 @@ export function RuntimeSessionPanel({
       ) : (
         <>
           {(() => {
-            const visibleRoles = runtimeStateSummary.roles.filter((role) => role.roleName !== "task-coordinator");
+            const visibleRoles = runtimeStateSummary.roles.filter(shouldShowRuntimeRoleByDefault);
             const sortedRoles = [...visibleRoles].sort((left, right) => {
               const orderDelta =
                 roleFlowOrder(left.roleName, session.workflow_profile) -
@@ -192,8 +196,8 @@ export function RuntimeSessionPanel({
                             ? "This lane currently owns the active workflow stage."
                             : role.liveState === "dead-stale"
                               ? "This lane has stale runtime state and may need restart."
-                              : role.roleName === "mr-comments-analyst-worker" && role.status === "stopped"
-                                ? "This on-demand lane stays sleeping until MR follow-up analysis is requested."
+                              : isOnDemandDashboardRole(role.roleName) && role.status === "stopped"
+                                ? "This on-demand lane stays sleeping until its workflow stage is requested."
                                 : roleDescription(role.roleName)}
                         </p>
                         <div className="actions-grid runtime-role-actions">

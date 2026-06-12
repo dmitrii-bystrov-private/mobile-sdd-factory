@@ -33,6 +33,7 @@ from backend.roles.contracts import (
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
     CODE_SCOUT_ROLE,
+    DOCUMENTATION_REVIEWER_ROLE,
     DOC_HARVEST_ROLE,
     MR_COMMENTS_ANALYST_ROLE,
     PERSISTENT_SESSION_ROLES,
@@ -81,6 +82,7 @@ _ACTIVE_WORK_TYPE_BY_STAGE = {
     "requirements_requested": "requirements",
     "boy_scout_requested": "boy_scout",
     "doc_harvest_requested": "doc_harvest",
+    "documentation_review_requested": "documentation_review",
     "acceptance_criteria_requested": "acceptance_criteria",
     "constraints_requested": "constraints",
     "spec_verification_requested": "spec_verification",
@@ -88,6 +90,7 @@ _ACTIVE_WORK_TYPE_BY_STAGE = {
     "subtask_implementation_requested": "subtask_implementation",
     "implementation_requested": "implementation",
     "boy_scout_correction_requested": "boy_scout_correction",
+    "documentation_review_correction_requested": "documentation_review_correction",
     "mr_comments_analysis_requested": "mr_comments_analysis",
     "self_review_requested": "self_review",
     "self_review_correction_requested": "self_review_correction",
@@ -115,6 +118,8 @@ _INTERNAL_REVIEW_METRIC_EVENT_TYPES = {
     "boy_scout_implement_now_selected",
     "boy_scout_tech_debt_created",
     "boy_scout_correction_requested",
+    "documentation_review_requested",
+    "documentation_review_correction_requested",
     "session_escalated_to_operator",
 }
 
@@ -987,6 +992,9 @@ class CoordinatorService:
             producer_id=None,
         )
         self._refresh_post_harvest_diff_artifacts(session.task_key)
+        if event is None:
+            raise IntakeError("Doc harvest completion did not emit an event")
+        session, _followup_event = self._enqueue_documentation_review(session=session, source_event=event)
         return session, event
 
     def skip_boy_scout(
@@ -1912,6 +1920,10 @@ class CoordinatorService:
             session, followup_event = self._handle_boy_scout_completed(session, accepted_event)
         elif mapped_event_type == "doc_harvest_completed":
             session, followup_event = self._handle_doc_harvest_completed(session, accepted_event)
+        elif mapped_event_type == "documentation_review_passed":
+            session, followup_event = self._handle_documentation_review_passed(session, accepted_event)
+        elif mapped_event_type == "documentation_review_issues_found":
+            session, followup_event = self._handle_documentation_review_issues_found(session, accepted_event)
         elif mapped_event_type == "acceptance_criteria_completed":
             session, followup_event = self._handle_acceptance_criteria_completed(session, accepted_event)
         elif mapped_event_type == "constraints_completed":
@@ -1973,6 +1985,11 @@ class CoordinatorService:
             )
         if role_name == DOC_HARVEST_ROLE and session.current_stage == "doc_harvest_requested":
             return self._normalize_doc_harvest_output_payload(
+                output_type=output_type,
+                payload=normalized_payload,
+            )
+        if role_name == DOCUMENTATION_REVIEWER_ROLE and session.current_stage == "documentation_review_requested":
+            return self._normalize_documentation_review_output_payload(
                 output_type=output_type,
                 payload=normalized_payload,
             )
@@ -2139,6 +2156,22 @@ class CoordinatorService:
             raise IntakeError(
                 "Doc harvest output must include payload.summary or payload.details"
             )
+        return payload
+
+    def _normalize_documentation_review_output_payload(
+        self,
+        *,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type in {"completed", "passed", "skipped_not_needed"}:
+            return payload
+        if output_type == "failed":
+            if not any(str(payload.get(key) or "").strip() for key in ("summary", "details", "issues_markdown")):
+                raise IntakeError(
+                    "Documentation review failed output must include payload.summary, payload.details, or payload.issues_markdown"
+                )
+            return payload
         return payload
 
     def collect_role_output(
@@ -2840,6 +2873,7 @@ class CoordinatorService:
                         "self_review_correction",
                         "boy_scout_correction",
                         "verification_correction",
+                        "documentation_review_correction",
                         "followup_implementation",
                     }
                 ):
@@ -2897,6 +2931,12 @@ class CoordinatorService:
         ):
             return True
         if (
+            role_name == DOCUMENTATION_REVIEWER_ROLE
+            and output_type in {"passed", "completed", "failed", "skipped_not_needed", "error"}
+            and session.current_owner != DOCUMENTATION_REVIEWER_ROLE
+        ):
+            return True
+        if (
             role_name == MR_COMMENTS_ANALYST_ROLE
             and output_type in {"passed", "completed", "error"}
             and session.current_owner != MR_COMMENTS_ANALYST_ROLE
@@ -2931,6 +2971,7 @@ class CoordinatorService:
                         "self_review_correction",
                         "boy_scout_correction",
                         "verification_correction",
+                        "documentation_review_correction",
                         "followup_implementation",
                     }
                 ),
@@ -5144,6 +5185,8 @@ class CoordinatorService:
             return self._enqueue_self_review(session=session, source_event=source_event)
         if active_item.work_type == "verification_correction":
             return self._enqueue_verification(session=session, source_event=source_event)
+        if active_item.work_type == "documentation_review_correction":
+            return self._enqueue_documentation_review(session=session, source_event=source_event)
 
         return self._advance_after_coding_completion(
             session=session,
@@ -5173,6 +5216,7 @@ class CoordinatorService:
                 "self_review_correction",
                 "boy_scout_correction",
                 "verification_correction",
+                "documentation_review_correction",
                 "followup_implementation",
             }:
                 return matching_item
@@ -5207,6 +5251,8 @@ class CoordinatorService:
             return "boy-scout fixes"
         if work_type == "verification_correction":
             return "verification fixes"
+        if work_type == "documentation_review_correction":
+            return "documentation review fixes"
         return work_type.replace("_", " ")
 
     def _commit_task_state(
@@ -6313,6 +6359,180 @@ class CoordinatorService:
         )
         return session, event
 
+    def _enqueue_documentation_review(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        review_role = self._ensure_on_demand_role(session, DOCUMENTATION_REVIEWER_ROLE)
+        review_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="documentation_review",
+            title=f"Documentation review for {session.task_key}",
+            owner_role_id=review_role.id,
+            source_event_id=source_event.id,
+            priority=111,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="documentation_review_requested",
+            current_owner=DOCUMENTATION_REVIEWER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._dispatch_role_work(
+            session=session,
+            role=review_role,
+            work_item=review_item,
+            stage_name="documentation_review_requested",
+            instruction=(
+                f"Review documentation quality for {session.task_key}. "
+                "Use the routed deterministic precheck, docs diff, full diff, and DOCUMENTATION_GUIDE.md when present; when the guide is absent, apply stable behavior/contract documentation rules. "
+                "Check only production documentation and doc/comment changes. "
+                "Do not edit files."
+            ),
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="documentation_review_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": DOCUMENTATION_REVIEWER_ROLE,
+                "work_item_id": review_item.id,
+                "source_event_id": source_event.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _complete_active_documentation_review_work_item(self, session: Session) -> None:
+        reviewer_role = self.role_repository.get_by_name(session.id, DOCUMENTATION_REVIEWER_ROLE)
+        if reviewer_role is None:
+            raise IntakeError("Documentation reviewer role is missing for the session")
+        review_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.owner_role_id == reviewer_role.id
+            and item.status != WorkItemStatus.COMPLETED
+            and item.work_type == "documentation_review"
+        ]
+        if not review_items:
+            raise IntakeError("No active documentation review work item found for the session")
+        self.work_item_repository.update_status(review_items[0].id, WorkItemStatus.COMPLETED)
+
+    def _handle_documentation_review_passed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        self._materialize_documentation_review_report(
+            session=session,
+            output_type="passed",
+            payload=source_event.payload,
+        )
+        self._complete_active_documentation_review_work_item(session)
+        self._stop_on_demand_role(session, DOCUMENTATION_REVIEWER_ROLE)
+        if self._verification_gate_required_for_delivery(session) and self._verification_outcome_status(session) != "passed":
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="documentation_review_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="session_escalated_to_operator",
+                producer_type="coordinator",
+                payload={
+                    "reason": "delivery_gate_blocked_after_documentation_review",
+                    "role_name": DOCUMENTATION_REVIEWER_ROLE,
+                    "summary": "delivery blocked because workflow verification did not pass",
+                    "details": (
+                        "Documentation review passed, but the latest structured verification outcome is not "
+                        "passed. Resolve verification failures before delivery can continue."
+                    ),
+                    "current_stage": session.current_stage,
+                },
+            )
+            return session, event
+        return self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
+
+    def _handle_documentation_review_issues_found(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        report_path = self._materialize_documentation_review_report(
+            session=session,
+            output_type="failed",
+            payload=source_event.payload,
+        )
+        self._complete_active_documentation_review_work_item(session)
+        self._stop_on_demand_role(session, DOCUMENTATION_REVIEWER_ROLE)
+        return self._enqueue_documentation_review_correction(
+            session=session,
+            source_event=source_event,
+            report_path=report_path,
+        )
+
+    def _enqueue_documentation_review_correction(
+        self,
+        session: Session,
+        source_event: Event,
+        report_path: Path,
+    ) -> tuple[Session, Event]:
+        coding_role = self._primary_coding_role_for_work_type(session, "documentation_review_correction")
+        correction_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="documentation_review_correction",
+            title=f"Documentation review corrections for {session.task_key}",
+            owner_role_id=coding_role.id,
+            source_event_id=source_event.id,
+            priority=94,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="documentation_review_correction_requested",
+            current_owner=coding_role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = self._stage_instruction(
+            "documentation_review_correction_requested",
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(
+                f"No documentation review correction instruction is available for role {coding_role.role_name}"
+            )
+        self._dispatch_role_work(
+            session=session,
+            role=coding_role,
+            work_item=correction_item,
+            stage_name="documentation_review_correction_requested",
+            instruction=instruction,
+            extra_hydration={
+                "documentation_review_report_path": str(report_path),
+                "issues_file_path": str(report_path),
+                "correction_source": "documentation_review",
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="documentation_review_correction_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": coding_role.role_name,
+                "work_item_id": correction_item.id,
+                "documentation_review_report_path": str(report_path),
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
     def _handle_doc_harvest_completed(
         self,
         session: Session,
@@ -6342,32 +6562,7 @@ class CoordinatorService:
         )
         session, _commit_event = self._commit_task_state(session, "doc harvest")
         self._refresh_post_harvest_diff_artifacts(session.task_key)
-        if self._verification_gate_required_for_delivery(session) and self._verification_outcome_status(session) != "passed":
-            session = self.session_repository.update_stage_and_owner(
-                session.id,
-                current_stage="doc_harvest_requested",
-                current_owner=None,
-            )
-            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
-            event = self._append_event(
-                session_id=session.id,
-                event_type="session_escalated_to_operator",
-                producer_type="coordinator",
-                payload={
-                    "reason": "delivery_gate_blocked_after_doc_harvest",
-                    "role_name": DOC_HARVEST_ROLE,
-                    "work_item_id": active_item.id,
-                    "summary": "delivery blocked because workflow verification did not pass",
-                    "details": (
-                        "Documentation harvest completed, but the latest structured verification outcome is not "
-                        "passed. Resolve verification failures before delivery can continue."
-                    ),
-                    "current_stage": session.current_stage,
-                },
-            )
-            return session, event
-        session, event = self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
-        return session, event
+        return self._enqueue_documentation_review(session=session, source_event=source_event)
 
     def _finalize_doc_harvest(
         self,
@@ -6574,6 +6769,7 @@ class CoordinatorService:
                 "boy_scout_correction_requested",
                 "self_review_correction_requested",
                 "verification_correction_requested",
+                "documentation_review_correction_requested",
                 "mr_followup_requested",
                 "qa_reopen_requested",
             }:
@@ -6636,6 +6832,11 @@ class CoordinatorService:
                 if self._optional_lane_policy_mode(session.policy, "doc_harvest_policy") != "enabled":
                     raise IntakeError("Doc harvest cannot be skipped when doc_harvest_policy is required")
                 return "doc_harvest_completed"
+        if role_name == DOCUMENTATION_REVIEWER_ROLE and session.current_stage == "documentation_review_requested":
+            if output_type in {"passed", "completed", "skipped_not_needed"}:
+                return "documentation_review_passed"
+            if output_type == "failed":
+                return "documentation_review_issues_found"
         if role_name == MR_COMMENTS_ANALYST_ROLE and session.current_stage == "mr_comments_analysis_requested":
             if output_type in {"passed", "completed"}:
                 return "mr_comments_analysis_completed"
@@ -7010,8 +7211,23 @@ class CoordinatorService:
                 cursor += 1
             if parsed_payload is not None:
                 results.append((marker_type, parsed_payload))
+            elif marker_type == "error":
+                results.append((marker_type, self._malformed_error_marker_payload("\n".join(payload_lines))))
             index = cursor
         return results
+
+    def _malformed_error_marker_payload(self, raw_payload: str) -> dict:
+        cleaned_payload = raw_payload.strip()
+        return {
+            "summary": "runtime emitted malformed SDD_ERROR marker",
+            "details": (
+                "The runtime emitted an SDD_ERROR marker, but the payload was not valid JSON and could not be "
+                "parsed deterministically. Treat this as an operator-visible runtime protocol issue. Raw marker "
+                f"payload:\n{cleaned_payload}"
+            ),
+            "needs_operator_input": True,
+            "malformed_marker": True,
+        }
 
     def _line_marker_type(self, line: str) -> str | None:
         normalized = line.lstrip()
@@ -7417,30 +7633,7 @@ class CoordinatorService:
             source_event = self._latest_event_by_type(session.id, {"doc_harvest_completed"})
             if source_event is None:
                 return False
-            if self._verification_gate_required_for_delivery(session) and self._verification_outcome_status(session) != "passed":
-                session = self.session_repository.update_stage_and_owner(
-                    session.id,
-                    current_stage="doc_harvest_requested",
-                    current_owner=None,
-                )
-                session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
-                followup_event = self._append_event(
-                    session_id=session.id,
-                    event_type="session_escalated_to_operator",
-                    producer_type="coordinator",
-                    payload={
-                        "reason": "delivery_gate_blocked_after_doc_harvest",
-                        "role_name": DOC_HARVEST_ROLE,
-                        "summary": "delivery blocked because workflow verification did not pass",
-                        "details": (
-                            "Documentation harvest completed, but the latest structured verification outcome is not "
-                            "passed. Resolve verification failures before delivery can continue."
-                        ),
-                        "current_stage": session.current_stage,
-                    },
-                )
-            else:
-                _session, followup_event = self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
+            _session, followup_event = self._enqueue_documentation_review(session=session, source_event=source_event)
             self._append_event(
                 session_id=session.id,
                 event_type="session_outcome_reconciled",
@@ -7448,6 +7641,29 @@ class CoordinatorService:
                 payload={
                     "stage_name": "doc_harvest_requested",
                     "outcome_status": "completed",
+                    "followup_event_type": followup_event.event_type,
+                },
+            )
+            return True
+
+        if session.current_stage == "documentation_review_requested":
+            review_role = self.role_repository.get_by_name(session.id, DOCUMENTATION_REVIEWER_ROLE)
+            if review_role is None:
+                return False
+            active_item = self._find_active_work_item_for_role(session.id, review_role.id)
+            if active_item is not None:
+                return False
+            source_event = self._latest_event_by_type(session.id, {"documentation_review_passed"})
+            if source_event is None:
+                return False
+            _session, followup_event = self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
+            self._append_event(
+                session_id=session.id,
+                event_type="session_outcome_reconciled",
+                producer_type="coordinator",
+                payload={
+                    "stage_name": "documentation_review_requested",
+                    "outcome_status": "passed",
                     "followup_event_type": followup_event.event_type,
                 },
             )
@@ -7546,6 +7762,7 @@ class CoordinatorService:
             "implementation",
             "self_review_correction",
             "verification_correction",
+            "documentation_review_correction",
             "followup_implementation",
         }:
             return None
@@ -7625,8 +7842,29 @@ class CoordinatorService:
                 "diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="source"),
             }
         if role.role_name == DOC_HARVEST_ROLE and stage_name == "doc_harvest_requested":
+            guide_path = None
+            if self.workdir_root is not None:
+                guide_path = self._existing_file_path(
+                    str(self.workdir_root / session.task_key / "repo" / "DOCUMENTATION_GUIDE.md")
+                )
             return {
                 "full_diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="full"),
+                "documentation_guide_path": guide_path,
+            }
+        if role.role_name == DOCUMENTATION_REVIEWER_ROLE and stage_name == "documentation_review_requested":
+            doc_diff_path = self._refresh_structured_diff_artifact(session.task_key, mode="docs")
+            full_diff_path = self._refresh_structured_diff_artifact(session.task_key, mode="full")
+            precheck_path = self._materialize_documentation_precheck(session.task_key)
+            guide_path = None
+            if self.workdir_root is not None:
+                guide_path = self._existing_file_path(
+                    str(self.workdir_root / session.task_key / "repo" / "DOCUMENTATION_GUIDE.md")
+                )
+            return {
+                "doc_diff_path": doc_diff_path,
+                "full_diff_path": full_diff_path,
+                "documentation_precheck_path": precheck_path,
+                "documentation_guide_path": guide_path,
             }
         if session.workflow_profile == "story_full":
             story_payload = self._story_context_extra_hydration(session.task_key)
@@ -7674,6 +7912,7 @@ class CoordinatorService:
             "boy_scout_correction_requested": "fix-only",
             "verification_correction_requested": "fix-only",
             "self_review_correction_requested": "fix-only",
+            "documentation_review_correction_requested": "fix-only",
             "mr_followup_requested": "fix-only",
             "qa_reopen_requested": "fix-only",
         }
@@ -7734,6 +7973,10 @@ class CoordinatorService:
             "verification_correction_requested": {
                 "source": "verification",
                 "artifact_type": "final_verification_markdown",
+            },
+            "documentation_review_correction_requested": {
+                "source": "documentation_review",
+                "artifact_type": "documentation_review_report_markdown",
             },
         }
         config = config_by_stage.get(stage_name)
@@ -7817,6 +8060,149 @@ class CoordinatorService:
     def _refresh_post_harvest_diff_artifacts(self, task_key: str) -> None:
         for mode in ("source", "docs", "full"):
             self._refresh_structured_diff_artifact(task_key, mode=mode)
+
+    def _materialize_documentation_precheck(self, task_key: str) -> str | None:
+        if self.workdir_root is None:
+            return None
+        task_root = self.workdir_root / task_key
+        repo_dir = task_root / "repo"
+        spec_root = task_root / "spec"
+        target_path = spec_root / "documentation-precheck.md"
+        if not repo_dir.exists():
+            return self._existing_file_path(str(target_path))
+
+        changed_files = self._changed_files_for_documentation_precheck(repo_dir)
+        findings = self._documentation_precheck_findings(repo_dir, changed_files)
+        lines = [
+            f"# Documentation Precheck: {task_key}",
+            "",
+            "This deterministic precheck flags documentation hygiene smells for the documentation reviewer.",
+            "It is not a replacement for the reviewer verdict.",
+            "",
+            f"Changed documentation/comment candidate files: {len(changed_files)}",
+            f"Findings: {len(findings)}",
+            "",
+        ]
+        if findings:
+            lines.extend(["## Findings", ""])
+            for index, finding in enumerate(findings, start=1):
+                lines.extend(
+                    [
+                        f"### {index}. {finding['title']}",
+                        "",
+                        f"- File: `{finding['file']}`",
+                        f"- Line: {finding['line']}",
+                        f"- Evidence: {finding['evidence']}",
+                        f"- Suggested direction: {finding['direction']}",
+                        "",
+                    ]
+                )
+        else:
+            lines.extend(["## Findings", "", "No deterministic documentation hygiene findings.", ""])
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        if self.artifacts_root is not None:
+            self.artifact_repository.create(
+                session_id=self._session_id_for_task_key(task_key),
+                stage_name="documentation-review",
+                artifact_type="documentation_precheck_markdown",
+                path=str(target_path),
+                metadata={"finding_count": len(findings), "changed_file_count": len(changed_files)},
+            )
+        return str(target_path)
+
+    def _session_id_for_task_key(self, task_key: str) -> int:
+        session = self.session_repository.get_by_task_key(task_key)
+        if session is None:
+            raise IntakeError(f"Session for {task_key} was not found")
+        return session.id
+
+    def _changed_files_for_documentation_precheck(self, repo_dir: Path) -> list[str]:
+        result = subprocess.run(
+            ["git", "-C", str(repo_dir), "diff", "--name-only", "origin/master...HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return []
+        candidate_suffixes = (".md", ".markdown", ".adoc", ".rst", ".txt", ".swift", ".kt", ".kts", ".java")
+        ignored_parts = {"Pods", ".build", "node_modules", "DerivedData", ".gradle"}
+        files: list[str] = []
+        for raw_line in result.stdout.splitlines():
+            rel_path = raw_line.strip()
+            if not rel_path or not rel_path.endswith(candidate_suffixes):
+                continue
+            if any(part in ignored_parts for part in Path(rel_path).parts):
+                continue
+            files.append(rel_path)
+        return files
+
+    def _documentation_precheck_findings(self, repo_dir: Path, changed_files: list[str]) -> list[dict[str, str | int]]:
+        findings: list[dict[str, str | int]] = []
+        history_pattern = re.compile(
+            r"\b(jira|follow[- ]?up|review finding|review history|moved from|no longer|task history)\b",
+            re.IGNORECASE,
+        )
+        task_pattern = re.compile(r"\b[A-Z]+-\d+\b")
+        for rel_path in changed_files:
+            path = repo_dir / rel_path
+            if not path.is_file():
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except UnicodeDecodeError:
+                continue
+            is_markdown = path.suffix.lower() in {".md", ".markdown", ".adoc", ".rst", ".txt"}
+            is_readme = path.name.lower() == "readme.md"
+            for index, line in enumerate(lines, start=1):
+                searchable = line.strip()
+                if not searchable:
+                    continue
+                if not is_markdown and not self._looks_like_comment_line(searchable):
+                    continue
+                if task_pattern.search(searchable):
+                    findings.append(
+                        {
+                            "title": "Task key in production documentation/comment",
+                            "file": rel_path,
+                            "line": index,
+                            "evidence": searchable[:240],
+                            "direction": "Remove Jira/task IDs from production docs and comments; keep durable behavior only.",
+                        }
+                    )
+                if history_pattern.search(searchable):
+                    findings.append(
+                        {
+                            "title": "Review/task history wording",
+                            "file": rel_path,
+                            "line": index,
+                            "evidence": searchable[:240],
+                            "direction": "Rewrite as stable subsystem or caller-facing documentation, not task execution history.",
+                        }
+                    )
+                if is_readme and self._looks_like_file_inventory_table(lines, index - 1):
+                    findings.append(
+                        {
+                            "title": "README file inventory table",
+                            "file": rel_path,
+                            "line": index,
+                            "evidence": searchable[:240],
+                            "direction": "Avoid file listings in module READMEs unless they are genuinely stable key entry points.",
+                        }
+                    )
+        return findings[:100]
+
+    def _looks_like_comment_line(self, line: str) -> bool:
+        return line.startswith("//") or line.startswith("///") or line.startswith("*") or line.startswith("/*")
+
+    def _looks_like_file_inventory_table(self, lines: list[str], index: int) -> bool:
+        if index + 1 >= len(lines):
+            return False
+        header = lines[index].strip().lower()
+        separator = lines[index + 1].strip()
+        if not (header.startswith("|") and separator.startswith("|") and "---" in separator):
+            return False
+        return any(token in header for token in ("file", "path", "source"))
 
     def _existing_directory_path(self, value: str | None) -> str | None:
         if not value:
@@ -8030,6 +8416,13 @@ class CoordinatorService:
             )
         if stage_name == "verification_correction_requested":
             return f"Apply verification corrections for {task_key}."
+        if stage_name == "documentation_review_requested":
+            return (
+                f"Review documentation quality for {task_key}. "
+                "Use the routed documentation precheck, docs diff, full diff, and DOCUMENTATION_GUIDE.md when present; when the guide is absent, apply stable behavior/contract documentation rules. "
+                "Emit passed when production docs/comments are clean, failed when documentation-only corrections are needed, "
+                "or skipped_not_needed when there are no docs/comment changes to review."
+            )
         if stage_name == "self_review_requested":
             policy_mode = self._optional_lane_policy_mode(session_policy, "self_review_policy")
             if policy_mode == "required":
@@ -8047,18 +8440,25 @@ class CoordinatorService:
             )
         if stage_name == "self_review_correction_requested":
             return f"Apply self review corrections for {task_key}."
+        if stage_name == "documentation_review_correction_requested":
+            return (
+                f"Apply documentation review corrections for {task_key}. "
+                "Edit only production documentation and comments needed to resolve the routed documentation review findings. "
+                "Do not change product behavior or broaden into code cleanup."
+            )
         if stage_name == "doc_harvest_requested":
             policy_mode = self._optional_lane_policy_mode(session_policy, "doc_harvest_policy")
             if policy_mode == "required":
                 return (
                     f"Run documentation harvest for {task_key}. "
                     "Generate or refresh `spec/full-diff.md`, use it as the source of truth, update grounded feature-level README targets only, "
+                    "use DOCUMENTATION_GUIDE.md when present and stable behavior/contract documentation rules when absent, "
                     "commit only the documentation changes, and report a compact result summary. "
                     "This documentation lane is required for this session, so do not emit skipped_not_needed."
                 )
             return (
                 f"Run documentation harvest for {task_key}. "
-                "Generate or refresh `spec/full-diff.md`, use it as the source of truth, update grounded feature-level README targets only, commit only the documentation changes, and report a compact result summary."
+                "Generate or refresh `spec/full-diff.md`, use it as the source of truth, update grounded feature-level README targets only, use DOCUMENTATION_GUIDE.md when present and stable behavior/contract documentation rules when absent, commit only the documentation changes, and report a compact result summary."
                 " Emit skipped_not_needed when the completed change has no grounded README/doc target or does not warrant a documentation update."
             )
         if stage_name == "mr_comments_analysis_requested":
@@ -8087,6 +8487,8 @@ class CoordinatorService:
             role_names.append(CODE_SCOUT_ROLE)
         if (policy or {}).get("doc_harvest_policy") != "disabled" and DOC_HARVEST_ROLE not in role_names:
             role_names.append(DOC_HARVEST_ROLE)
+        if (policy or {}).get("doc_harvest_policy") != "disabled" and DOCUMENTATION_REVIEWER_ROLE not in role_names:
+            role_names.append(DOCUMENTATION_REVIEWER_ROLE)
         if workflow_profile == "story_full":
             for role_name in (
                 PROPOSAL_CONTEXT_WORKER_ROLE,
@@ -8114,6 +8516,7 @@ class CoordinatorService:
             "followup_implementation",
             "self_review_correction",
             "verification_correction",
+            "documentation_review_correction",
         }:
             return BUG_FIXER_ROLE
         return IMPLEMENTER_ROLE
@@ -8773,10 +9176,11 @@ class CoordinatorService:
         return subtasks
 
     def _parse_subtask_work_item_title(self, title: str) -> dict[str, str | None]:
+        normalized_title = title.removeprefix("Retry: ")
         prefix = "Subtask implementation for "
-        if not title.startswith(prefix):
+        if not normalized_title.startswith(prefix):
             return {"key": None, "title": title}
-        payload = title[len(prefix):]
+        payload = normalized_title[len(prefix):]
         if ": " not in payload:
             return {"key": payload.strip() or None, "title": title}
         key, item_title = payload.split(": ", 1)
@@ -9528,6 +9932,60 @@ class CoordinatorService:
                 "work_item_id": payload.get("work_item_id"),
             },
         )
+
+    def _materialize_documentation_review_report(
+        self,
+        *,
+        session: Session,
+        output_type: str,
+        payload: dict,
+    ) -> Path:
+        if self.workdir_root is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing workdir or artifact root")
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        status = "passed" if output_type in {"passed", "completed", "skipped_not_needed"} else "failed"
+        target_path = spec_root / "documentation-review.md"
+        summary = str(payload.get("summary") or "").strip()
+        details = str(payload.get("details") or "").strip()
+        issues_markdown = str(payload.get("issues_markdown") or "").strip()
+        lines = [
+            f"# Documentation Review: {session.task_key}",
+            "",
+            f"Status: {status}",
+            "",
+        ]
+        if summary:
+            lines.extend(["## Summary", "", summary, ""])
+        if details:
+            lines.extend(["## Details", "", details, ""])
+        if issues_markdown:
+            lines.extend(["## Issues", "", issues_markdown, ""])
+        if not any((summary, details, issues_markdown)):
+            lines.extend(["## Summary", "", "Documentation review completed.", ""])
+        content = "\n".join(lines).rstrip() + "\n"
+        target_path.write_text(content, encoding="utf-8")
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "documentation-review",
+            "documentation-review.md",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="documentation-review",
+            artifact_type="documentation_review_report_markdown",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": status,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+        return target_path
 
     def _materialize_boy_scout_outcome_file(
         self,

@@ -89,9 +89,22 @@ def role_runtime_rules(role_name: str) -> str:
             "Role-specific rules:\n"
             "- Treat this role as a bounded one-shot worker: update feature-level documentation from the completed task diff, then exit.\n"
             "- Start by generating or refreshing `spec/full-diff.md`, then use it as the primary source of truth for what changed on the branch.\n"
+            "- Use the repository `DOCUMENTATION_GUIDE.md` when present; when it is absent, follow the stable documentation rules below instead of inventing repository-specific conventions.\n"
             "- Resolve documentation targets conservatively: prefer changed README/doc anchors first, then docs near changed code, and skip ambiguous multi-feature diffs.\n"
             "- Read selectively, update only grounded README targets, and commit only the documentation files you touched.\n"
             "- Report a compact summary that states whether READMEs were created, enriched, already complete, or skipped due to ambiguity.\n\n"
+        )
+    if role_name == "documentation-reviewer":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded one-shot reviewer: inspect documentation changes, write the routed result, and exit.\n"
+            "- Start from the routed deterministic precheck, `spec/doc-diff.md`, `spec/full-diff.md`, and the repository `DOCUMENTATION_GUIDE.md` when present; when it is absent, apply the stable documentation rules below.\n"
+            "- Review only production documentation and doc/comment changes; do not broaden into product-code correctness review.\n"
+            "- Flag docs that preserve Jira/review history, task IDs, file inventories, implementation-step narration, duplicated explanations, or unstable details that should stay in Jira/review artifacts.\n"
+            "- Prefer stable subsystem contracts, ownership, lifecycle, extension rules, and caller-facing public API documentation.\n"
+            "- Do not edit files and do not run build/test/lint wrappers.\n"
+            "- Emit `skipped_not_needed` only when there are no documentation or comment changes to review.\n"
+            "- When issues exist, submit `failed` with actionable `issues_markdown` or `details` for a docs-only correction pass.\n\n"
         )
     if role_name == "proposal-context-worker":
         return (

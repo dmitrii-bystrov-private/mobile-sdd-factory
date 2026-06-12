@@ -61,6 +61,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
     if role_name == "verification-coordinator":
         return [
             "- Task repo worktree: `{task_repo_root}`",
+            "- Documentation guide: `{task_repo_root}/DOCUMENTATION_GUIDE.md` when present",
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and verification outputs: `{task_artifacts_root}`",
@@ -112,6 +113,17 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task artifacts and documentation outputs: `{task_artifacts_root}`",
             "- Main repo diff helper: `{repo_root}/scripts/generate-diff.sh`",
             "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+        ]
+    if role_name == "documentation-reviewer":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Documentation diff input: `{task_snapshot_root}/spec/doc-diff.md`",
+            "- Full diff input: `{task_snapshot_root}/spec/full-diff.md`",
+            "- Deterministic documentation precheck: `{task_snapshot_root}/spec/documentation-precheck.md`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Documentation guide: `{task_repo_root}/DOCUMENTATION_GUIDE.md` when present",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task artifacts and documentation review outputs: `{task_artifacts_root}`",
         ]
     if role_name == "proposal-context-worker":
         return [
@@ -241,7 +253,14 @@ def _role_responsibility(role_name: str) -> list[str]:
         return [
             "- You execute one bounded documentation-harvest task for one completed task session.",
             "- You update or create feature-level README files from grounded diff evidence in the task worktree.",
+            "- You use the repository documentation guide when present and fall back to stable behavior/contract documentation rules when it is absent.",
             "- You stop after committing only the documentation updates and reporting the compact result summary.",
+        ]
+    if role_name == "documentation-reviewer":
+        return [
+            "- You execute one bounded documentation quality review for one completed documentation pass.",
+            "- You verify production docs and doc comments against the repository documentation guide when present, otherwise against stable behavior/contract documentation rules.",
+            "- You do not edit files; report either a clean pass, a skip, or actionable documentation-only findings.",
         ]
     if role_name == "proposal-context-worker":
         return [
@@ -368,8 +387,18 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Treat this role as a bounded one-shot worker: generate or refresh `spec/full-diff.md`, update grounded feature-level README targets, and exit.",
             "- Use `spec/full-diff.md` as the primary source of truth for branch changes and prefer changed README/doc anchors over broad repo scanning.",
+            "- Use `DOCUMENTATION_GUIDE.md` when present; otherwise write durable behavior and contract documentation without preserving task/review history.",
             "- Read selectively and skip ambiguous multi-feature diffs instead of inventing a single arbitrary documentation target.",
             "- Commit only the README/doc files you changed, then report a compact summary for the coordinator.",
+        ]
+    if role_name == "documentation-reviewer":
+        return [
+            "- Treat this role as a bounded one-shot reviewer: inspect documentation changes, write a terminal result, and exit.",
+            "- Start from `spec/documentation-precheck.md`, `spec/doc-diff.md`, `spec/full-diff.md`, and `DOCUMENTATION_GUIDE.md` when present; otherwise apply the stable documentation rules from this prompt.",
+            "- Review production README files, docs, and public/doc comments for stable-contract documentation quality.",
+            "- Flag Jira/review history, file inventories in module READMEs, duplicated explanations, stale implementation narration, and documentation that preserves how the task was implemented instead of the durable behavior.",
+            "- Do not edit files, do not run verification wrappers, and keep findings scoped to documentation/comment changes.",
+            "- Emit `skipped_not_needed` only when there are no documentation/comment changes to review.",
         ]
     if role_name == "proposal-context-worker":
         return [

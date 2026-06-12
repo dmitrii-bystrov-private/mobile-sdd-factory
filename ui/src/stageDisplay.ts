@@ -17,6 +17,8 @@ const STAGE_LABELS: Record<string, string> = {
   boy_scout_correction_requested: "Code Scout Correction",
   verification_requested: "Verification",
   verification_correction_requested: "Verification Correction",
+  documentation_review_requested: "Documentation Review",
+  documentation_review_correction_requested: "Documentation Review Correction",
   qa_reopen_requested: "QA Reopen",
   mr_comments_analysis_requested: "Comments Analysis",
   mr_followup_requested: "MR Follow-up",

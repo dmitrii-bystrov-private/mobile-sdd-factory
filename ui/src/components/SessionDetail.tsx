@@ -7,6 +7,7 @@ import { InteractiveStatePanel } from "./InteractiveStatePanel";
 import { OperatorActions } from "./OperatorActions";
 import { useToast } from "./ToastProvider";
 import { roleDescription, roleDisplayName } from "../roleDisplay";
+import { isOnDemandDashboardRole, shouldShowRoleOnDashboardByDefault } from "../roleVisibility";
 import {
   workflowProfileDisplayName,
 } from "../sessionDisplay";
@@ -24,8 +25,6 @@ type DeliveryFailureState = {
   summary: string;
   details: string | null;
 } | null;
-
-const ON_DEMAND_SLEEPING_ROLES = new Set(["mr-comments-analyst-worker"]);
 
 function humanizeEventType(value: string): string {
   return value
@@ -63,6 +62,7 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
     "verification-coordinator",
     "code-scout",
     "doc-harvest-worker",
+    "documentation-reviewer",
     "mr-comments-analyst-worker",
   ];
   const bugFullOrder = [
@@ -72,6 +72,7 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
     "verification-coordinator",
     "code-scout",
     "doc-harvest-worker",
+    "documentation-reviewer",
     "mr-comments-analyst-worker",
   ];
   const storyFullOrder = [
@@ -86,6 +87,7 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
     "verification-coordinator",
     "code-scout",
     "doc-harvest-worker",
+    "documentation-reviewer",
     "mr-comments-analyst-worker",
   ];
 
@@ -117,7 +119,7 @@ function workerStateLabel(
     }
     return "Active";
   }
-  if (ON_DEMAND_SLEEPING_ROLES.has(role.role_name)) {
+  if (isOnDemandDashboardRole(role.role_name)) {
     if (role.status === "running" || runtimeRole?.liveState === "live-idle") {
       return "On-demand";
     }
@@ -265,7 +267,6 @@ export function SessionDetail({
 
   const activeSession = session;
 
-  const visibleRoles = bundle.roles.filter((role) => role.role_name !== "task-coordinator");
   const interactiveOwnerRoleName =
     session.status === "waiting_for_operator" && bundle.interactiveStateSummary?.available
       ? bundle.interactiveStateSummary.roleName
@@ -275,7 +276,8 @@ export function SessionDetail({
       .filter((item) => item.status === "active" || item.status === "pending")
       .map((item) => item.owner_role_id),
   );
-  const activeRoles = visibleRoles.filter(
+  const baseRoles = bundle.roles.filter((role) => role.role_name !== "task-coordinator");
+  const activeRoles = baseRoles.filter(
     (role) =>
       role.status === "running" &&
       (
@@ -295,7 +297,7 @@ export function SessionDetail({
       ? "Awaiting assignment"
       : "Not assigned yet";
   const activeRoleIds = new Set(activeRoles.map((role) => role.id));
-  const orderedRoles = [...visibleRoles].sort((left, right) => {
+  const orderedRoles = [...baseRoles].sort((left, right) => {
     const orderDelta =
       roleFlowOrder(left.role_name, session.workflow_profile) -
       roleFlowOrder(right.role_name, session.workflow_profile);
@@ -310,6 +312,16 @@ export function SessionDetail({
   const visibleWorkflowRoles = orderedRoles.filter((role) => {
     if (showAllWorkflowRoles) {
       return true;
+    }
+    if (
+      !shouldShowRoleOnDashboardByDefault(role, {
+        activeRoleIds,
+        currentOwner: session.current_owner,
+        interactiveOwner: interactiveOwnerRoleName,
+        workItems: bundle.workItems,
+      })
+    ) {
+      return false;
     }
     const label = workerStateLabel(
       role,
