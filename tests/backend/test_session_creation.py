@@ -18,6 +18,7 @@ from backend.roles.contracts import (
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
     CODE_SCOUT_ROLE,
+    CONVENTION_REVIEWER_ROLE,
     DOCUMENTATION_REVIEWER_ROLE,
     DOC_HARVEST_ROLE,
     DEFAULT_SESSION_ROLES,
@@ -28,6 +29,7 @@ from backend.roles.contracts import (
     PERSISTENT_SESSION_ROLES,
     PROPOSAL_CONTEXT_WORKER_ROLE,
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+    REQUIREMENTS_REVIEWER_ROLE,
     SPEC_VERIFIER_WORKER_ROLE,
     TASK_DECOMPOSER_WORKER_ROLE,
     VERIFICATION_COORDINATOR_ROLE,
@@ -694,7 +696,12 @@ class SessionCreationTests(unittest.TestCase):
                     "model": "sonnet",
                     "effort": "medium",
                 },
-                "code-scout": {
+                "convention-reviewer": {
+                    "runner": "codex",
+                    "model": "gpt-5.5",
+                    "effort": "high",
+                },
+                "requirements-reviewer": {
                     "runner": "codex",
                     "model": "gpt-5.5",
                     "effort": "high",
@@ -726,8 +733,9 @@ class SessionCreationTests(unittest.TestCase):
                 "model": "gpt-5.5",
                 "effort": "high",
             },
-            session.role_config["code-scout"],
+            session.role_config["convention-reviewer"],
         )
+        self.assertIn("requirements-reviewer", session.role_config)
         self.assertEqual(
             {
                 "runner": "claude",
@@ -1945,7 +1953,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Impacted schemes: Finom", report_text)
         self.assertIn("Impacted test targets: FinomTests", report_text)
 
-    def test_implementation_completed_routes_to_reviewer_when_self_review_required(self) -> None:
+    def test_implementation_completed_routes_to_convention_reviewer_when_review_gate_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003R",
             workflow_profile="oneshot",
@@ -1965,24 +1973,24 @@ class SessionCreationTests(unittest.TestCase):
         review_items = [
             item
             for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "self_review"
+            if item.work_type == "convention_review"
         ]
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        reviewer_role = self.role_repository.get_by_name(session.id, CONVENTION_REVIEWER_ROLE)
         sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
 
-        self.assertEqual("self_review_requested", updated_session.current_stage)
-        self.assertEqual(CODE_REVIEWER_ROLE, updated_session.current_owner)
-        self.assertEqual("self_review_requested", followup_event.event_type)
+        self.assertEqual("convention_review_requested", updated_session.current_stage)
+        self.assertEqual(CONVENTION_REVIEWER_ROLE, updated_session.current_owner)
+        self.assertEqual("convention_review_requested", followup_event.event_type)
         self.assertEqual(1, len(review_items))
         self.assertEqual(1, len(sent_inputs))
-        self.assertIn("Review the current task changes for IOS-30003R.", sent_inputs[0])
+        self.assertIn("Run convention review for IOS-30003R.", sent_inputs[0])
         self.assertIn("Role-specific rules:", sent_inputs[0])
-        self.assertIn("Start from the current diff and review only the touched changes.", sent_inputs[0])
+        self.assertIn("Primary project guidance", sent_inputs[0])
         self.assertIn("review_scope", sent_inputs[0])
         self.assertIn("write-result.sh", sent_inputs[0])
         self.assertIn("--work-item-id", sent_inputs[0])
 
-    def test_reviewer_output_passed_routes_self_review_to_verification(self) -> None:
+    def test_dual_review_passes_route_to_verification(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003RP",
             workflow_profile="oneshot",
@@ -2001,22 +2009,33 @@ class SessionCreationTests(unittest.TestCase):
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
+            role_name=CONVENTION_REVIEWER_ROLE,
             output_type="passed",
-            payload={"summary": "clean review"},
+            payload={"summary": "clean convention review"},
+        )
+        self.assertEqual("convention_review_passed", mapped_event.event_type)
+        self.assertEqual("requirements_review_requested", followup_event.event_type)
+        self.assertEqual("requirements_review_requested", updated_session.current_stage)
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=REQUIREMENTS_REVIEWER_ROLE,
+            output_type="passed",
+            payload={"summary": "clean requirements review"},
         )
         artifacts = self.artifact_repository.list_for_session(session.id)
 
-        self.assertEqual("self_review_passed", mapped_event.event_type)
+        self.assertEqual("requirements_review_passed", mapped_event.event_type)
         self.assertEqual("verification_requested", followup_event.event_type)
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
-        self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
-        outcome_artifact = next(item for item in artifacts if item.artifact_type == "self_review_outcome_json")
+        self.assertTrue(any(item.artifact_type == "convention_review_report_markdown" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "requirements_review_report_markdown" for item in artifacts))
+        outcome_artifact = next(item for item in artifacts if item.artifact_type == "requirements_review_outcome_json")
         self.assertEqual("internal_review", outcome_artifact.metadata["report_family"])
-        self.assertEqual("self_review", outcome_artifact.metadata["review_lane"])
+        self.assertEqual("requirements", outcome_artifact.metadata["review_lane"])
         self.assertEqual("passed", outcome_artifact.metadata["status"])
-        outcome_path = Path(self.temp_dir.name) / "IOS-30003RP" / "review" / "self-review-outcome.json"
+        outcome_path = Path(self.temp_dir.name) / "IOS-30003RP" / "review" / "requirements" / "outcome.json"
         self.assertTrue(outcome_path.exists())
         self.assertEqual("passed", json.loads(outcome_path.read_text())["status"])
 
@@ -2039,7 +2058,7 @@ class SessionCreationTests(unittest.TestCase):
                 payload={"summary": "all green"},
             )
 
-    def test_reviewer_output_failed_routes_self_review_to_correction(self) -> None:
+    def test_convention_reviewer_output_failed_routes_to_correction(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003RF",
             workflow_profile="oneshot",
@@ -2058,7 +2077,7 @@ class SessionCreationTests(unittest.TestCase):
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
             session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
+            role_name=CONVENTION_REVIEWER_ROLE,
             output_type="failed",
             payload={
                 "summary": "issues remain",
@@ -2082,29 +2101,69 @@ class SessionCreationTests(unittest.TestCase):
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
 
-        self.assertEqual("self_review_issues_found", mapped_event.event_type)
-        self.assertEqual("self_review_correction_requested", followup_event.event_type)
-        self.assertEqual("self_review_correction_requested", updated_session.current_stage)
+        self.assertEqual("convention_review_issues_found", mapped_event.event_type)
+        self.assertEqual("convention_review_correction_requested", followup_event.event_type)
+        self.assertEqual("convention_review_correction_requested", updated_session.current_stage)
         self.assertEqual("implementer", updated_session.current_owner)
-        report_artifact = next(item for item in artifacts if item.artifact_type == "self_review_report_markdown")
+        report_artifact = next(item for item in artifacts if item.artifact_type == "convention_review_report_markdown")
         self.assertEqual("internal_review", report_artifact.metadata["report_family"])
-        self.assertEqual("self_review", report_artifact.metadata["review_lane"])
+        self.assertEqual("convention", report_artifact.metadata["review_lane"])
         self.assertEqual("report", report_artifact.metadata["artifact_role"])
         self.assertEqual("issues_found", report_artifact.metadata["status"])
         self.assertIn('"issues_file_path"', sent_inputs[-1])
-        self.assertIn('"correction_source": "self_review"', sent_inputs[-1])
+        self.assertIn('"correction_source": "convention_review"', sent_inputs[-1])
         self.assertIn('"correction_report_path"', sent_inputs[-1])
         self.assertIn("pass-01.md", sent_inputs[-1])
-        review_report = (Path(self.temp_dir.name) / "IOS-30003RF" / "review" / "pass-01.md").read_text()
+        review_report = (Path(self.temp_dir.name) / "IOS-30003RF" / "review" / "convention" / "pass-01.md").read_text()
         self.assertIn("- Why it matters: Keeping the duplicate state path makes future regressions more likely.", review_report)
         self.assertIn("- Required direction: Use one shared retry path for the touched flow instead of parallel branches.", review_report)
         self.assertIn("- Non-goals: Do not broaden this correction into unrelated flow-controller cleanup.", review_report)
         self.assertIn("- Evidence: The touched branch now stores retry state both before and after the shared helper call.", review_report)
         self.assertIn("- Suggested approach: Route both call sites back through the existing shared retry helper instead of carrying a second local branch.", review_report)
         self.assertIn("- Test expectations: Re-run the retry-state unit coverage and confirm both branches still converge on one state path.", review_report)
-        outcome_path = Path(self.temp_dir.name) / "IOS-30003RF" / "review" / "self-review-outcome.json"
+        outcome_path = Path(self.temp_dir.name) / "IOS-30003RF" / "review" / "convention" / "outcome.json"
         self.assertTrue(outcome_path.exists())
         self.assertEqual("issues_found", json.loads(outcome_path.read_text())["status"])
+
+    def test_review_correction_completion_reenters_full_review_gate(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RC",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RC")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CONVENTION_REVIEWER_ROLE,
+            output_type="passed",
+            payload={"summary": "clean convention review"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=REQUIREMENTS_REVIEWER_ROLE,
+            output_type="failed",
+            payload={"summary": "missing edge case"},
+        )
+
+        updated_session, _mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=IMPLEMENTER_ROLE,
+            output_type="completed",
+            payload={"summary": "requirements review fix done"},
+        )
+
+        self.assertEqual("convention_review_requested", updated_session.current_stage)
+        self.assertEqual(CONVENTION_REVIEWER_ROLE, updated_session.current_owner)
+        self.assertEqual("convention_review_requested", followup_event.event_type)
 
     def test_reviewer_failed_output_requires_summary_details_or_issues_markdown(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

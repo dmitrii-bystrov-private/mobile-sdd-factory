@@ -146,70 +146,70 @@ Legacy `code-reviewer` / `self_review_requested` may keep using `review/pass-NN.
 
 ### 2. New Roles
 
-- [ ] Add `convention-reviewer` role contract.
-- [ ] Add `requirements-reviewer` role contract.
-- [ ] Add role baselines.
-- [ ] Add both new reviewer roles to persistent session roles.
-- [ ] Add launcher/workspace support.
-- [ ] Add role prompt rules.
-- [ ] Encode Requirements Reviewer input precedence: newer Jira follow-up tasks/subtasks override the original description, older specs, and earlier follow-ups only on explicit conflict.
-- [ ] Encode cumulative Requirements Reviewer semantics: earlier accepted subtasks remain active regression requirements unless explicitly overridden.
-- [ ] Route `statuses.md` to Requirements Reviewer as the canonical task/subtask order input.
-- [ ] Ensure Requirements Reviewer does not treat `plan/index.md` or `plan/NN-*.md` as authoritative follow-up inputs.
-- [ ] Add deterministic result writer support.
-- [ ] Add UI role labels and descriptions.
+- [x] Add `convention-reviewer` role contract.
+- [x] Add `requirements-reviewer` role contract.
+- [x] Add role baselines.
+- [x] Add both new reviewer roles to persistent session roles.
+- [x] Add launcher/workspace support.
+- [x] Add role prompt rules.
+- [x] Encode Requirements Reviewer input precedence: newer Jira follow-up tasks/subtasks override the original description, older specs, and earlier follow-ups only on explicit conflict.
+- [x] Encode cumulative Requirements Reviewer semantics: earlier accepted subtasks remain active regression requirements unless explicitly overridden.
+- [x] Route `statuses.md` to Requirements Reviewer as the canonical task/subtask order input.
+- [x] Ensure Requirements Reviewer does not treat `plan/index.md` or `plan/NN-*.md` as authoritative follow-up inputs.
+- [x] Add deterministic result writer support.
+- [x] Add UI role labels and descriptions.
 
 ### 3. Coordinator Routing
 
-- [ ] Route implementation completion to convention review when review policy is enabled/required.
-- [ ] Route convention pass to requirements review.
-- [ ] Route requirements pass to verification or the next existing quality gate.
-- [ ] Route convention failure to convention correction.
-- [ ] Route requirements failure to requirements correction.
-- [ ] Route convention correction completion back to convention review.
-- [ ] Route requirements correction completion back to convention review, then requirements review.
-- [ ] Keep legacy `self_review_requested` behavior for already-running sessions.
+- [x] Route implementation completion to convention review when review policy is enabled/required.
+- [x] Route convention pass to requirements review.
+- [x] Route requirements pass to verification or the next existing quality gate.
+- [x] Route convention failure to convention correction.
+- [x] Route requirements failure to requirements correction.
+- [x] Route convention correction completion back to convention review.
+- [x] Route requirements correction completion back to convention review, then requirements review.
+- [x] Keep legacy `self_review_requested` behavior for already-running sessions.
 
 ### 4. Policies and UI
 
-- [ ] Reuse `self_review_policy` as the compatibility backing field for the dual-review gate.
-- [ ] Rename operator-facing `Self Review` policy labels to `Review Gate`.
-- [ ] Document that `review_policy` storage/API rename is deferred.
-- [ ] Add readable stage labels:
+- [x] Reuse `self_review_policy` as the compatibility backing field for the dual-review gate.
+- [x] Rename operator-facing `Self Review` policy labels to `Review Gate`.
+- [x] Document that `review_policy` storage/API rename is deferred.
+- [x] Add readable stage labels:
   - `Convention Review`
   - `Convention Review Correction`
   - `Requirements Review`
   - `Requirements Review Correction`
-- [ ] Update runtime/session role ordering in the UI.
-- [ ] Ensure on-demand/default dashboard visibility stays intentional.
+- [x] Update runtime/session role ordering in the UI.
+- [x] Ensure on-demand/default dashboard visibility stays intentional.
 - [ ] Keep legacy Code Scout controls available only for active legacy sessions until old sessions drain.
 
 ### 5. Tests
 
-- [ ] `implementation -> convention_review_requested`.
-- [ ] `convention_review passed -> requirements_review_requested`.
-- [ ] `requirements_review passed -> verification_requested`.
-- [ ] `convention_review failed -> convention_review_correction_requested`.
-- [ ] `requirements_review failed -> requirements_review_correction_requested`.
-- [ ] Convention correction completion returns to convention review.
-- [ ] Requirements correction completion returns to convention review before requirements review.
+- [x] `implementation -> convention_review_requested`.
+- [x] `convention_review passed -> requirements_review_requested`.
+- [x] `requirements_review passed -> verification_requested`.
+- [x] `convention_review failed -> convention_review_correction_requested`.
+- [x] `requirements_review failed -> requirements_review_correction_requested`.
+- [x] Convention correction completion returns to convention review.
+- [x] Requirements correction completion returns to convention review before requirements review.
 - [ ] Blocked review cycle works independently per lane.
 - [ ] Previous review reports are scoped to the immediate correction chain per lane.
-- [ ] Convention and requirements review artifacts are written to separate lane directories.
+- [x] Convention and requirements review artifacts are written to separate lane directories.
 - [ ] Operator guidance after blocked-cycle reply is replayed to the correct lane.
 - [ ] Requirements Reviewer follows newest Jira follow-up precedence when inputs conflict.
 - [ ] Requirements Reviewer catches regressions against earlier subtasks that were not overridden by later follow-ups.
 - [ ] Requirements Reviewer uses `statuses.md` ordering to resolve task/subtask precedence.
 - [ ] Requirements Reviewer ignores temporary plan/decomposition numbering as follow-up authority.
-- [ ] Result writer accepts both new reviewer roles.
-- [ ] UI/API display new stages and roles correctly.
+- [x] Result writer accepts both new reviewer roles.
+- [x] UI/API display new stages and roles correctly.
 
 ### 6. Documentation
 
-- [ ] Update `README.md` workflow diagrams and role table.
-- [ ] Update `docs/runtime-model.md`.
-- [ ] Update `docs/operator-guide.md`.
-- [ ] Update `docs/terminal-result-contract.md`.
+- [x] Update `README.md` workflow diagrams and role table.
+- [x] Update `docs/runtime-model.md`.
+- [x] Update `docs/operator-guide.md`.
+- [x] Update `docs/terminal-result-contract.md`.
 - [ ] Update `DEVELOPERS_GUIDE.md` if supported-platform behavior is described there.
 - [ ] Remove Code Scout from default/current-flow documentation once new sessions no longer route to it; document it only as legacy compatibility until old sessions drain.
 

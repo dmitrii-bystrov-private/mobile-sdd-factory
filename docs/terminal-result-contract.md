@@ -62,7 +62,7 @@ For deterministic routing, roles should prefer the smallest meaningful set:
 
 ## Minimal Role Contracts
 
-### Code Scout
+### Legacy Code Scout
 
 Used during `boy_scout_requested`.
 
@@ -182,7 +182,33 @@ Useful but derivative:
 
 Those fields help artifact materialization, but the pass/fail decision must not depend on prose.
 
-### Code Reviewer
+### Convention Reviewer
+
+Used during `convention_review_requested`.
+
+Required:
+- `output_type`
+- `payload.work_item_id`
+
+Routing by `output_type`:
+- `completed` or `passed` -> convention review passed
+- `failed` -> convention issues found
+- `blocked_review_cycle` -> operator escalation
+
+### Requirements Reviewer
+
+Used during `requirements_review_requested`.
+
+Required:
+- `output_type`
+- `payload.work_item_id`
+
+Routing by `output_type`:
+- `completed` or `passed` -> requirements review passed
+- `failed` -> requirements issues found
+- `blocked_review_cycle` -> operator escalation
+
+### Legacy Code Reviewer
 
 Used during `self_review_requested`.
 

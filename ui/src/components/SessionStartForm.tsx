@@ -140,10 +140,7 @@ export function SessionStartForm({
       roleNames.push("bug-fixer");
     }
     if (policy.self_review_policy !== "disabled") {
-      roleNames.push("code-reviewer");
-    }
-    if (policy.boy_scout_policy !== "disabled") {
-      roleNames.push("code-scout");
+      roleNames.push("convention-reviewer", "requirements-reviewer");
     }
     if (policy.doc_harvest_policy !== "disabled") {
       roleNames.push("doc-harvest-worker");

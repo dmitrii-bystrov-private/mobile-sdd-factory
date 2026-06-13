@@ -185,6 +185,42 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("scripts/run-test.sh", text)
         self.assertIn("scripts/ios-verify.sh", text)
 
+    def test_full_prompt_for_convention_reviewer_uses_project_guidance(self) -> None:
+        text = role_handoff_prompt(
+            role_name="convention-reviewer",
+            instruction="Run convention review for IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "convention_review_requested",
+                "work_item_id": 14,
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("Primary project guidance", text)
+        self.assertIn("CLAUDE.md", text)
+        self.assertIn("README.md", text)
+        self.assertIn("do not run builds, tests, lint, simulator commands", text)
+        self.assertIn("Do not review product requirement completeness", text)
+
+    def test_full_prompt_for_requirements_reviewer_uses_statuses_ordering(self) -> None:
+        text = role_handoff_prompt(
+            role_name="requirements-reviewer",
+            instruction="Run requirements review for IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "requirements_review_requested",
+                "work_item_id": 15,
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("statuses.md", text)
+        self.assertIn("canonical source of current scope ordering", text)
+        self.assertIn("newer Jira follow-up tasks have priority only when they explicitly conflict", text)
+        self.assertIn("earlier accepted subtasks as a regression contract", text)
+        self.assertIn("Do not treat `plan/index.md`", text)
+
     def test_full_prompt_restores_acceptance_criteria_format_contract(self) -> None:
         text = role_handoff_prompt(
             role_name="acceptance-criteria-worker",

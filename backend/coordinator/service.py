@@ -33,6 +33,7 @@ from backend.roles.contracts import (
     BUG_FIXER_ROLE,
     CODE_REVIEWER_ROLE,
     CODE_SCOUT_ROLE,
+    CONVENTION_REVIEWER_ROLE,
     DOCUMENTATION_REVIEWER_ROLE,
     DOC_HARVEST_ROLE,
     MR_COMMENTS_ANALYST_ROLE,
@@ -41,6 +42,7 @@ from backend.roles.contracts import (
     CONSTRAINTS_WORKER_ROLE,
     PROPOSAL_CONTEXT_WORKER_ROLE,
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+    REQUIREMENTS_REVIEWER_ROLE,
     SPEC_VERIFIER_WORKER_ROLE,
     TASK_DECOMPOSER_WORKER_ROLE,
     IMPLEMENTER_ROLE,
@@ -80,6 +82,8 @@ _ACTIVE_WORK_TYPE_BY_STAGE = {
     "bug_analysis_requested": "bug_analysis",
     "proposal_context_requested": "proposal_context",
     "requirements_requested": "requirements",
+    "convention_review_requested": "convention_review",
+    "requirements_review_requested": "requirements_review",
     "boy_scout_requested": "boy_scout",
     "doc_harvest_requested": "doc_harvest",
     "documentation_review_requested": "documentation_review",
@@ -90,6 +94,8 @@ _ACTIVE_WORK_TYPE_BY_STAGE = {
     "subtask_implementation_requested": "subtask_implementation",
     "implementation_requested": "implementation",
     "boy_scout_correction_requested": "boy_scout_correction",
+    "convention_review_correction_requested": "convention_review_correction",
+    "requirements_review_correction_requested": "requirements_review_correction",
     "documentation_review_correction_requested": "documentation_review_correction",
     "mr_comments_analysis_requested": "mr_comments_analysis",
     "self_review_requested": "self_review",
@@ -113,6 +119,16 @@ _INTERNAL_REVIEW_METRIC_EVENT_TYPES = {
     "self_review_issues_found",
     "self_review_blocked",
     "self_review_correction_requested",
+    "convention_review_requested",
+    "convention_review_passed",
+    "convention_review_issues_found",
+    "convention_review_blocked",
+    "convention_review_correction_requested",
+    "requirements_review_requested",
+    "requirements_review_passed",
+    "requirements_review_issues_found",
+    "requirements_review_blocked",
+    "requirements_review_correction_requested",
     "boy_scout_completed",
     "boy_scout_skipped_by_operator",
     "boy_scout_implement_now_selected",
@@ -121,6 +137,39 @@ _INTERNAL_REVIEW_METRIC_EVENT_TYPES = {
     "documentation_review_requested",
     "documentation_review_correction_requested",
     "session_escalated_to_operator",
+}
+
+_DUAL_REVIEW_ROLE_BY_LANE = {
+    "convention": CONVENTION_REVIEWER_ROLE,
+    "requirements": REQUIREMENTS_REVIEWER_ROLE,
+}
+_DUAL_REVIEW_STAGE_BY_LANE = {
+    "convention": "convention_review_requested",
+    "requirements": "requirements_review_requested",
+}
+_DUAL_REVIEW_WORK_TYPE_BY_LANE = {
+    "convention": "convention_review",
+    "requirements": "requirements_review",
+}
+_DUAL_REVIEW_CORRECTION_STAGE_BY_LANE = {
+    "convention": "convention_review_correction_requested",
+    "requirements": "requirements_review_correction_requested",
+}
+_DUAL_REVIEW_CORRECTION_WORK_TYPE_BY_LANE = {
+    "convention": "convention_review_correction",
+    "requirements": "requirements_review_correction",
+}
+_DUAL_REVIEW_EVENT_PREFIX_BY_LANE = {
+    "convention": "convention_review",
+    "requirements": "requirements_review",
+}
+_DUAL_REVIEW_REPORT_ARTIFACT_BY_LANE = {
+    "convention": "convention_review_report_markdown",
+    "requirements": "requirements_review_report_markdown",
+}
+_DUAL_REVIEW_OUTCOME_ARTIFACT_BY_LANE = {
+    "convention": "convention_review_outcome_json",
+    "requirements": "requirements_review_outcome_json",
 }
 
 
@@ -698,6 +747,18 @@ class CoordinatorService:
             return session, followup_event
         if event_type == "boy_scout_completed":
             session, followup_event = self._handle_boy_scout_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "convention_review_passed":
+            session, followup_event = self._handle_dual_review_passed(session, accepted_event, lane="convention")
+            return session, followup_event
+        if event_type == "convention_review_issues_found":
+            session, followup_event = self._handle_dual_review_issues_found(session, accepted_event, lane="convention")
+            return session, followup_event
+        if event_type == "requirements_review_passed":
+            session, followup_event = self._handle_dual_review_passed(session, accepted_event, lane="requirements")
+            return session, followup_event
+        if event_type == "requirements_review_issues_found":
+            session, followup_event = self._handle_dual_review_issues_found(session, accepted_event, lane="requirements")
             return session, followup_event
         if event_type == "acceptance_criteria_completed":
             session, followup_event = self._handle_acceptance_criteria_completed(session, accepted_event)
@@ -1918,6 +1979,18 @@ class CoordinatorService:
             session, followup_event = self._handle_story_planning_blocked(session, accepted_event)
         elif mapped_event_type == "boy_scout_completed":
             session, followup_event = self._handle_boy_scout_completed(session, accepted_event)
+        elif mapped_event_type == "convention_review_passed":
+            session, followup_event = self._handle_dual_review_passed(session, accepted_event, lane="convention")
+        elif mapped_event_type == "convention_review_issues_found":
+            session, followup_event = self._handle_dual_review_issues_found(session, accepted_event, lane="convention")
+        elif mapped_event_type == "convention_review_blocked":
+            session, followup_event = self._handle_dual_review_blocked(session, accepted_event, lane="convention")
+        elif mapped_event_type == "requirements_review_passed":
+            session, followup_event = self._handle_dual_review_passed(session, accepted_event, lane="requirements")
+        elif mapped_event_type == "requirements_review_issues_found":
+            session, followup_event = self._handle_dual_review_issues_found(session, accepted_event, lane="requirements")
+        elif mapped_event_type == "requirements_review_blocked":
+            session, followup_event = self._handle_dual_review_blocked(session, accepted_event, lane="requirements")
         elif mapped_event_type == "doc_harvest_completed":
             session, followup_event = self._handle_doc_harvest_completed(session, accepted_event)
         elif mapped_event_type == "documentation_review_passed":
@@ -1977,6 +2050,17 @@ class CoordinatorService:
                 output_type=output_type,
                 payload=normalized_payload,
             )
+        if role_name in {CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE}:
+            expected_stage = (
+                "convention_review_requested"
+                if role_name == CONVENTION_REVIEWER_ROLE
+                else "requirements_review_requested"
+            )
+            if session.current_stage == expected_stage:
+                return self._normalize_self_review_output_payload(
+                    output_type=output_type,
+                    payload=normalized_payload,
+                )
         if role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE, MR_COMMENTS_ANALYST_ROLE}:
             return self._normalize_coding_output_payload(
                 session=session,
@@ -2871,6 +2955,8 @@ class CoordinatorService:
                         "subtask_implementation",
                         "implementation",
                         "self_review_correction",
+                        "convention_review_correction",
+                        "requirements_review_correction",
                         "boy_scout_correction",
                         "verification_correction",
                         "documentation_review_correction",
@@ -2905,6 +2991,27 @@ class CoordinatorService:
                     and matching_item.session_id == session.id
                     and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
                     and matching_item.work_type == "self_review"
+                ):
+                    return False
+            return True
+        if (
+            role_name in {CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE}
+            and output_type in {"passed", "completed", "failed", "blocked_review_cycle", "skipped_not_needed", "error"}
+            and session.current_owner != role_name
+        ):
+            payload_work_item_id = output_payload.get("work_item_id") if isinstance(output_payload, dict) else None
+            expected_work_type = (
+                "convention_review"
+                if role_name == CONVENTION_REVIEWER_ROLE
+                else "requirements_review"
+            )
+            if isinstance(payload_work_item_id, int):
+                matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
+                if (
+                    matching_item is not None
+                    and matching_item.session_id == session.id
+                    and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+                    and matching_item.work_type == expected_work_type
                 ):
                     return False
             return True
@@ -2969,6 +3076,8 @@ class CoordinatorService:
                         "subtask_implementation",
                         "implementation",
                         "self_review_correction",
+                        "convention_review_correction",
+                        "requirements_review_correction",
                         "boy_scout_correction",
                         "verification_correction",
                         "documentation_review_correction",
@@ -5183,6 +5292,8 @@ class CoordinatorService:
             return self._enqueue_verification(session=session, source_event=source_event)
         if active_item.work_type == "self_review_correction":
             return self._enqueue_self_review(session=session, source_event=source_event)
+        if active_item.work_type in _DUAL_REVIEW_CORRECTION_WORK_TYPE_BY_LANE.values():
+            return self._enqueue_dual_review(session=session, source_event=source_event, lane="convention")
         if active_item.work_type == "verification_correction":
             return self._enqueue_verification(session=session, source_event=source_event)
         if active_item.work_type == "documentation_review_correction":
@@ -5214,6 +5325,8 @@ class CoordinatorService:
                 "subtask_implementation",
                 "implementation",
                 "self_review_correction",
+                "convention_review_correction",
+                "requirements_review_correction",
                 "boy_scout_correction",
                 "verification_correction",
                 "documentation_review_correction",
@@ -5233,6 +5346,8 @@ class CoordinatorService:
             completed_work_type in {"implementation", "subtask_implementation"}
             and self._optional_lane_policy_mode(session.policy, "self_review_policy") != "disabled"
         ):
+            if self._uses_dual_review_lanes(session):
+                return self._enqueue_dual_review(session=session, source_event=source_event, lane="convention")
             return self._enqueue_self_review(session=session, source_event=source_event)
 
         return self._enqueue_post_implementation_quality_gate(
@@ -5247,6 +5362,10 @@ class CoordinatorService:
             return "follow-up pass"
         if work_type == "self_review_correction":
             return "self-review fixes"
+        if work_type == "convention_review_correction":
+            return "convention review fixes"
+        if work_type == "requirements_review_correction":
+            return "requirements review fixes"
         if work_type == "boy_scout_correction":
             return "boy-scout fixes"
         if work_type == "verification_correction":
@@ -5447,6 +5566,128 @@ class CoordinatorService:
                 "operator_guided_recheck" if operator_guidance_history else None
             ),
         }
+
+    def _uses_dual_review_lanes(self, session: Session) -> bool:
+        if self._optional_lane_policy_mode(session.policy, "self_review_policy") == "disabled":
+            return False
+        return all(
+            self.role_repository.get_by_name(session.id, role_name) is not None
+            for role_name in (CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE)
+        )
+
+    def _enqueue_dual_review(
+        self,
+        session: Session,
+        source_event: Event,
+        *,
+        lane: str,
+    ) -> tuple[Session, Event]:
+        role_name = _DUAL_REVIEW_ROLE_BY_LANE[lane]
+        stage_name = _DUAL_REVIEW_STAGE_BY_LANE[lane]
+        work_type = _DUAL_REVIEW_WORK_TYPE_BY_LANE[lane]
+        reviewer_role = self.role_repository.get_by_name(session.id, role_name)
+        if reviewer_role is None:
+            raise IntakeError(f"{role_name} role is missing for the session")
+
+        review_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type=work_type,
+            title=f"{lane.title()} review for {session.task_key}",
+            owner_role_id=reviewer_role.id,
+            source_event_id=source_event.id,
+            priority=89 if lane == "convention" else 90,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=stage_name,
+            current_owner=role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction, review_hydration = self._dual_review_dispatch_context(
+            session,
+            lane=lane,
+            before_event_id=source_event.id,
+        )
+        self._dispatch_role_work(
+            session=session,
+            role=reviewer_role,
+            work_item=review_item,
+            stage_name=stage_name,
+            instruction=instruction,
+            extra_hydration=review_hydration,
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type=stage_name,
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": role_name,
+                "review_lane": lane,
+                "work_item_id": review_item.id,
+                "source_event_id": source_event.id,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event
+
+    def _dual_review_dispatch_context(
+        self,
+        session: Session,
+        *,
+        lane: str,
+        before_event_id: int | None = None,
+    ) -> tuple[str, dict[str, str | int | None]]:
+        previous_review_reports = self._dual_review_report_paths_for_current_chain(
+            session,
+            lane=lane,
+            before_event_id=before_event_id,
+        )
+        review_report_path = self._next_dual_review_report_target_path(session, lane=lane)
+        if lane == "convention":
+            instruction = (
+                f"Run convention review for {session.task_key}. "
+                "Start from the current diff, read CLAUDE.md and README.md when present, "
+                "follow their relevant local links for the touched diff, write the routed convention report, "
+                "and report a clean pass or grounded convention issues."
+            )
+        else:
+            instruction = (
+                f"Run requirements review for {session.task_key}. "
+                "Start from statuses.md as canonical Jira task/subtask order, read task and per-key Jira inputs in that order, "
+                "treat earlier accepted subtasks as regression contracts unless explicitly overridden by newer Jira follow-ups, "
+                "write the routed requirements report, and report a clean pass or grounded requirement/edge-case issues."
+            )
+        if previous_review_reports:
+            instruction += (
+                "\nPrevious review reports from this immediate correction chain "
+                "(read first and do not re-flag the same issues):\n"
+                + "\n".join(previous_review_reports)
+                + "\nOnly emit blocked_review_cycle when the current issue is the same unresolved issue "
+                "from this immediate correction chain. If a similar issue returns after later follow-up, "
+                "subtask, or implementation work, report it as a normal failed review finding."
+            )
+        hydration: dict[str, str | int | None] = {
+            "review_scope": "current_diff_only",
+            "review_lane": lane,
+            "review_report_path": str(review_report_path) if review_report_path is not None else None,
+            "previous_review_report_paths": "\n".join(previous_review_reports)
+            if previous_review_reports
+            else None,
+            "diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="source"),
+        }
+        if lane == "requirements" and self.workdir_root is not None:
+            task_root = self.workdir_root / session.task_key
+            hydration.update(
+                {
+                    "statuses_path": self._existing_file_path(str(task_root / "statuses.md")),
+                    "root_description_path": self._existing_file_path(str(task_root / "description.md")),
+                    "root_comments_path": self._existing_file_path(str(task_root / "comments.md")),
+                    "plan_artifacts_are_not_authoritative": "true",
+                }
+            )
+        return instruction, hydration
 
     def _handle_spec_verification_blocked(
         self,
@@ -6078,6 +6319,136 @@ class CoordinatorService:
                 ),
                 "needs_operator_input": True,
                 "review_report_paths": report_paths,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _handle_dual_review_passed(
+        self,
+        session: Session,
+        source_event: Event,
+        *,
+        lane: str,
+    ) -> tuple[Session, Event]:
+        self._materialize_dual_review_outcome_file(session=session, source_event=source_event, lane=lane)
+        self._complete_active_dual_review_work_item(session, lane=lane)
+        if lane == "convention":
+            return self._enqueue_dual_review(session=session, source_event=source_event, lane="requirements")
+        return self._enqueue_verification(session=session, source_event=source_event)
+
+    def _handle_dual_review_issues_found(
+        self,
+        session: Session,
+        source_event: Event,
+        *,
+        lane: str,
+    ) -> tuple[Session, Event]:
+        self._materialize_dual_review_outcome_file(session=session, source_event=source_event, lane=lane)
+        self._complete_active_dual_review_work_item(session, lane=lane)
+        return self._enqueue_dual_review_correction(session=session, source_event=source_event, lane=lane)
+
+    def _handle_dual_review_blocked(
+        self,
+        session: Session,
+        source_event: Event,
+        *,
+        lane: str,
+    ) -> tuple[Session, Event]:
+        self._materialize_dual_review_outcome_file(session=session, source_event=source_event, lane=lane)
+        self._complete_active_dual_review_work_item(session, lane=lane)
+        role_name = _DUAL_REVIEW_ROLE_BY_LANE[lane]
+        stage_name = _DUAL_REVIEW_STAGE_BY_LANE[lane]
+        reviewer_role = self.role_repository.get_by_name(session.id, role_name)
+        if reviewer_role is None:
+            raise IntakeError(f"{role_name} role is missing for the session")
+        self.work_item_repository.create(
+            session_id=session.id,
+            work_type=f"{_DUAL_REVIEW_WORK_TYPE_BY_LANE[lane]}_cycle_review",
+            title=f"{lane.title()} review cycle resolution for {session.task_key}",
+            owner_role_id=reviewer_role.id,
+            source_event_id=source_event.id,
+            priority=92,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=stage_name,
+            current_owner=role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        report_paths = self._previous_dual_review_report_paths(session.id, lane=lane)[-2:]
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": f"{lane}_review_cycle",
+                "role_name": role_name,
+                "review_lane": lane,
+                "summary": str(source_event.payload.get("summary") or "").strip()
+                or f"{lane} review cycle blocked",
+                "details": self._self_review_cycle_operator_details(
+                    source_event.payload,
+                    report_paths=report_paths,
+                ),
+                "needs_operator_input": True,
+                "review_report_paths": report_paths,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _enqueue_dual_review_correction(
+        self,
+        session: Session,
+        source_event: Event,
+        *,
+        lane: str,
+    ) -> tuple[Session, Event]:
+        work_type = _DUAL_REVIEW_CORRECTION_WORK_TYPE_BY_LANE[lane]
+        stage_name = _DUAL_REVIEW_CORRECTION_STAGE_BY_LANE[lane]
+        coding_role = self._primary_coding_role_for_work_type(session, work_type)
+        correction_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type=work_type,
+            title=f"{lane.title()} review corrections for {session.task_key}",
+            owner_role_id=coding_role.id,
+            source_event_id=source_event.id,
+            priority=92,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=stage_name,
+            current_owner=coding_role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = self._stage_instruction(
+            stage_name,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(f"No {lane} review correction instruction is available for role {coding_role.role_name}")
+        self._dispatch_role_work(
+            session=session,
+            role=coding_role,
+            work_item=correction_item,
+            stage_name=stage_name,
+            instruction=instruction,
+            extra_hydration=self._correction_dispatch_hydration(session.id, stage_name),
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type=stage_name,
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": coding_role.role_name,
+                "review_lane": lane,
+                "work_item_id": correction_item.id,
                 "current_stage": session.current_stage,
             },
         )
@@ -6775,6 +7146,8 @@ class CoordinatorService:
                 "implementation_requested",
                 "boy_scout_correction_requested",
                 "self_review_correction_requested",
+                "convention_review_correction_requested",
+                "requirements_review_correction_requested",
                 "verification_correction_requested",
                 "documentation_review_correction_requested",
                 "mr_followup_requested",
@@ -6790,6 +7163,8 @@ class CoordinatorService:
                 "implementation_requested",
                 "boy_scout_correction_requested",
                 "self_review_correction_requested",
+                "convention_review_correction_requested",
+                "requirements_review_correction_requested",
                 "verification_correction_requested",
                 "mr_followup_requested",
                 "qa_reopen_requested",
@@ -6825,6 +7200,28 @@ class CoordinatorService:
                 return "self_review_issues_found"
             if output_type == "blocked_review_cycle":
                 return "self_review_blocked"
+        if role_name == CONVENTION_REVIEWER_ROLE and session.current_stage == "convention_review_requested":
+            if output_type in {"passed", "completed"}:
+                return "convention_review_passed"
+            if output_type == "skipped_not_needed":
+                if self._optional_lane_policy_mode(session.policy, "self_review_policy") != "enabled":
+                    raise IntakeError("Convention review cannot be skipped when review gate policy is required")
+                return "convention_review_passed"
+            if output_type == "failed":
+                return "convention_review_issues_found"
+            if output_type == "blocked_review_cycle":
+                return "convention_review_blocked"
+        if role_name == REQUIREMENTS_REVIEWER_ROLE and session.current_stage == "requirements_review_requested":
+            if output_type in {"passed", "completed"}:
+                return "requirements_review_passed"
+            if output_type == "skipped_not_needed":
+                if self._optional_lane_policy_mode(session.policy, "self_review_policy") != "enabled":
+                    raise IntakeError("Requirements review cannot be skipped when review gate policy is required")
+                return "requirements_review_passed"
+            if output_type == "failed":
+                return "requirements_review_issues_found"
+            if output_type == "blocked_review_cycle":
+                return "requirements_review_blocked"
         if role_name == CODE_SCOUT_ROLE and session.current_stage == "boy_scout_requested":
             if output_type in {"passed", "completed"}:
                 return "boy_scout_completed"
@@ -6925,6 +7322,15 @@ class CoordinatorService:
                 output_type=output_type,
                 payload=payload,
             )
+        if role_name in {CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE}:
+            lane = "convention" if role_name == CONVENTION_REVIEWER_ROLE else "requirements"
+            if session.current_stage == _DUAL_REVIEW_STAGE_BY_LANE[lane]:
+                self._materialize_dual_review_report(
+                    session=session,
+                    output_type=output_type,
+                    payload=payload,
+                    lane=lane,
+                )
 
     def _record_runtime_output_artifacts(
         self,
@@ -7479,6 +7885,10 @@ class CoordinatorService:
         extra_hydration: dict[str, str | int | None] | None = None
         if role.role_name == CODE_REVIEWER_ROLE and session.current_stage == "self_review_requested":
             instruction, extra_hydration = self._self_review_dispatch_context(session)
+        elif role.role_name == CONVENTION_REVIEWER_ROLE and session.current_stage == "convention_review_requested":
+            instruction, extra_hydration = self._dual_review_dispatch_context(session, lane="convention")
+        elif role.role_name == REQUIREMENTS_REVIEWER_ROLE and session.current_stage == "requirements_review_requested":
+            instruction, extra_hydration = self._dual_review_dispatch_context(session, lane="requirements")
         else:
             instruction = self._stage_instruction(
                 session.current_stage,
@@ -7768,6 +8178,8 @@ class CoordinatorService:
             "subtask_implementation",
             "implementation",
             "self_review_correction",
+            "convention_review_correction",
+            "requirements_review_correction",
             "verification_correction",
             "documentation_review_correction",
             "followup_implementation",
@@ -7790,6 +8202,24 @@ class CoordinatorService:
             raise IntakeError("No active self review work item found for the session")
         self.work_item_repository.update_status(review_items[0].id, WorkItemStatus.COMPLETED)
 
+    def _complete_active_dual_review_work_item(self, session: Session, *, lane: str) -> None:
+        role_name = _DUAL_REVIEW_ROLE_BY_LANE[lane]
+        reviewer_role = self.role_repository.get_by_name(session.id, role_name)
+        if reviewer_role is None:
+            raise IntakeError(f"{role_name} role is missing for the session")
+        work_type = _DUAL_REVIEW_WORK_TYPE_BY_LANE[lane]
+        cycle_work_type = f"{work_type}_cycle_review"
+        review_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.owner_role_id == reviewer_role.id
+            and item.status != WorkItemStatus.COMPLETED
+            and item.work_type in {work_type, cycle_work_type}
+        ]
+        if not review_items:
+            raise IntakeError(f"No active {lane} review work item found for the session")
+        self.work_item_repository.update_status(review_items[0].id, WorkItemStatus.COMPLETED)
+
     def _previous_self_review_report_paths(self, session_id: int) -> list[str]:
         return self._internal_review_artifact_paths(
             session_id,
@@ -7797,6 +8227,97 @@ class CoordinatorService:
             artifact_role="report",
             fallback_artifact_types={"self_review_report_markdown"},
         )
+
+    def _previous_dual_review_report_paths(self, session_id: int, *, lane: str) -> list[str]:
+        return self._internal_review_artifact_paths(
+            session_id,
+            review_lane=lane,
+            artifact_role="report",
+            fallback_artifact_types={_DUAL_REVIEW_REPORT_ARTIFACT_BY_LANE[lane]},
+        )
+
+    def _dual_review_report_paths_for_current_chain(
+        self,
+        session: Session,
+        *,
+        lane: str,
+        before_event_id: int | None,
+    ) -> list[str]:
+        review_event_id = self._current_dual_review_source_event_id(
+            session,
+            lane=lane,
+            before_event_id=before_event_id,
+        )
+        if review_event_id is None:
+            return []
+
+        review_event = next(
+            (
+                item
+                for item in self.event_repository.list_for_session(session.id)
+                if item.id == review_event_id
+            ),
+            None,
+        )
+        if review_event is None:
+            return []
+
+        review_work_item_id = review_event.payload.get("work_item_id")
+        candidate_paths: list[str] = []
+        for artifact in self.artifact_repository.list_for_session(session.id):
+            metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+            if str(metadata.get("report_family") or "").strip() != "internal_review":
+                continue
+            if str(metadata.get("review_lane") or "").strip() != lane:
+                continue
+            if str(metadata.get("artifact_role") or "").strip() != "report":
+                continue
+            if isinstance(review_work_item_id, int) and metadata.get("work_item_id") == review_work_item_id:
+                candidate_paths.append(artifact.path)
+        if candidate_paths:
+            return candidate_paths
+
+        all_paths = self._previous_dual_review_report_paths(session.id, lane=lane)
+        return all_paths[-1:] if all_paths else []
+
+    def _current_dual_review_source_event_id(
+        self,
+        session: Session,
+        *,
+        lane: str,
+        before_event_id: int | None,
+    ) -> int | None:
+        if before_event_id is None:
+            active_item = self._find_active_work_item_for_current_stage(session)
+            before_event_id = active_item.source_event_id if active_item is not None else None
+        if before_event_id is None:
+            return None
+
+        event = next(
+            (
+                item
+                for item in self.event_repository.list_for_session(session.id)
+                if item.id == before_event_id
+            ),
+            None,
+        )
+        if event is None:
+            return None
+        if event.event_type in {
+            f"{_DUAL_REVIEW_EVENT_PREFIX_BY_LANE[lane]}_issues_found",
+            f"{_DUAL_REVIEW_EVENT_PREFIX_BY_LANE[lane]}_blocked",
+        }:
+            return event.id
+        if event.event_type != "implementation_completed":
+            return None
+
+        work_item_id = event.payload.get("work_item_id")
+        if not isinstance(work_item_id, int):
+            return None
+        work_item = self.work_item_repository.get_by_id(work_item_id)
+        if work_item is None or work_item.work_type != _DUAL_REVIEW_CORRECTION_WORK_TYPE_BY_LANE[lane]:
+            return None
+        return work_item.source_event_id
 
     def _self_review_report_paths_for_current_chain(
         self,
@@ -7922,6 +8443,12 @@ class CoordinatorService:
             return {
                 "diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="source"),
             }
+        if role.role_name == CONVENTION_REVIEWER_ROLE and stage_name == "convention_review_requested":
+            _instruction, payload = self._dual_review_dispatch_context(session, lane="convention")
+            return payload
+        if role.role_name == REQUIREMENTS_REVIEWER_ROLE and stage_name == "requirements_review_requested":
+            _instruction, payload = self._dual_review_dispatch_context(session, lane="requirements")
+            return payload
         if role.role_name == CODE_SCOUT_ROLE and stage_name == "boy_scout_requested":
             return {
                 "diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="source"),
@@ -7997,6 +8524,8 @@ class CoordinatorService:
             "boy_scout_correction_requested": "fix-only",
             "verification_correction_requested": "fix-only",
             "self_review_correction_requested": "fix-only",
+            "convention_review_correction_requested": "fix-only",
+            "requirements_review_correction_requested": "fix-only",
             "documentation_review_correction_requested": "fix-only",
             "mr_followup_requested": "fix-only",
             "qa_reopen_requested": "fix-only",
@@ -8048,6 +8577,18 @@ class CoordinatorService:
                 "review_lane": "self_review",
                 "artifact_role": "report",
                 "fallback_artifact_types": {"self_review_report_markdown"},
+            },
+            "convention_review_correction_requested": {
+                "source": "convention_review",
+                "review_lane": "convention",
+                "artifact_role": "report",
+                "fallback_artifact_types": {"convention_review_report_markdown"},
+            },
+            "requirements_review_correction_requested": {
+                "source": "requirements_review",
+                "review_lane": "requirements",
+                "artifact_role": "report",
+                "fallback_artifact_types": {"requirements_review_report_markdown"},
             },
             "boy_scout_correction_requested": {
                 "source": "code_scout",
@@ -8406,6 +8947,18 @@ class CoordinatorService:
                     f"Apply self review corrections for {task_key}. "
                     "Stay aligned to the review findings, but fix the root cause cleanly and prevent regressions."
                 )
+            if stage_name == "convention_review_correction_requested":
+                return (
+                    f"Mode: fix-only\n"
+                    f"Apply convention review corrections for {task_key}. "
+                    "Stay aligned to the routed convention findings; fix the local consistency issue cleanly without unrelated cleanup."
+                )
+            if stage_name == "requirements_review_correction_requested":
+                return (
+                    f"Mode: fix-only\n"
+                    f"Apply requirements review corrections for {task_key}. "
+                    "Stay aligned to the routed requirement or regression findings; fix the behavior and focused tests without unrelated cleanup."
+                )
             if stage_name == "mr_followup_requested":
                 return (
                     f"Mode: fix-only\n"
@@ -8508,6 +9061,18 @@ class CoordinatorService:
                 "Emit passed when production docs/comments are clean, failed when documentation-only corrections are needed, "
                 "or skipped_not_needed when there are no docs/comment changes to review."
             )
+        if stage_name == "convention_review_requested":
+            return (
+                f"Run convention review for {task_key}. "
+                "Review the current diff against local project conventions from CLAUDE.md, README.md, and relevant linked local docs/templates. "
+                "Emit passed if clean, failed for grounded convention issues, or blocked_review_cycle when the immediate correction chain no longer converges."
+            )
+        if stage_name == "requirements_review_requested":
+            return (
+                f"Run requirements review for {task_key}. "
+                "Use statuses.md as canonical Jira task/subtask order and check cumulative requirements, explicit follow-up priority, regressions, edge cases, and focused test coverage. "
+                "Emit passed if clean, failed for grounded requirement issues, or blocked_review_cycle when the immediate correction chain no longer converges."
+            )
         if stage_name == "self_review_requested":
             policy_mode = self._optional_lane_policy_mode(session_policy, "self_review_policy")
             if policy_mode == "required":
@@ -8525,6 +9090,16 @@ class CoordinatorService:
             )
         if stage_name == "self_review_correction_requested":
             return f"Apply self review corrections for {task_key}."
+        if stage_name == "convention_review_correction_requested":
+            return (
+                f"Apply convention review corrections for {task_key}. "
+                "Stay aligned to the routed convention findings; fix the local consistency issue cleanly without broadening into unrelated cleanup."
+            )
+        if stage_name == "requirements_review_correction_requested":
+            return (
+                f"Apply requirements review corrections for {task_key}. "
+                "Stay aligned to the routed requirement or regression findings; fix behavior and focused tests without broadening into unrelated cleanup."
+            )
         if stage_name == "documentation_review_correction_requested":
             return (
                 f"Apply documentation review corrections for {task_key}. "
@@ -8566,10 +9141,10 @@ class CoordinatorService:
             role_names.append(MR_COMMENTS_ANALYST_ROLE)
         if workflow_profile == "bug_full" and BUG_FIXER_ROLE not in role_names:
             role_names.append(BUG_FIXER_ROLE)
-        if (policy or {}).get("self_review_policy") != "disabled" and CODE_REVIEWER_ROLE not in role_names:
-            role_names.append(CODE_REVIEWER_ROLE)
-        if (policy or {}).get("boy_scout_policy") != "disabled" and CODE_SCOUT_ROLE not in role_names:
-            role_names.append(CODE_SCOUT_ROLE)
+        if (policy or {}).get("self_review_policy") != "disabled":
+            for role_name in (CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE):
+                if role_name not in role_names:
+                    role_names.append(role_name)
         if (policy or {}).get("doc_harvest_policy") != "disabled" and DOC_HARVEST_ROLE not in role_names:
             role_names.append(DOC_HARVEST_ROLE)
         if (policy or {}).get("doc_harvest_policy") != "disabled" and DOCUMENTATION_REVIEWER_ROLE not in role_names:
@@ -8600,6 +9175,8 @@ class CoordinatorService:
             "boy_scout_correction",
             "followup_implementation",
             "self_review_correction",
+            "convention_review_correction",
+            "requirements_review_correction",
             "verification_correction",
             "documentation_review_correction",
         }:
@@ -9855,6 +10432,62 @@ class CoordinatorService:
             ),
         )
 
+    def _materialize_dual_review_outcome_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+        lane: str,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        review_root = self.workdir_root / session.task_key / "review" / lane
+        review_root.mkdir(parents=True, exist_ok=True)
+        target_path = review_root / "outcome.json"
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        event_prefix = _DUAL_REVIEW_EVENT_PREFIX_BY_LANE[lane]
+        if source_event.event_type == f"{event_prefix}_passed":
+            status = "passed"
+        elif source_event.event_type == f"{event_prefix}_issues_found":
+            status = "issues_found"
+        else:
+            status = "blocked"
+        outcome = {
+            "task_key": session.task_key,
+            "review_lane": lane,
+            "source_event_id": source_event.id,
+            "source_event_type": source_event.event_type,
+            "status": status,
+            "summary": str(payload.get("summary") or "").strip(),
+            "details": str(payload.get("details") or "").strip(),
+            "issues_markdown": str(payload.get("issues_markdown") or "").strip(),
+            "work_item_id": payload.get("work_item_id"),
+        }
+        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
+        target_path.write_text(content, encoding="utf-8")
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            f"{lane}-review",
+            "outcome.json",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name=f"{lane}-review",
+            artifact_type=_DUAL_REVIEW_OUTCOME_ARTIFACT_BY_LANE[lane],
+            path=str(artifact_path),
+            metadata=self._review_outcome_metadata(
+                task_key=session.task_key,
+                source_path=str(target_path),
+                review_lane=lane,
+                status=status,
+                source_event_id=source_event.id,
+                work_item_id=payload.get("work_item_id"),
+            ),
+        )
+
     def _materialize_story_planning_outcome_file(
         self,
         *,
@@ -10300,6 +10933,66 @@ class CoordinatorService:
             ),
         )
 
+    def _materialize_dual_review_report(
+        self,
+        *,
+        session: Session,
+        output_type: str,
+        payload: dict,
+        lane: str,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        target_path = self._next_dual_review_report_target_path(session, lane=lane)
+        if target_path is None:
+            return
+        explicit_markdown = str(payload.get("review_markdown") or "").strip()
+        if explicit_markdown:
+            content = explicit_markdown.rstrip() + "\n"
+        else:
+            summary = str(payload.get("summary") or "").strip()
+            issues_markdown = str(payload.get("issues_markdown") or "").strip()
+            issues = payload.get("issues")
+            lines: list[str] = []
+            if output_type in {"passed", "completed", "skipped_not_needed"}:
+                lines.extend(["REVIEW_RESULT: clean"])
+                if summary:
+                    lines.extend(["", "## Summary", "", summary])
+            else:
+                lines.extend(["REVIEW_RESULT: issues_found"])
+                if issues_markdown:
+                    lines.extend(["", issues_markdown])
+                elif isinstance(issues, list) and issues:
+                    lines.extend(["", self._render_self_review_issues_markdown(issues)])
+                elif summary:
+                    lines.extend(["", "## Issues", "", f"- {summary}"])
+            content = "\n".join(lines).rstrip() + "\n"
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(content, encoding="utf-8")
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            f"{lane}-review",
+            target_path.name,
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name=f"{lane}-review",
+            artifact_type=_DUAL_REVIEW_REPORT_ARTIFACT_BY_LANE[lane],
+            path=str(artifact_path),
+            metadata=self._review_report_metadata(
+                task_key=session.task_key,
+                source_path=str(target_path),
+                review_lane=lane,
+                status=self._self_review_report_status(output_type),
+                work_item_id=payload.get("work_item_id"),
+                output_type=output_type,
+            ),
+        )
+
     def _self_review_report_status(self, output_type: str) -> str:
         if output_type == "passed":
             return "clean"
@@ -10404,6 +11097,20 @@ class CoordinatorService:
                 review_lane="self_review",
                 artifact_role="report",
                 fallback_artifact_types={"self_review_report_markdown"},
+            )
+        )
+        return review_dir / f"pass-{pass_count + 1:02d}.md"
+
+    def _next_dual_review_report_target_path(self, session: Session, *, lane: str) -> Path | None:
+        if self.workdir_root is None:
+            return None
+        review_dir = self.workdir_root / session.task_key / "review" / lane
+        pass_count = len(
+            self._internal_review_artifact_paths(
+                session.id,
+                review_lane=lane,
+                artifact_role="report",
+                fallback_artifact_types={_DUAL_REVIEW_REPORT_ARTIFACT_BY_LANE[lane]},
             )
         )
         return review_dir / f"pass-{pass_count + 1:02d}.md"

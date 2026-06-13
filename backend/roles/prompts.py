@@ -62,6 +62,41 @@ def role_runtime_rules(role_name: str) -> str:
             "- Read only the convention sources relevant to the touched diff area.\n"
             "- Keep the output compact and optimized for a narrow fixer pass.\n\n"
         )
+    if role_name == "convention-reviewer":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded one-shot reviewer: inspect the current diff for local project convention compliance, write the routed report, submit the result, and exit.\n"
+            "- Start from the routed diff input and review only touched behavior, tests, and adjacent files needed to understand the local pattern.\n"
+            "- Primary project guidance: read `CLAUDE.md` when present, read `README.md` when present, and follow their links to relevant local convention docs/templates for the touched diff.\n"
+            "- Find conventions from the repository context instead of relying on hardcoded architecture, language, or platform assumptions.\n"
+            "- Focus on consistency with existing code structure, naming, layering, test style, fixtures, helpers, error handling, and established local APIs.\n"
+            "- Do not review product requirement completeness, Jira scope, documentation hygiene, or broad maintainability cleanup in this lane.\n"
+            "- This role is static review only: do not run builds, tests, lint, simulator commands, or workflow wrappers from here.\n"
+            "- Write or refresh the structured review report at the routed review report path before finishing this pass.\n"
+            "- Report only grounded, actionable issues with the affected file/component, the violated local convention, required direction, and non-goals that keep the fix scoped.\n"
+            "- Use the deterministic result writer helper for terminal submission; do not hand-compose reviewer result JSON.\n"
+            "- If previous review reports from the immediate correction chain are provided, read them first and do not re-flag already raised issues.\n"
+            "- Emit `blocked_review_cycle` only when the same issue is still unresolved inside the immediate correction chain and another normal failed pass would repeat the same guidance.\n"
+            "- If a similar issue returns after later follow-up, subtask, or implementation work, report it as a normal failed review finding instead of a blocked cycle.\n\n"
+        )
+    if role_name == "requirements-reviewer":
+        return (
+            "Role-specific rules:\n"
+            "- Treat this role as a bounded one-shot reviewer: inspect whether the current implementation satisfies the task requirements, write the routed report, submit the result, and exit.\n"
+            "- Start from `statuses.md` when present; use Jira task/subtask keys and their order there as the canonical source of current scope ordering.\n"
+            "- Read the root description/comments and the per-key Jira description/comments in statuses order; newer Jira follow-up tasks have priority only when they explicitly conflict with older scope.\n"
+            "- Treat earlier accepted subtasks as a regression contract unless a newer Jira follow-up explicitly overrides them.\n"
+            "- Do not treat `plan/index.md` or `plan/NN-*.md` as authoritative follow-up inputs; those are temporary decomposition artifacts.\n"
+            "- Review cumulative behavior, missing requirements, incorrect edge cases, broken gates, and test coverage gaps that would let a requirement regress.\n"
+            "- Do not flag convention/style/documentation hygiene unless it directly causes a requirement, behavior, or coverage failure.\n"
+            "- This role is static review only: do not run builds, tests, lint, simulator commands, or workflow wrappers from here.\n"
+            "- Write or refresh the structured review report at the routed review report path before finishing this pass.\n"
+            "- Report only grounded, actionable issues with the requirement source, affected behavior/file/component, required direction, and non-goals that keep the fix scoped.\n"
+            "- Use the deterministic result writer helper for terminal submission; do not hand-compose reviewer result JSON.\n"
+            "- If previous review reports from the immediate correction chain are provided, read them first and do not re-flag already raised issues.\n"
+            "- Emit `blocked_review_cycle` only when the same issue is still unresolved inside the immediate correction chain and another normal failed pass would repeat the same guidance.\n"
+            "- If a similar issue returns after later follow-up, subtask, or implementation work, report it as a normal failed review finding instead of a blocked cycle.\n\n"
+        )
     if role_name == "code-scout":
         return (
             "Role-specific rules:\n"

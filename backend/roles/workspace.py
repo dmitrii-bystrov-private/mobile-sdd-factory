@@ -80,6 +80,30 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task artifacts and review outputs: `{task_artifacts_root}`",
             "- Project conventions: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
         ]
+    if role_name == "convention-reviewer":
+        return [
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Diff input: `{task_snapshot_root}/spec/diff.md`",
+            "- Review report directory and current pass target: `{task_snapshot_root}/review/convention`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Task artifacts and review outputs: `{task_artifacts_root}`",
+            "- Primary project guidance: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/README.md`",
+        ]
+    if role_name == "requirements-reviewer":
+        return [
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Canonical task ordering: `{task_snapshot_root}/statuses.md`",
+            "- Task description and comments: `{task_snapshot_root}/description.md`, `{task_snapshot_root}/comments.md`",
+            "- Diff input: `{task_snapshot_root}/spec/diff.md`",
+            "- Review report directory and current pass target: `{task_snapshot_root}/review/requirements`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Task artifacts and review outputs: `{task_artifacts_root}`",
+            "- Primary project guidance: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/README.md`",
+        ]
     if role_name == "code-scout":
         return [
             "- Task snapshot metadata: `{task_snapshot_root}`",
@@ -236,6 +260,21 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You do not run builds, tests, lint, simulators, or verification wrappers; runtime validation belongs to the verification lane.",
             "- Across repeated passes, retain reviewer context for the same task instead of reinitializing from zero.",
         ]
+    if role_name == "convention-reviewer":
+        return [
+            "- You execute one bounded convention review pass for one task session.",
+            "- You review the routed diff against local repository conventions and produce a durable structured report for the current pass.",
+            "- You do not review requirement completeness or broad maintainability cleanup.",
+            "- You do not run builds, tests, lint, simulators, or verification wrappers; runtime validation belongs to the verification lane.",
+        ]
+    if role_name == "requirements-reviewer":
+        return [
+            "- You execute one bounded requirements review pass for one task session.",
+            "- You review whether the current implementation satisfies the cumulative Jira task/subtask scope in canonical statuses order.",
+            "- You protect earlier accepted subtasks from regressions unless a newer Jira follow-up explicitly overrides them.",
+            "- You do not review convention/style/documentation hygiene unless it directly breaks behavior or coverage.",
+            "- You do not run builds, tests, lint, simulators, or verification wrappers; runtime validation belongs to the verification lane.",
+        ]
     if role_name == "code-scout":
         return [
             "- You execute one bounded Code Scout pass for one completed coding session.",
@@ -366,6 +405,31 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Treat unnecessary test self-activity or ad-hoc testing patterns as real review findings when they diverge from established project conventions.",
             "- Keep outputs compact and fixer-oriented.",
             "- Do not re-flag issues that were already raised in the immediate correction chain when that context is provided.",
+            "- Treat similar issues that return after later follow-up, subtask, or implementation work as normal failed review findings, not blocked review cycles.",
+        ]
+    if role_name == "convention-reviewer":
+        return [
+            "- Read the routed diff first, then inspect only touched full files and directly relevant local convention sources.",
+            "- Primary project guidance: read `CLAUDE.md` when present, read `README.md` when present, and follow their links to relevant local convention docs/templates for the touched diff.",
+            "- Infer conventions from the repository context; do not import platform-, language-, or architecture-specific rules from this factory repo.",
+            "- Check local structure, naming, layering, test style, fixtures, helpers, established APIs, and error handling only when grounded by touched files.",
+            "- Write or refresh the structured convention review report before finishing.",
+            "- Report findings only when they are concrete, actionable, and likely to improve consistency of the submitted diff.",
+            "- Keep outputs compact and fixer-oriented.",
+            "- Do not re-flag issues already raised in the immediate correction chain when that context is provided.",
+            "- Treat similar issues that return after later follow-up, subtask, or implementation work as normal failed review findings, not blocked review cycles.",
+        ]
+    if role_name == "requirements-reviewer":
+        return [
+            "- Read `statuses.md` first when present and use Jira keys plus their order there as the canonical source of task/subtask ordering.",
+            "- Read root description/comments and per-key Jira description/comments in statuses order; newer Jira follow-ups override older scope only on explicit conflict.",
+            "- Treat earlier accepted subtasks as a regression contract unless a newer Jira follow-up explicitly overrides them.",
+            "- Do not use `plan/index.md` or `plan/NN-*.md` as authoritative follow-up inputs.",
+            "- Review cumulative behavior, missing requirements, edge cases, acceptance gaps, and tests that should protect the requirement.",
+            "- Avoid convention/style/documentation findings unless they directly cause a behavior or coverage failure.",
+            "- Write or refresh the structured requirements review report before finishing.",
+            "- Keep outputs compact and fixer-oriented.",
+            "- Do not re-flag issues already raised in the immediate correction chain when that context is provided.",
             "- Treat similar issues that return after later follow-up, subtask, or implementation work as normal failed review findings, not blocked review cycles.",
         ]
     if role_name == "code-scout":

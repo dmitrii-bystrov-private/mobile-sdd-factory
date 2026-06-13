@@ -175,6 +175,28 @@ class WriteResultScriptTests(unittest.TestCase):
             self.assertEqual("failed", payload["output_type"])
             self.assertEqual("Issue 1", payload["payload"]["issues_markdown"])
 
+    def test_dual_reviewer_failed_result_can_include_issues_markdown(self) -> None:
+        for role_name in ("convention-reviewer", "requirements-reviewer"):
+            with self.subTest(role_name=role_name):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    env, output_path, work_item_id = self._create_context(temp_dir, role_name=role_name)
+                    result = self._run(
+                        env,
+                        "--work-item-id",
+                        str(work_item_id),
+                        "--output-type",
+                        "failed",
+                        "--summary",
+                        "review issues found",
+                        "--issues-markdown",
+                        "Issue 1",
+                    )
+
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    payload = json.loads(output_path.read_text(encoding="utf-8"))
+                    self.assertEqual("failed", payload["output_type"])
+                    self.assertEqual("Issue 1", payload["payload"]["issues_markdown"])
+
     def test_code_reviewer_failed_result_can_read_issues_markdown_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-reviewer")

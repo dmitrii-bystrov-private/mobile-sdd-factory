@@ -148,8 +148,8 @@ The current pipeline is composed of specialized long-running or on-demand roles:
 | `task-decomposer-worker` | Produces `plan/index.md` and the self-contained task package for execution. |
 | `bug-fixer` | Analyzes bug root cause and implements the fix. |
 | `implementer` | Executes the current implementation or correction pass against the task-local repo. |
-| `code-reviewer` | Persistent self-review lane that can pass, request corrections, skip when optional, or block a non-converging review cycle. |
-| `code-scout` | Boy Scout lane that can produce implement-now findings or old-code tech-debt candidates. |
+| `convention-reviewer` | Reviews the diff against local repository conventions, nearby patterns, and test style. |
+| `requirements-reviewer` | Reviews the diff against current Jira scope, follow-ups, cumulative requirements, regressions, and edge cases. |
 | `verification-coordinator` | Persistent verification lane that runs the workflow gate and can request corrections or block a non-converging verification cycle. |
 | `mr-comments-analyst-worker` | Groups unresolved MR discussions into actionable themes and a follow-up subtask plan. |
 | `doc-harvest-worker` | Produces or updates documentation when the diff justifies it. |

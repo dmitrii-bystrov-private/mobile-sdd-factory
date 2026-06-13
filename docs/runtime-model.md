@@ -40,8 +40,8 @@ Important roles include:
 
 - `implementer`
 - `bug-fixer`
-- `code-reviewer`
-- `code-scout`
+- `convention-reviewer`
+- `requirements-reviewer`
 - `verification-coordinator`
 - planning workers such as `proposal-context-worker`, `requirements-clarifier-worker`, `spec-verifier-worker`, and `task-decomposer-worker`
 - follow-up workers such as `mr-comments-analyst-worker` and `doc-harvest-worker`
@@ -54,7 +54,8 @@ Some roles are persistent long-runners.
 The most important supported long-running roles are:
 
 - `implementer`
-- `code-reviewer`
+- `convention-reviewer`
+- `requirements-reviewer`
 - `verification-coordinator`
 
 The platform intentionally keeps these roles alive across rounds so they retain context.
@@ -122,8 +123,7 @@ Optional lanes follow this model:
 
 This applies to optional quality/documentation lanes such as:
 
-- self-review
-- Code Scout
+- review gate
 - doc harvest
 
 ## Follow-Up Flows

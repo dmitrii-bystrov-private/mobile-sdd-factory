@@ -20,6 +20,8 @@ ROLE_BASELINES: tuple[RoleBaseline, ...] = (
     RoleBaseline("implementer", "sonnet", "medium", ["ios-rag", "android-rag", "frontend-rag"], _BASELINE_SOURCE),
     RoleBaseline("verification-coordinator", "sonnet", "medium", [], _BASELINE_SOURCE),
     RoleBaseline("bug-fixer", "sonnet", "high", ["ios-rag", "android-rag", "frontend-rag"], _BASELINE_SOURCE),
+    RoleBaseline("convention-reviewer", "sonnet", "medium", [], _BASELINE_SOURCE),
+    RoleBaseline("requirements-reviewer", "sonnet", "medium", [], _BASELINE_SOURCE),
     RoleBaseline("code-reviewer", "sonnet", "medium", [], _BASELINE_SOURCE),
     RoleBaseline("code-scout", "sonnet", "medium", [], _BASELINE_SOURCE),
     RoleBaseline("mr-comments-analyst-worker", "sonnet", "high", [], _BASELINE_SOURCE),

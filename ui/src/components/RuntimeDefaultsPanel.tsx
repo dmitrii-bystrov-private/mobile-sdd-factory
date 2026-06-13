@@ -60,9 +60,9 @@ const POLICY_DEFAULT_DESCRIPTIONS: Record<
 > = {
   test_policy: "Choose whether the bug flow treats testing as disabled, auto-started with agent skip semantics, or required.",
   self_review_policy:
-    "Choose whether the self-review lane is disabled, auto-started with agent skip semantics, or required.",
+    "Choose whether the dual review gate is disabled, auto-started with reviewer skip semantics, or required.",
   boy_scout_policy:
-    "Choose whether the Code Scout lane is disabled, auto-started with agent skip semantics, or required.",
+    "Compatibility setting for legacy Code Scout sessions. New sessions use the dual review gate.",
   doc_harvest_policy:
     "Choose whether the Documentation Writer lane is disabled, auto-started with agent skip semantics, or required.",
 };
@@ -76,18 +76,18 @@ const CLARIFICATION_MODE_DESCRIPTIONS: Record<RequirementsClarificationMode, str
 function roleFlowOrder(roleName: string, workflowProfile: WorkflowProfile): number {
   const oneshotOrder = [
     "implementer",
-    "code-reviewer",
+    "convention-reviewer",
+    "requirements-reviewer",
     "verification-coordinator",
-    "code-scout",
     "doc-harvest-worker",
     "mr-comments-analyst-worker",
   ];
   const bugFullOrder = [
     "implementer",
     "bug-fixer",
-    "code-reviewer",
+    "convention-reviewer",
+    "requirements-reviewer",
     "verification-coordinator",
-    "code-scout",
     "doc-harvest-worker",
     "mr-comments-analyst-worker",
   ];
@@ -99,9 +99,9 @@ function roleFlowOrder(roleName: string, workflowProfile: WorkflowProfile): numb
     "spec-verifier-worker",
     "task-decomposer-worker",
     "implementer",
-    "code-reviewer",
+    "convention-reviewer",
+    "requirements-reviewer",
     "verification-coordinator",
-    "code-scout",
     "doc-harvest-worker",
     "mr-comments-analyst-worker",
   ];

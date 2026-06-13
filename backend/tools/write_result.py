@@ -26,6 +26,8 @@ SUPPORTED_ROLES = {
     "code-scout",
     "verification-coordinator",
     "code-reviewer",
+    "convention-reviewer",
+    "requirements-reviewer",
     "spec-verifier-worker",
     "doc-harvest-worker",
     "documentation-reviewer",
@@ -192,6 +194,20 @@ def _validate_role_output_type(role_name: str, output_type: str) -> None:
             "blocked_verification_cycle",
         },
         "code-reviewer": {
+            "completed",
+            "passed",
+            "failed",
+            "blocked_review_cycle",
+            "skipped_not_needed",
+        },
+        "convention-reviewer": {
+            "completed",
+            "passed",
+            "failed",
+            "blocked_review_cycle",
+            "skipped_not_needed",
+        },
+        "requirements-reviewer": {
             "completed",
             "passed",
             "failed",
@@ -365,7 +381,7 @@ def build_result_document(
         payload = _build_code_scout_payload(args)
     elif resolved_role_name == "verification-coordinator":
         payload = _build_verification_payload(args)
-    elif resolved_role_name == "code-reviewer":
+    elif resolved_role_name in {"code-reviewer", "convention-reviewer", "requirements-reviewer"}:
         payload = _build_code_reviewer_payload(args)
     elif resolved_role_name in CODING_ROLES:
         payload = _build_coding_payload(args)
