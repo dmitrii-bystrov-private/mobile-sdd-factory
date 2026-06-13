@@ -49,13 +49,15 @@ workdir/
 .ts/
 .cache/
 .playwright-cli/
+.sdd-factory/
+state.sqlite
+state.sqlite-*
 
 # =============================================================================
 # Claude local settings (device-specific, not shared)
 # =============================================================================
 .claude/settings.local.json
 .claude/memory/
-.sdd-factory/settings.local.json
 
 # =============================================================================
 # Editor & IDE
