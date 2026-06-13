@@ -1141,7 +1141,7 @@ class SessionCreationTests(unittest.TestCase):
             / "AGENTS.md"
         ).read_text()
         self.assertIn("Project conventions:", reviewer_agents)
-        self.assertIn("Read previous review reports first when they are provided", reviewer_agents)
+        self.assertIn("Read previous review reports from the immediate correction chain", reviewer_agents)
         self.assertIn("Keep outputs compact and fixer-oriented.", reviewer_agents)
 
     def test_create_task_session_creates_bug_fixer_workspace_contract(self) -> None:
@@ -2808,11 +2808,67 @@ class SessionCreationTests(unittest.TestCase):
         sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
         self.assertEqual(2, len(sent_inputs))
         self.assertIn(
-            "Previous review reports (read first and do not re-flag the same issues):",
+            "Previous review reports from this immediate correction chain",
             sent_inputs[-1],
         )
         self.assertIn("previous_review_report_paths", sent_inputs[-1])
         self.assertIn("review_report_path", sent_inputs[-1])
+
+    def test_new_self_review_chain_does_not_replay_old_review_reports(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003RCHAIN",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "required",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RCHAIN")
+        self.coordinator.handle_operator_event(
+            session_id=prepared_session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=CODE_REVIEWER_ROLE,
+            output_type="failed",
+            payload={"summary": "issues remain"},
+        )
+
+        correction_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "self_review_correction"
+        )
+        updated_session, _, _ = self.coordinator.handle_role_output(
+            session_id=prepared_session.id,
+            role_name=IMPLEMENTER_ROLE,
+            output_type="completed",
+            payload={"work_item_id": correction_item.id, "summary": "corrections applied"},
+        )
+        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
+        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
+
+        self.assertEqual("self_review_requested", updated_session.current_stage)
+        self.assertIn("Previous review reports from this immediate correction chain", sent_inputs[-1])
+
+        new_work_event = self.event_repository.append(
+            session_id=session.id,
+            event_type="implementation_completed",
+            producer_type="role",
+            producer_id=IMPLEMENTER_ROLE,
+            payload={"work_item_id": 999999, "summary": "later follow-up implementation completed"},
+        )
+
+        instruction, hydration = self.coordinator._self_review_dispatch_context(  # noqa: SLF001
+            updated_session,
+            before_event_id=new_work_event.id,
+        )
+
+        self.assertNotIn("Previous review reports from this immediate correction chain", instruction)
+        self.assertIsNone(hydration["previous_review_report_paths"])
 
     def test_previous_self_review_report_paths_accept_internal_review_metadata(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

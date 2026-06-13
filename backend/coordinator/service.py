@@ -5393,7 +5393,10 @@ class CoordinatorService:
         *,
         before_event_id: int | None = None,
     ) -> tuple[str, dict[str, str | int | None]]:
-        previous_review_reports = self._previous_self_review_report_paths(session.id)
+        previous_review_reports = self._self_review_report_paths_for_current_chain(
+            session,
+            before_event_id=before_event_id,
+        )
         review_report_path = self._next_self_review_report_target_path(session)
         instruction = (
             f"Review the current task changes for {session.task_key}. "
@@ -5403,8 +5406,12 @@ class CoordinatorService:
         )
         if previous_review_reports:
             instruction += (
-                "\nPrevious review reports (read first and do not re-flag the same issues):\n"
+                "\nPrevious review reports from this immediate correction chain "
+                "(read first and do not re-flag the same issues):\n"
                 + "\n".join(previous_review_reports)
+                + "\nOnly emit blocked_review_cycle when the current issue is the same unresolved issue "
+                "from this immediate correction chain. If a similar issue returns after later follow-up, "
+                "subtask, or implementation work, report it as a normal failed review finding."
             )
         operator_guidance_history = self._self_review_cycle_operator_guidance_history(
             session.id,
@@ -7790,6 +7797,84 @@ class CoordinatorService:
             artifact_role="report",
             fallback_artifact_types={"self_review_report_markdown"},
         )
+
+    def _self_review_report_paths_for_current_chain(
+        self,
+        session: Session,
+        *,
+        before_event_id: int | None,
+    ) -> list[str]:
+        review_event_id = self._current_self_review_source_event_id(
+            session,
+            before_event_id=before_event_id,
+        )
+        if review_event_id is None:
+            return []
+
+        events_by_id = {
+            event.id: event
+            for event in self.event_repository.list_for_session(session.id)
+            if event.id is not None
+        }
+        review_event = events_by_id.get(review_event_id)
+        if review_event is None:
+            return []
+
+        review_work_item_id = review_event.payload.get("work_item_id")
+        candidate_paths: list[str] = []
+        for artifact in self.artifact_repository.list_for_session(session.id):
+            metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+            if str(metadata.get("report_family") or "").strip() != "internal_review":
+                continue
+            if str(metadata.get("review_lane") or "").strip() != "self_review":
+                continue
+            if str(metadata.get("artifact_role") or "").strip() != "report":
+                continue
+            if isinstance(review_work_item_id, int) and metadata.get("work_item_id") == review_work_item_id:
+                candidate_paths.append(artifact.path)
+
+        if candidate_paths:
+            return candidate_paths
+
+        # Older tests and manually injected results may omit work_item_id. In that
+        # case keep only the latest report instead of replaying the whole session.
+        all_paths = self._previous_self_review_report_paths(session.id)
+        return all_paths[-1:] if all_paths else []
+
+    def _current_self_review_source_event_id(
+        self,
+        session: Session,
+        *,
+        before_event_id: int | None,
+    ) -> int | None:
+        if before_event_id is None:
+            active_item = self._find_active_work_item_for_current_stage(session)
+            before_event_id = active_item.source_event_id if active_item is not None else None
+        if before_event_id is None:
+            return None
+
+        event = next(
+            (
+                item
+                for item in self.event_repository.list_for_session(session.id)
+                if item.id == before_event_id
+            ),
+            None,
+        )
+        if event is None:
+            return None
+        if event.event_type in {"self_review_issues_found", "self_review_blocked"}:
+            return event.id
+        if event.event_type != "implementation_completed":
+            return None
+
+        work_item_id = event.payload.get("work_item_id")
+        if not isinstance(work_item_id, int):
+            return None
+        work_item = self.work_item_repository.get_by_id(work_item_id)
+        if work_item is None or work_item.work_type != "self_review_correction":
+            return None
+        return work_item.source_event_id
 
     def _previous_code_scout_report_paths(self, session_id: int) -> list[str]:
         return self._internal_review_artifact_paths(

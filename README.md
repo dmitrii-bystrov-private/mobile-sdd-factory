@@ -379,4 +379,5 @@ index.html        # local static presentation deck for the SDD workflow
 - [`docs/operator-guide.md`](docs/operator-guide.md) — practical operator workflow for the supported backend/UI runtime model
 - [`docs/runtime-model.md`](docs/runtime-model.md) — supported session, role, quality-loop, recovery, and cleanup model
 - [`docs/terminal-result-contract.md`](docs/terminal-result-contract.md) — deterministic terminal result submission contract for routed roles
+- [`docs/dual-review-lanes-migration-plan.md`](docs/dual-review-lanes-migration-plan.md) — working plan and checklist for replacing Code Scout with focused convention and requirements review lanes
 - [`AGENTS.md`](AGENTS.md) — repository conventions for contributors and coding agents

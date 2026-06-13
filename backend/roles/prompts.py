@@ -56,8 +56,9 @@ def role_runtime_rules(role_name: str) -> str:
             "- When you report issues, make them actionable: include the finding title or affected file/component, why it matters, the required direction for the fix, and any non-goals that should not be expanded in this pass.\n"
             "- When you have strong grounding, also include concrete evidence, a suggested approach, and test expectations for the correction; omit these sections rather than guessing.\n"
             "- Use the deterministic result writer helper for terminal submission; do not hand-compose reviewer result JSON.\n"
-            "- If previous review reports are provided, read them first and do not re-flag already raised issues.\n"
-            "- If the review loop is no longer converging and you would otherwise repeat the same issues again, emit `blocked_review_cycle` instead of another normal failed pass.\n"
+            "- If previous review reports from the immediate correction chain are provided, read them first and do not re-flag already raised issues.\n"
+            "- Emit `blocked_review_cycle` only when the same issue is still unresolved inside the immediate correction chain and another normal failed pass would repeat the same guidance.\n"
+            "- If a similar issue returns after later follow-up, subtask, or implementation work, report it as a normal failed review finding instead of a blocked cycle.\n"
             "- Read only the convention sources relevant to the touched diff area.\n"
             "- Keep the output compact and optimized for a narrow fixer pass.\n\n"
         )

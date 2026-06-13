@@ -360,12 +360,13 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Review only the routed diff and conventions relevant to that diff.",
             "- Write or refresh the structured review report for the current pass before you finish.",
             "- Structure real findings with enough direction to act: include the finding title or affected file/component, why it matters, required direction, and non-goals when they help keep the fix scoped.",
-            "- Read previous review reports first when they are provided and do not re-flag the same issue twice.",
+            "- Read previous review reports from the immediate correction chain first when they are provided and do not re-flag the same issue twice.",
             "- Read only the convention files relevant to the touched diff area; do not broaden the review scope speculatively.",
             "- When the diff adds or edits tests, verify that the tests follow the existing local test conventions for naming, fixtures, setup, helpers, and assertion style in that area.",
             "- Treat unnecessary test self-activity or ad-hoc testing patterns as real review findings when they diverge from established project conventions.",
             "- Keep outputs compact and fixer-oriented.",
-            "- Do not re-flag issues that were already raised in previous review passes when that context is provided.",
+            "- Do not re-flag issues that were already raised in the immediate correction chain when that context is provided.",
+            "- Treat similar issues that return after later follow-up, subtask, or implementation work as normal failed review findings, not blocked review cycles.",
         ]
     if role_name == "code-scout":
         return [
