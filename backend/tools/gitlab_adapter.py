@@ -20,9 +20,3 @@ class GitLabAdapter:
 
     def create_mr(self, task_key: str) -> CommandResult:
         return self.runner.run(["bash", "scripts/create-mr.sh", task_key], cwd=self.repo_root)
-
-    def fetch_mr_comments(self, platform: str, mr_id: str) -> CommandResult:
-        return self.runner.run(
-            ["bash", "scripts/fetch-mr-comments.sh", platform, mr_id],
-            cwd=self.repo_root,
-        )

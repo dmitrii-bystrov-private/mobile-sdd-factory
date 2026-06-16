@@ -11,10 +11,6 @@ type CompletedFollowupPanelProps = {
   onRefresh: () => Promise<void>;
 };
 
-function inferPlatform(taskKey: string): "ios" | "android" {
-  return taskKey.startsWith("ANDR-") ? "android" : "ios";
-}
-
 function latestMrUrl(artifacts: Artifact[], events: EventItem[]): string | null {
   for (const artifact of [...artifacts].reverse()) {
     const value = artifact.metadata?.mr_url;
@@ -48,7 +44,6 @@ export function CompletedFollowupPanel({
   const { showToast, showActivity, clearActivity } = useToast();
   const mrUrl = useMemo(() => latestMrUrl(artifacts, events), [artifacts, events]);
   const inferredMrId = useMemo(() => mrIdFromUrl(mrUrl), [mrUrl]);
-  const platform = inferPlatform(session.task_key);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -120,17 +115,6 @@ export function CompletedFollowupPanel({
     }
   }
 
-  async function handleIngestMrComments(): Promise<void> {
-    if (inferredMrId.length === 0) {
-      setError("MR data is not available for this session yet");
-      showToast("MR data is not available for this session yet", "error");
-      return;
-    }
-    await run(async () => {
-      await apiClient.ingestMrComments(session.id, platform, inferredMrId);
-    }, "Processing MR comments…");
-  }
-
   async function handleRefreshSnapshot(): Promise<void> {
     await run(async () => {
       await apiClient.refreshSnapshot(session.id);
@@ -179,14 +163,6 @@ export function CompletedFollowupPanel({
         </div>
 
         <div className="completed-followup-actions">
-          <button
-            className="action-button"
-            disabled={busy || inferredMrId.length === 0}
-            onClick={() => void handleIngestMrComments()}
-            type="button"
-          >
-            Process MR comments
-          </button>
           <button
             className="action-button"
             disabled={busy}

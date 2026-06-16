@@ -464,25 +464,6 @@ class WriteResultScriptTests(unittest.TestCase):
                 payload["payload"]["requested_decision"],
             )
 
-    def test_mr_comments_analyst_completed_result_is_supported(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            env, output_path, work_item_id = self._create_context(
-                temp_dir,
-                role_name="mr-comments-analyst-worker",
-            )
-            result = self._run(
-                env,
-                "--work-item-id",
-                str(work_item_id),
-                "--summary",
-                "comments processed",
-            )
-
-            self.assertEqual(0, result.returncode, result.stderr)
-            payload = json.loads(output_path.read_text(encoding="utf-8"))
-            self.assertEqual("comments processed", payload["payload"]["summary"])
-            self.assertEqual(work_item_id, payload["payload"]["work_item_id"])
-
     def test_rejects_work_item_from_other_runtime_role(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env, _, work_item_id = self._create_context(temp_dir, role_name="code-scout")

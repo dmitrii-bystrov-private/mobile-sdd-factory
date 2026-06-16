@@ -134,7 +134,6 @@ export function SessionStartForm({
     const roleNames = [
       "implementer",
       "verification-coordinator",
-      "mr-comments-analyst-worker",
     ];
     if (workflowProfile === "bug_full") {
       roleNames.push("bug-fixer");

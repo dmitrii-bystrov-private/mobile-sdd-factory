@@ -7,7 +7,6 @@ CODE_REVIEWER_ROLE = "code-reviewer"
 CODE_SCOUT_ROLE = "code-scout"
 CONVENTION_REVIEWER_ROLE = "convention-reviewer"
 REQUIREMENTS_REVIEWER_ROLE = "requirements-reviewer"
-MR_COMMENTS_ANALYST_ROLE = "mr-comments-analyst-worker"
 DOC_HARVEST_ROLE = "doc-harvest-worker"
 DOCUMENTATION_REVIEWER_ROLE = "documentation-reviewer"
 PROPOSAL_CONTEXT_WORKER_ROLE = "proposal-context-worker"
@@ -16,6 +15,10 @@ ACCEPTANCE_CRITERIA_WORKER_ROLE = "acceptance-criteria-worker"
 CONSTRAINTS_WORKER_ROLE = "constraints-worker"
 SPEC_VERIFIER_WORKER_ROLE = "spec-verifier-worker"
 TASK_DECOMPOSER_WORKER_ROLE = "task-decomposer-worker"
+
+RETIRED_ROLE_NAMES = {
+    "mr-comments-analyst-worker",
+}
 
 DEFAULT_SESSION_ROLES = [
     IMPLEMENTER_ROLE,
@@ -95,9 +98,6 @@ ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     "documentation_review_correction_requested": {
         IMPLEMENTER_ROLE,
         BUG_FIXER_ROLE,
-    },
-    "mr_comments_analysis_requested": {
-        MR_COMMENTS_ANALYST_ROLE,
     },
     "self_review_correction_requested": {
         IMPLEMENTER_ROLE,

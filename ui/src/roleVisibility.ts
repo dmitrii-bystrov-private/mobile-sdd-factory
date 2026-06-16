@@ -1,8 +1,6 @@
 import type { Role, RuntimeRoleStateSummary, WorkItem } from "./types";
 
-const ON_DEMAND_DASHBOARD_ROLES = new Set([
-  "mr-comments-analyst-worker",
-]);
+const ON_DEMAND_DASHBOARD_ROLES = new Set<string>();
 
 export function isOnDemandDashboardRole(roleName: string): boolean {
   return ON_DEMAND_DASHBOARD_ROLES.has(roleName);

@@ -70,9 +70,6 @@ run_step "Operator acceptance: happy path" \
 run_step "Operator acceptance: follow-up reopen" \
   bash factory/acceptance/run-followup-reopen-acceptance.sh
 
-run_step "Operator acceptance: MR follow-up" \
-  bash factory/acceptance/run-mr-followup-acceptance.sh
-
 run_step "Operator acceptance: delivery" \
   bash factory/acceptance/run-delivery-acceptance.sh
 

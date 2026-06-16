@@ -14,7 +14,7 @@ from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
 
 
-CODING_ROLES = {"implementer", "bug-fixer", "mr-comments-analyst-worker"}
+CODING_ROLES = {"implementer", "bug-fixer"}
 PLANNING_ROLES = {
     "proposal-context-worker",
     "requirements-clarifier-worker",

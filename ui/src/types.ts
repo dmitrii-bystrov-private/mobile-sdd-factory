@@ -67,7 +67,7 @@ export type WorkItem = {
 };
 
 export type FollowupContext = {
-  source: "mr" | "qa";
+  source: "qa";
   eventId: number;
   eventType: string;
   stageName: string;

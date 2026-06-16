@@ -25,7 +25,6 @@ from backend.roles.contracts import (
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
     CONSTRAINTS_WORKER_ROLE,
     IMPLEMENTER_ROLE,
-    MR_COMMENTS_ANALYST_ROLE,
     PERSISTENT_SESSION_ROLES,
     PROPOSAL_CONTEXT_WORKER_ROLE,
     REQUIREMENTS_CLARIFIER_WORKER_ROLE,
@@ -199,23 +198,6 @@ class FakeGitLabAdapter:
             ),
             stderr="",
         )
-
-    def fetch_mr_comments(self, platform: str, mr_id: str) -> CommandResult:
-        return CommandResult(
-            command=["fetch_mr_comments", platform, mr_id],
-            returncode=0,
-            stdout=(
-                f"# Unresolved MR discussions: !{mr_id} (2 total)\n\n"
-                "## Discussion 1 — file_a.swift:10\n\n"
-                "**Reviewer:** First comment\n\n"
-                "---\n\n"
-                "## Discussion 2 — file_b.swift:20\n\n"
-                "**Reviewer:** Second comment\n\n"
-                "---\n"
-            ),
-            stderr="",
-        )
-
 
 class AutoRecoveryRecordingBackend(RecordingSessionBackend):
     def __init__(self) -> None:
@@ -711,11 +693,6 @@ class SessionCreationTests(unittest.TestCase):
                     "model": "sonnet",
                     "effort": "medium",
                 },
-                "mr-comments-analyst-worker": {
-                    "runner": "codex",
-                    "model": "gpt-5.5",
-                    "effort": "medium",
-                },
             },
         )
 
@@ -744,7 +721,6 @@ class SessionCreationTests(unittest.TestCase):
             },
             session.role_config["doc-harvest-worker"],
         )
-        self.assertIn("mr-comments-analyst-worker", session.role_config)
 
     def test_send_operator_runtime_input_reactivates_waiting_session_without_new_handoff(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -1104,7 +1080,7 @@ class SessionCreationTests(unittest.TestCase):
         )
 
         self.assertIsNotNone(session.id)
-        for role_name in DEFAULT_SESSION_ROLES + [CODE_REVIEWER_ROLE]:
+        for role_name in DEFAULT_SESSION_ROLES + [CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE]:
             role_dir = Path(self.temp_dir.name) / "IOS-30000W" / "runtime" / "role-workspaces" / role_name
             agents_path = role_dir / "AGENTS.md"
             claude_path = role_dir / "CLAUDE.md"
@@ -1127,7 +1103,10 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Task repo worktree:", implementer_agents)
         self.assertIn("Use RAG tools first for code exploration", implementer_agents)
         self.assertIn("Read all routed spec inputs before writing code.", implementer_agents)
-        self.assertIn("Treat final test+lint verification as deferred to the coordinator.", implementer_agents)
+        self.assertIn(
+            "Do not run build, test, or lint verification. Submit your implementation result; verification happens after this role finishes.",
+            implementer_agents,
+        )
         verification_agents = (
             Path(self.temp_dir.name)
             / "IOS-30000W"
@@ -1145,11 +1124,11 @@ class SessionCreationTests(unittest.TestCase):
             / "IOS-30000W"
             / "runtime"
             / "role-workspaces"
-            / CODE_REVIEWER_ROLE
+            / CONVENTION_REVIEWER_ROLE
             / "AGENTS.md"
         ).read_text()
-        self.assertIn("Project conventions:", reviewer_agents)
-        self.assertIn("Read previous review reports from the immediate correction chain", reviewer_agents)
+        self.assertIn("Primary project guidance:", reviewer_agents)
+        self.assertIn("Do not run build, test, or lint verification.", reviewer_agents)
         self.assertIn("Keep outputs compact and fixer-oriented.", reviewer_agents)
 
     def test_create_task_session_creates_bug_fixer_workspace_contract(self) -> None:
@@ -1507,20 +1486,21 @@ class SessionCreationTests(unittest.TestCase):
         verifier_inputs = session_backend.get_sent_inputs(verifier_role.runtime_handle)
 
         self.assertEqual(2, len(implementer_inputs))
-        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", implementer_inputs[0])
+        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory once now", implementer_inputs[0])
         self.assertIn(
-            "Continue from your existing implementer role context in this persistent task session.",
+            "Continue from your existing role context.",
             implementer_inputs[1],
         )
 
         self.assertEqual(1, len(reviewer_inputs))
-        self.assertIn("Role-specific rules:", reviewer_inputs[0])
+        self.assertNotIn("Role-specific rules:", reviewer_inputs[0])
+        self.assertIn("Read AGENTS.md/CLAUDE.md", reviewer_inputs[0])
         self.assertIn("review_scope", reviewer_inputs[0])
 
         self.assertEqual(2, len(verifier_inputs))
-        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", verifier_inputs[0])
+        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory once now", verifier_inputs[0])
         self.assertIn(
-            "Continue from your existing verification-coordinator role context in this persistent task session.",
+            "Continue from your existing role context.",
             verifier_inputs[1],
         )
 
@@ -1589,10 +1569,10 @@ class SessionCreationTests(unittest.TestCase):
         sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Start implementation work for IOS-30002.", sent_inputs[0])
-        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[0])
-        self.assertIn("Role-specific rules:", sent_inputs[0])
-        self.assertIn("Use RAG tools first for code exploration", sent_inputs[0])
-        self.assertIn("Final test+lint gate remains deferred to the coordinator.", sent_inputs[0])
+        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory once now", sent_inputs[0])
+        self.assertIn("Read HYDRATION.json for machine-readable routed IDs and paths.", sent_inputs[0])
+        self.assertNotIn("Role-specific rules:", sent_inputs[0])
+        self.assertNotIn("Use RAG tools first for code exploration", sent_inputs[0])
 
     def test_prepare_task_session_reuses_existing_policy_aware_session(self) -> None:
         session, _, created = self.coordinator.create_task_session(
@@ -1651,11 +1631,9 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Mode: analysis-only", sent_inputs[0])
         self.assertIn("Analyze bug IOS-30002BUG before implementation.", sent_inputs[0])
         self.assertIn("Test policy for this session: required.", sent_inputs[0])
-        self.assertIn("Role-specific rules:", sent_inputs[0])
-        self.assertIn("In `analysis-only` mode, read task description/comments first", sent_inputs[0])
-        self.assertIn('"bug_analysis_report_path"', sent_inputs[0])
-        self.assertIn('"bug_mode": "analysis-only"', sent_inputs[0])
-        self.assertIn('"primary_bug_inputs": "description.md + comments.md"', sent_inputs[0])
+        self.assertNotIn("Role-specific rules:", sent_inputs[0])
+        self.assertNotIn("In `analysis-only` mode, read task description/comments first", sent_inputs[0])
+        self.assertNotIn('"bug_analysis_report_path"', sent_inputs[0])
 
     def test_implementation_completed_moves_session_to_verification(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003")
@@ -1696,12 +1674,12 @@ class SessionCreationTests(unittest.TestCase):
         sent_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Run deterministic verification for IOS-30003.", sent_inputs[0])
-        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[0])
-        self.assertIn("Role-specific rules:", sent_inputs[0])
-        self.assertIn("Start from the routed verification strategy file", sent_inputs[0])
-        self.assertIn("For iOS strategies, prefer the routed `bash scripts/ios-verify.sh", sent_inputs[0])
-        self.assertIn("verification_report_path", sent_inputs[0])
-        self.assertIn("verification_strategy_path", sent_inputs[0])
+        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory once now", sent_inputs[0])
+        self.assertNotIn("Role-specific rules:", sent_inputs[0])
+        self.assertNotIn("Start from the routed verification strategy file", sent_inputs[0])
+        self.assertNotIn("For iOS strategies, prefer the routed `bash scripts/ios-verify.sh", sent_inputs[0])
+        self.assertNotIn("verification_report_path", sent_inputs[0])
+        self.assertNotIn("verification_strategy_path", sent_inputs[0])
 
     def test_verification_dispatch_materializes_strategy_file(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERSTRAT")
@@ -1984,11 +1962,11 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, len(review_items))
         self.assertEqual(1, len(sent_inputs))
         self.assertIn("Run convention review for IOS-30003R.", sent_inputs[0])
-        self.assertIn("Role-specific rules:", sent_inputs[0])
-        self.assertIn("Primary project guidance", sent_inputs[0])
-        self.assertIn("review_scope", sent_inputs[0])
-        self.assertIn("write-result.sh", sent_inputs[0])
-        self.assertIn("--work-item-id", sent_inputs[0])
+        self.assertNotIn("Role-specific rules:", sent_inputs[0])
+        self.assertNotIn("Primary project guidance", sent_inputs[0])
+        self.assertNotIn("review_scope", sent_inputs[0])
+        self.assertNotIn("write-result.sh", sent_inputs[0])
+        self.assertNotIn("--work-item-id", sent_inputs[0])
 
     def test_dual_review_passes_route_to_verification(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -3032,10 +3010,21 @@ class SessionCreationTests(unittest.TestCase):
             "Bug analysis summary: Likely missing state reset in coordinator",
             bug_fixer_inputs[-1],
         )
-        self.assertIn("Continue from your existing bug-fixer role context", bug_fixer_inputs[-1])
+        self.assertIn("Continue from your existing role context.", bug_fixer_inputs[-1])
         self.assertNotIn('"bug_analysis_report_path"', bug_fixer_inputs[-1])
-        self.assertIn('"bug_mode": "fix-only"', bug_fixer_inputs[-1])
-        self.assertIn("In `fix-only` mode, read the saved `spec/bug-analysis.md` first", bug_fixer_inputs[-1])
+        self.assertNotIn('"bug_mode": "fix-only"', bug_fixer_inputs[-1])
+        self.assertNotIn("In `fix-only` mode, read the saved `spec/bug-analysis.md` first", bug_fixer_inputs[-1])
+        bug_fixer_hydration = json.loads(
+            (
+                Path(self.temp_dir.name)
+                / "IOS-30003BUG"
+                / "runtime"
+                / "role-workspaces"
+                / BUG_FIXER_ROLE
+                / "HYDRATION.json"
+            ).read_text()
+        )
+        self.assertEqual("fix-only", bug_fixer_hydration["bug_mode"])
 
     def test_prepare_task_session_routes_story_full_into_proposal_context(self) -> None:
         session, _, created = self.coordinator.create_task_session(
@@ -3077,7 +3066,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Read `description.md` and `comments.md`", sent_inputs[0])
         self.assertIn("comments take precedence over description when they conflict", sent_inputs[0])
         self.assertIn("treat external links as operator-provided context references", sent_inputs[0])
-        self.assertIn("Role-specific rules:", sent_inputs[0])
+        self.assertNotIn("Role-specific rules:", sent_inputs[0])
         launch_script = (
             Path(self.temp_dir.name)
             / "IOS-30002STORY"
@@ -3261,7 +3250,7 @@ class SessionCreationTests(unittest.TestCase):
             self.coordinator._default_extra_hydration_for_dispatch(  # type: ignore[attr-defined]
                 session,
                 bug_fixer_role,
-                "mr_followup_requested",
+                "qa_reopen_requested",
             )
         )
 
@@ -3270,27 +3259,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertNotIn("followup_comments_path", hydration)
         self.assertNotIn("followup_plan_index_path", hydration)
         self.assertNotIn("followup_plan_directory_path", hydration)
-
-    def test_mr_comments_analysis_hydration_keeps_plan_targets_but_omits_missing_comments_artifact(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003MRPLAN",
-            workflow_profile="bug_full",
-            policy=None,
-        )
-        bug_fixer_role = self.role_repository.get_by_name(session.id, BUG_FIXER_ROLE)
-        assert bug_fixer_role is not None
-
-        hydration = self.coordinator._sanitize_dispatch_hydration(  # type: ignore[attr-defined]
-            self.coordinator._default_extra_hydration_for_dispatch(  # type: ignore[attr-defined]
-                session,
-                bug_fixer_role,
-                "mr_comments_analysis_requested",
-            )
-        )
-
-        self.assertNotIn("followup_comments_path", hydration)
-        self.assertTrue(str(hydration["followup_plan_index_path"]).endswith("/plan/index.md"))
-        self.assertTrue(str(hydration["followup_plan_directory_path"]).endswith("/plan"))
 
     def test_boy_scout_dispatch_omits_missing_diff_input_path(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -5488,9 +5456,9 @@ class SessionCreationTests(unittest.TestCase):
         verification_report = Path(self.temp_dir.name) / "IOS-30004" / "spec" / "final-verification.md"
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Apply verification corrections for IOS-30004.", sent_inputs[-1])
-        self.assertIn("Continue from your existing implementer role context", sent_inputs[-1])
-        self.assertIn("fix the real root cause cleanly and avoid regressions", sent_inputs[-1])
-        self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
+        self.assertIn("Continue from your existing role context.", sent_inputs[-1])
+        self.assertNotIn("fix the real root cause cleanly and avoid regressions", sent_inputs[-1])
+        self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory once now", sent_inputs[-1])
         self.assertTrue(verification_report.exists())
         self.assertIn("## Strategy", verification_report.read_text())
         self.assertIn("Mode: android_broad_safe_gate", verification_report.read_text())
@@ -6384,12 +6352,12 @@ class SessionCreationTests(unittest.TestCase):
         sent_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
 
         self.assertEqual(2, len(sent_inputs))
-        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[0])
+        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory once now", sent_inputs[0])
         self.assertIn(
-            "Continue from your existing verification-coordinator role context",
+            "Continue from your existing role context.",
             sent_inputs[-1],
         )
-        self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory now.", sent_inputs[-1])
+        self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory once now", sent_inputs[-1])
 
     def test_verifier_can_block_non_converging_verification_cycle(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VBLOCK")
@@ -7738,6 +7706,57 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(sent_before, sent_after)
         self.assertFalse(any(item.event_type == "session_dispatch_reconciled" for item in events))
 
+    def test_dispatch_role_work_is_idempotent_for_active_same_target(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30009DISPATCHIDEMPOTENT",
+            workflow_profile="oneshot",
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title="Initial implementation for IOS-30009DISPATCHIDEMPOTENT",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        active_session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="implementation_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        active_session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+
+        first_event = self.coordinator._dispatch_role_work(
+            session=active_session,
+            role=implementer_role,
+            work_item=work_item,
+            stage_name="implementation_requested",
+            instruction="Start implementation work for IOS-30009DISPATCHIDEMPOTENT.",
+        )
+        sent_before = list(self.session_backend.get_sent_inputs(implementer_role.runtime_handle))
+
+        second_event = self.coordinator._dispatch_role_work(
+            session=active_session,
+            role=implementer_role,
+            work_item=work_item,
+            stage_name="implementation_requested",
+            instruction="Start implementation work for IOS-30009DISPATCHIDEMPOTENT.",
+        )
+        sent_after = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+        refreshed_role = self.role_repository.get_by_id(implementer_role.id)
+        assert refreshed_role is not None
+        dispatch_events = [
+            event
+            for event in self.event_repository.list_for_session(session.id)
+            if event.event_type == "role_input_dispatched"
+        ]
+
+        self.assertEqual(first_event.id, second_event.id)
+        self.assertEqual(sent_before, sent_after)
+        self.assertEqual(1, len(dispatch_events))
+        self.assertEqual(1, refreshed_role.last_hydration_version)
+
     def test_collect_role_output_does_not_recreate_old_result_when_newer_review_cycle_item_is_active(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009RESULTREVIEWCYCLE",
@@ -9003,150 +9022,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIsNone(event)
         self.assertEqual(0, session_count)
         self.assertEqual(0, chunk_count)
-
-    def test_ingest_mr_comments_reopens_completed_session_with_followup_work(self) -> None:
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30020")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-        completed_session, _ = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="verification_passed",
-            payload={"summary": "all green"},
-        )
-
-        updated_session, event, followup_event, discussion_count = self.coordinator.ingest_mr_comments(
-            session_id=completed_session.id,
-            platform="ios",
-            mr_id="2942",
-        )
-        work_items = self.work_item_repository.list_for_session(session.id)
-        events = self.event_repository.list_for_session(session.id)
-
-        self.assertEqual("active", updated_session.status.value)
-        self.assertEqual("mr_comments_analysis_requested", updated_session.current_stage)
-        self.assertEqual(MR_COMMENTS_ANALYST_ROLE, updated_session.current_owner)
-        self.assertEqual("mr_comments_received", event.event_type)
-        self.assertEqual("mr_comments_analysis_requested", followup_event.event_type)
-        self.assertEqual(2, discussion_count)
-        self.assertTrue(
-            any(item.title == "MR comment analysis for IOS-30020 from !2942" for item in work_items)
-        )
-        self.assertTrue(
-            any(item.work_type == "mr_comments_analysis" for item in work_items)
-        )
-        self.assertTrue(any(item.event_type == "mr_comments_received" for item in events))
-        self.assertTrue(any(item.event_type == "mr_comments_analysis_requested" for item in events))
-
-    def test_mr_comments_analysis_completion_routes_to_subtask_graph_when_snapshot_contains_followup_subtasks(
-        self,
-    ) -> None:
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30020A")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-        completed_session, _ = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="verification_passed",
-            payload={"summary": "all green"},
-        )
-        self.coordinator.ingest_mr_comments(
-            session_id=completed_session.id,
-            platform="ios",
-            mr_id="2943",
-        )
-        plan_dir = Path(self.temp_dir.name) / "IOS-30020A" / "plan"
-        plan_dir.mkdir(parents=True, exist_ok=True)
-        (plan_dir / "index.md").write_text(
-            "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Address MR feedback](./01-address-mr-feedback.md) | — | ☐ |\n"
-        )
-        (plan_dir / "01-address-mr-feedback.md").write_text(
-            "# Address MR feedback\n\n## What to implement\nApply the grouped MR follow-up changes.\n"
-        )
-        self.write_statuses_file(
-            "IOS-30020A",
-            """# Statuses
-
-| Key | Type | Title | Status |
-| --- | --- | --- | --- |
-| IOS-30020A | Story | Parent story | Ready for test |
-| IOS-90001 | Sub-task | Address MR feedback | To Do |
-| IOS-90002 | Sub-task | Cleanup review leftovers | To Do |
-""",
-        )
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=MR_COMMENTS_ANALYST_ROLE,
-            output_type="completed",
-            payload={"summary": "Grouped two review themes into actionable follow-up plan."},
-        )
-        work_items = self.work_item_repository.list_for_session(session.id)
-        events = self.event_repository.list_for_session(session.id)
-        artifacts = self.artifact_repository.list_for_session(session.id)
-
-        self.assertEqual("mr_comments_analysis_completed", mapped_event.event_type)
-        self.assertEqual("subtask_implementation_requested", followup_event.event_type)
-        self.assertEqual("subtask_implementation_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
-        self.assertTrue(any(item.work_type == "mr_comments_analysis" for item in work_items))
-        self.assertTrue(any(item.work_type == "subtask_implementation" for item in work_items))
-        self.assertTrue(any(item.event_type == "mr_comments_analysis_completed" for item in events))
-        self.assertTrue(any(item.event_type == "jira_subtasks_created" for item in events))
-        self.assertTrue(any(item.event_type == "subtask_graph_requested" for item in events))
-        self.assertTrue(any(item.event_type == "subtask_implementation_requested" for item in events))
-        self.assertTrue(any(item.artifact_type == "jira_subtasks_summary" for item in artifacts))
-        self.assertTrue(any(item.artifact_type == "mr_followup_plan_markdown" for item in artifacts))
-        analyst_role = self.role_repository.get_by_name(session.id, MR_COMMENTS_ANALYST_ROLE)
-        assert analyst_role is not None
-        self.assertEqual(RoleStatus.STOPPED, analyst_role.status)
-
-    def test_mr_comments_analysis_completion_falls_back_to_direct_followup_without_resolved_snapshot_subtasks(
-        self,
-    ) -> None:
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30020B")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-        completed_session, _ = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="verification_passed",
-            payload={"summary": "all green"},
-        )
-        self.coordinator.ingest_mr_comments(
-            session_id=completed_session.id,
-            platform="ios",
-            mr_id="2944",
-        )
-        plan_dir = Path(self.temp_dir.name) / "IOS-30020B" / "plan"
-        plan_dir.mkdir(parents=True, exist_ok=True)
-        (plan_dir / "index.md").write_text(
-            "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Address MR feedback](./01-address-mr-feedback.md) | — | ☐ |\n"
-        )
-        (plan_dir / "01-address-mr-feedback.md").write_text(
-            "# Address MR feedback\n\n## What to implement\nApply the grouped MR follow-up changes.\n"
-        )
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=MR_COMMENTS_ANALYST_ROLE,
-            output_type="completed",
-            payload={"summary": "Grouped two review themes into actionable follow-up plan."},
-        )
-        work_items = self.work_item_repository.list_for_session(session.id)
-        events = self.event_repository.list_for_session(session.id)
-
-        self.assertEqual("mr_comments_analysis_completed", mapped_event.event_type)
-        self.assertEqual("mr_followup_requested", followup_event.event_type)
-        self.assertEqual("mr_followup_requested", updated_session.current_stage)
-        self.assertTrue(any(item.work_type == "followup_implementation" for item in work_items))
-        self.assertTrue(any(item.event_type == "mr_followup_requested" for item in events))
 
     def test_reopen_from_qa_reactivates_completed_session(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021")
@@ -11120,7 +10995,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn(CODE_SCOUT_ROLE, PERSISTENT_SESSION_ROLES)
         self.assertIn(DOC_HARVEST_ROLE, PERSISTENT_SESSION_ROLES)
         self.assertIn(DOCUMENTATION_REVIEWER_ROLE, PERSISTENT_SESSION_ROLES)
-        self.assertNotIn(MR_COMMENTS_ANALYST_ROLE, PERSISTENT_SESSION_ROLES)
 
     def test_stale_runtime_cleanup_keeps_persistent_optional_roles_running(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -11143,19 +11017,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(RoleStatus.RUNNING, scout_role.status)
         self.assertEqual(RoleStatus.RUNNING, doc_role.status)
         self.assertEqual(RoleStatus.RUNNING, documentation_reviewer_role.status)
-
-    def test_stale_runtime_cleanup_stops_mr_comments_analyst_worker(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021MRONDEMAND",
-            workflow_profile="oneshot",
-        )
-
-        self.coordinator._maybe_stop_stale_runtime_role(session=session, role_name=MR_COMMENTS_ANALYST_ROLE)
-
-        analyst_role = self.role_repository.get_by_name(session.id, MR_COMMENTS_ANALYST_ROLE)
-        assert analyst_role is not None
-
-        self.assertEqual(RoleStatus.STOPPED, analyst_role.status)
 
     def test_doc_harvest_skipped_not_needed_completes_session_when_policy_enabled(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

@@ -52,17 +52,10 @@ const SURFACE_TILES: Array<{
   },
 ];
 
-const FOLLOWUP_ARTIFACT_TYPES_BY_SOURCE: Record<"mr" | "qa", readonly string[]> = {
-  mr: ["mr_followup_plan_markdown", "mr_comments_markdown"],
+const FOLLOWUP_ARTIFACT_TYPES_BY_SOURCE: Record<"qa", readonly string[]> = {
   qa: ["qa_reopen_comments"],
 };
-const FOLLOWUP_STAGE_EVENT_TYPES: Record<"mr" | "qa", readonly string[]> = {
-  mr: [
-    "mr_comments_analysis_requested",
-    "subtask_graph_requested",
-    "subtask_implementation_requested",
-    "mr_followup_requested",
-  ],
+const FOLLOWUP_STAGE_EVENT_TYPES: Record<"qa", readonly string[]> = {
   qa: [
     "subtask_graph_requested",
     "subtask_implementation_requested",
@@ -310,13 +303,12 @@ function buildFollowupContext(
 ): Promise<FollowupContext | null> | FollowupContext | null {
   const sourceEvent = [...events]
     .reverse()
-    .find((event) => event.event_type === "mr_comments_received" || event.event_type === "qa_reopened");
+    .find((event) => event.event_type === "qa_reopened");
   if (sourceEvent === undefined) {
     return null;
   }
 
-  const source =
-    sourceEvent.event_type === "mr_comments_received" ? "mr" : "qa";
+  const source = "qa";
   const followupEvent = events.find(
     (event) =>
       event.id > sourceEvent.id &&

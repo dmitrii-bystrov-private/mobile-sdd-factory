@@ -26,14 +26,13 @@ export function FollowupContextPanel({
           <strong>Follow-up Context</strong>
         </div>
         <p className="followup-empty">
-          This session has not been reopened from MR or QA feedback yet.
+          This session has not been reopened from QA feedback yet.
         </p>
       </section>
     );
   }
 
-  const sourceLabel =
-    followupContext.source === "mr" ? "Merge Request Feedback" : "QA Reopen";
+  const sourceLabel = "QA Reopen";
 
   return (
     <section className="subpanel">

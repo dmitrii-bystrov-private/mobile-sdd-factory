@@ -32,8 +32,6 @@ from backend.api.schemas import (
     CompleteSelfReviewResponse,
     CreateMrRequest,
     CreateMrResponse,
-    IngestMrCommentsRequest,
-    IngestMrCommentsResponse,
     ReviewMessagePreviewRequest,
     ReviewMessagePreviewResponse,
     ReopenFromQaRequest,
@@ -421,31 +419,6 @@ def cleanup_task(
         full_cleanup_allowed=bool(result["full_cleanup_allowed"]),
         removed_paths=[str(path) for path in result["removed_paths"]],
         session=to_session_response(session) if session is not None else None,
-    )
-
-
-@router.post("/ingest-mr-comments", response_model=IngestMrCommentsResponse)
-def ingest_mr_comments(
-    payload: IngestMrCommentsRequest,
-    dependencies: AppDependencies = Depends(get_dependencies),
-) -> IngestMrCommentsResponse:
-    try:
-        session, event, followup_event, discussion_count = (
-            dependencies.coordinator_service.ingest_mr_comments(
-                session_id=payload.session_id,
-                platform=payload.platform,
-                mr_id=payload.mr_id,
-            )
-        )
-    except IntakeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return IngestMrCommentsResponse(
-        ingested=True,
-        session=to_session_response(session),
-        event_type=event.event_type,
-        followup_event_type=followup_event.event_type if followup_event else None,
-        discussion_count=discussion_count,
     )
 
 

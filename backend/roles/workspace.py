@@ -42,7 +42,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task snapshot metadata: `{task_snapshot_root}`",
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
-            "- Task artifacts and coordinator outputs: `{task_artifacts_root}`",
+            "- Task artifacts and generated outputs: `{task_artifacts_root}`",
             "- Main repo scripts: `{repo_root}/scripts`",
             "- Project conventions: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
         ]
@@ -110,17 +110,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Diff input: `{task_snapshot_root}/spec/diff.md`",
             "- Findings target: `{task_snapshot_root}/spec/findings.md`",
             "- Deferred findings input: `{task_snapshot_root}/spec/scout-deferred.md`",
-            "- Task repo worktree: `{task_repo_root}`",
-            "- Task-local runtime root: `{task_runtime_root}`",
-            "- Task-local temp root: `{task_tmp_root}`",
-            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-        ]
-    if role_name == "mr-comments-analyst-worker":
-        return [
-            "- Task snapshot metadata: `{task_snapshot_root}`",
-            "- Raw MR comments input: `{task_artifacts_root}/mr-followup`",
-            "- Follow-up plan directory: `{task_snapshot_root}/plan`",
-            "- Context directory: `{task_snapshot_root}/spec/context`",
             "- Task repo worktree: `{task_repo_root}`",
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
@@ -238,26 +227,26 @@ def _role_responsibility(role_name: str) -> list[str]:
         return [
             "- You execute routed implementation work for one task session.",
             "- You focus only on the currently assigned work item.",
-            "- You should not reason about other agents or hidden orchestration concerns.",
+            "- Work only on the current routed task. Do not inspect or modify unrelated task/session state.",
         ]
     if role_name == "bug-fixer":
         return [
             "- You execute unified bug work for one bug task session.",
             "- You retain bug-specific context across analysis, fix, and follow-up rounds.",
-            "- You should not reason about other agents or hidden orchestration concerns.",
+            "- Work only on the current routed task. Do not inspect or modify unrelated task/session state.",
         ]
     if role_name == "verification-coordinator":
         return [
             "- You execute routed verification work for one task session.",
             "- You validate changes through deterministic checks and review the resulting evidence.",
-            "- You should not take ownership of implementation work except through explicit coordinator routing.",
+            "- Do not modify product code; report verification results and required corrections only.",
         ]
     if role_name == "code-reviewer":
         return [
             "- You execute routed code review work for one task session.",
             "- You review only the routed task changes and produce compact review outcomes plus a durable structured review report for the current pass.",
             "- For real findings, include optional `Evidence`, `Suggested approach`, and `Test expectations` sections only when they are grounded by the touched diff and likely to help the next correction pass.",
-            "- You do not run builds, tests, lint, simulators, or verification wrappers; runtime validation belongs to the verification lane.",
+            "- Do not run build, test, or lint verification. Submit your review result; verification happens after this role finishes.",
             "- Across repeated passes, retain reviewer context for the same task instead of reinitializing from zero.",
         ]
     if role_name == "convention-reviewer":
@@ -265,7 +254,7 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You execute one bounded convention review pass for one task session.",
             "- You review the routed diff against local repository conventions and produce a durable structured report for the current pass.",
             "- You do not review requirement completeness or broad maintainability cleanup.",
-            "- You do not run builds, tests, lint, simulators, or verification wrappers; runtime validation belongs to the verification lane.",
+            "- Do not run build, test, or lint verification. Submit your review result; verification happens after this role finishes.",
         ]
     if role_name == "requirements-reviewer":
         return [
@@ -273,7 +262,7 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You review whether the current implementation satisfies the cumulative Jira task/subtask scope in canonical statuses order.",
             "- You protect earlier accepted subtasks from regressions unless a newer Jira follow-up explicitly overrides them.",
             "- You do not review convention/style/documentation hygiene unless it directly breaks behavior or coverage.",
-            "- You do not run builds, tests, lint, simulators, or verification wrappers; runtime validation belongs to the verification lane.",
+            "- Do not run build, test, or lint verification. Submit your review result; verification happens after this role finishes.",
         ]
     if role_name == "code-scout":
         return [
@@ -281,12 +270,6 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You inspect only the changed code area for real maintainability improvements and do not modify product code yourself.",
             "- For real findings, include optional `Evidence`, `Suggested approach`, and `Test expectations` sections only when they are grounded by the touched code and likely to help the next cleanup pass.",
             "- You stop after writing either a clean result or structured findings for operator review.",
-        ]
-    if role_name == "mr-comments-analyst-worker":
-        return [
-            "- You execute one bounded MR review analysis task for one task session.",
-            "- You transform unresolved MR comments into an actionable grouped follow-up plan package for the implementer.",
-            "- You stop after writing the follow-up plan package and the routed summary; you do not remain the owner of later implementation work.",
         ]
     if role_name == "doc-harvest-worker":
         return [
@@ -304,44 +287,44 @@ def _role_responsibility(role_name: str) -> list[str]:
     if role_name == "proposal-context-worker":
         return [
             "- You execute one bounded proposal/context preparation task for one story session.",
-            "- Produce `spec/proposal.md` plus the `spec/context/` package, then stop; you do not remain the owner of later planning or implementation work.",
+            "- Produce `spec/proposal.md` plus the `spec/context/` package, submit the result, then stop.",
             "- Read `description.md` and `comments.md` first; when they conflict, treat `comments.md` as the fresher source and record the conflict explicitly in the proposal.",
             "- Resolve explicit HTTP/HTTPS links from the snapshot as operator-provided context references rather than mandatory fetched inputs.",
             "- Resolve only explicit local file references from the snapshot before broadening to any narrower repo exploration.",
-            "- You should not assume persistence across unrelated tasks or later implementation rounds.",
+            "- Do not continue into requirements, decomposition, or implementation work.",
         ]
     if role_name == "requirements-clarifier-worker":
         return [
             "- You execute one bounded requirements-clarification task for one story session.",
             "- When critical ambiguity remains, you must ask the operator directly in the live session and continue after the operator replies.",
-            "- Produce the routed requirements result and then stop; you do not remain the owner of later planning or implementation work.",
+            "- Produce the routed requirements result, submit it, then stop.",
         ]
     if role_name == "acceptance-criteria-worker":
         return [
             "- You execute one bounded acceptance-criteria preparation task for one story session.",
-            "- Produce the routed acceptance-criteria result and then stop; you do not remain the owner of later planning or implementation work.",
-            "- You should not assume persistence across unrelated tasks or later implementation rounds.",
+            "- Produce the routed acceptance-criteria result, submit it, then stop.",
+            "- Do not continue into constraints, decomposition, or implementation work.",
         ]
     if role_name == "constraints-worker":
         return [
             "- You execute one bounded constraints-preparation task for one story session.",
-            "- Produce the routed constraints result and then stop; you do not remain the owner of later planning or implementation work.",
-            "- You should not assume persistence across unrelated tasks or later implementation rounds.",
+            "- Produce the routed constraints result, submit it, then stop.",
+            "- Do not continue into decomposition or implementation work.",
         ]
     if role_name == "spec-verifier-worker":
         return [
             "- You execute one bounded planning-verification task for one story session.",
             "- Produce the routed verification result and then stop only when the planning package is actually clean; if critical blockers remain, continue after the operator replies in the same live session.",
-            "- You should not assume persistence across unrelated tasks or later implementation rounds.",
+            "- Do not continue into decomposition or implementation work.",
         ]
     if role_name == "task-decomposer-worker":
         return [
             "- You execute one bounded task-decomposition task for one story session.",
-            "- Produce the routed decomposition result and then stop; you do not remain the owner of later implementation or verification work.",
-            "- You should not assume persistence across unrelated tasks or later execution rounds.",
+            "- Produce the routed decomposition result, submit it, then stop.",
+            "- Do not continue into implementation work.",
         ]
     return [
-        "- You operate only on coordinator-routed work for one task session.",
+        "- You operate only on routed work for one task session.",
         "- You should not infer responsibilities outside your current role.",
     ]
 
@@ -357,25 +340,22 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Keep implementation aligned to the routed task or correction scope, but make any adjacent code changes that are necessary to fix the real root cause cleanly and avoid regressions.",
             "- If a routed correction conflicts with already-authoritative product/operator direction or cannot be resolved safely without a fresh operator decision, stop and escalate instead of forcing a local patch.",
             "- In that escalation, provide a reasoned disagreement package: the concrete conflict, the premise you believe is wrong or outdated, the technical direction you recommend instead, and the exact operator decision needed.",
-            "- Do not run workflow-level `run-build.sh`, `run-test.sh`, or `run-lint.sh` unless the routed work explicitly requires a narrow task-specific check.",
-            "- Broad workflow-level verification wrappers remain verifier-only authority even when local code checks would be convenient.",
-            "- Treat final test+lint verification as deferred to the coordinator.",
+            "- Do not run build, test, or lint verification. Submit your implementation result; verification happens after this role finishes.",
         ]
     if role_name == "bug-fixer":
         return [
             "- Preserve bug-specific context across analysis, fix, and follow-up rounds.",
             "- Support the routed bug modes inside one runtime identity: `analysis-only` before code changes, then `fix-only` for implementation, correction, and follow-up rounds.",
             "- In implementation and fix-only rounds, read `description.md`, `comments.md`, and `spec/diff.md` when they exist before deciding there is no concrete bug-fix work to perform.",
-            "- In `analysis-only` mode, read task description/comments first, investigate the code path, write or update `spec/bug-analysis.md`, and stop before product-code changes when confidence is low or when the coordinator routed an analysis-only pass.",
+            "- In `analysis-only` mode, read task description/comments first, investigate the code path, write or update `spec/bug-analysis.md`, and stop before product-code changes when confidence is low or when the routed pass is analysis-only.",
             "- In `fix-only` mode, read the saved `spec/bug-analysis.md` first and treat it as the durable bug context unless a routed issues file or follow-up comments narrow the scope further.",
             "- If an `Issues file:` path is routed, treat it as the primary scoped input for this round, but make any adjacent code changes that are necessary to fix the root cause cleanly and avoid regressions.",
             "- If `Follow-up comments:` are routed, prioritize the latest follow-up comments over redoing the original bug analysis from scratch.",
             "- Keep the current bug task scoped to the routed pass, saved bug analysis, and latest follow-up context.",
             "- If a routed correction conflicts with already-authoritative product/operator direction or cannot be resolved safely without a fresh operator decision, stop and escalate instead of forcing a local patch.",
             "- In that escalation, provide a reasoned disagreement package: the concrete conflict, the premise you believe is wrong or outdated, the technical direction you recommend instead, and the exact operator decision needed.",
-            "- Broad workflow-level `run-build.sh`, `run-test.sh`, and `run-lint.sh` remain verifier-only authority for this role too.",
-            "- Write or update `spec/bug-analysis.md` in bug-analysis rounds; keep final workflow-level verification deferred to the coordinator.",
-            "- Treat final test+lint verification as deferred to the coordinator.",
+            "- Do not run build, test, or lint verification. Submit your implementation result; verification happens after this role finishes.",
+            "- Write or update `spec/bug-analysis.md` in bug-analysis rounds.",
         ]
     if role_name == "verification-coordinator":
         return [
@@ -441,20 +421,13 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Structure each finding with a clear title, why it matters, required direction, and non-goals; affected files and additional context should be included when grounded by the diff.",
             "- Skip style nits, convention-only feedback, and speculative improvements.",
         ]
-    if role_name == "mr-comments-analyst-worker":
-        return [
-            "- Treat this role as a bounded one-shot worker: analyze unresolved MR comments, write the grouped follow-up plan package, and exit.",
-            "- Start from the latest MR comments artifact, group related discussions into actionable themes, and enrich them with just enough source-code context to make the plan executable.",
-            "- Use `spec/context/feature-overview.md` first when it exists and pull in the rest of `spec/context/*` selectively when they clarify the expected pattern.",
-            "- Write `plan/index.md` plus one or more `plan/NN-*.md` files only with grounded task-specific content; keep numbering only in filenames, not in human-facing task titles, and do not modify product code.",
-        ]
     if role_name == "doc-harvest-worker":
         return [
             "- Treat this role as a bounded one-shot worker: generate or refresh `spec/full-diff.md`, update grounded feature-level README targets, and exit.",
             "- Use `spec/full-diff.md` as the primary source of truth for branch changes and prefer changed README/doc anchors over broad repo scanning.",
             "- Use `DOCUMENTATION_GUIDE.md` when present; otherwise write durable behavior and contract documentation without preserving task/review history.",
             "- Read selectively and skip ambiguous multi-feature diffs instead of inventing a single arbitrary documentation target.",
-            "- Commit only the README/doc files you changed, then report a compact summary for the coordinator.",
+            "- Commit only the README/doc files you changed, then report a compact summary.",
         ]
     if role_name == "documentation-reviewer":
         return [
@@ -462,7 +435,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Start from `spec/documentation-precheck.md`, `spec/doc-diff.md`, `spec/full-diff.md`, and `DOCUMENTATION_GUIDE.md` when present; otherwise apply the stable documentation rules from this prompt.",
             "- Review production README files, docs, and public/doc comments for stable-contract documentation quality.",
             "- Flag Jira/review history, file inventories in module READMEs, duplicated explanations, stale implementation narration, and documentation that preserves how the task was implemented instead of the durable behavior.",
-            "- Do not edit files, do not run verification wrappers, and keep findings scoped to documentation/comment changes.",
+            "- Do not edit files; keep findings scoped to documentation/comment changes.",
             "- Emit `skipped_not_needed` only when there are no documentation/comment changes to review.",
         ]
     if role_name == "proposal-context-worker":
@@ -470,14 +443,14 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Treat this role as a bounded one-shot worker: produce `spec/proposal.md` and the `spec/context/` package, then exit.",
             "- Always write `spec/context/feature-overview.md`; write the other `spec/context/*` files only when they contain concrete task-specific findings.",
             "- Read snapshot description/comments first; use repo sources and local docs only when they are directly needed to ground the proposal/context outputs.",
-            "- Keep the output compact and downstream-oriented so later story roles can reuse the written context package instead of rediscovering it.",
+            "- Keep the output compact and reusable for the next routed planning step.",
         ]
     if role_name == "requirements-clarifier-worker":
         return [
             "- Treat this role as a bounded worker for one story session: clarify requirements, ask live follow-up questions when needed, then write the routed result and exit.",
             "- Start from `spec/proposal.md` and `spec/context/feature-overview.md`; read the rest of `spec/context/*` selectively when it materially helps resolve ambiguity.",
             "- If a risky ambiguity remains, ask the operator directly in the live session instead of guessing.",
-            "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than unresolved requirements.",
+            "- Keep the output compact and reusable for the next routed planning step.",
         ]
     if role_name == "acceptance-criteria-worker":
         return [
@@ -485,7 +458,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Start from `spec/proposal.md`, clarified requirements, and `spec/context/feature-overview.md`; read other context files only when they materially affect behavior coverage.",
             "- Write independently testable criteria in WHEN-THEN-SHALL form and cover happy paths, edge cases, and error scenarios from the clarified requirements.",
             "- Ensure each meaningful decision from the clarified requirements is covered by at least one criterion before finishing.",
-            "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than behavioral coverage gaps.",
+            "- Keep the output compact and reusable for the next routed planning step.",
         ]
     if role_name == "constraints-worker":
         return [
@@ -493,7 +466,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Start from the proposal, clarified requirements, acceptance criteria, and `spec/context/feature-overview.md`; use `implementation-patterns.md`, `documentation.md`, and `preconditions.md` when they materially shape constraints.",
             "- Treat `spec/context/project.md` as architectural ground truth, cite it instead of restating generic conventions, and keep constraints task-specific and grounded.",
             "- Express constraints as imperative MUST, MUST NOT, and SHOULD statements across only the applicable categories.",
-            "- Keep the output compact and downstream-oriented so the later story-spec worker can focus on implementation structure rather than rediscovering constraints.",
+            "- Keep the output compact and reusable for the next routed planning step.",
         ]
     if role_name == "spec-verifier-worker":
         return [
@@ -516,7 +489,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Keep the output compact and downstream-oriented so execution can start from an explicit decomposition instead of implicit planning assumptions.",
         ]
     return [
-        "- Stay within the routed task scope and use coordinator instructions as the active payload.",
+        "- Stay within the routed task scope and use ROUTED_WORK.md as the active payload.",
     ]
 
 
@@ -561,8 +534,8 @@ def build_role_agents_md(
             "## Runtime Rules",
             "",
             "- Start from this role workspace and keep your work scoped to the routed task session.",
-            "- Re-read this file after context compaction or if role boundaries become unclear.",
-            "- Use coordinator hydration and routed work instructions as the current task payload.",
+            "- Read this file once when the role starts. Do not reread it on every routed work item unless context was compacted or role boundaries are unclear.",
+            "- Use HYDRATION.json and routed work instructions as the current task payload.",
             "- Treat this file as durable role context; treat routed handoff prompts as per-work instructions.",
             "- Paths written as `spec/...`, `review/...`, or `plan/...` refer to the task snapshot metadata root listed above, not to this role workspace current directory.",
             "- When hydration or the relevant-path list provides explicit absolute `*_path` values, use those exact paths directly instead of reconstructing task paths relative to the current directory.",
@@ -576,7 +549,7 @@ def build_role_agents_md(
             "- You may emit `SDD_PROGRESS` for intermediate updates.",
             "- For implementer/bug-fixer live escalations that need an operator decision before the current work item can continue, emit `SDD_ERROR` with `summary`, `details`, and `needs_operator_input: true` instead of forcing a terminal completion/error result.",
             "- When that escalation is a reasoned disagreement with a correction or review request, also include `conflict_point`, `reviewer_premise`, `preferred_direction`, `requested_decision`, and optional `supporting_evidence` when they are grounded.",
-            "- If you also emit terminal completion text directly, use the exact `SDD_OUTPUT: {...}` format described by the coordinator.",
+            "- If you also emit terminal completion text directly, use the exact `SDD_OUTPUT: {...}` format described here.",
             "",
             "## Operating Rules",
             "",

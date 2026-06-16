@@ -30,6 +30,7 @@ try:
     from backend.api.schemas import CollectRoleOutputRequest, RoleOutputRequest, SubmitRoleResultRequest
     from backend.api.routes_artifacts import get_artifact, list_artifacts
     from backend.api.routes_roles import collect_role_output
+    from backend.api.routes_roles import list_roles
     from backend.api.routes_operator import poll_session_output
     from backend.api.routes_operator import run_loop_once
     from backend.api.routes_operator import pause_session
@@ -58,7 +59,6 @@ try:
     from backend.api.routes_operator import stop_runtime_session
     from backend.api.routes_operator import send_to_test
     from backend.api.routes_operator import start_subtask_graph
-    from backend.api.routes_operator import ingest_mr_comments
     from backend.api.routes_operator import loop_status, start_loop, stop_loop
     from backend.api.routes_operator import update_runtime_defaults
     from backend.api.schemas import (
@@ -69,7 +69,6 @@ try:
         CreateSubtasksFromPlanRequest,
         SkipBoyScoutRequest,
         ResolveBoyScoutFindingsRequest,
-        IngestMrCommentsRequest,
         PollSessionOutputRequest,
         PauseSessionRequest,
         RefreshSnapshotRequest,
@@ -245,20 +244,6 @@ class FakeGitLabAdapter:
             ),
             "",
         )
-
-    def fetch_mr_comments(self, platform: str, mr_id: str) -> "CommandResult":
-        return CommandResult(
-            ["fetch_mr_comments", platform, mr_id],
-            0,
-            (
-                f"# Unresolved MR discussions: !{mr_id} (1 total)\n\n"
-                "## Discussion 1 — file.swift:10\n\n"
-                "**Reviewer:** Please fix this\n\n"
-                "---\n"
-            ),
-            "",
-        )
-
 
 @unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi is not installed in the local environment")
 class SessionApiTests(unittest.TestCase):
@@ -3210,6 +3195,36 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("owner-active", implementer.live_state)
         self.assertTrue(implementer.is_current_owner)
 
+    def test_retired_mr_comments_role_is_hidden_from_existing_sessions(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013OLDMR"),
+            dependencies=self.dependencies,
+        )
+        self.dependencies.role_repository.create(
+            session_id=prepare_response.session.id,
+            role_name="mr-comments-analyst-worker",
+            runtime_backend="recording",
+            runtime_handle="legacy-runtime:mr-comments-analyst-worker",
+        )
+
+        roles_response = list_roles(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+        runtime_response = get_runtime_state(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertNotIn(
+            "mr-comments-analyst-worker",
+            [role.role_name for role in roles_response.items],
+        )
+        self.assertNotIn(
+            "mr-comments-analyst-worker",
+            [role.role_name for role in runtime_response.roles],
+        )
+
     def test_get_runtime_state_route_returns_last_auto_recovery(self) -> None:
         from tests.backend.test_session_creation import AutoRecoveryRecordingBackend
 
@@ -3498,44 +3513,6 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("session_paused_by_operator", response.event_type)
         self.assertEqual("paused", response.session.status)
         self.assertEqual("implementer", response.session.current_owner)
-
-    def test_ingest_mr_comments_route_reopens_completed_session(self) -> None:
-        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
-            PrepareSessionRequest(task_key="IOS-40014A"),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=prepare_response.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "done"},
-            ),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=prepare_response.session.id,
-                event_type="verification_passed",
-                payload={"summary": "all green"},
-            ),
-            dependencies=self.dependencies,
-        )
-
-        response = ingest_mr_comments(
-            IngestMrCommentsRequest(
-                session_id=prepare_response.session.id,
-                platform="ios",
-                mr_id="2942",
-            ),
-            dependencies=self.dependencies,
-        )
-
-        self.assertTrue(response.ingested)
-        self.assertEqual("mr_comments_received", response.event_type)
-        self.assertEqual("mr_comments_analysis_requested", response.followup_event_type)
-        self.assertEqual("active", response.session.status)
-        self.assertEqual("mr_comments_analysis_requested", response.session.current_stage)
-        self.assertEqual(1, response.discussion_count)
 
     def test_create_mr_route_marks_completed_session_as_handed_off(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

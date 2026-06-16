@@ -24,8 +24,6 @@ const STAGE_LABELS: Record<string, string> = {
   documentation_review_requested: "Documentation Review",
   documentation_review_correction_requested: "Documentation Review Correction",
   qa_reopen_requested: "QA Reopen",
-  mr_comments_analysis_requested: "Comments Analysis",
-  mr_followup_requested: "MR Follow-up",
   doc_harvest_requested: "Documentation Writer",
   mr_handoff_completed: "MR Handoff Complete",
   mr_handoff_failed: "MR Handoff Failed",

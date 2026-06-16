@@ -80,12 +80,7 @@ const STREAM_EVENT_TYPES = [
   "verification_blocked",
   "verification_passed",
   "task_completed",
-  "mr_comments_empty",
-  "mr_comments_received",
-  "mr_comments_analysis_requested",
-  "mr_comments_analysis_completed",
   "proposal_external_links_detected",
-  "mr_followup_requested",
   "mr_handoff_completed",
   "mr_handoff_failed",
   "send_to_test_completed",
@@ -475,27 +470,6 @@ export const apiClient = {
     return request("/operator/send-runtime-input", {
       method: "POST",
       body: JSON.stringify({ session_id: sessionId, text }),
-    });
-  },
-
-  ingestMrComments(
-    sessionId: number,
-    platform: "ios" | "android",
-    mrId: string,
-  ): Promise<{
-    ingested: boolean;
-    event_type: string;
-    followup_event_type: string | null;
-    discussion_count: number;
-    session: Session;
-  }> {
-    return request("/operator/ingest-mr-comments", {
-      method: "POST",
-      body: JSON.stringify({
-        session_id: sessionId,
-        platform,
-        mr_id: mrId,
-      }),
     });
   },
 

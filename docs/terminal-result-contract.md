@@ -387,7 +387,6 @@ Minimal example:
 Applies to:
 - `implementer`
 - `bug-fixer`
-- `mr-comments-analyst-worker`
 
 Required:
 - `output_type`

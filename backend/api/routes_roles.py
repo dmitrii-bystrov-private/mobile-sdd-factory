@@ -19,6 +19,7 @@ from backend.api.schemas import (
 )
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
+from backend.roles.contracts import RETIRED_ROLE_NAMES
 
 router = APIRouter(prefix="/roles", tags=["roles"])
 
@@ -32,7 +33,11 @@ def list_roles(
     session_id: int = Query(...),
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> RolesResponse:
-    roles = dependencies.role_repository.list_for_session(session_id)
+    roles = [
+        role
+        for role in dependencies.role_repository.list_for_session(session_id)
+        if role.role_name not in RETIRED_ROLE_NAMES
+    ]
     return RolesResponse(
         items=[
             RoleResponse(

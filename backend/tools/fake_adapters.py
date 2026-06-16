@@ -224,15 +224,3 @@ class FakeGitLabAdapter:
             ),
             stderr="",
         )
-
-    def fetch_mr_comments(self, platform: str, mr_id: str) -> CommandResult:
-        return CommandResult(
-            command=["fake_fetch_mr_comments", platform, mr_id],
-            returncode=0,
-            stdout=(
-                f"# Unresolved MR discussions: !{mr_id} (1 total)\n\n"
-                "## Discussion 1 — file.swift:10\n\n"
-                "**Reviewer:** Placeholder MR follow-up comment\n\n"
-            ),
-            stderr="",
-        )

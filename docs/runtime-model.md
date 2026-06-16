@@ -44,7 +44,7 @@ Important roles include:
 - `requirements-reviewer`
 - `verification-coordinator`
 - planning workers such as `proposal-context-worker`, `requirements-clarifier-worker`, `spec-verifier-worker`, and `task-decomposer-worker`
-- follow-up workers such as `mr-comments-analyst-worker` and `doc-harvest-worker`
+- follow-up workers such as `doc-harvest-worker`
 
 Some roles are short planning lanes.
 Some roles are persistent long-runners.
@@ -132,7 +132,6 @@ The supported platform routes follow-up work back into the same runtime model in
 
 Important follow-up inputs:
 
-- MR comments
 - QA reopen comments
 - refreshed Jira subtasks
 

@@ -123,7 +123,7 @@ scripts/create-subtasks-batch.sh --parent <KEY> --plan-dir <plan/> \
 - Already-created subtasks are NOT rolled back on partial failure.
 - Prints a summary table of created subtask keys and any skipped titles.
 
-This selective mode is useful when `plan/` contains a broader backlog but you only want to create newly added review findings or MR follow-up tasks without rebuilding a temporary plan directory.
+This selective mode is useful when `plan/` contains a broader backlog but you only want to create newly added review findings without rebuilding a temporary plan directory.
 
 #### `request-review-message.sh`
 
@@ -242,29 +242,6 @@ bash scripts/send-to-test.sh <TASK-KEY>
 
 Requires `acli` and `jq`.
 
-#### `fetch-mr-comments.sh`
-
-Fetches unresolved GitLab review discussions and renders them as Markdown:
-
-```bash
-bash scripts/fetch-mr-comments.sh <ios|android> <mr_iid>
-```
-
-- Paginates through all MR discussions using the GitLab API.
-- Filters to unresolved resolvable notes only.
-- Prints grouped Markdown sections with file path and line number when available.
-- Exits with code `2` when no unresolved discussions exist.
-
-Useful for turning review feedback into Jira subtasks or QA follow-up items.
-
-This script is the first half of the `/handle-mr-comments` workflow:
-- `fetch-mr-comments.sh` exports unresolved MR discussions
-- the `mr-comments-analyst` agent groups them into `plan/` files under `$SDD_WORKDIR/<KEY>/plan/`
-- `create-subtasks-batch.sh --parent <KEY>` creates Jira subtasks from those generated plan files
-- when only a subset of new plan files should become Jira subtasks, pass them explicitly with repeated `--task-file`
-
-That workflow assumes an existing task workspace at `$SDD_WORKDIR/<KEY>/repo/`, typically prepared via `bash scripts/snapshot.sh <KEY>`.
-
 #### `get-mr-jira-key.sh`
 
 Extracts the Jira key from a GitLab MR title or description:
@@ -278,7 +255,7 @@ bash scripts/get-mr-jira-key.sh <ios|android> <mr_iid>
 - Prints the key to stdout.
 - Exits with code `1` if no key is found.
 
-Used by the `/handle-mr-comments` skill to auto-detect the Jira key when the user provides only an MR URL.
+Used by MR handoff helpers to auto-detect the Jira key when the user provides only an MR URL.
 
 #### `create-issue.sh`
 

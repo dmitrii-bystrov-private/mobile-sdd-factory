@@ -60,7 +60,7 @@ The current system is centered on the operator console and persistent role runti
 - the UI exposes session creation, runtime visibility, operator actions, runtime defaults, doctor, bootstrap guidance, and runtime capabilities
 - live roles run under persistent tmux-backed runtimes
 - quality lanes such as self-review and verification are long-running roles that keep their context across correction rounds
-- task execution, MR follow-up, and QA reopen flows can route through the same subtask graph instead of spawning disconnected one-off lanes
+- task execution and QA reopen flows can route through the same subtask graph instead of spawning disconnected one-off lanes
 
 The main workflow profiles are still the same:
 
@@ -76,7 +76,7 @@ self-review        →  optional/required persistent reviewer lane with correcti
 boy scout          →  optional/required scout lane with implement-now vs tech-debt resolution flow
 verification       →  persistent verifier lane with correction loop
 delivery           →  automatic MR handoff + automatic send-to-test
-follow-up          →  MR comments and QA reopen can materialize new subtasks and resume the same execution model
+follow-up          →  QA reopen can materialize new subtasks and resume the same execution model
 ```
 
 ### Bug flow — `bug_full`
@@ -151,7 +151,6 @@ The current pipeline is composed of specialized long-running or on-demand roles:
 | `convention-reviewer` | Reviews the diff against local repository conventions, nearby patterns, and test style. |
 | `requirements-reviewer` | Reviews the diff against current Jira scope, follow-ups, cumulative requirements, regressions, and edge cases. |
 | `verification-coordinator` | Persistent verification lane that runs the workflow gate and can request corrections or block a non-converging verification cycle. |
-| `mr-comments-analyst-worker` | Groups unresolved MR discussions into actionable themes and a follow-up subtask plan. |
 | `doc-harvest-worker` | Produces or updates documentation when the diff justifies it. |
 
 ---
@@ -347,7 +346,6 @@ The repo also exposes direct shell entry points for automation and debugging:
 - `bash scripts/create-mr.sh <KEY>` — push the task branch and open a GitLab MR
 - `bash scripts/send-to-test.sh <KEY>` — transition Jira status to testing-ready after MR handoff
 - `bash scripts/create-issue.sh ...` / `create-subtask.sh ...` / `create-subtasks-batch.sh ...` — Jira creation helpers
-- `bash scripts/fetch-mr-comments.sh <ios|android> <mr_iid>` — export unresolved MR discussions as Markdown
 - `bash scripts/get-mr-jira-key.sh <ios|android> <mr_iid>` — extract the Jira key from an MR title or description
 - `bash scripts/request-review-message.sh <ios|android> <mr_iid>` — generate a Slack-ready review message
 - `bash scripts/cleanup.sh` — remove resolved workspaces from `$SDD_WORKDIR`

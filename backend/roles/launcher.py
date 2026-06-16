@@ -36,7 +36,6 @@ def _role_lifecycle_mode(role_name: str) -> str:
         "convention-reviewer",
         "requirements-reviewer",
         "code-scout",
-        "mr-comments-analyst-worker",
         "doc-harvest-worker",
         "documentation-reviewer",
     }:

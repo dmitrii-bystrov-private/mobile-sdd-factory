@@ -21,7 +21,6 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
     "verification-coordinator",
     "doc-harvest-worker",
     "documentation-reviewer",
-    "mr-comments-analyst-worker",
   ];
   const bugFullOrder = [
     "implementer",
@@ -31,7 +30,6 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
     "verification-coordinator",
     "doc-harvest-worker",
     "documentation-reviewer",
-    "mr-comments-analyst-worker",
   ];
   const storyFullOrder = [
     "proposal-context-worker",
@@ -46,7 +44,6 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
     "verification-coordinator",
     "doc-harvest-worker",
     "documentation-reviewer",
-    "mr-comments-analyst-worker",
   ];
 
   const orderedRoles =
