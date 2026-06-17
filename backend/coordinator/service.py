@@ -2538,6 +2538,31 @@ class CoordinatorService:
                 role=role,
                 error_message=str(exc),
             )
+        except Exception as exc:
+            mapped_event = self._accepted_mapped_event_for_work_item(
+                session_id=session.id,
+                work_item_id=work_item_id,
+            )
+            if mapped_event is None:
+                raise
+            mapped_event_type = mapped_event.event_type
+            session = self._get_session_or_raise(session.id)
+            latest_event = self.event_repository.list_for_session(session.id)[-1]
+            if latest_event.id != mapped_event.id:
+                followup_event_type = latest_event.event_type
+            self._append_event(
+                session_id=session.id,
+                event_type="role_result_followup_dispatch_failed",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "work_item_id": work_item_id,
+                    "mapped_event_type": mapped_event_type,
+                    "current_stage": session.current_stage,
+                    "current_owner": session.current_owner,
+                    "error": str(exc),
+                },
+            )
         else:
             mapped_event_type = self._map_role_output_to_event_type(
                 session=session,
@@ -2564,6 +2589,20 @@ class CoordinatorService:
             },
         )
         return session, event, mapped_event_type, followup_event_type, ignored
+
+    def _accepted_mapped_event_for_work_item(
+        self,
+        *,
+        session_id: int,
+        work_item_id: int,
+    ) -> Event | None:
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.producer_type != "role":
+                continue
+            if event.payload.get("work_item_id") != work_item_id:
+                continue
+            return event
+        return None
 
     def _parse_role_result_json(self, raw_text: str) -> dict[str, object] | None:
         try:
@@ -5705,8 +5744,13 @@ class CoordinatorService:
         if not verification_items:
             raise IntakeError("No active verification work item found for the session")
 
-        active_item = verification_items[0]
-        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        payload_work_item_id = self._payload_work_item_id(source_event.payload)
+        verification_items = sorted(
+            verification_items,
+            key=lambda item: item.id != payload_work_item_id,
+        )
+        for item in verification_items:
+            self.work_item_repository.update_status(item.id, WorkItemStatus.COMPLETED)
         self._materialize_verification_outcome_file(session=session, source_event=source_event)
         self._materialize_final_verification_file(session=session, source_event=source_event)
 
@@ -5811,7 +5855,7 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
-        payload_work_item_id = source_event.payload.get("work_item_id")
+        payload_work_item_id = self._payload_work_item_id(source_event.payload)
         verification_items = [
             item
             for item in self.work_item_repository.list_for_session(session.id)
@@ -5820,20 +5864,17 @@ class CoordinatorService:
         if not verification_items:
             raise IntakeError("No active verification work item found for the session")
 
-        active_item = next(
-            (
-                item
-                for item in verification_items
-                if isinstance(payload_work_item_id, int) and item.id == payload_work_item_id
-            ),
-            verification_items[0],
+        verification_items = sorted(
+            verification_items,
+            key=lambda item: item.id != payload_work_item_id,
         )
         self._materialize_verification_outcome_file(session=session, source_event=source_event)
         self._materialize_final_verification_file(session=session, source_event=source_event)
         session = self._get_session_or_raise(session.id)
         if self._verification_outcome_status(session) != "passed":
             return self._handle_verification_failed(session, source_event)
-        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        for item in verification_items:
+            self.work_item_repository.update_status(item.id, WorkItemStatus.COMPLETED)
         doc_harvest_policy = self._optional_lane_policy_mode(session.policy, "doc_harvest_policy")
         if doc_harvest_policy != "disabled":
             session, event = self._enqueue_doc_harvest(session=session, source_event=source_event)
@@ -10035,9 +10076,6 @@ class CoordinatorService:
         explicit_markdown = str(source_event.payload.get("final_verification_markdown") or "").strip()
         if explicit_markdown:
             content = explicit_markdown.rstrip() + "\n"
-        elif target_path.is_file():
-            existing_content = target_path.read_text().strip()
-            content = existing_content.rstrip() + "\n" if existing_content else ""
         else:
             summary = str(source_event.payload.get("summary") or "").strip()
             failures = source_event.payload.get("failures")
@@ -10290,6 +10328,18 @@ class CoordinatorService:
                 "work_item_id": payload.get("work_item_id"),
             },
         )
+
+    def _payload_work_item_id(self, payload: dict | object) -> int | None:
+        if not isinstance(payload, dict):
+            return None
+        raw_work_item_id = payload.get("work_item_id")
+        if isinstance(raw_work_item_id, int):
+            return raw_work_item_id
+        if isinstance(raw_work_item_id, str):
+            rendered = raw_work_item_id.strip()
+            if rendered.isdigit():
+                return int(rendered)
+        return None
 
     def _verification_event_outcome_status(self, source_event: Event) -> str:
         payload = source_event.payload if isinstance(source_event.payload, dict) else {}

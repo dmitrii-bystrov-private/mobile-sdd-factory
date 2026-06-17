@@ -432,7 +432,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
         ]
     if role_name == "doc-harvest-worker":
         return [
-            "- Treat this role as a bounded one-shot worker: generate or refresh `spec/full-diff.md`, update grounded feature-level README targets, and exit.",
+            "- Treat each routed work item as one bounded documentation pass: generate or refresh `spec/full-diff.md`, update grounded feature-level README targets, write one terminal result, and stop.",
             "- Use `spec/full-diff.md` as the primary source of truth for branch changes and prefer changed README/doc anchors over broad repo scanning.",
             "- Use `DOCUMENTATION_GUIDE.md` when present; otherwise write durable behavior and contract documentation without preserving task/review history.",
             "- Read selectively and skip ambiguous multi-feature diffs instead of inventing a single arbitrary documentation target.",
@@ -440,8 +440,9 @@ def _role_operating_rules(role_name: str) -> list[str]:
         ]
     if role_name == "documentation-reviewer":
         return [
-            "- Treat this role as a bounded one-shot reviewer: inspect documentation changes, write a terminal result, and exit.",
+            "- Treat each routed work item as one bounded documentation review pass: inspect the current documentation changes, write one terminal result, and stop.",
             "- Start from `spec/documentation-precheck.md`, `spec/doc-diff.md`, `spec/full-diff.md`, and `DOCUMENTATION_GUIDE.md` when present; otherwise apply the stable documentation rules from this prompt.",
+            "- For each routed work item, perform a fresh review of the current documentation files. Do not reuse prior findings files or prior review conclusions after a documentation correction.",
             "- Review production README files, docs, and public/doc comments for stable-contract documentation quality.",
             "- Flag Jira/review history, file inventories in module READMEs, duplicated explanations, stale implementation narration, and documentation that preserves how the task was implemented instead of the durable behavior.",
             "- Do not edit files; keep findings scoped to documentation/comment changes.",
@@ -449,7 +450,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
         ]
     if role_name == "proposal-context-worker":
         return [
-            "- Treat this role as a bounded one-shot worker: produce `spec/proposal.md` and the `spec/context/` package, then exit.",
+            "- Treat each routed work item as one bounded proposal-context pass: produce `spec/proposal.md` and the `spec/context/` package, write one terminal result, and stop.",
             "- Always write `spec/context/feature-overview.md`; write the other `spec/context/*` files only when they contain concrete task-specific findings.",
             "- Read snapshot description/comments first; use repo sources and local docs only when they are directly needed to ground the proposal/context outputs.",
             "- Keep the output compact and reusable for the next routed planning step.",
@@ -465,7 +466,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
         ]
     if role_name == "acceptance-criteria-worker":
         return [
-            "- Treat this role as a bounded one-shot worker: prepare acceptance criteria, write the routed result, and exit.",
+            "- Treat each routed work item as one bounded acceptance-criteria pass: prepare acceptance criteria, write one terminal result, and stop.",
             "- Start from `spec/proposal.md`, clarified requirements, and `spec/context/feature-overview.md`; read other context files only when they materially affect behavior coverage.",
             "- Write independently testable criteria in WHEN-THEN-SHALL form and cover happy paths, edge cases, and error scenarios from the clarified requirements.",
             "- Ensure each meaningful decision from the clarified requirements is covered by at least one criterion before finishing.",
@@ -473,7 +474,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
         ]
     if role_name == "constraints-worker":
         return [
-            "- Treat this role as a bounded one-shot worker: prepare implementation constraints, write the routed result, and exit.",
+            "- Treat each routed work item as one bounded constraints pass: prepare implementation constraints, write one terminal result, and stop.",
             "- Start from the proposal, clarified requirements, acceptance criteria, and `spec/context/feature-overview.md`; use `implementation-patterns.md`, `documentation.md`, and `preconditions.md` when they materially shape constraints.",
             "- Treat `spec/context/project.md` as architectural ground truth, cite it instead of restating generic conventions, and keep constraints task-specific and grounded.",
             "- State convention changes only when Jira/operator input explicitly requests them; otherwise constrain implementation to satisfy the requirement within existing local conventions.",
@@ -494,7 +495,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
         ]
     if role_name == "task-decomposer-worker":
         return [
-            "- Treat this role as a bounded one-shot worker: prepare task decomposition, write the routed result, and exit.",
+            "- Treat each routed work item as one bounded decomposition pass: prepare task decomposition, write one terminal result, and stop.",
             "- Start from the verified planning package and `spec/context/feature-overview.md`; use `relevant-code.md` and `implementation-patterns.md` when they materially affect task boundaries.",
             "- Write the decomposition package directly into `plan/` inside your role workspace: mandatory machine-readable `plan/tasks.json` plus self-contained Markdown task files for each task; `plan/index.md` is optional companion context only.",
             "- Keep ordering in filenames like `plan/NN-*.md`, but do not prefix the human-facing task titles or Markdown headings with `Task 01`, `Task 02`, and similar numbering.",

@@ -3160,9 +3160,6 @@ class SessionCreationTests(unittest.TestCase):
             "Produce the proposal and context package for story IOS-30002STORY before downstream planning and decomposition.",
             sent_inputs[0],
         )
-        self.assertIn("Read `description.md` and `comments.md`", sent_inputs[0])
-        self.assertIn("comments take precedence over description when they conflict", sent_inputs[0])
-        self.assertIn("treat external links as operator-provided context references", sent_inputs[0])
         self.assertNotIn("Role-specific rules:", sent_inputs[0])
         launch_script = (
             Path(self.temp_dir.name)
@@ -3186,7 +3183,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Required snapshot inputs:", proposal_agents)
         self.assertIn("Context directory:", proposal_agents)
         self.assertIn("Required context output:", proposal_agents)
-        self.assertIn("bounded one-shot worker", proposal_agents)
+        self.assertIn("one bounded proposal-context pass", proposal_agents)
+        self.assertIn("Read `description.md` and `comments.md`", proposal_agents)
         self.assertIn("comments.md` as the fresher source", proposal_agents)
         self.assertIn("operator-provided context references rather than mandatory fetched inputs", proposal_agents)
         self.assertIn("SDD_FACTORY_ROLE_LIFECYCLE=one-shot", launch_script_text)
@@ -5652,6 +5650,49 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("## Output: run-test.sh", verification_report.read_text())
         self.assertIn("presenter state mismatch", verification_report.read_text())
 
+    def test_verification_failed_overwrites_stale_report_and_closes_duplicate_items(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004STALE")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        self.assertIsNotNone(verifier_role)
+        assert verifier_role is not None
+        duplicate_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification",
+            title=f"Verification for {session.task_key}",
+            owner_role_id=verifier_role.id,
+            priority=90,
+        )
+        verification_report = Path(self.temp_dir.name) / session.task_key / "spec" / "final-verification.md"
+        verification_report.parent.mkdir(parents=True, exist_ok=True)
+        verification_report.write_text("# Final Verification\n\nold missing android-build.sh failure\n")
+
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_failed",
+            payload={
+                "work_item_id": str(duplicate_item.id),
+                "summary": "Verification failed",
+                "failures": ["fresh Kotlin compile failure"],
+            },
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        report_text = verification_report.read_text()
+
+        self.assertIn("fresh Kotlin compile failure", report_text)
+        self.assertNotIn("old missing android-build.sh failure", report_text)
+        self.assertTrue(
+            all(
+                item.status == WorkItemStatus.COMPLETED
+                for item in work_items
+                if item.work_type == "verification"
+            )
+        )
+
     def test_verification_dispatch_includes_result_writer_path(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERWRITER")
         self.coordinator.handle_operator_event(
@@ -7550,6 +7591,40 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("verification-coordinator", stalled_event.payload["role_name"])
         self.assertIn("simulated send failure", stalled_event.payload["error"])
         self.assertIsNotNone(stalled_event.payload.get("dispatch_token"))
+
+    def test_submit_result_returns_accepted_when_followup_dispatch_stalls_after_acceptance(self) -> None:
+        backend = DispatchTraceRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004RESULTSTALL")
+        work_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "implementation"
+        )
+        backend.fail_send = True
+
+        updated_session, event, mapped_event_type, followup_event_type, ignored = (
+            self.coordinator.submit_role_result_document(
+                document={
+                    "output_type": "completed",
+                    "payload": {
+                        "work_item_id": work_item.id,
+                        "summary": "implementation done",
+                    },
+                }
+            )
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("implementation_completed", mapped_event_type)
+        self.assertEqual("role_input_delivery_stalled", followup_event_type)
+        self.assertFalse(ignored)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertTrue(any(item.event_type == "implementation_completed" for item in events))
+        self.assertTrue(any(item.event_type == "role_input_delivery_stalled" for item in events))
+        self.assertTrue(any(item.event_type == "role_result_followup_dispatch_failed" for item in events))
 
     def test_reconcile_session_dispatch_does_not_redispatch_stalled_token(self) -> None:
         backend = DispatchTraceRecordingBackend()

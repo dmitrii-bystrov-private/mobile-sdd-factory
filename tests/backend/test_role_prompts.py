@@ -42,7 +42,9 @@ class RolePromptTests(unittest.TestCase):
 
         self.assertIn("Continue from your existing role context.", text)
         self.assertNotIn("AGENTS.md/CLAUDE.md role context", text)
-        self.assertIn("resume and finish it instead of restarting from zero", text)
+        self.assertIn("same work item that was already in progress", text)
+        self.assertIn("If the routed work_item_id changed", text)
+        self.assertIn("re-evaluate the current files instead of reusing a prior result", text)
         self.assertIn("Read the updated HYDRATION.json", text)
         self.assertIn("Run deterministic verification for IOS-123.", text)
         self.assertNotIn("Role-specific rules:", text)
@@ -137,6 +139,12 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("--issues-markdown-file <path>", agents)
         self.assertIn("--output-type blocked_review_cycle", agents)
         self.assertIn("HYDRATION.json", agents)
+
+    def test_documentation_reviewer_requires_fresh_review_per_work_item(self) -> None:
+        agents = self._agents("documentation-reviewer")
+
+        self.assertIn("For each routed work item, perform a fresh review", agents)
+        self.assertIn("Do not reuse prior findings files", agents)
 
     def test_implementer_agents_include_completion_and_subtask_result_templates(self) -> None:
         agents = self._agents("implementer")

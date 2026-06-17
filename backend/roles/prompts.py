@@ -32,7 +32,9 @@ def role_handoff_prompt(
         return (
             "Continue from your existing role context.\n"
             "Read the updated HYDRATION.json for machine-readable routed IDs and paths.\n"
-            "If this work was already in progress before an interruption, resume and finish it instead of restarting from zero.\n\n"
+            "If HYDRATION.json points to the same work item that was already in progress before an interruption, "
+            "resume and finish it. If the routed work_item_id changed, treat this as fresh routed work and "
+            "re-evaluate the current files instead of reusing a prior result.\n\n"
             "Current routed work:\n"
             f"{instruction}\n\n"
         )
