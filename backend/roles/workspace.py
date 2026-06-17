@@ -334,6 +334,8 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Read all routed spec inputs before writing code.",
             "- For implementation work, read the task snapshot inputs (`description.md`, `comments.md`, and `spec/diff.md`) when they exist before concluding that no concrete work was routed.",
+            "- Treat repository conventions as the default implementation contract. A task spec, planning artifact, or decomposition note overrides a local convention only when Jira/operator input explicitly states that this task is intentionally changing that convention.",
+            "- If a routed spec conflicts with established local convention without an explicit convention-change instruction, follow the convention when the semantic requirement can still be satisfied; escalate only when the conflict changes product behavior or cannot be resolved locally.",
             "- When you add or edit tests, follow the existing local test conventions in the touched area instead of inventing new fixture, assertion, naming, or helper patterns.",
             "- Use the closest existing test file as the reference implementation for structure, setup, and expectations before introducing a new style.",
             "- Use RAG tools first for code exploration; fall back to filesystem search only for structural queries.",
@@ -347,6 +349,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Preserve bug-specific context across analysis, fix, and follow-up rounds.",
             "- Support the routed bug modes inside one runtime identity: `analysis-only` before code changes, then `fix-only` for implementation, correction, and follow-up rounds.",
             "- In implementation and fix-only rounds, read `description.md`, `comments.md`, and `spec/diff.md` when they exist before deciding there is no concrete bug-fix work to perform.",
+            "- Treat repository conventions as the default implementation contract. A task spec or follow-up overrides a local convention only when Jira/operator input explicitly states that this task is intentionally changing that convention.",
             "- In `analysis-only` mode, read task description/comments first, investigate the code path, write or update `spec/bug-analysis.md`, and stop before product-code changes when confidence is low or when the routed pass is analysis-only.",
             "- In `fix-only` mode, read the saved `spec/bug-analysis.md` first and treat it as the durable bug context unless a routed issues file or follow-up comments narrow the scope further.",
             "- If an `Issues file:` path is routed, treat it as the primary scoped input for this round, but make any adjacent code changes that are necessary to fix the root cause cleanly and avoid regressions.",
@@ -392,6 +395,8 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Read the routed diff first, then inspect only touched full files and directly relevant local convention sources.",
             "- Primary project guidance: read `CLAUDE.md` when present, read `README.md` when present, and follow their links to relevant local convention docs/templates for the touched diff.",
             "- Infer conventions from the repository context; do not import platform-, language-, or architecture-specific rules from this factory repo.",
+            "- Treat local repository convention sources and stable nearby precedent as authoritative over downstream spec/decomposition text unless Jira/operator input explicitly says this task is meant to change the convention.",
+            "- If a task intentionally changes a convention, expect the diff to update the relevant convention source or adjacent canonical examples; otherwise report the inconsistency instead of accepting a silent convention override.",
             "- Check local structure, naming, layering, test style, fixtures, helpers, established APIs, and error handling only when grounded by touched files.",
             "- Write or refresh the structured convention review report before finishing.",
             "- Report findings only when they are concrete, actionable, and likely to improve consistency of the submitted diff.",
@@ -405,6 +410,10 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Read root description/comments and per-key Jira description/comments in statuses order; newer Jira follow-ups override older scope only on explicit conflict.",
             "- Treat earlier accepted subtasks as a regression contract unless a newer Jira follow-up explicitly overrides them.",
             "- Do not use `plan/index.md` or `plan/NN-*.md` as authoritative follow-up inputs.",
+            "- Do not treat spec/decomposition wording as an implicit override of local code conventions. A convention override is authoritative only when Jira/operator input explicitly says the task intentionally changes that convention.",
+            "- When a semantic requirement can be satisfied while following local convention, accept the convention-aligned implementation rather than requiring a literal spec shape that exists only in downstream planning artifacts.",
+            "- Treat exact names, tags, string constants, analytics keys, and identifiers from downstream specs/decomposition as derived guidance unless they are explicitly present in Jira/operator input or already accepted in an earlier completed subtask.",
+            "- When a derived exact value conflicts with local repository convention or a convention-review correction, do not require restoring the derived value; review the requirement at the semantic level instead.",
             "- Review cumulative behavior, missing requirements, edge cases, acceptance gaps, and tests that should protect the requirement.",
             "- Avoid convention/style/documentation findings unless they directly cause a behavior or coverage failure.",
             "- Write or refresh the structured requirements review report before finishing.",
@@ -449,6 +458,8 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Treat this role as a bounded worker for one story session: clarify requirements, ask live follow-up questions when needed, then write the routed result and exit.",
             "- Start from `spec/proposal.md` and `spec/context/feature-overview.md`; read the rest of `spec/context/*` selectively when it materially helps resolve ambiguity.",
+            "- Preserve existing repository conventions as default constraints. Do not phrase a requirement as a convention override unless Jira/operator input explicitly asks to change that convention.",
+            "- Do not invent exact names, tags, string constants, analytics keys, or identifiers when the source only asks for stable values; ground them in explicit Jira/operator input or existing repository convention, otherwise leave the requirement semantic and ask the operator when the value itself matters.",
             "- If a risky ambiguity remains, ask the operator directly in the live session instead of guessing.",
             "- Keep the output compact and reusable for the next routed planning step.",
         ]
@@ -465,6 +476,8 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Treat this role as a bounded one-shot worker: prepare implementation constraints, write the routed result, and exit.",
             "- Start from the proposal, clarified requirements, acceptance criteria, and `spec/context/feature-overview.md`; use `implementation-patterns.md`, `documentation.md`, and `preconditions.md` when they materially shape constraints.",
             "- Treat `spec/context/project.md` as architectural ground truth, cite it instead of restating generic conventions, and keep constraints task-specific and grounded.",
+            "- State convention changes only when Jira/operator input explicitly requests them; otherwise constrain implementation to satisfy the requirement within existing local conventions.",
+            "- For concrete names, tags, string constants, analytics keys, and identifiers, constrain the implementation to explicit Jira/operator values or local repository convention instead of inventing new literal values in the constraints.",
             "- Express constraints as imperative MUST, MUST NOT, and SHOULD statements across only the applicable categories.",
             "- Keep the output compact and reusable for the next routed planning step.",
         ]
@@ -474,6 +487,8 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Start from the proposal, requirements, acceptance criteria, constraints, and `spec/context/feature-overview.md`; use the rest of `spec/context/*` selectively when checking planning coherence.",
             "- Do not treat a missing `spec/spec_verification.md` as a blocker before the verification pass completes; that file is your output when the package is clean.",
             "- Treat `spec/context/documentation.md`, `implementation-patterns.md`, `preconditions.md`, and `relevant-code.md` as optional supporting inputs unless a specific planning claim depends on them.",
+            "- Flag planning claims that silently override local repository conventions without explicit Jira/operator authority and without updating the relevant convention source or canonical examples.",
+            "- Flag or fix planning package claims that invent exact names, tags, string constants, analytics keys, or identifiers without grounding in Jira/operator input or local repository convention.",
             "- Fix non-blocking issues autonomously. If critical blockers remain, summarize them clearly, ask the operator direct live questions, and continue verification after answers arrive.",
             "- Keep the output compact and downstream-oriented so decomposition can start from a verified planning package instead of rediscovering planning gaps.",
         ]
@@ -486,6 +501,8 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- `plan/tasks.json` is the source of truth for Jira subtask materialization. It must be valid JSON with `{ \"version\": 1, \"tasks\": [{ \"order\": 1, \"filename\": \"01-something.md\", \"title\": \"Human title\" }] }` and every listed file must exist.",
             "- Keep the routed output minimal: return a concise summary only after the `plan/` package is fully written.",
             "- Make every task file self-contained: copy relevant acceptance criteria, constraints, exact repo file paths, and validation steps into the task instead of pointing back to spec files.",
+            "- Do not convert a semantic requirement into a convention override. If the verified planning package does not explicitly authorize changing a local convention, decompose the work so implementation follows the existing convention.",
+            "- Do not introduce exact names, tags, string constants, analytics keys, or identifiers that are absent from the verified planning package; if a stable value is required but not specified, instruct implementation to follow the local repository convention.",
             "- Keep the output compact and downstream-oriented so execution can start from an explicit decomposition instead of implicit planning assumptions.",
         ]
     return [

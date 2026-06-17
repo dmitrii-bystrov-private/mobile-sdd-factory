@@ -766,6 +766,51 @@ class SessionCreationTests(unittest.TestCase):
             ["1"],
             self.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
         )
+        self.assertEqual("1", event.payload.get("operator_reply"))
+        self.assertEqual("implementation_requested", event.payload.get("continuation_stage"))
+
+    def test_operator_reply_to_dual_review_correction_is_persisted_for_later_reviews(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30002DUALREPLY",
+            workflow_profile="story_full",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30002DUALREPLY")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="convention_review_correction",
+            title="Convention review corrections for IOS-30002DUALREPLY",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="convention_review_correction_requested",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+
+        _updated_session, event = self.coordinator.send_operator_runtime_input(
+            session_id=session.id,
+            text="Use class-style screen keys; the snake_case values are not authoritative.",
+        )
+
+        self.assertEqual("operator_runtime_input_sent", event.event_type)
+        self.assertEqual(work_item.id, event.payload.get("work_item_id"))
+        self.assertEqual(
+            "convention_review_correction_requested",
+            event.payload.get("continuation_stage"),
+        )
+        self.assertEqual(
+            "Use class-style screen keys; the snake_case values are not authoritative.",
+            event.payload.get("operator_reply"),
+        )
 
     def test_send_operator_runtime_input_sends_live_reply_to_alive_one_shot_role(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -2717,6 +2762,47 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Authoritative operator resolutions", sent_inputs[-1])
         self.assertIn("The accepted operator direction stands; do not reintroduce the old plumbing.", sent_inputs[-1])
         self.assertIn("\"review_cycle_resolution\": \"operator_guided_recheck\"", sent_inputs[-1])
+
+    def test_dual_review_recheck_includes_operator_guidance_from_prior_correction(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003DUALGUIDE",
+            workflow_profile="story_full",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003DUALGUIDE")
+        operator_event = self.event_repository.append(
+            session_id=session.id,
+            event_type="operator_runtime_input_sent",
+            producer_type="operator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": 2105,
+                "current_stage": "convention_review_correction_requested",
+                "continuation_stage": "convention_review_correction_requested",
+                "input_length": 79,
+                "operator_reply": (
+                    "Use class-style screen keys; the snake_case screen tags are downstream artifacts "
+                    "and not authoritative."
+                ),
+            },
+        )
+
+        instruction, hydration = self.coordinator._dual_review_dispatch_context(  # noqa: SLF001
+            prepared_session,
+            lane="requirements",
+        )
+
+        self.assertIn("Authoritative operator decisions from prior review-correction escalations", instruction)
+        self.assertIn("Use class-style screen keys", instruction)
+        self.assertIn("do not re-flag", instruction)
+        self.assertEqual(operator_event.id, hydration["operator_reply_event_id"])
+        self.assertIn("snake_case screen tags", str(hydration["operator_reply"]))
+        self.assertIn("operator_guided_recheck", str(hydration["review_cycle_resolution"]))
+        self.assertIn("operator_resolution_history", hydration)
 
     def test_interactive_state_treats_persisted_numeric_operator_reply_flag_as_truthy(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

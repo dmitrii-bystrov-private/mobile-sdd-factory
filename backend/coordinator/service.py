@@ -3593,14 +3593,8 @@ class CoordinatorService:
                 "work_item_id": work_item.id,
                 "current_stage": session.current_stage,
                 "input_length": len(text),
-                **(
-                    {
-                        "operator_reply": text.strip(),
-                        "continuation_stage": session.current_stage,
-                    }
-                    if session.current_stage == "self_review_correction_requested"
-                    else {}
-                ),
+                "operator_reply": text.strip(),
+                "continuation_stage": session.current_stage,
             },
         )
         if role.role_name not in PERSISTENT_SESSION_ROLES:
@@ -5573,6 +5567,24 @@ class CoordinatorService:
                 "from this immediate correction chain. If a similar issue returns after later follow-up, "
                 "subtask, or implementation work, report it as a normal failed review finding."
             )
+        operator_guidance_history = self._dual_review_operator_guidance_history(
+            session.id,
+            before_event_id=before_event_id,
+        )
+        latest_operator_guidance = operator_guidance_history[-1] if operator_guidance_history else None
+        if operator_guidance_history:
+            guidance_lines = []
+            for guidance in operator_guidance_history:
+                guidance_lines.append(
+                    f"- event {guidance['operator_reply_event_id']} during {guidance['continuation_stage']}: "
+                    f"{guidance['operator_reply']}"
+                )
+            instruction += (
+                "\nAuthoritative operator decisions from prior review-correction escalations "
+                "(apply them to the same issue even when they contradict older review findings or downstream artifacts; "
+                "do not re-flag a finding that directly contradicts a relevant operator decision):\n"
+                + "\n".join(guidance_lines)
+            )
         hydration: dict[str, str | int | None] = {
             "review_scope": "current_diff_only",
             "review_lane": lane,
@@ -5581,6 +5593,14 @@ class CoordinatorService:
             if previous_review_reports
             else None,
             "diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="source"),
+            "operator_reply": latest_operator_guidance["operator_reply"] if latest_operator_guidance is not None else None,
+            "operator_reply_event_id": (
+                latest_operator_guidance["operator_reply_event_id"] if latest_operator_guidance is not None else None
+            ),
+            "operator_resolution_history": json.dumps(operator_guidance_history, indent=2)
+            if operator_guidance_history
+            else None,
+            "review_cycle_resolution": "operator_guided_recheck" if operator_guidance_history else None,
         }
         if lane == "requirements" and self.workdir_root is not None:
             task_root = self.workdir_root / session.task_key
@@ -5593,6 +5613,39 @@ class CoordinatorService:
                 }
             )
         return instruction, hydration
+
+    def _dual_review_operator_guidance_history(
+        self,
+        session_id: int,
+        *,
+        before_event_id: int | None = None,
+    ) -> list[dict[str, str | int]]:
+        guidance: list[dict[str, str | int]] = []
+        review_correction_stages = {
+            "convention_review_correction_requested",
+            "requirements_review_correction_requested",
+        }
+        for event in self.event_repository.list_for_session(session_id):
+            if before_event_id is not None and event.id > before_event_id:
+                continue
+            if event.event_type != "operator_runtime_input_sent":
+                continue
+            continuation_stage = str(event.payload.get("continuation_stage") or "").strip()
+            current_stage = str(event.payload.get("current_stage") or "").strip()
+            if continuation_stage not in review_correction_stages and current_stage not in review_correction_stages:
+                continue
+            operator_reply = str(event.payload.get("operator_reply") or "").strip()
+            if not operator_reply:
+                continue
+            guidance.append(
+                {
+                    "operator_reply": operator_reply,
+                    "operator_reply_event_id": event.id,
+                    "continuation_stage": continuation_stage or current_stage,
+                    "work_item_id": int(event.payload.get("work_item_id") or 0),
+                }
+            )
+        return guidance
 
     def _handle_spec_verification_blocked(
         self,
@@ -8493,11 +8546,26 @@ class CoordinatorService:
                     str(config["artifact_type"]),
                 )
             )
-        return {
+        payload = {
             "correction_source": str(config["source"]),
             "correction_report_path": report_path,
             "issues_file_path": report_path,
         }
+        if stage_name in {
+            "convention_review_correction_requested",
+            "requirements_review_correction_requested",
+        }:
+            operator_guidance_history = self._dual_review_operator_guidance_history(session_id)
+            latest_operator_guidance = operator_guidance_history[-1] if operator_guidance_history else None
+            if latest_operator_guidance is not None:
+                payload.update(
+                    {
+                        "operator_reply": latest_operator_guidance["operator_reply"],
+                        "operator_reply_event_id": latest_operator_guidance["operator_reply_event_id"],
+                        "operator_resolution_history": json.dumps(operator_guidance_history, indent=2),
+                    }
+                )
+        return payload
 
     def _requirements_clarification_mode(self, policy: dict[str, str] | None) -> str:
         return (policy or {}).get("requirements_clarification_mode", "ask-selectively")

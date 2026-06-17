@@ -155,6 +155,49 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("--failure \"<failed check>\"", agents)
         self.assertIn("--output-type blocked_verification_cycle", agents)
 
+    def test_requirements_reviewer_does_not_treat_derived_exact_values_as_authoritative(self) -> None:
+        agents = self._agents("requirements-reviewer")
+
+        self.assertIn("downstream specs/decomposition as derived guidance", agents)
+        self.assertIn("explicitly present in Jira/operator input", agents)
+        self.assertIn("conflicts with local repository convention", agents)
+        self.assertIn("review the requirement at the semantic level", agents)
+
+    def test_spec_text_does_not_silently_override_code_conventions(self) -> None:
+        implementer = self._agents("implementer")
+        convention_reviewer = self._agents("convention-reviewer")
+        requirements_reviewer = self._agents("requirements-reviewer")
+
+        self.assertIn("repository conventions as the default implementation contract", implementer)
+        self.assertIn("explicitly states that this task is intentionally changing that convention", implementer)
+        self.assertIn("local repository convention sources and stable nearby precedent as authoritative", convention_reviewer)
+        self.assertIn("update the relevant convention source or adjacent canonical examples", convention_reviewer)
+        self.assertIn("Do not treat spec/decomposition wording as an implicit override", requirements_reviewer)
+        self.assertIn("semantic requirement can be satisfied while following local convention", requirements_reviewer)
+
+    def test_planning_roles_are_told_not_to_invent_literal_identifiers(self) -> None:
+        for role_name in (
+            "requirements-clarifier-worker",
+            "constraints-worker",
+            "spec-verifier-worker",
+            "task-decomposer-worker",
+        ):
+            agents = self._agents(role_name)
+            self.assertIn("names, tags, string constants, analytics keys", agents)
+            self.assertIn("identifiers", agents)
+            self.assertIn("repository convention", agents)
+
+    def test_planning_roles_do_not_create_implicit_convention_overrides(self) -> None:
+        expectations = {
+            "requirements-clarifier-worker": "Do not phrase a requirement as a convention override",
+            "constraints-worker": "State convention changes only when Jira/operator input explicitly requests them",
+            "spec-verifier-worker": "silently override local repository conventions without explicit Jira/operator authority",
+            "task-decomposer-worker": "Do not convert a semantic requirement into a convention override",
+        }
+        for role_name, expected in expectations.items():
+            agents = self._agents(role_name)
+            self.assertIn(expected, agents)
+
     def _agents(self, role_name: str) -> str:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
