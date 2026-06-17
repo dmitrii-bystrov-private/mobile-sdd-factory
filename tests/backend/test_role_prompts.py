@@ -128,6 +128,33 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("Final verification report target:", agents)
         self.assertIn("Do not modify product code.", agents)
 
+    def test_review_agents_include_terminal_result_cheat_sheet(self) -> None:
+        agents = self._agents("convention-reviewer")
+
+        self.assertIn("## Terminal Result Contract", agents)
+        self.assertIn("--output-type passed", agents)
+        self.assertIn("--output-type failed", agents)
+        self.assertIn("--issues-markdown-file <path>", agents)
+        self.assertIn("--output-type blocked_review_cycle", agents)
+        self.assertIn("HYDRATION.json", agents)
+
+    def test_implementer_agents_include_completion_and_subtask_result_templates(self) -> None:
+        agents = self._agents("implementer")
+
+        self.assertIn("## Terminal Result Contract", agents)
+        self.assertIn("--output-type completed", agents)
+        self.assertIn("--subtask-key <subtask_key>", agents)
+        self.assertIn("--output-type failed", agents)
+
+    def test_verifier_agents_include_result_payload_templates(self) -> None:
+        agents = self._agents("verification-coordinator")
+
+        self.assertIn("## Terminal Result Contract", agents)
+        self.assertIn("--result passed", agents)
+        self.assertIn("--result failed", agents)
+        self.assertIn("--failure \"<failed check>\"", agents)
+        self.assertIn("--output-type blocked_verification_cycle", agents)
+
     def _agents(self, role_name: str) -> str:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -157,13 +157,23 @@ class FakeSnapshotAdapter:
         self.workdir_root = workdir_root
         self.calls: list[str] = []
         self.statuses_by_task: dict[str, str] = {}
+        self.statuses_sequences_by_task: dict[str, list[str]] = {}
 
     def set_statuses_output(self, task_key: str, content: str) -> None:
         self.statuses_by_task[task_key] = content
 
+    def set_statuses_sequence(self, task_key: str, contents: list[str]) -> None:
+        self.statuses_sequences_by_task[task_key] = list(contents)
+
     def run(self, task_key: str) -> CommandResult:
         self.calls.append(task_key)
-        if self.workdir_root is not None and task_key in self.statuses_by_task:
+        if self.workdir_root is not None and task_key in self.statuses_sequences_by_task:
+            sequence = self.statuses_sequences_by_task[task_key]
+            content = sequence.pop(0) if len(sequence) > 1 else sequence[0]
+            task_dir = self.workdir_root / task_key
+            task_dir.mkdir(parents=True, exist_ok=True)
+            (task_dir / "statuses.md").write_text(content)
+        elif self.workdir_root is not None and task_key in self.statuses_by_task:
             task_dir = self.workdir_root / task_key
             task_dir.mkdir(parents=True, exist_ok=True)
             (task_dir / "statuses.md").write_text(self.statuses_by_task[task_key])
@@ -320,6 +330,7 @@ class SessionCreationTests(unittest.TestCase):
                 workdir_root=Path(self.temp_dir.name),
                 launcher_command=["sh"],
             ),
+            post_create_subtask_snapshot_refresh_delay_seconds=0,
         )
 
     def tearDown(self) -> None:
@@ -4362,6 +4373,93 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stdout" for item in artifacts))
         self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stderr" for item in artifacts))
         self.assertEqual(0, event.payload["snapshot_refresh_exit_code"])
+
+    def test_create_subtasks_from_plan_retries_until_created_subtasks_appear_in_snapshot(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003SUBRETRY",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003SUBRETRY")
+        plan_dir = Path(self.temp_dir.name) / "IOS-30003SUBRETRY" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
+        )
+        (plan_dir / "01-build-data-source.md").write_text(
+            "# Build data source\n\n## What to implement\nCreate the feature data source.\n"
+        )
+        self.snapshot_adapter.set_statuses_sequence(
+            "IOS-30003SUBRETRY",
+            [
+                """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30003SUBRETRY | Story | Parent story | In Progress |
+""",
+                """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30003SUBRETRY | Story | Parent story | In Progress |
+| IOS-90001 | Sub-task | Build data source | To Do |
+""",
+            ],
+        )
+
+        updated_session, event, followup_event = self.coordinator.create_subtasks_from_plan(session.id)
+
+        self.assertEqual(session.id, updated_session.id)
+        self.assertEqual("jira_subtasks_created", event.event_type)
+        self.assertIsNone(followup_event)
+        self.assertEqual(2, event.payload["snapshot_refresh_attempts"])
+        self.assertTrue(event.payload["snapshot_refresh_matched_created_subtasks"])
+        self.assertGreaterEqual(self.snapshot_adapter.calls.count("IOS-30003SUBRETRY"), 2)
+
+    def test_create_subtasks_from_plan_waits_for_operator_after_bounded_snapshot_retry(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003SUBRETRYFAIL",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        self.coordinator.prepare_task_session("IOS-30003SUBRETRYFAIL")
+        self.coordinator.post_create_subtask_snapshot_refresh_attempts = 2
+        plan_dir = Path(self.temp_dir.name) / "IOS-30003SUBRETRYFAIL" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
+        )
+        (plan_dir / "01-build-data-source.md").write_text(
+            "# Build data source\n\n## What to implement\nCreate the feature data source.\n"
+        )
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-30003SUBRETRYFAIL",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30003SUBRETRYFAIL | Story | Parent story | In Progress |
+""",
+        )
+
+        updated_session, event, followup_event = self.coordinator.create_subtasks_from_plan(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("jira_subtasks_created", event.event_type)
+        self.assertIsNone(followup_event)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertEqual("subtask_creation_requested", updated_session.current_stage)
+        self.assertIsNone(updated_session.current_owner)
+        self.assertEqual(2, event.payload["snapshot_refresh_attempts"])
+        self.assertFalse(event.payload["snapshot_refresh_matched_created_subtasks"])
+        self.assertTrue(
+            any(
+                item.event_type == "session_escalated_to_operator"
+                and item.payload.get("reason") == "subtask_snapshot_missing_created_subtasks"
+                for item in events
+            )
+        )
 
     def test_extract_created_subtask_keys_deduplicates_repeated_stdout_entries(self) -> None:
         stdout = (

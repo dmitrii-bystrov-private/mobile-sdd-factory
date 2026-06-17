@@ -493,6 +493,98 @@ def _role_operating_rules(role_name: str) -> list[str]:
     ]
 
 
+def _terminal_result_contract(role_name: str) -> list[str]:
+    helper = 'bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh"'
+    common = [
+        "- Replace `<work_item_id>` and `<subtask_key>` with the exact values from `HYDRATION.json` when present.",
+        "- Keep summaries short and operator-readable.",
+    ]
+    if role_name in {"code-reviewer", "convention-reviewer", "requirements-reviewer"}:
+        return [
+            "- Clean review:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type passed --summary \"Review passed\"`",
+            "- Review with findings:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Review found issues\" --issues-markdown-file <path>`",
+            "- Non-converging correction loop that genuinely needs operator decision:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type blocked_review_cycle --summary \"Review cycle blocked\" --issues-markdown-file <path>`",
+            *common,
+        ]
+    if role_name == "documentation-reviewer":
+        return [
+            "- Clean documentation review:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type passed --summary \"Documentation review passed\"`",
+            "- No documentation/comment changes to review:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type skipped_not_needed --summary \"No documentation review needed\"`",
+            "- Documentation findings:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Documentation review found issues\" --issues-markdown-file <path>`",
+            *common,
+        ]
+    if role_name == "verification-coordinator":
+        return [
+            "- Verification passed:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --result passed --summary \"Verification passed\"`",
+            "- Verification failed:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --result failed --summary \"Verification failed\" --failure \"<failed check>\"`",
+            "- Non-converging verification loop that genuinely needs operator decision:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type blocked_verification_cycle --summary \"Verification cycle blocked\" --details \"<why blocked>\"`",
+            *common,
+        ]
+    if role_name in {"implementer", "bug-fixer"}:
+        return [
+            "- Implementation completed:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --summary \"Implementation completed\"`",
+            "- Subtask implementation completed:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --subtask-key <subtask_key> --summary \"Subtask completed\"`",
+            "- Implementation could not complete:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Implementation blocked\" --details \"<what prevented completion>\"`",
+            *common,
+        ]
+    if role_name == "code-scout":
+        return [
+            "- Clean scout pass:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --result clean --summary \"No maintainability findings\"`",
+            "- Maintainability findings found:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --result findings_found --findings-count <count> --findings-path <path> --summary \"Maintainability findings found\"`",
+            "- Scout not needed for this diff:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type skipped_not_needed --result clean --summary \"Scout not needed\"`",
+            *common,
+        ]
+    if role_name == "doc-harvest-worker":
+        return [
+            "- Documentation updated:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --summary \"Documentation updated\"`",
+            "- No documentation update needed:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type skipped_not_needed --summary \"No documentation update needed\"`",
+            *common,
+        ]
+    if role_name == "spec-verifier-worker":
+        return [
+            "- Planning package verified:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type passed --summary \"Planning package verified\" --verified-focus \"<verified scope>\"`",
+            "- Planning package has blockers:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Planning verification failed\" --blocker-question \"<question or blocker>\"`",
+            *common,
+        ]
+    if role_name in {
+        "proposal-context-worker",
+        "requirements-clarifier-worker",
+        "acceptance-criteria-worker",
+        "constraints-worker",
+        "task-decomposer-worker",
+    }:
+        return [
+            "- Planning step completed:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --summary \"Planning step completed\"`",
+            "- Planning step needs operator input:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Planning blocked\" --needs-operator-input --blocker-question \"<question>\"`",
+            *common,
+        ]
+    return [
+        f"- Use `{helper} --work-item-id <work_item_id> --output-type completed --summary \"Completed\"` for normal completion.",
+        *common,
+    ]
+
+
 def build_role_agents_md(
     *,
     role_name: str,
@@ -514,6 +606,7 @@ def build_role_agents_md(
     ]
     responsibility = _role_responsibility(role_name)
     operating_rules = _role_operating_rules(role_name)
+    terminal_result_contract = _terminal_result_contract(role_name)
     return "\n".join(
         [
             f"# {role_name} AGENTS",
@@ -554,6 +647,10 @@ def build_role_agents_md(
             "## Operating Rules",
             "",
             *operating_rules,
+            "",
+            "## Terminal Result Contract",
+            "",
+            *terminal_result_contract,
         ]
     ) + "\n"
 

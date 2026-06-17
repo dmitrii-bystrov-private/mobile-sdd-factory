@@ -294,6 +294,7 @@ class SessionApiTests(unittest.TestCase):
                 workdir_root=Path(self.temp_dir.name),
                 launcher_command=["sh"],
             ),
+            post_create_subtask_snapshot_refresh_delay_seconds=0,
         )
         loop_runner = CoordinatorLoopRunner(
             callback=coordinator.run_loop_once,

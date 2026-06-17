@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 from backend.api.sse import SessionEventBus
@@ -60,9 +61,12 @@ from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.gitlab_adapter import GitLabAdapter
 from backend.tools.jira_adapter import JiraAdapter
 from backend.tools.snapshot_adapter import SnapshotAdapter
+from backend.tools.command_runner import CommandResult
 
 
 _CLOSED_JIRA_STATUSES = {"resolved", "done", "closed", "cancelled"}
+_POST_CREATE_SUBTASK_SNAPSHOT_REFRESH_ATTEMPTS = 3
+_POST_CREATE_SUBTASK_SNAPSHOT_REFRESH_DELAY_SECONDS = 2.0
 _TASK_KEY_PATTERN = re.compile(r"^[A-Z]+-\d+$")
 _INLINE_TASK_KEY_PATTERN = re.compile(r"\b[A-Z]+-\d+\b")
 _EXPLICIT_URL_PATTERN = re.compile(r"https?://[^\s)>\]]+")
@@ -191,6 +195,10 @@ class CoordinatorService:
     event_bus: SessionEventBus | None = None
     role_workspace_manager: RoleWorkspaceManager | None = None
     role_launcher_manager: RoleLauncherManager | None = None
+    post_create_subtask_snapshot_refresh_attempts: int = _POST_CREATE_SUBTASK_SNAPSHOT_REFRESH_ATTEMPTS
+    post_create_subtask_snapshot_refresh_delay_seconds: float = (
+        _POST_CREATE_SUBTASK_SNAPSHOT_REFRESH_DELAY_SECONDS
+    )
 
     def create_task_session(
         self,
@@ -1341,9 +1349,16 @@ class CoordinatorService:
             )
 
         snapshot_refresh_exit_code: int | None = None
+        snapshot_refresh_attempts = 0
+        snapshot_refresh_matched_created_subtasks: bool | None = None
         if result.ok:
             self._cleanup_temporary_plan_package(session)
-            refresh_result = self.snapshot_adapter.run(session.task_key)
+            refresh_result, snapshot_refresh_attempts, snapshot_refresh_matched_created_subtasks = (
+                self._refresh_snapshot_after_subtask_creation(
+                    session=session,
+                    created_subtask_keys=created_subtask_keys,
+                )
+            )
             snapshot_refresh_exit_code = refresh_result.returncode
             refresh_stdout_path = write_text_artifact(
                 self.artifacts_root,
@@ -1368,6 +1383,9 @@ class CoordinatorService:
                     "task_key": session.task_key,
                     "command": refresh_result.command,
                     "returncode": refresh_result.returncode,
+                    "attempts": snapshot_refresh_attempts,
+                    "expected_subtask_keys": created_subtask_keys,
+                    "matched_created_subtasks": snapshot_refresh_matched_created_subtasks,
                 },
             )
             self.artifact_repository.create(
@@ -1379,11 +1397,21 @@ class CoordinatorService:
                     "task_key": session.task_key,
                     "command": refresh_result.command,
                     "returncode": refresh_result.returncode,
+                    "attempts": snapshot_refresh_attempts,
+                    "expected_subtask_keys": created_subtask_keys,
+                    "matched_created_subtasks": snapshot_refresh_matched_created_subtasks,
                 },
             )
 
         event_type = "jira_subtasks_created" if result.ok else "jira_subtasks_creation_failed"
         if not result.ok:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="subtask_creation_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        elif created_subtask_keys and snapshot_refresh_matched_created_subtasks is False:
             session = self.session_repository.update_stage_and_owner(
                 session.id,
                 current_stage="subtask_creation_requested",
@@ -1399,6 +1427,8 @@ class CoordinatorService:
                 "returncode": result.returncode,
                 "created_subtask_keys": created_subtask_keys,
                 "snapshot_refresh_exit_code": snapshot_refresh_exit_code,
+                "snapshot_refresh_attempts": snapshot_refresh_attempts,
+                "snapshot_refresh_matched_created_subtasks": snapshot_refresh_matched_created_subtasks,
                 "current_stage": session.current_stage,
                 "status": session.status.value,
             },
@@ -1455,7 +1485,86 @@ class CoordinatorService:
                     "current_stage": session.current_stage,
                 },
             )
+        elif created_subtask_keys and snapshot_refresh_matched_created_subtasks is False:
+            self._append_event(
+                session_id=session.id,
+                event_type="session_escalated_to_operator",
+                producer_type="coordinator",
+                payload={
+                    "reason": "subtask_snapshot_missing_created_subtasks",
+                    "summary": "created Jira subtasks were not visible in the refreshed snapshot",
+                    "details": (
+                        "Jira subtask creation succeeded, but the bounded snapshot refresh did not return "
+                        "all created subtasks. Wait for Jira indexing, then refresh subtask state."
+                    ),
+                    "created_subtask_keys": created_subtask_keys,
+                    "snapshot_refresh_attempts": snapshot_refresh_attempts,
+                    "current_stage": session.current_stage,
+                },
+            )
         return session, event, followup_event
+
+    def _refresh_snapshot_after_subtask_creation(
+        self,
+        *,
+        session: Session,
+        created_subtask_keys: list[str],
+    ) -> tuple[CommandResult, int, bool | None]:
+        if self.snapshot_adapter is None:
+            raise IntakeError("Coordinator is missing snapshot adapter")
+
+        max_attempts = max(1, int(self.post_create_subtask_snapshot_refresh_attempts))
+        delay_seconds = max(0.0, float(self.post_create_subtask_snapshot_refresh_delay_seconds))
+        expected_keys = set(created_subtask_keys)
+        attempts: list[CommandResult] = []
+
+        for attempt_index in range(max_attempts):
+            result = self.snapshot_adapter.run(session.task_key)
+            attempts.append(result)
+            matched_created_subtasks = (
+                self._snapshot_contains_subtask_keys(session.task_key, expected_keys)
+                if result.ok
+                else False
+            )
+            if result.ok and matched_created_subtasks is not False:
+                return self._combine_snapshot_refresh_attempts(attempts), len(attempts), matched_created_subtasks
+            if attempt_index < max_attempts - 1 and delay_seconds > 0:
+                time.sleep(delay_seconds)
+
+        final_result = self._combine_snapshot_refresh_attempts(attempts)
+        return (
+            final_result,
+            len(attempts),
+            self._snapshot_contains_subtask_keys(session.task_key, expected_keys) if final_result.ok else False,
+        )
+
+    def _snapshot_contains_subtask_keys(self, task_key: str, expected_keys: set[str]) -> bool | None:
+        if not expected_keys:
+            return None
+        subtasks = self._read_snapshot_subtasks(task_key)
+        if subtasks is None:
+            return False
+        present_keys = {subtask.key for subtask in subtasks}
+        return expected_keys.issubset(present_keys)
+
+    def _combine_snapshot_refresh_attempts(self, attempts: list[CommandResult]) -> CommandResult:
+        latest = attempts[-1]
+        if len(attempts) == 1:
+            return latest
+        stdout = "\n".join(
+            f"--- snapshot refresh attempt {index} ---\n{attempt.stdout.rstrip()}"
+            for index, attempt in enumerate(attempts, start=1)
+        ).rstrip()
+        stderr = "\n".join(
+            f"--- snapshot refresh attempt {index} ---\n{attempt.stderr.rstrip()}"
+            for index, attempt in enumerate(attempts, start=1)
+        ).rstrip()
+        return CommandResult(
+            command=latest.command,
+            returncode=latest.returncode,
+            stdout=f"{stdout}\n" if stdout else "",
+            stderr=f"{stderr}\n" if stderr else "",
+        )
 
     def refresh_subtask_state(
         self,

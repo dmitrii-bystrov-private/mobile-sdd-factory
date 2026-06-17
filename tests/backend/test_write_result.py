@@ -65,6 +65,23 @@ class WriteResultScriptTests(unittest.TestCase):
             text=True,
         )
 
+    def test_shell_helper_help_is_local_and_does_not_submit_to_backend(self) -> None:
+        env = dict(os.environ)
+        env["SDD_FACTORY_BACKEND_PORT"] = "1"
+
+        result = subprocess.run(
+            ["bash", str(SHELL_SCRIPT_PATH), "--help"],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("--work-item-id", result.stdout)
+        self.assertIn("--issues-markdown-file", result.stdout)
+        self.assertNotIn("JSON decode error", result.stderr)
+
     def test_code_scout_clean_result_is_minimal_and_valid(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-scout")

@@ -21,6 +21,25 @@ python_cmd() {
   return 1
 }
 
+show_help() {
+  local py
+  py="$(python_cmd)" || return 1
+  PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" "${py}" - <<'PY'
+from backend.tools.write_result import build_parser
+
+build_parser().print_help()
+PY
+}
+
+for arg in "$@"; do
+  case "${arg}" in
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+  esac
+done
+
 submit_via_ingress() {
   local py
   py="$(python_cmd)" || return 1
