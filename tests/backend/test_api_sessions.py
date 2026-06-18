@@ -1548,6 +1548,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("spec_verification_blocked", response.source_reason)
         self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, response.role_name)
         self.assertTrue(response.needs_operator_input)
+        self.assertIn("Choose notification model", str(response.details))
 
     def test_get_interactive_state_route_marks_self_review_cycle_as_runtime_input(self) -> None:
         prepare_response = create_session(
@@ -3541,13 +3542,15 @@ class SessionApiTests(unittest.TestCase):
 
         self.assertTrue(response.handed_off)
         self.assertEqual("mr_handoff_completed", response.event_type)
-        self.assertEqual("mr_handoff_completed", response.session.current_stage)
+        self.assertEqual("send_to_test_completed", response.followup_event_type)
+        self.assertEqual("send_to_test_completed", response.session.current_stage)
         self.assertEqual("completed", response.session.status)
         self.assertEqual(
             "https://gitlab.example.com/mobile/IOS-40014MR/-/merge_requests/42",
             response.mr_url,
         )
         self.assertTrue(any(item.artifact_type == "mr_handoff_stdout" for item in artifacts_response.items))
+        self.assertTrue(any(item.artifact_type == "send_to_test_stdout" for item in artifacts_response.items))
 
     def test_send_to_test_route_marks_mr_handed_off_session_as_ready(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

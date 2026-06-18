@@ -540,6 +540,7 @@ class CreateMrResponse(BaseModel):
     handed_off: bool
     session: SessionResponse
     event_type: str
+    followup_event_type: str | None = None
     mr_url: str | None = None
 
 
@@ -581,6 +582,18 @@ class RefreshSubtaskStateRequest(BaseModel):
 
 class RefreshSubtaskStateResponse(BaseModel):
     refreshed: bool
+    session: SessionResponse
+    event_type: str
+    followup_event_type: str | None = None
+
+
+class SkipCurrentSubtaskRequest(BaseModel):
+    session_id: int
+    reason: str
+
+
+class SkipCurrentSubtaskResponse(BaseModel):
+    skipped: bool
     session: SessionResponse
     event_type: str
     followup_event_type: str | None = None

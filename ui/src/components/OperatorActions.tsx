@@ -88,6 +88,10 @@ export function OperatorActions({
     session.current_stage !== "subtask_creation_requested" &&
     !hasStageSpecificDeliveryRetry &&
     !requiresRuntimeReactivation;
+  const canSkipCurrentSubtask =
+    session.workflow_profile === "story_full" &&
+    session.status === "waiting_for_operator" &&
+    session.current_stage === "subtask_implementation_requested";
   const dailyActions: ActionDefinition[] = [];
   const runtimeSessionActions: ActionDefinition[] = [];
   dailyActions.push({
@@ -152,6 +156,30 @@ export function OperatorActions({
       disabled: busy,
       strong: true,
       onClick: () => run(() => apiClient.startSubtaskGraph(session.id), "Starting subtask graph…"),
+    });
+  }
+  if (canSkipCurrentSubtask) {
+    recoveryActions.push({
+      label: "Skip current subtask",
+      description: "Skip the currently blocked subtask in this run and continue to the downstream quality gates.",
+      disabled: busy,
+      danger: true,
+      onClick: async () => {
+        const reason = window.prompt("Reason for skipping the current subtask in this run:");
+        if (reason === null) {
+          return;
+        }
+        const normalizedReason = reason.trim();
+        if (!normalizedReason) {
+          setError("Subtask skip reason is required");
+          showToast("Subtask skip reason is required", "error");
+          return;
+        }
+        await run(
+          () => apiClient.skipCurrentSubtask(session.id, normalizedReason),
+          "Skipping current subtask…",
+        );
+      },
     });
   }
   const cleanupActions: ActionDefinition[] = [

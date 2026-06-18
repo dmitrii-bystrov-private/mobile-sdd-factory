@@ -18,6 +18,8 @@ from backend.api.schemas import (
     ResolveBoyScoutFindingsResponse,
     SkipBoyScoutRequest,
     SkipBoyScoutResponse,
+    SkipCurrentSubtaskRequest,
+    SkipCurrentSubtaskResponse,
     EnvironmentDoctorResponse,
     RuntimeCapabilitiesResponse,
     RuntimeDefaultsResponse,
@@ -431,6 +433,12 @@ def create_mr(
         session, event, mr_url = dependencies.coordinator_service.create_mr_handoff(
             session_id=payload.session_id
         )
+        followup_event_type = None
+        if event.event_type == "mr_handoff_completed":
+            session, followup_event = dependencies.coordinator_service.send_to_test_handoff(
+                session_id=session.id
+            )
+            followup_event_type = followup_event.event_type
     except IntakeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -438,6 +446,7 @@ def create_mr(
         handed_off=True,
         session=to_session_response(session),
         event_type=event.event_type,
+        followup_event_type=followup_event_type,
         mr_url=mr_url,
     )
 
@@ -607,6 +616,27 @@ def refresh_subtask_state(
 
     return RefreshSubtaskStateResponse(
         refreshed=event.event_type == "subtask_state_refreshed_by_operator",
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
+@router.post("/skip-current-subtask", response_model=SkipCurrentSubtaskResponse)
+def skip_current_subtask(
+    payload: SkipCurrentSubtaskRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> SkipCurrentSubtaskResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.skip_current_subtask(
+            session_id=payload.session_id,
+            reason=payload.reason,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return SkipCurrentSubtaskResponse(
+        skipped=True,
         session=to_session_response(session),
         event_type=event.event_type,
         followup_event_type=followup_event.event_type if followup_event else None,

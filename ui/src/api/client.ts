@@ -624,6 +624,24 @@ export const apiClient = {
     });
   },
 
+  skipCurrentSubtask(
+    sessionId: number,
+    reason: string,
+  ): Promise<{
+    skipped: boolean;
+    event_type: string;
+    followup_event_type?: string | null;
+    session: Session;
+  }> {
+    return request("/operator/skip-current-subtask", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        reason,
+      }),
+    });
+  },
+
   refreshSnapshot(
     sessionId: number,
   ): Promise<{

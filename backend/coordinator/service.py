@@ -628,9 +628,10 @@ class CoordinatorService:
                 "resume_strategy": None,
             }
 
+        events = self.event_repository.list_for_session(session.id)
         blocker_event = None
         clear_event = None
-        for event in reversed(self.event_repository.list_for_session(session.id)):
+        for event in reversed(events):
             if (
                 blocker_event is None
                 and (
@@ -657,6 +658,8 @@ class CoordinatorService:
             blocker_event = None
 
         source_event = blocker_event
+        if source_event is not None and self._interactive_blocker_is_stale_for_session(source_event, session):
+            source_event = None
         if source_event is None:
             return {
                 "available": False,
@@ -674,6 +677,8 @@ class CoordinatorService:
 
         review_family, review_lane = self._interactive_review_context(source_event.payload)
         details = source_event.payload.get("details")
+        if not str(details or "").strip() and source_event.payload.get("reason") == "spec_verification_blocked":
+            details = self._spec_verification_operator_details_from_history(events, source_event.id)
         implement_now_count = source_event.payload.get("implement_now_count")
         tech_debt_candidate_count = source_event.payload.get("tech_debt_candidate_count")
         if source_event.payload.get("reason") == "boy_scout_findings":
@@ -700,6 +705,10 @@ class CoordinatorService:
             "implement_now_count": implement_now_count,
             "tech_debt_candidate_count": tech_debt_candidate_count,
         }
+
+    def _interactive_blocker_is_stale_for_session(self, source_event: Event, session: Session) -> bool:
+        event_stage = str(source_event.payload.get("current_stage") or "").strip()
+        return bool(event_stage and event_stage != session.current_stage)
 
     def _interactive_review_context(self, payload: object) -> tuple[str | None, str | None]:
         if not isinstance(payload, dict):
@@ -1860,6 +1869,57 @@ class CoordinatorService:
         refreshed = self._get_session_or_raise(session.id)
         return refreshed, event, followup_event
 
+    def skip_current_subtask(
+        self,
+        session_id: int,
+        reason: str,
+    ) -> tuple[Session, Event, Event]:
+        session = self._get_session_or_raise(session_id)
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise IntakeError("Subtask skip reason must not be empty")
+        if session.current_stage != "subtask_implementation_requested":
+            raise IntakeError(f"Session {session_id} is not waiting on subtask implementation")
+        if session.status not in {SessionStatus.ACTIVE, SessionStatus.WAITING_FOR_OPERATOR}:
+            raise IntakeError(f"Session {session_id} is not in a skippable subtask state")
+
+        active_item: WorkItem | None = None
+        if session.status == SessionStatus.WAITING_FOR_OPERATOR:
+            active_item = self._find_operator_pending_work_item(session.id)
+        if active_item is None:
+            active_item = self._find_active_primary_coding_work_item(session)
+        if active_item is None or active_item.work_type != "subtask_implementation":
+            raise IntakeError("No current subtask implementation work item found for skip")
+
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        parsed_subtask = self._parse_subtask_work_item_title(active_item.title)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="subtask_implementation_skipped_by_operator",
+            producer_type="operator",
+            payload={
+                "task_key": session.task_key,
+                "work_item_id": active_item.id,
+                "subtask_key": parsed_subtask["key"],
+                "subtask_title": parsed_subtask["title"],
+                "reason": normalized_reason,
+                "current_stage": session.current_stage,
+            },
+        )
+        self._materialize_skipped_subtasks_context(session)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        session, followup_event = self._advance_after_coding_completion(
+            session=session,
+            source_event=event,
+            completed_work_type="subtask_implementation",
+        )
+        return session, event, followup_event
+
     def start_subtask_graph(
         self,
         session_id: int,
@@ -2233,9 +2293,9 @@ class CoordinatorService:
         if output_type in {"completed", "passed", "skipped_not_needed"}:
             return payload
         if output_type == "failed":
-            if not any(str(payload.get(key) or "").strip() for key in ("summary", "details", "issues_markdown")):
+            if not str(payload.get("issues_markdown") or "").strip():
                 raise IntakeError(
-                    "Documentation review failed output must include payload.summary, payload.details, or payload.issues_markdown"
+                    "Documentation review failed output must include payload.issues_markdown with actionable findings"
                 )
             return payload
         return payload
@@ -4637,10 +4697,14 @@ class CoordinatorService:
 
         summary = str(source_event.payload.get("summary") or "").strip() or f"{work_type} requires operator input"
         detail_lines: list[str] = []
+        details = str(source_event.payload.get("details") or "").strip()
+        if details:
+            detail_lines.append(details)
         for key, label in (
             ("failures", "Failures"),
             ("missing_inputs", "Missing inputs"),
             ("pending_decisions", "Pending decisions"),
+            ("blocker_questions", "Questions"),
         ):
             value = source_event.payload.get(key)
             if isinstance(value, list):
@@ -5624,6 +5688,23 @@ class CoordinatorService:
                 "do not re-flag a finding that directly contradicts a relevant operator decision):\n"
                 + "\n".join(guidance_lines)
             )
+        skipped_subtask_context_path = None
+        skipped_subtasks = []
+        if lane == "requirements":
+            skipped_subtasks = self._subtask_skip_history(session.id, before_event_id=before_event_id)
+            if skipped_subtasks:
+                skipped_subtask_context_path = self._materialize_skipped_subtasks_context(session)
+                skipped_lines = [
+                    f"- {item['subtask_key']}: {item['reason']}"
+                    for item in skipped_subtasks
+                    if item.get("subtask_key")
+                ]
+                instruction += (
+                    "\nOperator-skipped/deferred Jira subtasks for this run "
+                    "(read the skipped-subtasks context and do not require their scoped work in this review pass; "
+                    "continue to report regressions in already accepted non-skipped scope):\n"
+                    + "\n".join(skipped_lines)
+                )
         hydration: dict[str, str | int | None] = {
             "review_scope": "current_diff_only",
             "review_lane": lane,
@@ -5640,6 +5721,8 @@ class CoordinatorService:
             if operator_guidance_history
             else None,
             "review_cycle_resolution": "operator_guided_recheck" if operator_guidance_history else None,
+            "skipped_subtasks_path": skipped_subtask_context_path,
+            "skipped_subtasks": json.dumps(skipped_subtasks, indent=2) if skipped_subtasks else None,
         }
         if lane == "requirements" and self.workdir_root is not None:
             task_root = self.workdir_root / session.task_key
@@ -5686,6 +5769,43 @@ class CoordinatorService:
             )
         return guidance
 
+    def _spec_verification_operator_details(
+        self,
+        *,
+        details: object,
+        blocker_questions: object,
+    ) -> str:
+        rendered_details = str(details or "").strip()
+        if isinstance(blocker_questions, list) and blocker_questions:
+            rendered_questions = "\n".join(
+                f"- {str(item).strip()}" for item in blocker_questions if str(item).strip()
+            )
+            if rendered_questions:
+                rendered_details = (
+                    f"{rendered_details}\n\nQuestions:\n{rendered_questions}".strip()
+                    if rendered_details
+                    else f"Questions:\n{rendered_questions}"
+                )
+        return rendered_details
+
+    def _spec_verification_operator_details_from_history(
+        self,
+        events: list[Event],
+        blocker_event_id: int,
+    ) -> str:
+        for event in reversed(events):
+            if event.id >= blocker_event_id:
+                continue
+            if event.event_type not in {"story_planning_blocked", "spec_verification_blocked"}:
+                continue
+            rendered_details = self._spec_verification_operator_details(
+                details=event.payload.get("details"),
+                blocker_questions=event.payload.get("blocker_questions"),
+            )
+            if rendered_details:
+                return rendered_details
+        return ""
+
     def _handle_spec_verification_blocked(
         self,
         session: Session,
@@ -5709,12 +5829,10 @@ class CoordinatorService:
         )
         session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
         summary = str(source_event.payload.get("summary") or "").strip() or "spec verification blockers require operator input"
-        details = str(source_event.payload.get("details") or "").strip()
-        blocker_questions = source_event.payload.get("blocker_questions")
-        if isinstance(blocker_questions, list) and blocker_questions:
-            rendered = "\n".join(f"- {str(item).strip()}" for item in blocker_questions if str(item).strip())
-            if rendered:
-                details = f"{details}\n\nQuestions:\n{rendered}".strip() if details else f"Questions:\n{rendered}"
+        details = self._spec_verification_operator_details(
+            details=source_event.payload.get("details"),
+            blocker_questions=source_event.payload.get("blocker_questions"),
+        )
         event = self._append_event(
             session_id=session.id,
             event_type="session_escalated_to_operator",
@@ -5886,6 +6004,27 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
+        current_session = self._get_session_or_raise(session.id)
+        if current_session.current_stage in {
+            "completed",
+            "mr_handoff_failed",
+            "mr_handoff_completed",
+            "send_to_test_failed",
+            "send_to_test_completed",
+        }:
+            latest_terminal_event = self._latest_event_by_type(
+                current_session.id,
+                {
+                    "task_completed",
+                    "mr_handoff_failed",
+                    "mr_handoff_completed",
+                    "send_to_test_failed",
+                    "send_to_test_completed",
+                },
+            )
+            if latest_terminal_event is not None:
+                return current_session, latest_terminal_event
+
         session = self.session_repository.update_stage_and_owner(
             session.id,
             current_stage="completed",
@@ -6895,8 +7034,13 @@ class CoordinatorService:
         if not doc_items:
             raise IntakeError("No active doc harvest work item found for the session")
 
-        active_item = doc_items[0]
-        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        payload_work_item_id = self._payload_work_item_id(source_event.payload)
+        doc_items = sorted(
+            doc_items,
+            key=lambda item: item.id != payload_work_item_id,
+        )
+        for item in doc_items:
+            self.work_item_repository.update_status(item.id, WorkItemStatus.COMPLETED)
         self._stop_on_demand_role(session, DOC_HARVEST_ROLE)
         self._materialize_doc_harvest_outcome_file(session=session, source_event=source_event, status="completed")
         summary = str(source_event.payload.get("summary") or "").strip()
@@ -7571,18 +7715,8 @@ class CoordinatorService:
             parsed_payload: dict | None = None
             while True:
                 raw_payload = "\n".join(payload_lines)
-                try:
-                    parsed = json.loads(raw_payload)
-                except json.JSONDecodeError:
-                    repaired_text = self._escape_raw_control_chars_in_json_strings(
-                        self._unwrap_wrapped_json_strings(raw_payload)
-                    )
-                    try:
-                        parsed = json.loads(repaired_text)
-                    except json.JSONDecodeError:
-                        parsed = None
-                if isinstance(parsed, dict):
-                    parsed_payload = parsed
+                parsed_payload = self._parse_marker_payload(raw_payload)
+                if parsed_payload is not None:
                     break
                 if cursor >= len(lines) or self._line_marker_type(lines[cursor]) is not None:
                     break
@@ -7591,9 +7725,46 @@ class CoordinatorService:
             if parsed_payload is not None:
                 results.append((marker_type, parsed_payload))
             elif marker_type == "error":
-                results.append((marker_type, self._malformed_error_marker_payload("\n".join(payload_lines))))
+                raw_payload = "\n".join(payload_lines)
+                trimmed_payload = self._trim_live_capture_noise(raw_payload)
+                parsed_payload = self._parse_marker_payload(trimmed_payload)
+                if parsed_payload is not None:
+                    results.append((marker_type, parsed_payload))
+                elif not self._looks_like_incomplete_live_marker_capture(raw_payload):
+                    results.append((marker_type, self._malformed_error_marker_payload(raw_payload)))
             index = cursor
         return results
+
+    def _parse_marker_payload(self, raw_payload: str) -> dict | None:
+        try:
+            parsed = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            repaired_text = self._escape_raw_control_chars_in_json_strings(
+                self._unwrap_wrapped_json_strings(raw_payload)
+            )
+            try:
+                parsed = json.loads(repaired_text)
+            except json.JSONDecodeError:
+                return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _trim_live_capture_noise(self, raw_payload: str) -> str:
+        clean_lines: list[str] = []
+        for line in raw_payload.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith(("✻", "✽", "❯")):
+                break
+            if self._looks_like_incomplete_live_marker_capture(line):
+                break
+            clean_lines.append(line)
+        return "\n".join(clean_lines).strip()
+
+    def _looks_like_incomplete_live_marker_capture(self, raw_payload: str) -> bool:
+        return (
+            " auto mode on " in raw_payload
+            or "shift+tab to cycle" in raw_payload
+            or re.search(r"─{8,}.*:[A-Z]+-\d+.*─{2,}", raw_payload) is not None
+        )
 
     def _malformed_error_marker_payload(self, raw_payload: str) -> dict:
         cleaned_payload = raw_payload.strip()
@@ -7988,6 +8159,12 @@ class CoordinatorService:
             source_event = self._latest_event_by_type(session.id, {"verification_passed"})
             if source_event is None:
                 return False
+            if self._has_event_after(
+                session.id,
+                source_event.id,
+                {"doc_harvest_requested", "task_completed", "mr_handoff_failed", "mr_handoff_completed"},
+            ):
+                return False
             if self._optional_lane_policy_mode(session.policy, "doc_harvest_policy") != "disabled":
                 _session, followup_event = self._enqueue_doc_harvest(session=session, source_event=source_event)
             else:
@@ -8016,6 +8193,12 @@ class CoordinatorService:
             source_event = self._latest_event_by_type(session.id, {"doc_harvest_completed"})
             if source_event is None:
                 return False
+            if self._has_event_after(
+                session.id,
+                source_event.id,
+                {"documentation_review_requested", "task_completed", "mr_handoff_failed", "mr_handoff_completed"},
+            ):
+                return False
             _session, followup_event = self._enqueue_documentation_review(session=session, source_event=source_event)
             self._append_event(
                 session_id=session.id,
@@ -8039,6 +8222,12 @@ class CoordinatorService:
             source_event = self._latest_event_by_type(session.id, {"documentation_review_passed"})
             if source_event is None:
                 return False
+            if self._has_event_after(
+                session.id,
+                source_event.id,
+                {"task_completed", "mr_handoff_failed", "mr_handoff_completed", "send_to_test_failed", "send_to_test_completed"},
+            ):
+                return False
             _session, followup_event = self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
             self._append_event(
                 session_id=session.id,
@@ -8052,6 +8241,16 @@ class CoordinatorService:
             )
             return True
 
+        return False
+
+    def _has_event_after(self, session_id: int, after_event_id: int | None, event_types: set[str]) -> bool:
+        if after_event_id is None:
+            return False
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.id <= after_event_id:
+                return False
+            if event.event_type in event_types:
+                return True
         return False
 
     def _latest_event_by_type(self, session_id: int, event_types: set[str]) -> Event | None:
@@ -8606,6 +8805,17 @@ class CoordinatorService:
                         "operator_resolution_history": json.dumps(operator_guidance_history, indent=2),
                     }
                 )
+            if stage_name == "requirements_review_correction_requested":
+                session = self.session_repository.get_by_id(session_id)
+                if session is not None:
+                    skipped_subtasks = self._subtask_skip_history(session_id)
+                    if skipped_subtasks:
+                        payload.update(
+                            {
+                                "skipped_subtasks_path": self._materialize_skipped_subtasks_context(session),
+                                "skipped_subtasks": json.dumps(skipped_subtasks, indent=2),
+                            }
+                        )
         return payload
 
     def _requirements_clarification_mode(self, policy: dict[str, str] | None) -> str:
@@ -9948,6 +10158,68 @@ class CoordinatorService:
                 "unresolved_count": len(unresolved),
             },
         )
+
+    def _subtask_skip_history(
+        self,
+        session_id: int,
+        *,
+        before_event_id: int | None = None,
+    ) -> list[dict[str, object]]:
+        entries: list[dict[str, object]] = []
+        for event in self.event_repository.list_for_session(session_id):
+            if before_event_id is not None and event.id >= before_event_id:
+                continue
+            if event.event_type != "subtask_implementation_skipped_by_operator":
+                continue
+            subtask_key = str(event.payload.get("subtask_key") or "").strip()
+            if not subtask_key:
+                continue
+            entries.append(
+                {
+                    "event_id": event.id,
+                    "subtask_key": subtask_key,
+                    "subtask_title": str(event.payload.get("subtask_title") or "").strip(),
+                    "reason": str(event.payload.get("reason") or "").strip(),
+                }
+            )
+        return entries
+
+    def _materialize_skipped_subtasks_context(self, session: Session) -> str | None:
+        if self.workdir_root is None:
+            return None
+        entries = self._subtask_skip_history(session.id)
+        if not entries:
+            return None
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / "skipped-subtasks.md"
+        lines = [
+            "# Operator-Skipped Subtasks",
+            "",
+            "These Jira subtasks were explicitly skipped or deferred by the operator for this run.",
+            "Do not require their scoped work in downstream review passes for this run.",
+            "Continue to report regressions in already accepted non-skipped scope.",
+            "",
+            "## Entries",
+            "",
+        ]
+        for entry in entries:
+            title = str(entry.get("subtask_title") or "").strip()
+            heading = str(entry["subtask_key"])
+            if title:
+                heading = f"{heading}: {title}"
+            lines.extend(
+                [
+                    f"### {heading}",
+                    "",
+                    f"- Operator event: {entry['event_id']}",
+                    f"- Reason: {entry.get('reason') or 'No reason recorded.'}",
+                    "",
+                ]
+            )
+        target_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        return str(target_path)
 
     def _latest_artifact_for_session_type(
         self,

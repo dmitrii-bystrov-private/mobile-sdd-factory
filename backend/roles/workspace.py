@@ -446,6 +446,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Review production README files, docs, and public/doc comments for stable-contract documentation quality.",
             "- Flag Jira/review history, file inventories in module READMEs, duplicated explanations, stale implementation narration, and documentation that preserves how the task was implemented instead of the durable behavior.",
             "- Do not edit files; keep findings scoped to documentation/comment changes.",
+            "- If findings exist, write the actionable findings to a markdown file and submit it with `--issues-markdown-file <path>`; a local notes file is not delivered unless it is passed to the helper.",
             "- Emit `skipped_not_needed` only when there are no documentation/comment changes to review.",
         ]
     if role_name == "proposal-context-worker":

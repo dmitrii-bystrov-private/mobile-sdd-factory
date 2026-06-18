@@ -263,10 +263,12 @@ export function SessionDetail({
   }
 
   const activeSession = session;
+  const activeInteractiveStateSummary =
+    session.status === "waiting_for_operator" ? bundle.interactiveStateSummary : null;
 
   const interactiveOwnerRoleName =
-    session.status === "waiting_for_operator" && bundle.interactiveStateSummary?.available
-      ? bundle.interactiveStateSummary.roleName
+    activeInteractiveStateSummary?.available
+      ? activeInteractiveStateSummary.roleName
       : null;
   const ownedRoleIds = new Set(
     bundle.workItems
@@ -430,7 +432,7 @@ export function SessionDetail({
 
       <>
       <InteractiveStatePanel
-        interactiveStateSummary={bundle.interactiveStateSummary}
+        interactiveStateSummary={activeInteractiveStateSummary}
         runtimeStateSummary={bundle.runtimeStateSummary}
         onRefresh={onRefresh}
         sessionId={session.id}
@@ -634,7 +636,7 @@ export function SessionDetail({
       />
 
       <OperatorActions
-        interactiveStateSummary={bundle.interactiveStateSummary}
+        interactiveStateSummary={activeInteractiveStateSummary}
         onRefresh={onRefresh}
         runtimeStateSummary={bundle.runtimeStateSummary}
         session={session}

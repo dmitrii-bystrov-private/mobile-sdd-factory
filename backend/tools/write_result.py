@@ -365,6 +365,10 @@ def _build_documentation_review_payload(args: argparse.Namespace) -> dict[str, o
         label="issues-markdown",
     )
     _clean_optional_text(payload, "issues_markdown", issues_markdown)
+    if args.output_type == "failed" and not str(payload.get("issues_markdown") or "").strip():
+        raise ResultWriterError(
+            "documentation-reviewer failed output requires --issues-markdown or --issues-markdown-file"
+        )
     return payload
 
 

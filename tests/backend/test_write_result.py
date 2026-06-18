@@ -214,6 +214,56 @@ class WriteResultScriptTests(unittest.TestCase):
                     self.assertEqual("failed", payload["output_type"])
                     self.assertEqual("Issue 1", payload["payload"]["issues_markdown"])
 
+    def test_documentation_reviewer_failed_result_requires_issues_markdown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, _output_path, work_item_id = self._create_context(
+                temp_dir,
+                role_name="documentation-reviewer",
+                work_type="documentation_review",
+            )
+            result = self._run(
+                env,
+                "--work-item-id",
+                str(work_item_id),
+                "--output-type",
+                "failed",
+                "--summary",
+                "Documentation review found issues",
+            )
+
+            self.assertEqual(2, result.returncode)
+            self.assertIn("requires --issues-markdown or --issues-markdown-file", result.stderr)
+
+    def test_documentation_reviewer_failed_result_can_read_issues_markdown_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, output_path, work_item_id = self._create_context(
+                temp_dir,
+                role_name="documentation-reviewer",
+                work_type="documentation_review",
+            )
+            issues_path = Path(temp_dir) / "documentation-review-findings.md"
+            issues_path.write_text("- `README.md`: Remove implementation history.\n", encoding="utf-8")
+
+            result = self._run(
+                env,
+                "--work-item-id",
+                str(work_item_id),
+                "--output-type",
+                "failed",
+                "--summary",
+                "Documentation review found issues",
+                "--issues-markdown-file",
+                str(issues_path),
+            )
+
+            self.assertEqual(0, result.returncode, result.stderr)
+            payload = json.loads(output_path.read_text(encoding="utf-8"))
+            self.assertEqual("failed", payload["output_type"])
+            self.assertEqual(
+                issues_path.read_text(encoding="utf-8").strip(),
+                payload["payload"]["issues_markdown"],
+            )
+
     def test_code_reviewer_failed_result_can_read_issues_markdown_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-reviewer")

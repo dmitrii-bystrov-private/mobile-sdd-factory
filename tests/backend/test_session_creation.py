@@ -3735,6 +3735,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("spec_verification_requested", updated_session.current_stage)
         self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, updated_session.current_owner)
         self.assertTrue(bool(followup_event.payload.get("needs_operator_input")))
+        self.assertIn("Questions:", str(followup_event.payload.get("details")))
+        self.assertIn("Should notifications remain inline", str(followup_event.payload.get("details")))
         self.assertTrue(any(item.work_type == "spec_verification" and item.status.value == "waiting_for_operator" for item in work_items))
         outcome_path = Path(self.temp_dir.name) / "IOS-30003VERIFYBLOCK" / "spec" / "spec-verification-outcome.json"
         self.assertTrue(outcome_path.exists())
@@ -3776,6 +3778,80 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("spec_verification_blocked", summary["source_reason"])
         self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, summary["role_name"])
         self.assertTrue(summary["needs_operator_input"])
+        self.assertIn("Choose notification model", str(summary["details"]))
+
+    def test_interactive_summary_recovers_spec_verification_questions_from_legacy_blank_escalation(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003SVLEGACY",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="spec_verification_requested",
+            current_owner=SPEC_VERIFIER_WORKER_ROLE,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="story_planning_blocked",
+            producer_type="role",
+            payload={
+                "summary": "Planning verification failed",
+                "work_item_id": 123,
+                "blocker_questions": ["Which repository should own the durable state?"],
+            },
+        )
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "spec_verification_blocked",
+                "role_name": SPEC_VERIFIER_WORKER_ROLE,
+                "work_item_id": 123,
+                "summary": "Planning verification failed",
+                "details": "",
+                "needs_operator_input": True,
+                "current_stage": "spec_verification_requested",
+            },
+        )
+
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertTrue(summary["available"])
+        self.assertIn("Which repository should own the durable state?", str(summary["details"]))
+
+    def test_interactive_summary_ignores_stale_blocker_from_previous_stage(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003STALEBLOCKER",
+            workflow_profile="oneshot",
+            policy=None,
+        )
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "runtime_error",
+                "role_name": IMPLEMENTER_ROLE,
+                "current_stage": "requirements_review_correction_requested",
+                "summary": "Old correction conflict",
+                "details": "This was already resolved.",
+                "needs_operator_input": True,
+            },
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="mr_handoff_failed",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertFalse(summary["available"])
+        self.assertFalse(summary["needs_operator_input"])
 
     def test_spec_verifier_blocked_output_requires_summary_or_questions(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -4832,6 +4908,86 @@ class SessionCreationTests(unittest.TestCase):
             self.gitlab_adapter.commit_requests,
         )
         self.assertEqual(["IOS-30020", "IOS-30021"], self.jira_adapter.completed_subtasks)
+
+    def test_operator_can_skip_current_blocked_subtask_before_verification(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004SUBSKIP",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004SUBSKIP")
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            self.coordinator.handle_operator_event(
+                session_id=session.id,
+                event_type=event_type,
+                payload={"summary": "prepared"},
+            )
+        self.write_statuses_file(
+            "IOS-30004SUBSKIP",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-30004SUBSKIP | Story | Parent story | In Progress |
+| IOS-30024 | Sub-task | Depends on another branch | To Do |
+""",
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="task_decomposition_completed",
+            payload=decomposition_payload("Execution chunks prepared"),
+        )
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "subtask_implementation"
+            and item.status == WorkItemStatus.ASSIGNED
+        )
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+
+        updated_session, event, followup_event = self.coordinator.skip_current_subtask(
+            session.id,
+            "Blocked by a dependency subtask; defer this item for a later run.",
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+        skipped_context_path = Path(self.temp_dir.name) / "IOS-30004SUBSKIP" / "spec" / "skipped-subtasks.md"
+
+        self.assertEqual("subtask_implementation_skipped_by_operator", event.event_type)
+        self.assertEqual("IOS-30024", event.payload["subtask_key"])
+        self.assertEqual("verification_requested", followup_event.event_type)
+        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual([], self.jira_adapter.completed_subtasks)
+        self.assertEqual([], self.gitlab_adapter.commit_requests)
+        self.assertTrue(
+            any(
+                item.id == active_item.id and item.status == WorkItemStatus.COMPLETED
+                for item in work_items
+            )
+        )
+        self.assertTrue(skipped_context_path.is_file())
+        self.assertIn("IOS-30024", skipped_context_path.read_text())
+
+        instruction, hydration = self.coordinator._dual_review_dispatch_context(
+            updated_session,
+            lane="requirements",
+        )
+
+        self.assertIn("Operator-skipped/deferred Jira subtasks", instruction)
+        self.assertEqual(str(skipped_context_path), hydration["skipped_subtasks_path"])
+        self.assertIn("IOS-30024", hydration["skipped_subtasks"])
 
     def test_subtask_completion_refreshes_snapshot_and_rewrites_graph(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -8131,6 +8287,70 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
         self.assertEqual("runtime emitted malformed SDD_ERROR marker", interactive["summary"])
         self.assertIn('"tuist"', interactive["details"])
+
+    def test_collect_role_output_ignores_incomplete_error_marker_live_capture(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRLIVEPARTIAL")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            "\n".join(
+                [
+                    'SDD_ERROR: {',
+                    '  "summary": "operator decision needed",',
+                    "",
+                    "---------- implementer:IOS-30009ERRLIVEPARTIAL --",
+                    "> ",
+                    "[Opus 4.8] 33% | auto mode on (shift+tab to cycle)",
+                ]
+            ),
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        events = self.event_repository.list_for_session(session.id)
+        interactive = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertFalse(any(item.event_type == "role_runtime_error_reported" for item in events))
+        self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertFalse(interactive["available"])
+
+    def test_collect_role_output_trims_live_capture_noise_after_error_json(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRLIVETAIL")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            "\n".join(
+                [
+                    'SDD_ERROR: {',
+                    '  "summary": "operator decision needed",',
+                    '  "details": "first line',
+                    'second line",',
+                    '  "needs_operator_input": true',
+                    '}',
+                    "",
+                    "✻ Baked for 3m 21s",
+                    "> previous operator reply",
+                    "[Opus 4.8] 33% | auto mode on (shift+tab to cycle)",
+                ]
+            ),
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        interactive = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("operator decision needed", interactive["summary"])
+        self.assertEqual("first line second line", interactive["details"])
 
     def test_collect_role_output_consumes_result_json_from_role_workspace(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009B")
@@ -11433,7 +11653,55 @@ class SessionCreationTests(unittest.TestCase):
         assert implementer_role is not None
         sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
         self.assertIn("Edit only production documentation and comments", sent_inputs[-1])
-        self.assertIn("documentation_review", sent_inputs[-1])
+        hydration = json.loads(
+            (
+                Path(self.temp_dir.name)
+                / "IOS-30021DOCREVIEWFAIL"
+                / "runtime"
+                / "role-workspaces"
+                / IMPLEMENTER_ROLE
+                / "HYDRATION.json"
+            ).read_text()
+        )
+        self.assertEqual("documentation_review", hydration["correction_source"])
+
+    def test_documentation_review_failed_requires_actionable_findings(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021DOCREVIEWEMPTY",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021DOCREVIEWEMPTY")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name=DOC_HARVEST_ROLE,
+            output_type="completed",
+            payload={"summary": "README updated."},
+        )
+
+        with self.assertRaisesRegex(
+            IntakeError,
+            "Documentation review failed output must include payload.issues_markdown with actionable findings",
+        ):
+            self.coordinator.handle_role_output(
+                session_id=session.id,
+                role_name=DOCUMENTATION_REVIEWER_ROLE,
+                output_type="failed",
+                payload={"summary": "Documentation review found issues"},
+            )
+
+        work_items = self.work_item_repository.list_for_session(session.id)
+        self.assertFalse(any(item.work_type == "documentation_review_correction" for item in work_items))
 
     def test_documentation_review_correction_returns_to_documentation_review(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -11462,7 +11730,10 @@ class SessionCreationTests(unittest.TestCase):
             session_id=session.id,
             role_name=DOCUMENTATION_REVIEWER_ROLE,
             output_type="failed",
-            payload={"summary": "Docs need cleanup."},
+            payload={
+                "summary": "Docs need cleanup.",
+                "issues_markdown": "Remove implementation-only details from README.",
+            },
         )
 
         updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
