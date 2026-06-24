@@ -61,6 +61,104 @@ class TmuxBackendTests(unittest.TestCase):
             self.assertEqual(["first line", "second line"], [chunk.text for chunk in chunks])
             self.assertEqual([], backend.read_output(role))
 
+    def test_terminal_idle_signature_detects_final_duration_followed_by_prompt(self) -> None:
+        backend = TmuxSessionBackend(mode="recording")
+
+        claude_signature = backend._extract_terminal_idle_signature(
+            "⏺ SDD_OUTPUT: {\"output_type\":\"completed\"}\n"
+            "\n"
+            "✻ Churned for 5m 3s\n"
+            "\n"
+            "──────────────────── doc-harvest-worker:IOS-13093 ──\n"
+            "❯ show me what changed in the last commit\n"
+            "────────────────────────────────────────────────────\n"
+            "  [Sonnet 4.6] ████████░░ 83% | $3.16 | 5905m 0s new task? /clear to save 165.6k tokens\n"
+            "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents /rc active\n"
+        )
+        codex_signature = backend._extract_terminal_idle_signature(
+            "• SDD_OUTPUT: {\"output_type\":\"passed\"}\n"
+            "\n"
+            "─ Worked for 1m 26s ───────────────────────────────────────────────────────────────\n"
+            "\n"
+            "\n"
+            "› Run /review on my current changes\n"
+            "\n"
+            "  gpt-5.4 medium · ~/Projects/Finom/workdir/IOS-13093/runtime/role-workspaces/documentation-reviewer · Context 58% used · 5h 85% left · weekly 52% left\n"
+        )
+
+        self.assertIn("churned for 5m 3s", claude_signature or "")
+        self.assertIn("show me what changed", claude_signature or "")
+        self.assertIn("worked for 1m 26s", codex_signature or "")
+        self.assertIn("run /review", codex_signature or "")
+        self.assertEqual(
+            "✻ baked for 5s\n❯",
+            backend._extract_terminal_idle_signature("✻ Baked for 5s\n\n❯"),
+        )
+
+    def test_terminal_idle_signature_ignores_active_working_counter(self) -> None:
+        backend = TmuxSessionBackend(mode="recording")
+
+        signature = backend._extract_terminal_idle_signature(
+            "› Read ROUTED_WORK.md\n"
+            "\n"
+            "• Working (5m 21s • esc to interrupt)\n"
+            "\n"
+            "  gpt-5.4 medium · ~/repo · Context 29% used\n"
+        )
+
+        self.assertIsNone(signature)
+
+    def test_terminal_idle_signature_rejects_counter_separated_from_prompt_by_work_output(self) -> None:
+        backend = TmuxSessionBackend(mode="recording")
+
+        signature = backend._extract_terminal_idle_signature(
+            "✻ Cogitated for 45s\n"
+            "\n"
+            "❯ Read ROUTED_WORK.md in the current directory, read HYDRATION.json too if it exists\n"
+            "\n"
+            "⏺ The implementation is complete. Submitting:\n"
+            "\n"
+            "⏺ Bash(bash \"$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh\" --work-item-id 2485)\n"
+            "  ⎿  (No output)\n"
+            "\n"
+            "❯\n"
+        )
+
+        self.assertIsNone(signature)
+
+    def test_tmux_mode_pokes_stalled_role_after_stable_terminal_idle_tail(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:2] == ("list-panes", "-t"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, "0: [220x60]\n", "")
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        backend.tmux_stall_poke_threshold_seconds = 30.0
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50010:implementer",
+            session_id="sdd-IOS-50010",
+            backend_name="tmux",
+        )
+        snapshot = "Done.\n✻ Crunched for 1m 38s\n\n❯ <dispatch token to continue>\n"
+
+        self.assertIsNone(backend.maybe_poke_stalled_role(role, snapshot=snapshot))
+        backend.tmux_activity_updated_at[role.role_id] = time.monotonic() - 31.0
+        result = backend.maybe_poke_stalled_role(
+            role,
+            snapshot="Done.\n✻ Crunched for 1m 38s\n\n❯ <dispatch token to continue>\n",
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(".", result["poke_text"])
+        self.assertIn(("send-keys", "-t", role.role_id, ".", "Enter"), backend.calls)
+
     def test_tmux_mode_sets_explicit_session_size_with_env_override(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self) -> None:
@@ -215,7 +313,7 @@ class TmuxBackendTests(unittest.TestCase):
             backend.calls,
         )
 
-    def test_tmux_launcher_raises_when_input_is_not_visible_in_pane(self) -> None:
+    def test_tmux_launcher_records_unconfirmed_when_input_is_not_visible_in_pane(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self) -> None:
                 super().__init__(mode="tmux")
@@ -236,8 +334,10 @@ class TmuxBackendTests(unittest.TestCase):
         backend.tmux_interactive_driver_enabled[role.role_id] = True
         backend.tmux_role_ready[role.role_id] = True
 
-        with self.assertRaisesRegex(RuntimeError, "not visible in the runner window"):
-            backend.send_input(role, "Run deterministic verification for IOS-50009.")
+        backend.send_input(role, "Run deterministic verification for IOS-50009.")
+
+        submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
+        self.assertEqual("submitted_unconfirmed", submit_trace["delivery_state"])
 
     def test_tmux_launcher_materialized_trigger_includes_dispatch_token_from_hydration(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
@@ -368,6 +468,39 @@ class TmuxBackendTests(unittest.TestCase):
             backend.calls[:2],
         )
         self.assertIn(("capture-pane", "-p", "-S", "-40", "-t", role.role_id), backend.calls)
+
+    def test_tmux_launcher_visibility_miss_is_nonfatal_after_successful_send(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, "runner already consumed input", "")
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50009:requirements-reviewer",
+            session_id="sdd-IOS-50009",
+            backend_name="tmux",
+        )
+        backend.tmux_interactive_driver_enabled[role.role_id] = True
+        backend.tmux_role_ready[role.role_id] = True
+
+        backend.send_input(role, "Review the routed work.")
+
+        submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
+        self.assertEqual("submitted_unconfirmed", submit_trace["delivery_state"])
+        self.assertEqual(
+            [
+                ("send-keys", "-t", role.role_id, "Review the routed work.", ""),
+                ("send-keys", "-t", role.role_id, "", "Enter"),
+            ],
+            backend.calls[:2],
+        )
 
     def test_tmux_launcher_retries_submit_when_pane_stays_idle_after_first_enter(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):

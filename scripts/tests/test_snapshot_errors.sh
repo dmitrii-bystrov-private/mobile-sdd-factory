@@ -124,6 +124,7 @@ EOF
 # Write a mock acli. Modes:
 #   fail_parent          — exit 1 immediately (before any output)
 #   fail_subtask_IOS-102 — succeed for parent/IOS-101, fail for IOS-102
+#   fail_transition      — fail only the optional transition to In Progress
 #   succeed              — route all calls to fixture files
 write_mock_acli() {
   local mode="${1:-succeed}" fixtures="${MOCK_FIXTURES}"
@@ -142,6 +143,12 @@ case "\$_MODE" in
   fail_parent)
     echo "mock acli: parent retrieval failed" >&2
     exit 1
+    ;;
+  fail_transition)
+    if echo "\$*" | grep -q "workitem transition"; then
+      echo "mock acli: transition failed" >&2
+      exit 1
+    fi
     ;;
   fail_subtask_IOS-102)
     if [[ "\$_KEY" == "IOS-102" ]]; then
@@ -258,6 +265,54 @@ else
 fi
 assert_stderr_contains "parent failure: stderr mentions error" "ERROR" "$STDERR"
 assert_no_files_under "parent failure: no snapshot artifacts written" "$MOCK_WORKDIR"
+rm -f "$STDERR"
+rm -rf "$TMP_ROOT"
+
+# ---------------------------------------------------------------------------
+# Transition failure: snapshot still renders artifacts
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- transition failure ---"
+
+TMP_ROOT="$(mktemp -d)"
+MOCK_WORKDIR="$TMP_ROOT/workdir"
+MOCK_IOS_DIR="$TMP_ROOT/ios"
+MOCK_BIN="$TMP_ROOT/bin"
+MOCK_FIXTURES="$TMP_ROOT/fixtures"
+mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR" "$MOCK_BIN" "$MOCK_FIXTURES"
+
+jq '.fields.status.name = "To Do" | .fields.issuetype.name = "Bug"' "$FIXTURES/parent_core.json" > "$MOCK_FIXTURES/IOS-100_core.json"
+cp "$FIXTURES/parent_comments.json"        "$MOCK_FIXTURES/IOS-100_comments.json"
+cp "$FIXTURES/subtasks_list.json"          "$MOCK_FIXTURES/subtasks_list.json"
+cp "$FIXTURES/subtask_IOS-101_core.json"   "$MOCK_FIXTURES/IOS-101_core.json"
+cp "$FIXTURES/subtask_IOS-101_comments.json" "$MOCK_FIXTURES/IOS-101_comments.json"
+cp "$FIXTURES/subtask_IOS-102_core.json"   "$MOCK_FIXTURES/IOS-102_core.json"
+cp "$FIXTURES/subtask_IOS-102_comments.json" "$MOCK_FIXTURES/IOS-102_comments.json"
+
+write_mock_git
+write_mock_acli "fail_transition"
+
+STDERR="$(mktemp)"
+ACTUAL_EXIT=0
+PATH="$MOCK_BIN:$PATH" SDD_WORKDIR="$MOCK_WORKDIR" IOS_DIR="$MOCK_IOS_DIR" \
+  bash "$SNAPSHOT" IOS-100 > /dev/null 2>"$STDERR" || ACTUAL_EXIT=$?
+if [[ "$ACTUAL_EXIT" -eq 0 ]]; then
+  echo "  PASS  transition failure: snapshot continues"
+  (( PASS++ )) || true
+else
+  echo "  FAIL  transition failure: expected exit 0, got $ACTUAL_EXIT"
+  echo "        stderr: $(cat "$STDERR" 2>/dev/null || echo '(empty)')"
+  (( FAIL++ )) || true
+fi
+assert_stderr_contains "transition failure: warning logged" "could not transition IOS-100" "$STDERR"
+assert_stderr_contains "transition failure: acli output logged" "mock acli: transition failed" "$STDERR"
+
+WDIR="$MOCK_WORKDIR/IOS-100"
+assert_file_exists "transition failure: parent description.md written" "$WDIR/description.md"
+assert_file_exists "transition failure: parent comments.md written" "$WDIR/comments.md"
+assert_file_exists "transition failure: IOS-101 description.md written" "$WDIR/IOS-101/description.md"
+assert_file_exists "transition failure: IOS-102 description.md written" "$WDIR/IOS-102/description.md"
+
 rm -f "$STDERR"
 rm -rf "$TMP_ROOT"
 

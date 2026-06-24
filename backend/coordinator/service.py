@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
@@ -10,6 +10,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -70,10 +71,6 @@ _POST_CREATE_SUBTASK_SNAPSHOT_REFRESH_DELAY_SECONDS = 2.0
 _TASK_KEY_PATTERN = re.compile(r"^[A-Z]+-\d+$")
 _INLINE_TASK_KEY_PATTERN = re.compile(r"\b[A-Z]+-\d+\b")
 _EXPLICIT_URL_PATTERN = re.compile(r"https?://[^\s)>\]]+")
-_RUNTIME_ERROR_WORK_ITEM_PATTERN = re.compile(
-    r"(?:--)?work[-_ ]item(?:[-_ ]id)?\s+(\d+)\b",
-    re.IGNORECASE,
-)
 _STORY_PLANNING_WORK_TYPE_BY_STAGE = {
     "proposal_context_requested": "proposal_context",
     "requirements_requested": "requirements",
@@ -198,6 +195,11 @@ class CoordinatorService:
     post_create_subtask_snapshot_refresh_attempts: int = _POST_CREATE_SUBTASK_SNAPSHOT_REFRESH_ATTEMPTS
     post_create_subtask_snapshot_refresh_delay_seconds: float = (
         _POST_CREATE_SUBTASK_SNAPSHOT_REFRESH_DELAY_SECONDS
+    )
+    _dispatch_locks: dict[tuple[int, int, int, str], threading.Lock] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
     )
 
     def create_task_session(
@@ -2328,6 +2330,12 @@ class CoordinatorService:
             )
             protocol_violation = True
         if not chunks and file_result is None and not protocol_violation:
+            if role.runtime_handle is not None:
+                self._maybe_poke_stalled_runtime_role(
+                    session=session,
+                    role=role,
+                    runtime_role=runtime_role,
+                )
             return session, None, 0
 
         if chunks:
@@ -2394,6 +2402,12 @@ class CoordinatorService:
                 )
                 protocol_violation = True
             if not chunks and file_result is None:
+                if not protocol_violation:
+                    self._maybe_poke_stalled_runtime_role(
+                        session=session,
+                        role=role,
+                        runtime_role=runtime_role,
+                    )
                 if protocol_violation:
                     total_chunks += 1
                 continue
@@ -7897,6 +7911,14 @@ class CoordinatorService:
         if active_item is None:
             return None
         if payload_work_item_id is None:
+            replayed_error = self._replayed_runtime_error_after_accepted_result(
+                session=session,
+                role=role,
+                active_item=active_item,
+                payload=payload,
+            )
+            if replayed_error is not None:
+                return replayed_error
             return self._stale_runtime_error_subtask_mismatch(
                 session=session,
                 active_item=active_item,
@@ -7910,18 +7932,78 @@ class CoordinatorService:
             "payload_work_item_id": payload_work_item_id,
         }
 
+    def _replayed_runtime_error_after_accepted_result(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_item: WorkItem,
+        payload: dict,
+    ) -> dict[str, object] | None:
+        current_signature = self._runtime_error_content_signature(payload)
+        events = self.event_repository.list_for_session(session.id)
+        prior_error: Event | None = None
+        for event in reversed(events):
+            if event.event_type != "role_runtime_error_reported":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if self._runtime_error_content_signature(event.payload) != current_signature:
+                continue
+            prior_error = event
+            break
+        if prior_error is None:
+            return None
+
+        accepted_work_item_id: int | None = None
+        accepted_event_id: int | None = None
+        for event in events:
+            if event.id <= prior_error.id:
+                continue
+            if event.event_type not in {"role_result_ingress_accepted", "role_output_collected"}:
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            work_item_id = event.payload.get("work_item_id")
+            if not isinstance(work_item_id, int):
+                continue
+            if work_item_id == active_item.id:
+                continue
+            accepted_work_item_id = work_item_id
+            accepted_event_id = event.id
+
+        if accepted_work_item_id is None or accepted_event_id is None:
+            return None
+
+        has_current_dispatch = any(
+            event.id > accepted_event_id
+            and event.event_type == "role_input_dispatched"
+            and event.payload.get("role_name") == role.role_name
+            and event.payload.get("work_item_id") == active_item.id
+            for event in events
+        )
+        if not has_current_dispatch:
+            return None
+
+        return {
+            "reason": "replayed_runtime_error_after_accepted_result",
+            "expected_work_item_id": active_item.id,
+            "payload_work_item_id": None,
+            "replayed_event_id": prior_error.id,
+            "accepted_work_item_id": accepted_work_item_id,
+            "accepted_event_id": accepted_event_id,
+        }
+
+    def _runtime_error_content_signature(self, payload: dict) -> str:
+        content = dict(payload)
+        for key in ("role_name", "marker_type", "current_stage"):
+            content.pop(key, None)
+        return self._normalized_json_signature(content)
+
     def _runtime_error_payload_work_item_id(self, payload: dict) -> int | None:
         direct_value = payload.get("work_item_id")
         if isinstance(direct_value, int):
             return direct_value
-        for field in ("details", "summary"):
-            raw_value = payload.get(field)
-            if not isinstance(raw_value, str):
-                continue
-            match = _RUNTIME_ERROR_WORK_ITEM_PATTERN.search(raw_value)
-            if match is None:
-                continue
-            return int(match.group(1))
         return None
 
     def _stale_runtime_error_subtask_mismatch(
@@ -9542,40 +9624,7 @@ class CoordinatorService:
         session = self.session_repository.get_by_id(session_id)
         if session is None:
             raise IntakeError(f"Session {session_id} not found")
-        if session.status == SessionStatus.COMPLETED:
-            return {
-                "available": False,
-                "role_name": None,
-                "runtime_handle": None,
-                "content": "",
-            }
-
-        if session.status == SessionStatus.WAITING_FOR_OPERATOR and session.current_owner is None:
-            interactive_state = self.get_interactive_state_summary(session_id)
-            blocker_role_name = (
-                str(interactive_state.get("role_name")).strip()
-                if interactive_state.get("available") and interactive_state.get("role_name")
-                else ""
-            )
-            if blocker_role_name:
-                blocker_role = self.role_repository.get_by_name(session_id, blocker_role_name)
-                if (
-                    blocker_role is not None
-                    and blocker_role.runtime_handle is not None
-                    and blocker_role.status == RoleStatus.RUNNING
-                ):
-                    runtime_role = RuntimeRoleHandle(
-                        role_id=blocker_role.runtime_handle,
-                        session_id=self._runtime_session_handle_for_session(session).session_id,
-                        backend_name=blocker_role.runtime_backend,
-                    )
-                    content = self.session_backend.capture_output_snapshot(runtime_role)
-                    return {
-                        "available": True,
-                        "role_name": blocker_role.role_name,
-                        "runtime_handle": blocker_role.runtime_handle,
-                        "content": content,
-                    }
+        if session.status != SessionStatus.ACTIVE:
             return {
                 "available": False,
                 "role_name": None,
@@ -9618,12 +9667,77 @@ class CoordinatorService:
             backend_name=active_role.runtime_backend,
         )
         content = self.session_backend.capture_output_snapshot(runtime_role)
+        self._maybe_poke_stalled_runtime_role(
+            session=session,
+            role=active_role,
+            runtime_role=runtime_role,
+            snapshot=content,
+        )
         return {
             "available": True,
             "role_name": active_role.role_name,
             "runtime_handle": active_role.runtime_handle,
             "content": content,
         }
+
+    def _maybe_poke_stalled_runtime_role(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        runtime_role: RuntimeRoleHandle,
+        snapshot: str | None = None,
+    ) -> None:
+        if not hasattr(self.session_backend, "maybe_poke_stalled_role"):
+            return
+        if (
+            session.current_owner != role.role_name
+            and self._find_active_work_item_for_role(session.id, role.id) is None
+        ):
+            return
+        if self._has_pending_role_result_file(session=session, role=role):
+            return
+        try:
+            if snapshot is None:
+                snapshot = self.session_backend.capture_output_snapshot(runtime_role)
+            poke_result = self.session_backend.maybe_poke_stalled_role(
+                runtime_role,
+                snapshot=snapshot,
+            )
+        except Exception as exc:
+            self._append_event(
+                session_id=session.id,
+                event_type="runtime_role_stall_poke_failed",
+                producer_type="system",
+                payload={
+                    "role_name": role.role_name,
+                    "runtime_handle": role.runtime_handle,
+                    "error": str(exc),
+                },
+            )
+            return
+        if not poke_result:
+            return
+        self._append_event(
+            session_id=session.id,
+            event_type="runtime_role_stall_poked",
+            producer_type="system",
+            payload={
+                "role_name": role.role_name,
+                "runtime_handle": role.runtime_handle,
+                **poke_result,
+            },
+        )
+
+    def _has_pending_role_result_file(self, *, session: Session, role: Role) -> bool:
+        candidate_paths: list[Path] = []
+        if self.role_workspace_manager is not None:
+            candidate_paths.append(
+                self.role_workspace_manager.role_directory(session.task_key, role.role_name) / "RESULT.json"
+            )
+        if self.workdir_root is not None:
+            candidate_paths.append(self.workdir_root / session.task_key / "RESULT.json")
+        return any(path.is_file() for path in candidate_paths)
 
     def stop_runtime_role(self, session_id: int, role_name: str) -> tuple[Session, Event]:
         session = self.session_repository.get_by_id(session_id)
@@ -9862,6 +9976,7 @@ class CoordinatorService:
         for child in self.workdir_root.iterdir():
             if child.is_dir() and _TASK_KEY_PATTERN.match(child.name):
                 candidates.add(child.name)
+        candidates.update(self._runner_private_residue_task_keys())
 
         for task_key in sorted(candidates):
             jira_status = self._get_jira_status_name(task_key)
@@ -12226,6 +12341,30 @@ class CoordinatorService:
         *,
         force_redispatch: bool = False,
     ) -> Event:
+        lock_key = (session.id, role.id, work_item.id, stage_name)
+        lock = self._dispatch_locks.setdefault(lock_key, threading.Lock())
+        with lock:
+            return self._dispatch_role_work_unlocked(
+                session=session,
+                role=role,
+                work_item=work_item,
+                stage_name=stage_name,
+                instruction=instruction,
+                extra_hydration=extra_hydration,
+                force_redispatch=force_redispatch,
+            )
+
+    def _dispatch_role_work_unlocked(
+        self,
+        session: Session,
+        role: Role,
+        work_item: WorkItem,
+        stage_name: str,
+        instruction: str,
+        extra_hydration: dict[str, str | int | None] | None = None,
+        *,
+        force_redispatch: bool = False,
+    ) -> Event:
         merged_hydration = self._default_extra_hydration_for_dispatch(
             session,
             role,
@@ -12536,16 +12675,31 @@ class CoordinatorService:
                 removed.append(str(child))
 
         codex_sessions_root = Path.home() / ".codex" / "sessions"
+        codex_session_ids: set[str] = set()
         if codex_sessions_root.exists() and codex_sessions_root.is_dir():
             for session_file in codex_sessions_root.rglob("*.jsonl"):
-                if not self._codex_session_file_matches_task(session_file, task_key_lower):
+                codex_session_id = self._codex_session_id_if_matches_task(session_file, task_key_lower)
+                if codex_session_id is None:
                     continue
                 session_file.unlink(missing_ok=True)
                 removed.append(str(session_file))
+                if codex_session_id:
+                    codex_session_ids.add(codex_session_id)
                 self._prune_empty_parents(session_file.parent, stop_root=codex_sessions_root)
+        codex_snapshots_root = Path.home() / ".codex" / "shell_snapshots"
+        if codex_session_ids and codex_snapshots_root.exists() and codex_snapshots_root.is_dir():
+            for session_id in sorted(codex_session_ids):
+                for snapshot_file in codex_snapshots_root.glob(f"{session_id}.*"):
+                    if not snapshot_file.is_file():
+                        continue
+                    snapshot_file.unlink(missing_ok=True)
+                    removed.append(str(snapshot_file))
         return removed
 
     def _codex_session_file_matches_task(self, session_file: Path, task_key_lower: str) -> bool:
+        return self._codex_session_id_if_matches_task(session_file, task_key_lower) is not None
+
+    def _codex_session_id_if_matches_task(self, session_file: Path, task_key_lower: str) -> str | None:
         try:
             with session_file.open("r", encoding="utf-8") as handle:
                 for _ in range(20):
@@ -12561,14 +12715,46 @@ class CoordinatorService:
                         if isinstance(payload, dict)
                         else None
                     )
-                    if isinstance(cwd, str) and task_key_lower in cwd.lower():
-                        return True
-                    session_text = json.dumps(payload).lower()
-                    if task_key_lower in session_text:
-                        return True
+                    if not isinstance(cwd, str) or task_key_lower not in cwd.lower():
+                        continue
+                    session_id = payload.get("payload", {}).get("id")
+                    return str(session_id).strip() if session_id is not None else ""
         except OSError:
-            return False
-        return False
+            return None
+        return None
+
+    def _runner_private_residue_task_keys(self) -> set[str]:
+        task_keys: set[str] = set()
+        claude_projects_root = Path.home() / ".claude" / "projects"
+        if claude_projects_root.exists() and claude_projects_root.is_dir():
+            for child in claude_projects_root.iterdir():
+                task_keys.update(match.upper() for match in _INLINE_TASK_KEY_PATTERN.findall(child.name))
+
+        codex_sessions_root = Path.home() / ".codex" / "sessions"
+        if codex_sessions_root.exists() and codex_sessions_root.is_dir():
+            for session_file in codex_sessions_root.rglob("*.jsonl"):
+                try:
+                    with session_file.open("r", encoding="utf-8") as handle:
+                        for _ in range(20):
+                            line = handle.readline()
+                            if not line:
+                                break
+                            try:
+                                payload = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            cwd = (
+                                payload.get("payload", {}).get("cwd")
+                                if isinstance(payload, dict)
+                                else None
+                            )
+                            if not isinstance(cwd, str):
+                                continue
+                            task_keys.update(match.upper() for match in _INLINE_TASK_KEY_PATTERN.findall(cwd))
+                            break
+                except OSError:
+                    continue
+        return task_keys
 
     def _prune_empty_parents(self, path: Path, *, stop_root: Path) -> None:
         current = path

@@ -439,13 +439,15 @@ fi
 _parent_status_now="$(jq -r '.fields.status.name' "$PARENT_CORE_JSON")"
 if [[ "$PARENT_ISSUE_TYPE" == "Bug" && "$_parent_status_now" == "To Do" ]]; then
   echo "Transitioning $PARENT_KEY to In Progress..."
+  set +e
   _transition_output="$(acli jira workitem transition --key "$PARENT_KEY" --status "In Progress" 2>&1)"
   _transition_exit=$?
+  set -e
   if [[ $_transition_exit -eq 0 && "$_transition_output" != *"Failure"* && "$_transition_output" != *"Error"* ]]; then
     echo "  Transitioned to In Progress."
   else
     echo "  WARN: could not transition $PARENT_KEY to In Progress." >&2
-    echo "  $TRANSITION_OUTPUT" >&2
+    echo "  $_transition_output" >&2
   fi
 fi
 

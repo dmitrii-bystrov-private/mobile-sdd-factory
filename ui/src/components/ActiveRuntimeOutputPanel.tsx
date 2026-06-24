@@ -5,7 +5,9 @@ import { roleDisplayName } from "../roleDisplay";
 
 type ActiveRuntimeOutputPanelProps = {
   sessionId: number;
+  pollingEnabled: boolean;
   runtimeAvailable: boolean;
+  onActiveRoleNameChange?: (roleName: string | null) => void;
 };
 
 function trimPromptTail(content: string): string {
@@ -19,6 +21,8 @@ function trimPromptTail(content: string): string {
 }
 
 export function ActiveRuntimeOutputPanel({
+  onActiveRoleNameChange,
+  pollingEnabled,
   sessionId,
   runtimeAvailable,
 }: ActiveRuntimeOutputPanelProps): JSX.Element | null {
@@ -40,8 +44,9 @@ export function ActiveRuntimeOutputPanel({
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
     async function loadActiveOutput(showLoading = false): Promise<void> {
-      if (!runtimeAvailable) {
+      if (!runtimeAvailable || !pollingEnabled) {
         setActiveOutput(null);
+        onActiveRoleNameChange?.(null);
         return;
       }
       if (showLoading) {
@@ -57,9 +62,11 @@ export function ActiveRuntimeOutputPanel({
           roleName: response.role_name,
           content: response.content,
         });
+        onActiveRoleNameChange?.(response.available ? response.role_name : null);
       } catch {
         if (!cancelled) {
           setActiveOutput(null);
+          onActiveRoleNameChange?.(null);
         }
       } finally {
         if (!cancelled && showLoading) {
@@ -79,7 +86,7 @@ export function ActiveRuntimeOutputPanel({
         clearInterval(intervalId);
       }
     };
-  }, [runtimeAvailable, sessionId]);
+  }, [onActiveRoleNameChange, pollingEnabled, runtimeAvailable, sessionId]);
 
   useEffect(() => {
     if (!followOutput) {
@@ -104,7 +111,7 @@ export function ActiveRuntimeOutputPanel({
 
   const visibleContent = activeOutput ? trimPromptTail(activeOutput.content) : "";
 
-  if (!runtimeAvailable) {
+  if (!runtimeAvailable || !pollingEnabled) {
     return null;
   }
 

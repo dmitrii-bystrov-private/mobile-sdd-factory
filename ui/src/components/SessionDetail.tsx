@@ -155,41 +155,8 @@ export function SessionDetail({
   const sessionId = session?.id ?? null;
 
   useEffect(() => {
-    if (sessionId === null || bundle === null || bundle.runtimeStateSummary?.available !== true) {
-      setActiveRuntimeRoleName(null);
-      return;
-    }
-    const activeSessionId = sessionId;
-
-    let cancelled = false;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-
-    async function loadActiveRuntimeRole(): Promise<void> {
-      try {
-        const response = await apiClient.getActiveRuntimeOutput(activeSessionId);
-        if (cancelled) {
-          return;
-        }
-        setActiveRuntimeRoleName(response.available ? response.role_name : null);
-      } catch {
-        if (!cancelled) {
-          setActiveRuntimeRoleName(null);
-        }
-      }
-    }
-
-    void loadActiveRuntimeRole();
-    intervalId = setInterval(() => {
-      void loadActiveRuntimeRole();
-    }, 1000);
-
-    return () => {
-      cancelled = true;
-      if (intervalId !== null) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [bundle, sessionId]);
+    setActiveRuntimeRoleName(null);
+  }, [sessionId]);
 
   useEffect(() => {
     if (session === null || bundle === null) {
@@ -265,6 +232,10 @@ export function SessionDetail({
   const activeSession = session;
   const activeInteractiveStateSummary =
     session.status === "waiting_for_operator" ? bundle.interactiveStateSummary : null;
+  const activeRuntimePollingEnabled =
+    session.status === "active" &&
+    session.current_owner !== null &&
+    bundle.runtimeStateSummary?.available === true;
 
   const interactiveOwnerRoleName =
     activeInteractiveStateSummary?.available
@@ -631,6 +602,8 @@ export function SessionDetail({
       </section>
 
       <ActiveRuntimeOutputPanel
+        onActiveRoleNameChange={setActiveRuntimeRoleName}
+        pollingEnabled={activeRuntimePollingEnabled}
         runtimeAvailable={bundle.runtimeStateSummary?.available === true}
         sessionId={session.id}
       />

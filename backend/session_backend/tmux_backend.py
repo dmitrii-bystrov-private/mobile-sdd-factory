@@ -58,6 +58,10 @@ class TmuxSessionBackend(SessionBackend):
         self.tmux_confirmation_blocker_emitted: dict[str, bool] = defaultdict(bool)
         self.tmux_generic_blocker_emitted: dict[str, bool] = defaultdict(bool)
         self.tmux_pre_ready_unknown_chunks: dict[str, int] = defaultdict(int)
+        self.tmux_activity_signatures: dict[str, str] = {}
+        self.tmux_activity_updated_at: dict[str, float] = {}
+        self.tmux_last_stall_poke_at: dict[str, float] = {}
+        self.tmux_stall_poke_threshold_seconds = self._read_tmux_stall_poke_threshold()
         self._available = shutil.which("tmux") is not None
         self._effective_mode = self._resolve_mode(mode)
 
@@ -84,10 +88,25 @@ class TmuxSessionBackend(SessionBackend):
             return default
         return value if value > 0 else default
 
+    def _read_tmux_stall_poke_threshold(self) -> float:
+        raw = os.environ.get("SDD_FACTORY_TMUX_STALL_POKE_SECONDS", "").strip()
+        if not raw:
+            return 180.0
+        try:
+            value = float(raw)
+        except ValueError:
+            return 180.0
+        return max(0.0, value)
+
     _ANSI_CSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
     _ANSI_OSC_RE = re.compile(r"\x1B\][^\x07\x1B]*(?:\x07|\x1B\\\\)")
     _ANSI_ESC_RE = re.compile(r"\x1B[@-_]")
     _RUNNER_STATUS_SIGNAL_RE = re.compile(r"✻\s+\S+\s+for\s+\d+[smh](?:\s+\d+[smh])*")
+    _RUNNER_FINAL_DURATION_RE = re.compile(
+        r"(?:✻\s+\S+\s+for|Worked\s+for)\s+\d+[smh](?:\s+\d+[smh])*",
+        re.IGNORECASE,
+    )
+    _RUNNER_IDLE_PROMPT_RE = re.compile(r"^\s*[❯›»>](?:\s|$)")
     _SNAPSHOT_SCROLLBACK_LINES = 300
     _LAUNCHER_INPUT_VISIBILITY_RETRIES = 4
     _LAUNCHER_INPUT_VISIBILITY_DELAY_SECONDS = 0.12
@@ -103,6 +122,52 @@ class TmuxSessionBackend(SessionBackend):
         without_esc = self._ANSI_ESC_RE.sub(" ", without_csi)
         without_controls = without_esc.replace("\r", " ").replace("\n", " ")
         return re.sub(r"\s+", " ", without_controls).strip().lower()
+
+    def _strip_terminal_control_sequences(self, text: str) -> str:
+        without_osc = self._ANSI_OSC_RE.sub("", text)
+        without_csi = self._ANSI_CSI_RE.sub("", without_osc)
+        return self._ANSI_ESC_RE.sub("", without_csi)
+
+    def _is_runner_footer_line(self, line: str) -> bool:
+        stripped = line.strip()
+        if not stripped:
+            return True
+        if set(stripped) <= {"─", "-"}:
+            return True
+        normalized = self._normalize_terminal_text(stripped)
+        if "─" in stripped and re.search(r"\b[a-z0-9-]+:[A-Z]+-\d+\b", stripped):
+            return True
+        return (
+            "context " in normalized
+            or "weekly " in normalized
+            or "new task?" in normalized
+            or "auto mode" in normalized
+            or "/rc active" in normalized
+            or normalized.startswith("[")
+            or normalized.startswith("gpt-")
+        )
+
+    def _extract_terminal_idle_signature(self, text: str) -> str | None:
+        lines = self._strip_terminal_control_sequences(text).splitlines()
+        prompt_index: int | None = None
+        for index in range(len(lines) - 1, -1, -1):
+            if self._RUNNER_IDLE_PROMPT_RE.match(lines[index]):
+                prompt_index = index
+                break
+        if prompt_index is None:
+            return None
+
+        if any(not self._is_runner_footer_line(line) for line in lines[prompt_index + 1 :]):
+            return None
+
+        for index in range(prompt_index - 1, -1, -1):
+            line = lines[index].strip()
+            if not line or self._is_runner_footer_line(line):
+                continue
+            if self._RUNNER_FINAL_DURATION_RE.search(line):
+                return f"{self._normalize_terminal_text(line)}\n{self._normalize_terminal_text(lines[prompt_index])}"
+            return None
+        return None
 
     def _task_runtime_root(self, task_key: str) -> Path:
         return self.runtime_root / task_key / "runtime"
@@ -369,6 +434,66 @@ class TmuxSessionBackend(SessionBackend):
                     return retry.stdout
         return current
 
+    def maybe_poke_stalled_role(
+        self,
+        role: RuntimeRoleHandle,
+        *,
+        snapshot: str | None = None,
+    ) -> dict[str, object] | None:
+        if self._effective_mode != "tmux":
+            return None
+        if self.tmux_stall_poke_threshold_seconds <= 0:
+            return None
+        self._restore_tmux_role_metadata_if_needed(role)
+        if not self.is_role_alive(role):
+            return None
+
+        raw_snapshot = snapshot if snapshot is not None else self.capture_output_snapshot(role)
+        signature = self._extract_terminal_idle_signature(raw_snapshot)
+        if not signature:
+            self.tmux_activity_signatures.pop(role.role_id, None)
+            self.tmux_activity_updated_at.pop(role.role_id, None)
+            return None
+
+        now = time.monotonic()
+        previous_signature = self.tmux_activity_signatures.get(role.role_id)
+        if previous_signature != signature:
+            self.tmux_activity_signatures[role.role_id] = signature
+            self.tmux_activity_updated_at[role.role_id] = now
+            return None
+
+        updated_at = self.tmux_activity_updated_at.setdefault(role.role_id, now)
+        stalled_seconds = now - updated_at
+        if stalled_seconds < self.tmux_stall_poke_threshold_seconds:
+            return None
+
+        last_poke_at = self.tmux_last_stall_poke_at.get(role.role_id, 0.0)
+        if now - last_poke_at < self.tmux_stall_poke_threshold_seconds:
+            return None
+
+        socket_path = self._socket_path(role.session_id)
+        if self.tmux_interactive_driver_enabled.get(role.role_id, False):
+            self._write_tmux_launcher_input(
+                role.role_id,
+                socket_path,
+                role.role_id,
+                ".",
+                source="stall_poke",
+            )
+        else:
+            result = self._tmux(socket_path, "send-keys", "-t", role.role_id, ".", "Enter")
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr or result.stdout or "Failed to poke stalled tmux role")
+
+        self.tmux_last_stall_poke_at[role.role_id] = now
+        return {
+            "role_id": role.role_id,
+            "stalled_seconds": round(stalled_seconds, 3),
+            "threshold_seconds": self.tmux_stall_poke_threshold_seconds,
+            "terminal_idle_signature_length": len(signature),
+            "poke_text": ".",
+        }
+
     def _auto_advance_snapshot_bootstrap_prompts(self, role_id: str, text: str) -> None:
         normalized = self._normalize_terminal_text(text)
         runtime_handle = role_id
@@ -412,6 +537,9 @@ class TmuxSessionBackend(SessionBackend):
             self.tmux_confirmation_blocker_emitted.pop(role.role_id, None)
             self.tmux_generic_blocker_emitted.pop(role.role_id, None)
             self.tmux_pre_ready_unknown_chunks.pop(role.role_id, None)
+            self.tmux_activity_signatures.pop(role.role_id, None)
+            self.tmux_activity_updated_at.pop(role.role_id, None)
+            self.tmux_last_stall_poke_at.pop(role.role_id, None)
             self.last_captured_output.pop(role.role_id, None)
             self.role_working_directories.pop(role.role_id, None)
             self.session_role_ids.get(role.session_id, set()).discard(role.role_id)
@@ -432,6 +560,9 @@ class TmuxSessionBackend(SessionBackend):
                 self.tmux_confirmation_blocker_emitted.pop(role_id, None)
                 self.tmux_generic_blocker_emitted.pop(role_id, None)
                 self.tmux_pre_ready_unknown_chunks.pop(role_id, None)
+                self.tmux_activity_signatures.pop(role_id, None)
+                self.tmux_activity_updated_at.pop(role_id, None)
+                self.tmux_last_stall_poke_at.pop(role_id, None)
                 self.last_captured_output.pop(role_id, None)
                 self.role_working_directories.pop(role_id, None)
             self._tmux(socket_path, "kill-session", "-t", session.session_id)
@@ -695,17 +826,17 @@ class TmuxSessionBackend(SessionBackend):
         socket_path: Path,
         runtime_handle: str,
         payload_text: str,
-    ) -> None:
+    ) -> bool:
         expected = self._normalize_terminal_text(payload_text)
         if not expected:
-            return
+            return True
         for _ in range(self._LAUNCHER_INPUT_VISIBILITY_RETRIES):
             pane_text = self._capture_tmux_pane_text(socket_path, runtime_handle)
             normalized_pane = self._normalize_terminal_text(pane_text)
             if expected in normalized_pane:
-                return
+                return True
             time.sleep(self._LAUNCHER_INPUT_VISIBILITY_DELAY_SECONDS)
-        raise RuntimeError("tmux launcher input was not visible in the runner window after submit")
+        return False
 
     def _tmux_launcher_submit_needs_retry(
         self,
@@ -767,7 +898,10 @@ class TmuxSessionBackend(SessionBackend):
             result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "", "Enter")
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to submit tmux launcher input")
-            self._confirm_tmux_launcher_input_visible(socket_path, runtime_handle, payload_text)
+            input_visible = self._confirm_tmux_launcher_input_visible(socket_path, runtime_handle, payload_text)
+            if not input_visible:
+                submit_trace["delivery_state"] = "submitted_unconfirmed"
+                return
             if self._tmux_launcher_submit_needs_retry(socket_path, runtime_handle):
                 result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "", "Enter")
                 if result.returncode != 0:
@@ -785,7 +919,10 @@ class TmuxSessionBackend(SessionBackend):
         result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, submit_key)
         if result.returncode != 0:
             raise RuntimeError(result.stderr or result.stdout or "Failed to submit tmux launcher input")
-        self._confirm_tmux_launcher_input_visible(socket_path, runtime_handle, payload_text)
+        input_visible = self._confirm_tmux_launcher_input_visible(socket_path, runtime_handle, payload_text)
+        if not input_visible:
+            submit_trace["delivery_state"] = "submitted_unconfirmed"
+            return
         if self._tmux_launcher_submit_needs_retry(socket_path, runtime_handle):
             result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, submit_key)
             if result.returncode != 0:

@@ -495,6 +495,74 @@ class SessionCreationTests(unittest.TestCase):
             "expected codex session residue to be reported",
         )
 
+    def test_cleanup_task_removes_codex_shell_snapshots_for_matching_session(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30000CODEXSNAPSHOT",
+            workflow_profile="oneshot",
+            policy={},
+        )
+        fake_home = Path(self.temp_dir.name) / "home"
+        codex_session_dir = fake_home / ".codex" / "sessions" / "2026" / "05" / "17"
+        codex_session_dir.mkdir(parents=True, exist_ok=True)
+        session_id = "019ede66-1a8b-74c0-b684-8ecee29eba43"
+        session_file = codex_session_dir / "rollout-test.jsonl"
+        session_file.write_text(
+            json.dumps(
+                {
+                    "timestamp": "2026-05-17T20:00:00Z",
+                    "type": "session_meta",
+                    "payload": {
+                        "id": session_id,
+                        "cwd": f"/tmp/workdir/{session.task_key}/runtime/role-workspaces/implementer",
+                    },
+                }
+            )
+            + "\n"
+        )
+        snapshots_dir = fake_home / ".codex" / "shell_snapshots"
+        snapshots_dir.mkdir(parents=True, exist_ok=True)
+        matching_snapshot = snapshots_dir / f"{session_id}.123.sh"
+        other_snapshot = snapshots_dir / "019ede66-other.123.sh"
+        matching_snapshot.write_text("matching")
+        other_snapshot.write_text("other")
+
+        with patch("backend.coordinator.service.Path.home", return_value=fake_home):
+            result = self.coordinator.cleanup_task(session.id, cleanup_mode="soft")
+
+        self.assertTrue(result["cleaned"])
+        self.assertFalse(session_file.exists())
+        self.assertFalse(matching_snapshot.exists())
+        self.assertTrue(other_snapshot.exists())
+        self.assertTrue(
+            any(".codex/shell_snapshots" in path for path in result["removed_paths"]),
+            "expected codex shell snapshot residue to be reported",
+        )
+
+    def test_cleanup_closed_tasks_finds_orphan_runner_private_residue(self) -> None:
+        task_key = "IOS-39999"
+        fake_home = Path(self.temp_dir.name) / "home"
+        claude_dir = (
+            fake_home
+            / ".claude"
+            / "projects"
+            / f"-Users-d-bystrov-Projects-Finom-workdir-{task_key}-runtime-role-workspaces-implementer"
+        )
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        (claude_dir / "session.jsonl").write_text("{}\n")
+        self.jira_adapter.status_by_task[task_key] = "Resolved"
+
+        with patch("backend.coordinator.service.Path.home", return_value=fake_home):
+            results = self.coordinator.cleanup_closed_tasks()
+
+        matching_result = next(
+            item for item in results if item["task_key"] == task_key
+        )
+        self.assertFalse(claude_dir.exists())
+        self.assertTrue(
+            any(".claude/projects" in path for path in matching_result["removed_paths"]),
+            "expected orphan claude project residue to be reported",
+        )
+
     def test_collect_role_output_escalates_launcher_selection_blocker_to_operator(self) -> None:
         fixture = (
             Path(__file__).resolve().parent
@@ -8288,6 +8356,135 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("runtime emitted malformed SDD_ERROR marker", interactive["summary"])
         self.assertIn('"tuist"', interactive["details"])
 
+    def test_collect_role_output_escalates_error_that_mentions_prior_work_item(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRMENTIONSOLDWI")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        active_item = self.coordinator._find_active_work_item_for_role(session.id, implementer_role.id)
+        assert active_item is not None
+        prior_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="convention_review_correction",
+            title=f"Prior convention review corrections for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.COMPLETED,
+        )
+        payload = {
+            "summary": "Convention and requirements reviews conflict",
+            "details": (
+                f"The convention review work_item {prior_item.id} required removing the init side effect, "
+                "but the current requirements review requires adding it back."
+            ),
+            "needs_operator_input": True,
+        }
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            "SDD_ERROR: " + json.dumps(payload, sort_keys=True),
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        interactive = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual(WorkItemStatus.WAITING_FOR_OPERATOR, self.work_item_repository.get_by_id(active_item.id).status)
+        self.assertTrue(any(item.event_type == "role_runtime_error_reported" for item in events))
+        self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertFalse(any(item.event_type == "stale_role_output_ignored" for item in events))
+        self.assertEqual(payload["summary"], interactive["summary"])
+
+    def test_collect_role_output_ignores_replayed_error_after_accepted_result(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRREPLAY")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        old_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.owner_role_id == implementer_role.id and item.work_type == "implementation"
+        )
+        stale_payload = {
+            "summary": "Documentation-review finding is based on stale code",
+            "details": "The requested README change would document code that no longer exists.",
+            "needs_operator_input": True,
+        }
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_runtime_error_reported",
+            producer_type="role",
+            producer_id=IMPLEMENTER_ROLE,
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "marker_type": "error",
+                "current_stage": "documentation_review_correction_requested",
+                **stale_payload,
+            },
+        )
+        self.work_item_repository.update_status(old_item.id, WorkItemStatus.COMPLETED)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_result_ingress_accepted",
+            producer_type="coordinator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": old_item.id,
+                "current_stage": "documentation_review_correction_requested",
+                "output_type": "completed",
+            },
+        )
+        new_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="documentation_review_correction",
+            title=f"Documentation review corrections for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="documentation_review_correction_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            producer_type="coordinator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": new_item.id,
+                "stage_name": "documentation_review_correction_requested",
+            },
+        )
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            "SDD_ERROR: "
+            + json.dumps(stale_payload, sort_keys=True),
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        runtime_error_events = [item for item in events if item.event_type == "role_runtime_error_reported"]
+        stale_events = [item for item in events if item.event_type == "stale_role_output_ignored"]
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual(1, len(runtime_error_events))
+        self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertTrue(stale_events)
+        self.assertEqual(
+            "replayed_runtime_error_after_accepted_result",
+            stale_events[-1].payload.get("reason"),
+        )
+        self.assertEqual(new_item.id, stale_events[-1].payload.get("expected_work_item_id"))
+
     def test_collect_role_output_ignores_incomplete_error_marker_live_capture(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRLIVEPARTIAL")
         implementer_role = self.role_repository.get_by_name(session.id, "implementer")
@@ -11083,6 +11280,160 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(summary["available"])
         self.assertIsNone(summary["role_name"])
         self.assertEqual("", summary["content"])
+
+    def test_active_runtime_output_records_stalled_runtime_poke(self) -> None:
+        class StallPokeRecordingBackend(RecordingSessionBackend):
+            def maybe_poke_stalled_role(self, role, *, snapshot=None):
+                return {
+                    "role_id": role.role_id,
+                    "stalled_seconds": 181.0,
+                    "threshold_seconds": 180.0,
+                    "terminal_idle_signature_length": len(snapshot or ""),
+                    "poke_text": ".",
+                }
+
+        backend = StallPokeRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021STALLPOKE",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "disabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021STALLPOKE")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        assert implementer_role.runtime_handle is not None
+        backend.simulate_output(implementer_role.runtime_handle, "stable console snapshot")
+
+        summary = self.coordinator.get_active_runtime_output_summary(session.id)
+        events = self.event_repository.list_for_session(session.id)
+        poke_events = [event for event in events if event.event_type == "runtime_role_stall_poked"]
+
+        self.assertTrue(summary["available"])
+        self.assertEqual(1, len(poke_events))
+        self.assertEqual(IMPLEMENTER_ROLE, poke_events[0].payload["role_name"])
+        self.assertEqual(".", poke_events[0].payload["poke_text"])
+
+    def test_active_runtime_output_does_not_poke_when_result_file_is_pending(self) -> None:
+        class StallPokeRecordingBackend(RecordingSessionBackend):
+            def maybe_poke_stalled_role(self, role, *, snapshot=None):
+                return {
+                    "role_id": role.role_id,
+                    "stalled_seconds": 181.0,
+                    "threshold_seconds": 180.0,
+                    "terminal_idle_signature_length": len(snapshot or ""),
+                    "poke_text": ".",
+                }
+
+        backend = StallPokeRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021STALLRESULT",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "disabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021STALLRESULT")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        assert implementer_role.runtime_handle is not None
+        backend.simulate_output(implementer_role.runtime_handle, "stable console snapshot")
+        result_path = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            session.task_key,
+            IMPLEMENTER_ROLE,
+        ) / "RESULT.json"
+        result_path.write_text('{"output_type":"completed","payload":{"work_item_id":1}}', encoding="utf-8")
+
+        self.coordinator.get_active_runtime_output_summary(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertFalse(any(event.event_type == "runtime_role_stall_poked" for event in events))
+
+    def test_waiting_operator_output_does_not_poke_stalled_runtime(self) -> None:
+        class StallPokeRecordingBackend(RecordingSessionBackend):
+            def maybe_poke_stalled_role(self, role, *, snapshot=None):
+                return {
+                    "role_id": role.role_id,
+                    "stalled_seconds": 181.0,
+                    "threshold_seconds": 180.0,
+                    "terminal_idle_signature_length": len(snapshot or ""),
+                    "poke_text": ".",
+                }
+
+        backend = StallPokeRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021WAITNOPOKE",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "disabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021WAITNOPOKE")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        assert implementer_role.id is not None
+        assert implementer_role.runtime_handle is not None
+        work_item = self.coordinator._find_active_work_item_for_role(session.id, implementer_role.id)
+        assert work_item is not None
+        self.work_item_repository.update_status(work_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "current_stage": session.current_stage,
+                "summary": "Implementer needs a reply",
+                "details": "Waiting for operator.",
+                "needs_operator_input": True,
+            },
+        )
+        backend.simulate_output(implementer_role.runtime_handle, "stable console snapshot")
+
+        summary = self.coordinator.get_active_runtime_output_summary(session.id)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertFalse(summary["available"])
+        self.assertIsNone(summary["role_name"])
+        self.assertEqual("", summary["content"])
+        self.assertFalse(any(event.event_type == "runtime_role_stall_poked" for event in events))
+
+    def test_collect_role_output_checks_active_owner_for_stalled_runtime(self) -> None:
+        class StallPokeRecordingBackend(RecordingSessionBackend):
+            def maybe_poke_stalled_role(self, role, *, snapshot=None):
+                return {
+                    "role_id": role.role_id,
+                    "stalled_seconds": 181.0,
+                    "threshold_seconds": 180.0,
+                    "terminal_idle_signature_length": len(snapshot or ""),
+                    "poke_text": ".",
+                }
+
+        backend = StallPokeRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021COLLECTSTALL",
+            workflow_profile="oneshot",
+            policy={"boy_scout_policy": "disabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021COLLECTSTALL")
+
+        session, event, chunk_count = self.coordinator.collect_role_output(session.id, IMPLEMENTER_ROLE)
+        events = self.event_repository.list_for_session(session.id)
+        poke_events = [item for item in events if item.event_type == "runtime_role_stall_poked"]
+
+        self.assertIsNone(event)
+        self.assertEqual(0, chunk_count)
+        self.assertEqual(1, len(poke_events))
+        self.assertEqual(IMPLEMENTER_ROLE, poke_events[0].payload["role_name"])
 
     def test_boy_scout_manual_skip_is_rejected_when_policy_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
