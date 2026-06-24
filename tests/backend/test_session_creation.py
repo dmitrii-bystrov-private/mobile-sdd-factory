@@ -6113,6 +6113,62 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
         self.assertFalse(any(item.event_type == "stale_role_output_ignored" for item in events))
 
+    def test_submit_role_result_document_accepts_documentation_review_after_runtime_error_escalation(
+        self,
+    ) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004DOCREVIEWINGRESS",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004DOCREVIEWINGRESS")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.complete_doc_harvest(
+            session_id=session.id,
+            summary="No documentation update needed.",
+        )
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "documentation_review" and item.status == WorkItemStatus.ASSIGNED
+        )
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="documentation_review_requested",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+
+        updated_session, event, mapped_event_type, followup_event_type, ignored = (
+            self.coordinator.submit_role_result_document(
+                document={
+                    "output_type": "passed",
+                    "payload": {
+                        "work_item_id": active_item.id,
+                        "summary": "Documentation review passed.",
+                    },
+                }
+            )
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("documentation_review_passed", mapped_event_type)
+        self.assertIn(followup_event_type, {"mr_handoff_completed", "send_to_test_completed", "task_completed"})
+        self.assertFalse(ignored)
+        self.assertIn(updated_session.status.value, {"active", "completed"})
+        self.assertFalse(any(item.event_type == "stale_role_output_ignored" for item in events))
+
     def test_collect_role_output_escalates_verification_completed_result_without_explicit_result(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERNORESULT")
         self.coordinator.handle_operator_event(
@@ -8484,6 +8540,61 @@ class SessionCreationTests(unittest.TestCase):
             stale_events[-1].payload.get("reason"),
         )
         self.assertEqual(new_item.id, stale_events[-1].payload.get("expected_work_item_id"))
+
+    def test_collect_role_output_ignores_stale_runtime_error_token_for_previous_work_item(
+        self,
+    ) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRTOKEN")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        old_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.owner_role_id == implementer_role.id and item.work_type == "implementation"
+        )
+        self.work_item_repository.update_status(old_item.id, WorkItemStatus.COMPLETED)
+        new_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="documentation_review_correction",
+            title=f"Documentation review corrections for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="documentation_review_correction_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        payload = {
+            "summary": "Result submission helper did not complete successfully",
+            "details": "write-result.sh exited non-zero after interruption.",
+            "needs_operator_input": True,
+            "token": f"hv2-wi{old_item.id}",
+        }
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            "SDD_ERROR: " + json.dumps(payload, sort_keys=True),
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        stale_events = [item for item in events if item.event_type == "stale_role_output_ignored"]
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("active", updated_session.status.value)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(new_item.id).status)
+        self.assertFalse(any(item.event_type == "role_runtime_error_reported" for item in events))
+        self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertTrue(stale_events)
+        self.assertEqual("address_mismatch", stale_events[-1].payload.get("reason"))
+        self.assertEqual(new_item.id, stale_events[-1].payload.get("expected_work_item_id"))
+        self.assertEqual(old_item.id, stale_events[-1].payload.get("payload_work_item_id"))
 
     def test_collect_role_output_ignores_incomplete_error_marker_live_capture(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRLIVEPARTIAL")

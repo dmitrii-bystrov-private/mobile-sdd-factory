@@ -3138,6 +3138,16 @@ class CoordinatorService:
             and output_type in {"passed", "completed", "failed", "skipped_not_needed", "error"}
             and session.current_owner != DOCUMENTATION_REVIEWER_ROLE
         ):
+            payload_work_item_id = output_payload.get("work_item_id") if isinstance(output_payload, dict) else None
+            if isinstance(payload_work_item_id, int):
+                matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
+                if (
+                    matching_item is not None
+                    and matching_item.session_id == session.id
+                    and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+                    and matching_item.work_type == "documentation_review"
+                ):
+                    return False
             return True
         return False
 
@@ -8007,6 +8017,11 @@ class CoordinatorService:
         direct_value = payload.get("work_item_id")
         if isinstance(direct_value, int):
             return direct_value
+        token = payload.get("token")
+        if isinstance(token, str):
+            match = re.search(r"(?:^|-)wi(\d+)(?:$|[^0-9])", token)
+            if match is not None:
+                return int(match.group(1))
         return None
 
     def _stale_runtime_error_subtask_mismatch(
