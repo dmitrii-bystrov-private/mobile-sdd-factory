@@ -11589,6 +11589,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("active", updated_session.status.value)
         self.assertEqual("documentation_review_requested", updated_session.current_stage)
         self.assertEqual("doc_harvest_completed", event.event_type)
+        self.assertEqual("active", event.payload.get("status"))
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
         outcome_path = Path(self.temp_dir.name) / "IOS-30021F" / "spec" / "doc-harvest-outcome.json"
         self.assertTrue(outcome_path.exists())
