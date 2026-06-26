@@ -10,6 +10,7 @@ from backend.api.schemas import EventResponse, EventsResponse, InjectEventReques
 from backend.api.sse import sse_event_generator
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
+from backend.state.event_repository import DEFAULT_UI_EXCLUDED_EVENT_TYPES
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -21,9 +22,17 @@ def get_dependencies(request: Request) -> AppDependencies:
 @router.get("", response_model=EventsResponse)
 def list_events(
     session_id: int = Query(...),
+    include_telemetry: bool = Query(default=True),
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> EventsResponse:
-    events = dependencies.event_repository.list_for_session(session_id)
+    events = (
+        dependencies.event_repository.list_for_session(session_id)
+        if include_telemetry
+        else dependencies.event_repository.list_for_session_excluding(
+            session_id,
+            DEFAULT_UI_EXCLUDED_EVENT_TYPES,
+        )
+    )
     return EventsResponse(
         items=[
             EventResponse(

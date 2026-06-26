@@ -61,6 +61,47 @@ class TmuxBackendTests(unittest.TestCase):
             self.assertEqual(["first line", "second line"], [chunk.text for chunk in chunks])
             self.assertEqual([], backend.read_output(role))
 
+    def test_tmux_capture_delta_uses_overlap_when_scrollback_window_shifts(self) -> None:
+        previous = "line 1\nSDD_ERROR: {\"summary\":\"needs operator\"}\nline 3\n"
+        current = "line 3\nline 4\n"
+
+        delta = TmuxSessionBackend._tmux_capture_delta(previous=previous, current=current)
+
+        self.assertEqual("line 4\n", delta)
+
+    def test_tmux_mode_read_output_captures_scrollback_window(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(
+                        ["tmux", *args],
+                        0,
+                        "older scrollback\nSDD_ERROR: {\"summary\":\"needs operator\",\"needs_operator_input\":true}\n",
+                        "",
+                    )
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50011:implementer",
+            session_id="sdd-IOS-50011",
+            backend_name="tmux",
+        )
+
+        chunks = backend.read_output(role)
+
+        self.assertEqual(1, len(chunks))
+        self.assertIn("SDD_ERROR", chunks[0].text)
+        self.assertIn(
+            ("capture-pane", "-p", "-S", "-2000", "-t", role.role_id),
+            backend.calls,
+        )
+
     def test_terminal_idle_signature_detects_final_duration_followed_by_prompt(self) -> None:
         backend = TmuxSessionBackend(mode="recording")
 
@@ -107,6 +148,23 @@ class TmuxBackendTests(unittest.TestCase):
         )
 
         self.assertIsNone(signature)
+
+    def test_terminal_idle_signature_detects_model_capacity_tail(self) -> None:
+        backend = TmuxSessionBackend(mode="recording")
+
+        signature = backend._extract_terminal_idle_signature(
+            "› Read ROUTED_WORK.md in the current directory\n"
+            "\n"
+            "⚠ Selected model is at capacity. Please try a different model.\n"
+            "\n"
+            "\n"
+            "› Find and fix a bug in @filename\n"
+            "\n"
+            "  gpt-5.4 medium · ~/repo · Context 76% used · weekly 88% left\n"
+        )
+
+        self.assertIn("selected model is at capacity", signature or "")
+        self.assertIn("find and fix a bug", signature or "")
 
     def test_terminal_idle_signature_rejects_counter_separated_from_prompt_by_work_output(self) -> None:
         backend = TmuxSessionBackend(mode="recording")
@@ -938,6 +996,64 @@ class TmuxBackendTests(unittest.TestCase):
 
             backend.stop_session(session)
 
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_tmux_mode_materializes_multiline_buffered_work_before_launcher_ready(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            backend = TmuxSessionBackend(
+                mode="tmux",
+                runtime_root=runtime_root,
+            )
+            session = backend.create_task_session("IOS-50008ROUTEDBUFFER")
+            fixture = (
+                Path(__file__).resolve().parent
+                / "fixtures"
+                / "interactive_unknown_pre_ready_fixture.py"
+            )
+            role_workspace = (
+                runtime_root
+                / "IOS-50008ROUTEDBUFFER"
+                / "runtime"
+                / "role-workspaces"
+                / "acceptance-criteria-worker"
+            )
+            role_workspace.mkdir(parents=True, exist_ok=True)
+            launcher_script = role_workspace / "launch-role.sh"
+            launcher_script.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env bash",
+                        "set -euo pipefail",
+                        "export SDD_FACTORY_ROLE_RUNNER='codex'",
+                        f"exec python3 -u {fixture}",
+                        "",
+                    ]
+                )
+            )
+            launcher_script.chmod(0o755)
+            role = backend.spawn_role(
+                session,
+                "acceptance-criteria-worker",
+                start_directory=role_workspace,
+                launch_command=[str(launcher_script)],
+            )
+
+            routed_prompt = "Read AGENTS.md once.\n\nCurrent routed work:\nPrepare acceptance criteria."
+            backend.send_input(role, routed_prompt)
+
+            routed_path = role_workspace / "ROUTED_WORK.md"
+            submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
+
+            self.assertTrue(routed_path.is_file())
+            self.assertEqual(routed_prompt, routed_path.read_text())
+            self.assertEqual("buffered_pre_ready", submit_trace["delivery_state"])
+            self.assertEqual("buffered_pre_ready", submit_trace["source"])
+            self.assertEqual("codex", submit_trace["runner"])
+            self.assertEqual([submit_trace["payload_text"]], backend.tmux_buffered_inputs[role.role_id])
+            self.assertIn("Read ROUTED_WORK.md", submit_trace["payload_text"])
+
+            backend.stop_session(session)
+
     def test_ansi_normalized_prompt_detection_helpers(self) -> None:
         backend = TmuxSessionBackend(mode="recording")
         trust = backend._normalize_terminal_text(
@@ -977,6 +1093,66 @@ class TmuxBackendTests(unittest.TestCase):
         self.assertFalse(backend._contains_interactive_input_prompt(trust))
         self.assertFalse(backend._contains_interactive_input_prompt(selection))
         self.assertFalse(backend._contains_interactive_input_prompt(confirmation))
+        self.assertTrue(
+            backend._contains_model_capacity_blocker(
+                backend._normalize_terminal_text(
+                    "⚠ Selected model is at capacity. Please try a different model."
+                )
+            )
+        )
+
+    def test_tmux_mode_pokes_model_capacity_tail_after_threshold(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:2] == ("list-panes", "-t"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, "0: [220x60]\n", "")
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        backend.tmux_stall_poke_threshold_seconds = 30.0
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50012:convention-reviewer",
+            session_id="sdd-IOS-50012",
+            backend_name="tmux",
+        )
+        snapshot = (
+            "› Read ROUTED_WORK.md in the current directory\n"
+            "\n"
+            "⚠ Selected model is at capacity. Please try a different model.\n"
+            "\n"
+            "› Find and fix a bug in @filename\n"
+            "\n"
+            "  gpt-5.4 medium · ~/repo · Context 76% used · weekly 88% left\n"
+        )
+
+        self.assertIsNone(backend.maybe_poke_stalled_role(role, snapshot=snapshot))
+        backend.tmux_activity_updated_at[role.role_id] = time.monotonic() - 31.0
+        result = backend.maybe_poke_stalled_role(role, snapshot=snapshot)
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(".", result["poke_text"])
+        self.assertIn(("send-keys", "-t", role.role_id, ".", "Enter"), backend.calls)
+
+    def test_interactive_driver_does_not_escalate_model_capacity_blocker(self) -> None:
+        backend = TmuxSessionBackend(mode="recording")
+        role_id = "sdd-IOS-50012:convention-reviewer"
+        backend.tmux_interactive_driver_enabled[role_id] = True
+        backend.tmux_role_ready[role_id] = True
+
+        markers = backend._handle_tmux_interactive_driver_output(
+            role_id,
+            "› Read ROUTED_WORK.md\n"
+            "\n"
+            "⚠ Selected model is at capacity. Please try a different model.\n",
+        )
+
+        self.assertEqual([], markers)
 
     def test_mcp_availability_blocker_details_extracts_servers(self) -> None:
         backend = TmuxSessionBackend(mode="recording")

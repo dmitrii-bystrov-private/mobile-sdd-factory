@@ -3,6 +3,7 @@ import tempfile
 import unittest
 
 from backend.models.enums import DispatchStatus, SessionStatus
+from backend.state.artifact_repository import ArtifactRepository
 from backend.state.db import Database
 from backend.state.dispatch_repository import DispatchRepository
 from backend.state.event_repository import EventRepository
@@ -92,6 +93,128 @@ class RepositoryTests(unittest.TestCase):
         events = event_repository.list_for_session(session.id)
 
         self.assertEqual(["task_started", "verification_requested"], [event.event_type for event in events])
+
+    def test_event_repository_can_exclude_dashboard_telemetry(self) -> None:
+        session_repository = SessionRepository(self.database)
+        event_repository = EventRepository(self.database)
+        session = session_repository.create(
+            task_key="IOS-20002T",
+            current_stage="intake",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+
+        event_repository.append(session.id, "task_started", "coordinator", {"task_key": "IOS-20002T"})
+        event_repository.append(session.id, "session_output_polled", "coordinator", {"chunk_count": 1})
+        event_repository.append(session.id, "coordinator_loop_ran", "coordinator", {"chunk_count": 1})
+
+        events = event_repository.list_for_session_excluding(
+            session.id,
+            {"coordinator_loop_ran", "session_output_polled"},
+        )
+
+        self.assertEqual(["task_started"], [event.event_type for event in events])
+
+    def test_event_repository_returns_latest_event_by_type(self) -> None:
+        session_repository = SessionRepository(self.database)
+        event_repository = EventRepository(self.database)
+        session = session_repository.create(
+            task_key="IOS-20002L",
+            current_stage="intake",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+
+        first = event_repository.append(session.id, "runtime_role_auto_recovery_attempted", "coordinator", {"n": 1})
+        event_repository.append(session.id, "task_started", "coordinator", {"task_key": "IOS-20002L"})
+        second = event_repository.append(session.id, "runtime_role_auto_recovery_attempted", "coordinator", {"n": 2})
+
+        latest = event_repository.latest_for_session_by_type(
+            session.id,
+            {"runtime_role_auto_recovery_attempted"},
+        )
+
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(second.id, latest.id)
+        self.assertNotEqual(first.id, latest.id)
+        self.assertEqual({"n": 2}, latest.payload)
+
+    def test_event_repository_returns_latest_event_by_type_and_payload(self) -> None:
+        session_repository = SessionRepository(self.database)
+        event_repository = EventRepository(self.database)
+        session = session_repository.create(
+            task_key="IOS-20002P",
+            current_stage="intake",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+
+        event_repository.append(
+            session.id,
+            "operator_runtime_input_sent",
+            "operator",
+            {"role_name": "implementer", "work_item_id": 1},
+        )
+        expected = event_repository.append(
+            session.id,
+            "operator_runtime_input_sent",
+            "operator",
+            {"role_name": "reviewer", "work_item_id": 2},
+        )
+        event_repository.append(
+            session.id,
+            "operator_runtime_input_sent",
+            "operator",
+            {"role_name": "implementer", "work_item_id": 3},
+        )
+
+        latest = event_repository.latest_for_session_by_type_and_payload(
+            session_id=session.id,
+            event_type="operator_runtime_input_sent",
+            payload_matches={"role_name": "reviewer", "work_item_id": 2},
+        )
+
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(expected.id, latest.id)
+
+    def test_artifact_repository_can_exclude_runtime_telemetry(self) -> None:
+        session_repository = SessionRepository(self.database)
+        artifact_repository = ArtifactRepository(self.database)
+        session = session_repository.create(
+            task_key="IOS-20002A",
+            current_stage="intake",
+            workflow_profile="oneshot",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "enabled",
+                "doc_harvest_policy": "enabled",
+            },
+        )
+
+        artifact_repository.create(session.id, "runtime", "runtime_output", "/tmp/runtime.log", {})
+        artifact_repository.create(session.id, "runtime", "runtime_progress_json", "/tmp/progress.json", {})
+        artifact_repository.create(session.id, "review", "convention_review_report_markdown", "/tmp/review.md", {})
+
+        artifacts = artifact_repository.list_for_session_excluding(
+            session.id,
+            {"runtime_output", "runtime_progress_json"},
+        )
+
+        self.assertEqual(["convention_review_report_markdown"], [artifact.artifact_type for artifact in artifacts])
 
     def test_work_item_repository_lists_items_in_priority_order(self) -> None:
         session_repository = SessionRepository(self.database)

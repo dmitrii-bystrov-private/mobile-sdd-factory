@@ -2398,9 +2398,9 @@ class SessionApiTests(unittest.TestCase):
         )
 
         self.assertTrue(response.polled)
-        self.assertEqual(3, response.role_count)
+        self.assertEqual(2, response.role_count)
         self.assertEqual(2, response.chunk_count)
-        self.assertEqual("session_output_polled", response.event_type)
+        self.assertIsNone(response.event_type)
         runtime_outputs = [a for a in artifacts_response.items if a.artifact_type == "runtime_output"]
         self.assertEqual(2, len(runtime_outputs))
 
@@ -2429,7 +2429,7 @@ class SessionApiTests(unittest.TestCase):
         )
 
         self.assertFalse(response.polled)
-        self.assertEqual(3, response.role_count)
+        self.assertEqual(2, response.role_count)
         self.assertEqual(0, response.chunk_count)
         self.assertIsNone(response.event_type)
         self.assertEqual("implementation_requested", response.session.current_stage)
@@ -2474,7 +2474,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(response.ran)
         self.assertEqual(2, response.session_count)
         self.assertEqual(2, response.chunk_count)
-        self.assertEqual("coordinator_loop_ran", response.event_type)
+        self.assertIsNone(response.event_type)
 
     def test_loop_runner_routes_control_background_loop(self) -> None:
         start_response = start_loop(dependencies=self.dependencies)

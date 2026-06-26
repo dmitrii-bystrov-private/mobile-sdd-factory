@@ -9,6 +9,13 @@ from backend.state.db import Database
 from backend.state.models import event_from_row
 
 
+DEFAULT_UI_EXCLUDED_EVENT_TYPES = {
+    "coordinator_loop_ran",
+    "runtime_terminal_output_echo_ignored",
+    "session_output_polled",
+}
+
+
 class EventRepository:
     def __init__(self, db: Database) -> None:
         self.db = db
@@ -52,6 +59,78 @@ class EventRepository:
                 (session_id,),
             ).fetchall()
         return [event_from_row(row) for row in rows]
+
+    def list_for_session_excluding(
+        self,
+        session_id: int,
+        excluded_event_types: set[str],
+    ) -> list[Event]:
+        if not excluded_event_types:
+            return self.list_for_session(session_id)
+        placeholders = ",".join("?" for _ in excluded_event_types)
+        with self.db.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT *
+                FROM events
+                WHERE session_id = ?
+                  AND event_type NOT IN ({placeholders})
+                ORDER BY id ASC
+                """,
+                (session_id, *sorted(excluded_event_types)),
+            ).fetchall()
+        return [event_from_row(row) for row in rows]
+
+    def latest_for_session_by_type(
+        self,
+        session_id: int,
+        event_types: set[str],
+    ) -> Event | None:
+        if not event_types:
+            return None
+        placeholders = ",".join("?" for _ in event_types)
+        with self.db.connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT *
+                FROM events
+                WHERE session_id = ?
+                  AND event_type IN ({placeholders})
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (session_id, *sorted(event_types)),
+            ).fetchone()
+        if row is None:
+            return None
+        return event_from_row(row)
+
+    def latest_for_session_by_type_and_payload(
+        self,
+        *,
+        session_id: int,
+        event_type: str,
+        payload_matches: dict[str, object],
+    ) -> Event | None:
+        predicates = ["session_id = ?", "event_type = ?"]
+        params: list[object] = [session_id, event_type]
+        for key in sorted(payload_matches):
+            predicates.append(f"json_extract(payload_json, '$.{key}') = ?")
+            params.append(payload_matches[key])
+        with self.db.connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT *
+                FROM events
+                WHERE {" AND ".join(predicates)}
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                tuple(params),
+            ).fetchone()
+        if row is None:
+            return None
+        return event_from_row(row)
 
     def list_after_id(
         self,

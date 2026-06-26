@@ -27,6 +27,7 @@ class TmuxSessionBackend(SessionBackend):
     _LAUNCHER_RUNNER_RE = re.compile(r"export\s+SDD_FACTORY_ROLE_RUNNER=(.+)")
     _DEFAULT_TMUX_WIDTH = 220
     _DEFAULT_TMUX_HEIGHT = 60
+    _DEFAULT_OUTPUT_SCROLLBACK_LINES = 2000
 
     def __init__(
         self,
@@ -39,6 +40,10 @@ class TmuxSessionBackend(SessionBackend):
         self.socket_root = socket_root or (self.runtime_root / ".tmux-sockets")
         self.tmux_width = self._read_tmux_dimension("SDD_FACTORY_TMUX_WIDTH", self._DEFAULT_TMUX_WIDTH)
         self.tmux_height = self._read_tmux_dimension("SDD_FACTORY_TMUX_HEIGHT", self._DEFAULT_TMUX_HEIGHT)
+        self.tmux_output_scrollback_lines = self._read_tmux_dimension(
+            "SDD_FACTORY_TMUX_OUTPUT_SCROLLBACK_LINES",
+            self._DEFAULT_OUTPUT_SCROLLBACK_LINES,
+        )
         self.sent_inputs: dict[str, list[str]] = defaultdict(list)
         self.pending_outputs: dict[str, list[str]] = defaultdict(list)
         self.last_captured_output: dict[str, str] = {}
@@ -165,6 +170,8 @@ class TmuxSessionBackend(SessionBackend):
             if not line or self._is_runner_footer_line(line):
                 continue
             if self._RUNNER_FINAL_DURATION_RE.search(line):
+                return f"{self._normalize_terminal_text(line)}\n{self._normalize_terminal_text(lines[prompt_index])}"
+            if self._contains_model_capacity_blocker(self._normalize_terminal_text(line)):
                 return f"{self._normalize_terminal_text(line)}\n{self._normalize_terminal_text(lines[prompt_index])}"
             return None
         return None
@@ -337,7 +344,23 @@ class TmuxSessionBackend(SessionBackend):
         if self._effective_mode == "tmux":
             self._restore_tmux_role_metadata_if_needed(role)
             if self.tmux_interactive_driver_enabled.get(role.role_id, False) and not self.tmux_role_ready.get(role.role_id, True):
-                self.tmux_buffered_inputs[role.role_id].append(text)
+                payload_text = text
+                if "\n" in text:
+                    payload_text = self._materialize_routed_input(role.role_id, text)
+                payload_text = self._normalize_launcher_input_text(payload_text)
+                self.tmux_submit_traces[role.role_id].append(
+                    {
+                        "source": "buffered_pre_ready",
+                        "original_text": text,
+                        "payload_text": payload_text,
+                        "submit_key": "Enter",
+                        "submit_style": self._launcher_submit_style(role.role_id, "buffered"),
+                        "runner": self.tmux_launcher_runners.get(role.role_id, ""),
+                        "retry_count": "0",
+                        "delivery_state": "buffered_pre_ready",
+                    }
+                )
+                self.tmux_buffered_inputs[role.role_id].append(payload_text)
                 return
             socket_path = self._socket_path(role.session_id)
             if self.tmux_interactive_driver_enabled.get(role.role_id, False):
@@ -359,7 +382,15 @@ class TmuxSessionBackend(SessionBackend):
 
         self._restore_tmux_role_metadata_if_needed(role)
         socket_path = self._socket_path(role.session_id)
-        result = self._tmux(socket_path, "capture-pane", "-p", "-t", role.role_id)
+        result = self._tmux(
+            socket_path,
+            "capture-pane",
+            "-p",
+            "-S",
+            f"-{self.tmux_output_scrollback_lines}",
+            "-t",
+            role.role_id,
+        )
         if result.returncode != 0:
             error_text = (result.stderr or result.stdout or "").lower()
             if "can't find window" in error_text or "can't find pane" in error_text:
@@ -377,10 +408,7 @@ class TmuxSessionBackend(SessionBackend):
                 synthetic_markers = self._handle_tmux_interactive_driver_output(role.role_id, current)
                 return [RuntimeOutputChunk(role_id=role.role_id, text=text) for text in synthetic_markers]
             return []
-        if previous and current.startswith(previous):
-            delta = current[len(previous):]
-        else:
-            delta = current
+        delta = self._tmux_capture_delta(previous=previous, current=current)
         if not delta:
             return []
         synthetic_markers = self._handle_tmux_interactive_driver_output(role.role_id, delta)
@@ -388,6 +416,18 @@ class TmuxSessionBackend(SessionBackend):
         for marker_text in synthetic_markers:
             chunks.append(RuntimeOutputChunk(role_id=role.role_id, text=marker_text))
         return chunks
+
+    @staticmethod
+    def _tmux_capture_delta(*, previous: str, current: str) -> str:
+        if not previous:
+            return current
+        if current.startswith(previous):
+            return current[len(previous):]
+        max_overlap = min(len(previous), len(current))
+        for overlap in range(max_overlap, 0, -1):
+            if previous.endswith(current[:overlap]):
+                return current[overlap:]
+        return current
 
     def capture_output_snapshot(self, role: RuntimeRoleHandle) -> str:
         if self._effective_mode == "recording":
@@ -723,6 +763,12 @@ class TmuxSessionBackend(SessionBackend):
             and "trust this folder" not in normalized_text
         )
 
+    def _contains_model_capacity_blocker(self, normalized_text: str) -> bool:
+        return (
+            "selected model is at capacity" in normalized_text
+            and "try a different model" in normalized_text
+        )
+
     def _contains_runner_status_signal(self, normalized_text: str) -> bool:
         return self._RUNNER_STATUS_SIGNAL_RE.search(normalized_text) is not None
 
@@ -853,6 +899,7 @@ class TmuxSessionBackend(SessionBackend):
                 or self._contains_runner_working_signal(normalized_pane)
                 or self._contains_generic_selection_blocker(normalized_pane)
                 or self._contains_generic_confirmation_blocker(normalized_pane)
+                or self._contains_model_capacity_blocker(normalized_pane)
                 or self._contains_workspace_trust_prompt(normalized_pane)
                 or self._contains_update_prompt(normalized_pane)
             ):

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from backend.api.schemas import ArtifactDetailResponse, ArtifactResponse, ArtifactsResponse
 from backend.dependencies import AppDependencies
+from backend.state.artifact_repository import DEFAULT_UI_EXCLUDED_ARTIFACT_TYPES
 
 router = APIRouter(prefix="/artifacts", tags=["artifacts"])
 
@@ -19,9 +20,17 @@ def get_dependencies(request: Request) -> AppDependencies:
 @router.get("", response_model=ArtifactsResponse)
 def list_artifacts(
     session_id: int = Query(...),
+    include_telemetry: bool = Query(default=True),
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> ArtifactsResponse:
-    artifacts = dependencies.artifact_repository.list_for_session(session_id)
+    artifacts = (
+        dependencies.artifact_repository.list_for_session(session_id)
+        if include_telemetry
+        else dependencies.artifact_repository.list_for_session_excluding(
+            session_id,
+            DEFAULT_UI_EXCLUDED_ARTIFACT_TYPES,
+        )
+    )
     return ArtifactsResponse(
         items=[
             ArtifactResponse(

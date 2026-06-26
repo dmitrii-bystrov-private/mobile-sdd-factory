@@ -11,7 +11,7 @@ from backend import session_policy as session_policy_module
 from backend.coordinator.intake import IntakeError
 from backend.coordinator.service import CoordinatorService
 from backend.coordinator.subtasks import SnapshotSubtask
-from backend.models.enums import RoleStatus, SessionStatus
+from backend.models.enums import DispatchStatus, RoleStatus, SessionStatus
 from backend.models.work_item import WorkItemStatus
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
@@ -257,9 +257,10 @@ class AutoRecoveryRecordingBackend(RecordingSessionBackend):
 
 
 class DispatchTraceRecordingBackend(RecordingSessionBackend):
-    def __init__(self, *, fail_send: bool = False) -> None:
+    def __init__(self, *, fail_send: bool = False, delivery_state: str = "retried") -> None:
         super().__init__()
         self.fail_send = fail_send
+        self.delivery_state = delivery_state
         self.tmux_submit_traces: dict[str, list[dict[str, str]]] = {}
 
     def send_input(self, role: RuntimeRoleHandle, text: str) -> None:
@@ -272,8 +273,8 @@ class DispatchTraceRecordingBackend(RecordingSessionBackend):
                 "submit_style": "plain-enter-two-call",
                 "submit_key": "Enter",
                 "runner": "codex",
-                "retry_count": "1",
-                "delivery_state": "retried",
+                "retry_count": "1" if self.delivery_state == "retried" else "0",
+                "delivery_state": self.delivery_state,
             }
         )
 
@@ -7598,7 +7599,7 @@ class SessionCreationTests(unittest.TestCase):
         artifacts = self.artifact_repository.list_for_session(session.id)
 
         self.assertEqual(session.id, updated_session.id)
-        self.assertEqual("session_output_polled", event.event_type)
+        self.assertIsNone(event)
         self.assertEqual(3, role_count)
         self.assertEqual(2, chunk_count)
         self.assertEqual(
@@ -7633,7 +7634,7 @@ class SessionCreationTests(unittest.TestCase):
         artifacts = self.artifact_repository.list_for_session(session.id)
 
         self.assertEqual(session.id, updated_session.id)
-        self.assertEqual("session_output_polled", event.event_type)
+        self.assertIsNone(event)
         self.assertEqual(3, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
@@ -7672,7 +7673,7 @@ class SessionCreationTests(unittest.TestCase):
         artifacts = self.artifact_repository.list_for_session(session.id)
 
         self.assertEqual(session.id, updated_session.id)
-        self.assertEqual("session_output_polled", event.event_type)
+        self.assertIsNone(event)
         self.assertEqual(3, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
@@ -7702,7 +7703,7 @@ class SessionCreationTests(unittest.TestCase):
         artifacts = self.artifact_repository.list_for_session(session.id)
 
         self.assertEqual(session.id, updated_session.id)
-        self.assertEqual("session_output_polled", event.event_type)
+        self.assertIsNone(event)
         self.assertEqual(3, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
@@ -7737,7 +7738,7 @@ class SessionCreationTests(unittest.TestCase):
         artifacts = self.artifact_repository.list_for_session(session.id)
 
         self.assertEqual(session.id, updated_session.id)
-        self.assertEqual("session_output_polled", event.event_type)
+        self.assertIsNone(event)
         self.assertEqual(3, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
@@ -7852,6 +7853,27 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, retry_event.payload["retry_count"])
         self.assertEqual("retried", retry_event.payload["delivery_state"])
 
+    def test_dispatch_records_pre_ready_buffer_as_stalled_delivery(self) -> None:
+        backend = DispatchTraceRecordingBackend(delivery_state="buffered_pre_ready")
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004BUFFEREDDISPATCH")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        events = self.event_repository.list_for_session(session.id)
+        stalled_event = [item for item in events if item.event_type == "role_input_delivery_stalled"][-1]
+        dispatches = self.dispatch_repository.list_for_session(session.id)
+        latest_dispatch = dispatches[-1]
+
+        self.assertEqual("verification-coordinator", stalled_event.payload["role_name"])
+        self.assertEqual("buffered_pre_ready", stalled_event.payload["delivery_state"])
+        self.assertEqual("stalled", latest_dispatch.status.value)
+        self.assertIn("not ready", latest_dispatch.error_text or "")
+
     def test_dispatch_records_transport_stall_event_on_send_failure(self) -> None:
         backend = DispatchTraceRecordingBackend()
         self.session_backend = backend
@@ -7932,6 +7954,68 @@ class SessionCreationTests(unittest.TestCase):
         sent_after = self.session_backend.get_sent_inputs(verifier_role.runtime_handle)
         self.assertFalse(reconciled)
         self.assertEqual(sent_before, sent_after)
+
+    def test_reconcile_session_dispatch_repairs_delivered_launcher_dispatch_without_routed_work(
+        self,
+    ) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004MISSINGROUTED",
+            workflow_profile="story_full",
+            policy={"self_review_policy": "disabled"},
+            role_config={"acceptance-criteria-worker": {"runner": "codex", "model": "gpt-5.4", "effort": "medium"}},
+        )
+        acceptance_role = self.role_repository.get_by_name(session.id, ACCEPTANCE_CRITERIA_WORKER_ROLE)
+        assert acceptance_role is not None
+        acceptance_role = self.role_repository.update_runtime(
+            acceptance_role.id,
+            runtime_backend="tmux",
+            runtime_handle="sdd-IOS-30004MISSINGROUTED:acceptance-criteria-worker",
+            status=RoleStatus.RUNNING,
+        )
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="acceptance_criteria",
+            title=f"Acceptance criteria preparation for {session.task_key}",
+            owner_role_id=acceptance_role.id,
+            priority=101,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="acceptance_criteria_requested",
+            current_owner=ACCEPTANCE_CRITERIA_WORKER_ROLE,
+        )
+        self.dispatch_repository.create(
+            session_id=session.id,
+            role_id=acceptance_role.id,
+            work_item_id=work_item.id,
+            stage_name="acceptance_criteria_requested",
+            dispatch_token="hv1-wi999",
+            hydration_version=1,
+            runtime_handle=acceptance_role.runtime_handle,
+            status=DispatchStatus.DELIVERED,
+        )
+        workspace = self.coordinator.role_workspace_manager.ensure_role_workspace(  # type: ignore[union-attr]
+            session.task_key,
+            ACCEPTANCE_CRITERIA_WORKER_ROLE,
+        )
+        routed_path = workspace.directory / "ROUTED_WORK.md"
+        if routed_path.exists():
+            routed_path.unlink()
+
+        reconciled = self.coordinator._reconcile_session_dispatch(session)
+
+        dispatches = self.dispatch_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+        sent_inputs = self.session_backend.get_sent_inputs(acceptance_role.runtime_handle)
+
+        self.assertTrue(reconciled)
+        self.assertEqual("superseded", dispatches[0].status.value)
+        self.assertEqual("delivered", dispatches[-1].status.value)
+        self.assertNotEqual("hv1-wi999", dispatches[-1].dispatch_token)
+        self.assertTrue(sent_inputs)
+        self.assertTrue(
+            any(item.event_type == "role_input_dispatch_repair_requested" for item in events)
+        )
 
     def test_collect_role_output_normalizes_structured_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009")
@@ -8541,6 +8625,57 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.assertEqual(new_item.id, stale_events[-1].payload.get("expected_work_item_id"))
 
+    def test_collect_role_output_ignores_replayed_error_after_operator_reply(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRREPLY")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        active_item = self.coordinator._find_active_work_item_for_role(session.id, implementer_role.id)
+        assert active_item is not None
+        payload = {
+            "summary": "Need one operator decision",
+            "details": "Choose the replay ownership model before continuing.",
+            "needs_operator_input": True,
+        }
+        marker = "SDD_ERROR: " + json.dumps(payload, sort_keys=True)
+        self.session_backend.simulate_output(implementer_role.runtime_handle, marker)
+        waiting_session, _, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+        )
+        self.assertEqual(1, chunk_count)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, waiting_session.status)
+
+        resumed_session, _ = self.coordinator.send_operator_runtime_input(
+            session_id=session.id,
+            text="Use the service-owned model and continue.",
+        )
+        self.assertEqual(SessionStatus.ACTIVE, resumed_session.status)
+
+        self.session_backend.simulate_output(implementer_role.runtime_handle, marker)
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        stale_events = [item for item in events if item.event_type == "stale_role_output_ignored"]
+        escalation_events = [
+            item
+            for item in events
+            if item.event_type == "session_escalated_to_operator"
+        ]
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertEqual(1, len(escalation_events))
+        self.assertTrue(stale_events)
+        self.assertEqual(
+            "replayed_runtime_error_after_operator_reply",
+            stale_events[-1].payload.get("reason"),
+        )
+        self.assertEqual(active_item.id, stale_events[-1].payload.get("expected_work_item_id"))
+
     def test_collect_role_output_ignores_stale_runtime_error_token_for_previous_work_item(
         self,
     ) -> None:
@@ -8659,6 +8794,42 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("waiting_for_operator", updated_session.status.value)
         self.assertEqual("operator decision needed", interactive["summary"])
         self.assertEqual("first line second line", interactive["details"])
+
+    def test_collect_role_output_escalates_malformed_error_before_live_capture_noise(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRMALFORMEDTAIL")
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            "\n".join(
+                [
+                    'SDD_ERROR: {"summary": "Verification build is locked",',
+                    '  "details": "xcodebuild failed: accessing build database',
+                    '  ".../XCBuildData/build.db": database is locked",',
+                    '  "needs_operator_input": true}',
+                    "",
+                    "✻ Crunched for 2m 6s",
+                    "──────────────── implementer:IOS-30009ERRMALFORMEDTAIL ────────────────",
+                    "❯ ",
+                    "[Opus 4.8] 55% | auto mode on (shift+tab to cycle)",
+                ]
+            ),
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name="implementer",
+        )
+        events = self.event_repository.list_for_session(session.id)
+        interactive = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertTrue(any(item.event_type == "role_runtime_error_reported" for item in events))
+        self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertEqual("runtime emitted malformed SDD_ERROR marker", interactive["summary"])
+        self.assertIn("build.db", interactive["details"])
+        self.assertNotIn("auto mode on", interactive["details"])
 
     def test_collect_role_output_consumes_result_json_from_role_workspace(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009B")
@@ -9370,7 +9541,7 @@ class SessionCreationTests(unittest.TestCase):
         events = self.event_repository.list_for_session(session.id)
         artifacts = self.artifact_repository.list_for_session(session.id)
 
-        self.assertEqual("session_output_polled", event.event_type)
+        self.assertIsNone(event)
         self.assertEqual(4, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("self_review_requested", updated_session.current_stage)
@@ -9446,7 +9617,7 @@ class SessionCreationTests(unittest.TestCase):
         events = self.event_repository.list_for_session(session.id)
         artifacts = self.artifact_repository.list_for_session(session.id)
 
-        self.assertEqual("session_output_polled", event.event_type)
+        self.assertIsNone(event)
         self.assertEqual(4, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
@@ -9719,7 +9890,7 @@ class SessionCreationTests(unittest.TestCase):
         artifacts_a = self.artifact_repository.list_for_session(session_a.id)
         artifacts_b = self.artifact_repository.list_for_session(session_b.id)
 
-        self.assertEqual("coordinator_loop_ran", event.event_type)
+        self.assertIsNone(event)
         self.assertEqual(2, session_count)
         self.assertEqual(2, chunk_count)
         self.assertTrue(any(artifact.artifact_type == "runtime_output" for artifact in artifacts_a))
@@ -9750,7 +9921,7 @@ class SessionCreationTests(unittest.TestCase):
         refreshed_role = self.role_repository.get_by_name(session.id, "implementer")
         sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
 
-        self.assertEqual("coordinator_loop_ran", event.event_type)
+        self.assertIsNone(event)
         self.assertEqual(1, session_count)
         self.assertEqual(0, chunk_count)
         self.assertEqual(1, refreshed_role.last_hydration_version)
@@ -12717,7 +12888,7 @@ class SessionCreationTests(unittest.TestCase):
 
         event, session_count, chunk_count = self.coordinator.run_loop_once()
 
-        self.assertEqual("coordinator_loop_ran", event.event_type)
+        self.assertIsNone(event)
         self.assertEqual(1, session_count)
         self.assertEqual(0, chunk_count)
         refreshed_session = self.session_repository.get_by_id(session.id)
@@ -12776,7 +12947,7 @@ class SessionCreationTests(unittest.TestCase):
 
         event, session_count, chunk_count = self.coordinator.run_loop_once()
 
-        self.assertEqual("coordinator_loop_ran", event.event_type)
+        self.assertIsNone(event)
         self.assertEqual(1, session_count)
         self.assertEqual(0, chunk_count)
         refreshed_session = self.session_repository.get_by_id(session.id)
@@ -12809,7 +12980,7 @@ class SessionCreationTests(unittest.TestCase):
 
         event, session_count, chunk_count = self.coordinator.run_loop_once()
 
-        self.assertEqual("coordinator_loop_ran", event.event_type)
+        self.assertIsNone(event)
         self.assertEqual(1, session_count)
         self.assertEqual(0, chunk_count)
         refreshed_session = self.session_repository.get_by_id(session.id)

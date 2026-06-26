@@ -162,7 +162,7 @@ export const apiClient = {
   },
 
   listArtifacts(sessionId: number): Promise<{ items: Artifact[] }> {
-    return request(`/artifacts?session_id=${sessionId}`);
+    return request(`/artifacts?session_id=${sessionId}&include_telemetry=false`);
   },
 
   getSubtaskGraph(sessionId: number): Promise<{
@@ -370,7 +370,7 @@ export const apiClient = {
   },
 
   listEvents(sessionId: number): Promise<{ items: EventItem[] }> {
-    return request(`/events?session_id=${sessionId}`);
+    return request(`/events?session_id=${sessionId}&include_telemetry=false`);
   },
 
   listWorkItems(sessionId: number): Promise<{ items: WorkItem[] }> {

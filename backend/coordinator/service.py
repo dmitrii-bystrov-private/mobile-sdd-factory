@@ -22,6 +22,7 @@ from backend.coordinator.verification_strategy import materialize_verification_s
 from backend.coordinator.hydration import build_role_hydration
 from backend.models.event import Event
 from backend.models.artifact import Artifact
+from backend.models.dispatch import Dispatch
 from backend.models.enums import DispatchStatus, RoleStatus, SessionStatus, WorkItemStatus
 from backend.models.session import Session
 from backend.models.role import Role
@@ -71,6 +72,7 @@ _POST_CREATE_SUBTASK_SNAPSHOT_REFRESH_DELAY_SECONDS = 2.0
 _TASK_KEY_PATTERN = re.compile(r"^[A-Z]+-\d+$")
 _INLINE_TASK_KEY_PATTERN = re.compile(r"\b[A-Z]+-\d+\b")
 _EXPLICIT_URL_PATTERN = re.compile(r"https?://[^\s)>\]]+")
+_PERSIST_POLL_TELEMETRY_ENV = "SDD_FACTORY_PERSIST_POLL_TELEMETRY"
 _STORY_PLANNING_WORK_TYPE_BY_STAGE = {
     "proposal_context_requested": "proposal_context",
     "requirements_requested": "requirements",
@@ -2440,15 +2442,17 @@ class CoordinatorService:
         if total_chunks == 0:
             return session, None, len(roles), 0
 
-        event = self._append_event(
-            session_id=session.id,
-            event_type="session_output_polled",
-            producer_type="coordinator",
-            payload={
-                "role_count": len(roles),
-                "chunk_count": total_chunks,
-            },
-        )
+        event = None
+        if self._should_persist_poll_telemetry():
+            event = self._append_event(
+                session_id=session.id,
+                event_type="session_output_polled",
+                producer_type="coordinator",
+                payload={
+                    "role_count": len(roles),
+                    "chunk_count": total_chunks,
+                },
+            )
         return session, event, len(roles), total_chunks
 
     def _consume_role_result_file(
@@ -3317,6 +3321,22 @@ class CoordinatorService:
             payload=payload,
         )
 
+    def _append_runtime_terminal_output_echo_ignored_once(
+        self,
+        *,
+        session_id: int,
+        payload: dict[str, object],
+    ) -> None:
+        latest = self._latest_event_by_type(session_id, {"runtime_terminal_output_echo_ignored"})
+        if latest is not None and self._normalized_json_signature(latest.payload) == self._normalized_json_signature(payload):
+            return
+        self._append_event(
+            session_id=session_id,
+            event_type="runtime_terminal_output_echo_ignored",
+            producer_type="coordinator",
+            payload=payload,
+        )
+
     def _active_subtask_completion_dispatch_missing(self, session: Session) -> bool:
         active_item = self._find_active_primary_coding_work_item(session)
         if active_item is None:
@@ -3381,17 +3401,27 @@ class CoordinatorService:
         if polled_sessions == 0:
             return None, 0, 0
 
-        summary_event = self._append_event(
-            session_id=active_sessions[0].id,
-            event_type="coordinator_loop_ran",
-            producer_type="coordinator",
-            payload={
-                "session_count": polled_sessions,
-                "chunk_count": total_chunks,
-                "reconciled_count": reconciled_sessions,
-            },
-        )
+        summary_event = None
+        if self._should_persist_poll_telemetry():
+            summary_event = self._append_event(
+                session_id=active_sessions[0].id,
+                event_type="coordinator_loop_ran",
+                producer_type="coordinator",
+                payload={
+                    "session_count": polled_sessions,
+                    "chunk_count": total_chunks,
+                    "reconciled_count": reconciled_sessions,
+                },
+            )
         return summary_event, polled_sessions, total_chunks
+
+    def _should_persist_poll_telemetry(self) -> bool:
+        return os.environ.get(_PERSIST_POLL_TELEMETRY_ENV, "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
 
     def _recover_dead_owner_runtime_if_needed(self, session: Session) -> Session:
         if session.current_owner is None:
@@ -7549,10 +7579,8 @@ class CoordinatorService:
                         role=role,
                         payload=payload,
                     )
-                    self._append_event(
+                    self._append_runtime_terminal_output_echo_ignored_once(
                         session_id=session.id,
-                        event_type="runtime_terminal_output_echo_ignored",
-                        producer_type="coordinator",
                         payload={
                             "role_name": role.role_name,
                             "current_stage": session.current_stage,
@@ -7697,34 +7725,26 @@ class CoordinatorService:
         work_item_id: int | None,
         stage_name: str | None,
     ) -> bool:
-        latest_operator_reply_id: int | None = None
-        latest_collection_id: int | None = None
-        for event in reversed(self.event_repository.list_for_session(session_id)):
-            if (
-                latest_operator_reply_id is None
-                and event.event_type == "operator_runtime_input_sent"
-                and event.payload.get("role_name") == role_name
-                and (
-                    work_item_id is None
-                    or event.payload.get("work_item_id") == work_item_id
-                )
-                and (
-                    stage_name is None
-                    or event.payload.get("current_stage") == stage_name
-                )
-            ):
-                latest_operator_reply_id = event.id
-            if (
-                latest_collection_id is None
-                and event.event_type == "role_output_collected"
-                and event.payload.get("role_name") == role_name
-            ):
-                latest_collection_id = event.id
-            if latest_operator_reply_id is not None and latest_collection_id is not None:
-                break
+        operator_payload_matches: dict[str, object] = {"role_name": role_name}
+        if work_item_id is not None:
+            operator_payload_matches["work_item_id"] = work_item_id
+        if stage_name is not None:
+            operator_payload_matches["current_stage"] = stage_name
+        latest_operator_reply = self.event_repository.latest_for_session_by_type_and_payload(
+            session_id=session_id,
+            event_type="operator_runtime_input_sent",
+            payload_matches=operator_payload_matches,
+        )
+        if latest_operator_reply is None:
+            return False
+        latest_collection = self.event_repository.latest_for_session_by_type_and_payload(
+            session_id=session_id,
+            event_type="role_output_collected",
+            payload_matches={"role_name": role_name},
+        )
         return (
-            latest_operator_reply_id is not None
-            and (latest_collection_id is None or latest_operator_reply_id > latest_collection_id)
+            latest_collection is None
+            or latest_operator_reply.id > latest_collection.id
         )
 
     def _extract_output_markers(self, text: str) -> list[tuple[str, dict]]:
@@ -7757,8 +7777,8 @@ class CoordinatorService:
                 parsed_payload = self._parse_marker_payload(trimmed_payload)
                 if parsed_payload is not None:
                     results.append((marker_type, parsed_payload))
-                elif not self._looks_like_incomplete_live_marker_capture(raw_payload):
-                    results.append((marker_type, self._malformed_error_marker_payload(raw_payload)))
+                elif self._looks_like_complete_marker_payload(trimmed_payload):
+                    results.append((marker_type, self._malformed_error_marker_payload(trimmed_payload)))
             index = cursor
         return results
 
@@ -7792,6 +7812,10 @@ class CoordinatorService:
             or "shift+tab to cycle" in raw_payload
             or re.search(r"─{8,}.*:[A-Z]+-\d+.*─{2,}", raw_payload) is not None
         )
+
+    def _looks_like_complete_marker_payload(self, raw_payload: str) -> bool:
+        stripped = raw_payload.strip()
+        return stripped.startswith("{") and stripped.endswith("}")
 
     def _malformed_error_marker_payload(self, raw_payload: str) -> dict:
         cleaned_payload = raw_payload.strip()
@@ -7923,6 +7947,14 @@ class CoordinatorService:
         active_item = self._find_active_work_item_for_role(session.id, role.id)
         if active_item is None:
             return None
+        replayed_after_reply = self._replayed_runtime_error_after_operator_reply(
+            session=session,
+            role=role,
+            active_item=active_item,
+            payload=payload,
+        )
+        if replayed_after_reply is not None:
+            return replayed_after_reply
         if payload_work_item_id is None:
             replayed_error = self._replayed_runtime_error_after_accepted_result(
                 session=session,
@@ -8007,6 +8039,62 @@ class CoordinatorService:
             "accepted_event_id": accepted_event_id,
         }
 
+    def _replayed_runtime_error_after_operator_reply(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_item: WorkItem,
+        payload: dict,
+    ) -> dict[str, object] | None:
+        if not self._has_pending_operator_continuation(
+            session_id=session.id,
+            role_name=role.role_name,
+            work_item_id=active_item.id,
+            stage_name=session.current_stage,
+        ):
+            return None
+
+        events = self.event_repository.list_for_session(session.id)
+        latest_reply: Event | None = None
+        for event in reversed(events):
+            if event.event_type != "operator_runtime_input_sent":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if event.payload.get("current_stage") != session.current_stage:
+                continue
+            if event.payload.get("work_item_id") != active_item.id:
+                continue
+            latest_reply = event
+            break
+        if latest_reply is None:
+            return None
+
+        current_signature = self._runtime_error_content_signature(payload)
+        latest_prior_error: Event | None = None
+        for event in reversed(events):
+            if event.id >= latest_reply.id:
+                continue
+            if event.event_type != "role_runtime_error_reported":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if self._runtime_error_content_signature(event.payload) != current_signature:
+                continue
+            latest_prior_error = event
+            break
+        if latest_prior_error is None:
+            return None
+
+        return {
+            "reason": "replayed_runtime_error_after_operator_reply",
+            "expected_work_item_id": active_item.id,
+            "payload_work_item_id": self._runtime_error_payload_work_item_id(payload),
+            "operator_reply_event_id": latest_reply.id,
+            "replayed_event_id": latest_prior_error.id,
+        }
+
     def _runtime_error_content_signature(self, payload: dict) -> str:
         content = dict(payload)
         for key in ("role_name", "marker_type", "current_stage"):
@@ -8084,6 +8172,7 @@ class CoordinatorService:
         ):
             return False
 
+        force_redispatch = False
         if self.dispatch_repository is not None:
             active_dispatch = self.dispatch_repository.get_latest_active_for_target(
                 session_id=session.id,
@@ -8092,7 +8181,26 @@ class CoordinatorService:
                 stage_name=session.current_stage,
             )
             if active_dispatch is not None:
-                return False
+                if self._delivered_launcher_dispatch_missing_routed_work(
+                    session=session,
+                    role=role,
+                    active_dispatch=active_dispatch,
+                ):
+                    force_redispatch = True
+                    self._append_event(
+                        session_id=session.id,
+                        event_type="role_input_dispatch_repair_requested",
+                        producer_type="coordinator",
+                        payload={
+                            "role_name": role.role_name,
+                            "work_item_id": work_item.id,
+                            "stage_name": session.current_stage,
+                            "dispatch_token": active_dispatch.dispatch_token,
+                            "reason": "delivered_launcher_dispatch_missing_routed_work",
+                        },
+                    )
+                else:
+                    return False
         else:
             if self._has_dispatch_event(
                 session_id=session.id,
@@ -8144,6 +8252,7 @@ class CoordinatorService:
             stage_name=session.current_stage,
             instruction=instruction,
             extra_hydration=extra_hydration,
+            force_redispatch=force_redispatch,
         )
         self._append_event(
             session_id=session.id,
@@ -8156,6 +8265,25 @@ class CoordinatorService:
             },
         )
         return True
+
+    def _delivered_launcher_dispatch_missing_routed_work(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_dispatch: Dispatch,
+    ) -> bool:
+        if active_dispatch.status != DispatchStatus.DELIVERED:
+            return False
+        if role.runtime_backend != "tmux":
+            return False
+        role_runtime_config = (session.role_config or {}).get(role.role_name, {})
+        if role_runtime_config.get("runner") not in {"claude", "codex"}:
+            return False
+        if self.role_workspace_manager is None:
+            return False
+        workspace = self.role_workspace_manager.role_directory(session.task_key, role.role_name)
+        return not (workspace / "ROUTED_WORK.md").is_file()
 
     def _role_recently_dispatched(self, role: Role, *, window_seconds: int = 5) -> bool:
         if role.last_hydration_version <= 0:
@@ -8354,10 +8482,7 @@ class CoordinatorService:
         return False
 
     def _latest_event_by_type(self, session_id: int, event_types: set[str]) -> Event | None:
-        for event in reversed(self.event_repository.list_for_session(session_id)):
-            if event.event_type in event_types:
-                return event
-        return None
+        return self.event_repository.latest_for_session_by_type(session_id, event_types)
 
     def _latest_dispatch_event_for_target(
         self,
@@ -9610,17 +9735,16 @@ class CoordinatorService:
                 }
             )
         last_auto_recovery = None
-        for event in reversed(self.event_repository.list_for_session(session_id)):
-            if event.event_type == "runtime_role_auto_recovery_attempted":
-                last_auto_recovery = {
-                    "role_name": event.payload.get("role_name"),
-                    "current_stage": event.payload.get("current_stage"),
-                    "runtime_handle": event.payload.get("runtime_handle"),
-                    "dead_runtime_handle": event.payload.get("dead_runtime_handle"),
-                    "event_id": event.id,
-                    "created_at": event.created_at,
-                }
-                break
+        latest_auto_recovery = self._latest_event_by_type(session_id, {"runtime_role_auto_recovery_attempted"})
+        if latest_auto_recovery is not None:
+            last_auto_recovery = {
+                "role_name": latest_auto_recovery.payload.get("role_name"),
+                "current_stage": latest_auto_recovery.payload.get("current_stage"),
+                "runtime_handle": latest_auto_recovery.payload.get("runtime_handle"),
+                "dead_runtime_handle": latest_auto_recovery.payload.get("dead_runtime_handle"),
+                "event_id": latest_auto_recovery.id,
+                "created_at": latest_auto_recovery.created_at,
+            }
         return {
             "available": runtime_session_id is not None,
             "runtime_session_id": runtime_session_id,
@@ -12520,10 +12644,21 @@ class CoordinatorService:
                 },
             )
             raise
+        latest_submit_trace = self._latest_runtime_submit_trace(runtime_role.role_id)
+        delivery_state = latest_submit_trace.get("delivery_state") if latest_submit_trace else None
         if self.dispatch_repository is not None:
             self.dispatch_repository.update_status(
                 dispatch_token,
-                status=DispatchStatus.DELIVERED,
+                status=(
+                    DispatchStatus.STALLED
+                    if delivery_state == "buffered_pre_ready"
+                    else DispatchStatus.DELIVERED
+                ),
+                error_text=(
+                    "launcher-backed role was not ready; routed input is buffered but not yet visible"
+                    if delivery_state == "buffered_pre_ready"
+                    else None
+                ),
             )
         self._record_role_input_delivery_event(
             session=session,
@@ -12547,6 +12682,12 @@ class CoordinatorService:
             },
         )
 
+    def _latest_runtime_submit_trace(self, runtime_role_id: str) -> dict[str, str] | None:
+        if not hasattr(self.session_backend, "get_tmux_submit_traces"):
+            return None
+        traces = self.session_backend.get_tmux_submit_traces(runtime_role_id)
+        return traces[-1] if traces else None
+
     def _record_role_input_delivery_event(
         self,
         *,
@@ -12566,22 +12707,23 @@ class CoordinatorService:
             "dispatch_token": dispatch_token,
         }
         event_type = "role_input_delivery_confirmed"
-        if hasattr(self.session_backend, "get_tmux_submit_traces"):
-            traces = self.session_backend.get_tmux_submit_traces(runtime_role.role_id)
-            if traces:
-                latest = traces[-1]
-                payload.update(
-                    {
-                        "submission_source": latest.get("source"),
-                        "submit_style": latest.get("submit_style"),
-                        "submit_key": latest.get("submit_key"),
-                        "runner": latest.get("runner"),
-                        "retry_count": int(latest.get("retry_count", "0") or "0"),
-                        "delivery_state": latest.get("delivery_state"),
-                    }
-                )
-                if payload["retry_count"] > 0:
-                    event_type = "role_input_delivery_retried"
+        latest = self._latest_runtime_submit_trace(runtime_role.role_id)
+        if latest:
+            payload.update(
+                {
+                    "submission_source": latest.get("source"),
+                    "submit_style": latest.get("submit_style"),
+                    "submit_key": latest.get("submit_key"),
+                    "runner": latest.get("runner"),
+                    "retry_count": int(latest.get("retry_count", "0") or "0"),
+                    "delivery_state": latest.get("delivery_state"),
+                }
+            )
+            if latest.get("delivery_state") == "buffered_pre_ready":
+                event_type = "role_input_delivery_stalled"
+                payload["error"] = "launcher-backed role was not ready; routed input is buffered but not yet visible"
+            elif payload["retry_count"] > 0:
+                event_type = "role_input_delivery_retried"
         self._append_event(
             session_id=session.id,
             event_type=event_type,

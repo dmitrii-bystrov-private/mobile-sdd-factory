@@ -9,6 +9,12 @@ from backend.state.db import Database
 from backend.state.models import artifact_from_row
 
 
+DEFAULT_UI_EXCLUDED_ARTIFACT_TYPES = {
+    "runtime_output",
+    "runtime_progress_json",
+}
+
+
 class ArtifactRepository:
     def __init__(self, db: Database) -> None:
         self.db = db
@@ -41,6 +47,27 @@ class ArtifactRepository:
             rows = connection.execute(
                 "SELECT * FROM artifacts WHERE session_id = ? ORDER BY id ASC",
                 (session_id,),
+            ).fetchall()
+        return [artifact_from_row(row) for row in rows]
+
+    def list_for_session_excluding(
+        self,
+        session_id: int,
+        excluded_artifact_types: set[str],
+    ) -> list[Artifact]:
+        if not excluded_artifact_types:
+            return self.list_for_session(session_id)
+        placeholders = ",".join("?" for _ in excluded_artifact_types)
+        with self.db.connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT *
+                FROM artifacts
+                WHERE session_id = ?
+                  AND artifact_type NOT IN ({placeholders})
+                ORDER BY id ASC
+                """,
+                (session_id, *sorted(excluded_artifact_types)),
             ).fetchall()
         return [artifact_from_row(row) for row in rows]
 
