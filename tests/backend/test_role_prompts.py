@@ -156,6 +156,13 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("--subtask-key <subtask_key>", agents)
         self.assertIn("--output-type failed", agents)
 
+    def test_agents_require_successful_helper_exit_before_claiming_submission(self) -> None:
+        agents = self._agents("implementer")
+
+        self.assertIn("exited 0", agents)
+        self.assertIn("Do not say or imply that work was submitted", agents)
+        self.assertIn("If you realize you described completion but did not run the helper", agents)
+
     def test_verifier_agents_include_result_payload_templates(self) -> None:
         agents = self._agents("verification-coordinator")
 

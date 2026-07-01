@@ -35,6 +35,20 @@ def _task_artifacts_root(workdir_root: Path, task_key: str) -> Path:
     return workdir_root / "factory-artifacts" / task_key
 
 
+def _ensure_task_output_directories(workdir_root: Path, task_key: str) -> None:
+    task_root = _task_snapshot_root(workdir_root, task_key)
+    for directory in (
+        task_root / "tmp",
+        task_root / "review",
+        task_root / "review" / "convention",
+        task_root / "review" / "requirements",
+        task_root / "review" / "documentation",
+        task_root / "spec",
+        task_root / "spec" / "context",
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+
+
 def _role_relevant_paths(role_name: str) -> list[str]:
     if role_name == "implementer":
         return [
@@ -652,6 +666,8 @@ def build_role_agents_md(
             "- Paths written as `spec/...`, `review/...`, or `plan/...` refer to the task snapshot metadata root listed above, not to this role workspace current directory.",
             "- When hydration or the relevant-path list provides explicit absolute `*_path` values, use those exact paths directly instead of reconstructing task paths relative to the current directory.",
             "- For terminal outcomes, call `bash \"$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh\" --work-item-id <work_item_id> ...` instead of hand-writing JSON or managing terminal files directly.",
+            "- A terminal outcome is delivered only after that exact helper command has run with the current routed `work_item_id` and exited 0. Do not say or imply that work was submitted, delivered, completed, or handed off until you have observed that successful helper exit.",
+            "- If you realize you described completion but did not run the helper, run the helper immediately for the current routed `work_item_id`; do not wait for a fresh dispatch and do not treat a plain chat summary as delivery.",
             "- For markdown payloads that contain backticks, parentheses, or paths with spaces, write the markdown to a file first and pass it with helper file flags such as `--issues-markdown-file <path>` instead of inline shell arguments.",
             "- Do not call `scripts/write-result.py` directly, do not choose terminal output paths yourself, and do not try to recreate fallback files manually.",
             "- Do not override `SDD_FACTORY_BACKEND_URL`, `SDD_FACTORY_BACKEND_HOST`, or `SDD_FACTORY_BACKEND_PORT`, and do not debug transport or fallback behavior from inside the role.",
@@ -689,6 +705,7 @@ class RoleWorkspaceManager:
         return self.session_root(task_key) / role_name
 
     def ensure_role_workspace(self, task_key: str, role_name: str) -> RoleWorkspace:
+        _ensure_task_output_directories(self.workdir_root, task_key)
         directory = self.role_directory(task_key, role_name)
         directory.mkdir(parents=True, exist_ok=True)
 

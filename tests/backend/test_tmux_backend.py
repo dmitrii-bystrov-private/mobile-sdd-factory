@@ -136,6 +136,27 @@ class TmuxBackendTests(unittest.TestCase):
             backend._extract_terminal_idle_signature("✻ Baked for 5s\n\n❯"),
         )
 
+    def test_terminal_idle_signature_detects_final_duration_before_claude_feedback_prompt(self) -> None:
+        backend = TmuxSessionBackend(mode="recording")
+
+        signature = backend._extract_terminal_idle_signature(
+            "Requirements-review correction applied and submitted via the SDD protocol.\n"
+            "\n"
+            "✻ Churned for 4m 3s\n"
+            "\n"
+            "● How is Claude doing this session? (optional)\n"
+            "  1: Bad    2: Fine   3: Good   0: Dismiss\n"
+            "\n"
+            "──────────────────────── implementer:IOS-13327 ──\n"
+            "❯\n"
+            "──────────────────────────────────────────────────\n"
+            "  [Opus 4.8] ██████░░░░ 62% | $95.83 | 7550m 50s\n"
+            "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n"
+        )
+
+        self.assertIn("churned for 4m 3s", signature or "")
+        self.assertIn("❯", signature or "")
+
     def test_terminal_idle_signature_ignores_active_working_counter(self) -> None:
         backend = TmuxSessionBackend(mode="recording")
 

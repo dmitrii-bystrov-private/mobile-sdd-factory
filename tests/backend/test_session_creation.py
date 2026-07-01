@@ -1327,6 +1327,22 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("/factory/scripts/run-role-agent.sh", script_text)
         self.assertIn("SDD_FACTORY_ROLE_LAUNCHER_READY", script_text)
 
+    def test_role_workspace_scaffolds_task_output_directories(self) -> None:
+        workspace_manager = RoleWorkspaceManager(
+            runtime_root=Path(self.temp_dir.name),
+            repo_root=Path(self.temp_dir.name) / "repo-root-output-dirs",
+            workdir_root=Path(self.temp_dir.name),
+        )
+
+        workspace_manager.ensure_role_workspace("IOS-30000OUTPUTDIRS", "convention-reviewer")
+
+        task_root = Path(self.temp_dir.name) / "IOS-30000OUTPUTDIRS"
+        self.assertTrue((task_root / "tmp").is_dir())
+        self.assertTrue((task_root / "review" / "convention").is_dir())
+        self.assertTrue((task_root / "review" / "requirements").is_dir())
+        self.assertTrue((task_root / "review" / "documentation").is_dir())
+        self.assertTrue((task_root / "spec" / "context").is_dir())
+
     def test_launcher_plan_can_mark_native_resume_mode(self) -> None:
         workspace_manager = RoleWorkspaceManager(
             runtime_root=Path(self.temp_dir.name),
@@ -2865,11 +2881,52 @@ class SessionCreationTests(unittest.TestCase):
             lane="requirements",
         )
 
-        self.assertIn("Authoritative operator decisions from prior review-correction escalations", instruction)
+        self.assertIn("Authoritative operator decisions from prior escalations in this session", instruction)
         self.assertIn("Use class-style screen keys", instruction)
         self.assertIn("do not re-flag", instruction)
         self.assertEqual(operator_event.id, hydration["operator_reply_event_id"])
         self.assertIn("snake_case screen tags", str(hydration["operator_reply"]))
+        self.assertIn("operator_guided_recheck", str(hydration["review_cycle_resolution"]))
+        self.assertIn("operator_resolution_history", hydration)
+
+    def test_dual_review_recheck_includes_operator_guidance_from_implementation_escalation(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003DUALIMPLGUIDE",
+            workflow_profile="story_full",
+            policy={
+                "self_review_policy": "enabled",
+                "boy_scout_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003DUALIMPLGUIDE")
+        operator_event = self.event_repository.append(
+            session_id=session.id,
+            event_type="operator_runtime_input_sent",
+            producer_type="operator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": 2860,
+                "current_stage": "subtask_implementation_requested",
+                "continuation_stage": "subtask_implementation_requested",
+                "input_length": 135,
+                "operator_reply": (
+                    "The real target is CardAlmostOrdered, not CardsAlmostReady. "
+                    "Do not add a no-op mask to CardsAlmostReady."
+                ),
+            },
+        )
+
+        instruction, hydration = self.coordinator._dual_review_dispatch_context(  # noqa: SLF001
+            prepared_session,
+            lane="requirements",
+        )
+
+        self.assertIn("Authoritative operator decisions from prior escalations in this session", instruction)
+        self.assertIn("The real target is CardAlmostOrdered", instruction)
+        self.assertIn("Do not add a no-op mask to CardsAlmostReady", instruction)
+        self.assertEqual(operator_event.id, hydration["operator_reply_event_id"])
+        self.assertIn("CardAlmostOrdered", str(hydration["operator_reply"]))
         self.assertIn("operator_guided_recheck", str(hydration["review_cycle_resolution"]))
         self.assertIn("operator_resolution_history", hydration)
 
@@ -6169,6 +6226,117 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(ignored)
         self.assertIn(updated_session.status.value, {"active", "completed"})
         self.assertFalse(any(item.event_type == "stale_role_output_ignored" for item in events))
+
+    def test_submit_role_result_document_ignores_duplicate_completed_documentation_review_result(
+        self,
+    ) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004DOCREVIEWDUP",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004DOCREVIEWDUP")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.complete_doc_harvest(
+            session_id=session.id,
+            summary="No documentation update needed.",
+        )
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "documentation_review" and item.status == WorkItemStatus.ASSIGNED
+        )
+        document = {
+            "output_type": "passed",
+            "payload": {
+                "work_item_id": active_item.id,
+                "summary": "Documentation review passed.",
+            },
+        }
+
+        self.coordinator.submit_role_result_document(document=document)
+        updated_session, _, _, _, ignored = self.coordinator.submit_role_result_document(document=document)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertTrue(ignored)
+        self.assertNotEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
+        self.assertFalse(
+            any(
+                item.event_type == "session_escalated_to_operator"
+                and item.payload.get("reason") == "role_result_protocol_violation"
+                for item in events
+            )
+        )
+
+    def test_collect_role_output_ignores_late_runtime_error_for_completed_documentation_review_item(
+        self,
+    ) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004DOCREVIEWERR",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "enabled", "self_review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30004DOCREVIEWERR")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_passed",
+            payload={"summary": "all green"},
+        )
+        self.coordinator.complete_doc_harvest(
+            session_id=session.id,
+            summary="No documentation update needed.",
+        )
+        active_item = next(
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "documentation_review" and item.status == WorkItemStatus.ASSIGNED
+        )
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        doc_role = self.role_repository.get_by_name(session.id, DOCUMENTATION_REVIEWER_ROLE)
+        assert doc_role is not None
+        assert doc_role.runtime_handle is not None
+        self.session_backend.queue_output(
+            doc_role.runtime_handle,
+            (
+                "SDD_ERROR: {"
+                "\"summary\":\"Result writer exited non-zero\","
+                "\"details\":\"write-result.sh was interrupted\","
+                f"\"dispatch_token\":\"hv2-wi{active_item.id}\""
+                "}"
+            ),
+        )
+
+        updated_session, _, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=DOCUMENTATION_REVIEWER_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertEqual(1, chunk_count)
+        self.assertNotEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertTrue(
+            any(
+                item.event_type == "stale_role_output_ignored"
+                and item.payload.get("reason") == "stale_runtime_error_for_inactive_work_item"
+                for item in events
+            )
+        )
+        self.assertFalse(any(item.event_type == "role_runtime_error_reported" for item in events))
 
     def test_collect_role_output_escalates_verification_completed_result_without_explicit_result(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERNORESULT")

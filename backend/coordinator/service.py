@@ -2353,12 +2353,12 @@ class CoordinatorService:
                     output_payload=output_payload,
                 )
             except IntakeError as exc:
-                session = self._handle_role_result_protocol_violation(
+                session, protocol_violation = self._handle_collected_result_intake_error(
                     session=session,
                     role=role,
+                    output_payload=output_payload,
                     error_message=str(exc),
                 )
-                protocol_violation = True
             else:
                 if handled_session is not None:
                     session = handled_session
@@ -2426,12 +2426,12 @@ class CoordinatorService:
                         output_payload=output_payload,
                     )
                 except IntakeError as exc:
-                    session = self._handle_role_result_protocol_violation(
+                    session, protocol_violation = self._handle_collected_result_intake_error(
                         session=session,
                         role=role,
+                        output_payload=output_payload,
                         error_message=str(exc),
                     )
-                    protocol_violation = True
                 else:
                     if handled_session is not None:
                         session = handled_session
@@ -2600,23 +2600,43 @@ class CoordinatorService:
                 output_payload=output_payload,
             )
         except IntakeError as exc:
-            self._append_event(
-                session_id=session.id,
-                event_type="role_result_ingress_rejected",
-                producer_type="coordinator",
-                payload={
-                    "role_name": role.role_name,
-                    "work_item_id": work_item_id,
-                    "current_stage": session.current_stage,
-                    "output_type": output_type,
-                    "error": str(exc),
-                },
-            )
-            session = self._handle_role_result_protocol_violation(
+            if self._should_ignore_stale_result_intake_error(
                 session=session,
                 role=role,
+                output_payload=output_payload,
                 error_message=str(exc),
-            )
+            ):
+                ignored = True
+                self._append_stale_role_output_ignored_once(
+                    session_id=session.id,
+                    payload={
+                        "role_name": role.role_name,
+                        "current_stage": session.current_stage,
+                        "current_owner": session.current_owner,
+                        "reason": "duplicate_or_stale_result_after_accepted_output",
+                        "work_item_id": work_item_id,
+                        "details": str(exc),
+                    },
+                )
+                self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
+            else:
+                self._append_event(
+                    session_id=session.id,
+                    event_type="role_result_ingress_rejected",
+                    producer_type="coordinator",
+                    payload={
+                        "role_name": role.role_name,
+                        "work_item_id": work_item_id,
+                        "current_stage": session.current_stage,
+                        "output_type": output_type,
+                        "error": str(exc),
+                    },
+                )
+                session = self._handle_role_result_protocol_violation(
+                    session=session,
+                    role=role,
+                    error_message=str(exc),
+                )
         except Exception as exc:
             mapped_event = self._accepted_mapped_event_for_work_item(
                 session_id=session.id,
@@ -2643,14 +2663,14 @@ class CoordinatorService:
                 },
             )
         else:
-            mapped_event_type = self._map_role_output_to_event_type(
-                session=session,
-                role_name=role.role_name,
-                output_type=output_type,
-                payload=output_payload,
-            )
-            latest_event = self.event_repository.list_for_session(session.id)[-1]
             if handled_session is not None:
+                mapped_event_type = self._map_role_output_to_event_type(
+                    session=session,
+                    role_name=role.role_name,
+                    output_type=output_type,
+                    payload=output_payload,
+                )
+                latest_event = self.event_repository.list_for_session(session.id)[-1]
                 session = handled_session
                 if latest_event.event_type != mapped_event_type:
                     followup_event_type = latest_event.event_type
@@ -2804,6 +2824,65 @@ class CoordinatorService:
             },
         )
         return session
+
+    def _handle_collected_result_intake_error(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        output_payload: dict,
+        error_message: str,
+    ) -> tuple[Session, bool]:
+        if self._should_ignore_stale_result_intake_error(
+            session=session,
+            role=role,
+            output_payload=output_payload,
+            error_message=error_message,
+        ):
+            self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
+            self._append_stale_role_output_ignored_once(
+                session_id=session.id,
+                payload={
+                    "role_name": role.role_name,
+                    "current_stage": session.current_stage,
+                    "current_owner": session.current_owner,
+                    "reason": "duplicate_or_stale_result_after_accepted_output",
+                    "work_item_id": self._payload_work_item_id(output_payload),
+                    "details": error_message,
+                },
+            )
+            self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
+            return session, False
+        return (
+            self._handle_role_result_protocol_violation(
+                session=session,
+                role=role,
+                error_message=error_message,
+            ),
+            True,
+        )
+
+    def _should_ignore_stale_result_intake_error(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        output_payload: dict,
+        error_message: str,
+    ) -> bool:
+        del error_message
+        work_item_id = self._payload_work_item_id(output_payload)
+        if work_item_id is None:
+            return False
+        work_item = self.work_item_repository.get_by_id(work_item_id)
+        if work_item is None or work_item.session_id != session.id or work_item.owner_role_id != role.id:
+            return False
+        if work_item.status != WorkItemStatus.COMPLETED:
+            return False
+        return self._accepted_mapped_event_for_work_item(
+            session_id=session.id,
+            work_item_id=work_item_id,
+        ) is not None
 
     def _escape_raw_control_chars_in_json_strings(self, raw_text: str) -> str:
         result: list[str] = []
@@ -5738,9 +5817,10 @@ class CoordinatorService:
                     f"{guidance['operator_reply']}"
                 )
             instruction += (
-                "\nAuthoritative operator decisions from prior review-correction escalations "
-                "(apply them to the same issue even when they contradict older review findings or downstream artifacts; "
-                "do not re-flag a finding that directly contradicts a relevant operator decision):\n"
+                "\nAuthoritative operator decisions from prior escalations in this session "
+                "(apply them when relevant to the same issue even if they contradict older review findings, "
+                "Jira wording, or downstream artifacts; do not re-flag a finding that directly contradicts "
+                "a relevant operator decision):\n"
                 + "\n".join(guidance_lines)
             )
         skipped_subtask_context_path = None
@@ -5798,10 +5878,6 @@ class CoordinatorService:
         before_event_id: int | None = None,
     ) -> list[dict[str, str | int]]:
         guidance: list[dict[str, str | int]] = []
-        review_correction_stages = {
-            "convention_review_correction_requested",
-            "requirements_review_correction_requested",
-        }
         for event in self.event_repository.list_for_session(session_id):
             if before_event_id is not None and event.id > before_event_id:
                 continue
@@ -5809,8 +5885,6 @@ class CoordinatorService:
                 continue
             continuation_stage = str(event.payload.get("continuation_stage") or "").strip()
             current_stage = str(event.payload.get("current_stage") or "").strip()
-            if continuation_stage not in review_correction_stages and current_stage not in review_correction_stages:
-                continue
             operator_reply = str(event.payload.get("operator_reply") or "").strip()
             if not operator_reply:
                 continue
@@ -7946,6 +8020,18 @@ class CoordinatorService:
         payload_work_item_id = self._runtime_error_payload_work_item_id(payload)
         active_item = self._find_active_work_item_for_role(session.id, role.id)
         if active_item is None:
+            if payload_work_item_id is not None:
+                matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
+                if (
+                    matching_item is not None
+                    and matching_item.session_id == session.id
+                    and matching_item.owner_role_id == role.id
+                    and matching_item.status not in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+                ):
+                    return {
+                        "reason": "stale_runtime_error_for_inactive_work_item",
+                        "payload_work_item_id": payload_work_item_id,
+                    }
             return None
         replayed_after_reply = self._replayed_runtime_error_after_operator_reply(
             session=session,
@@ -8105,11 +8191,12 @@ class CoordinatorService:
         direct_value = payload.get("work_item_id")
         if isinstance(direct_value, int):
             return direct_value
-        token = payload.get("token")
-        if isinstance(token, str):
-            match = re.search(r"(?:^|-)wi(\d+)(?:$|[^0-9])", token)
-            if match is not None:
-                return int(match.group(1))
+        for key in ("token", "dispatch_token"):
+            token = payload.get(key)
+            if isinstance(token, str):
+                match = re.search(r"(?:^|-)wi(\d+)(?:$|[^0-9])", token)
+                if match is not None:
+                    return int(match.group(1))
         return None
 
     def _stale_runtime_error_subtask_mismatch(

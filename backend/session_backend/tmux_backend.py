@@ -148,6 +148,8 @@ class TmuxSessionBackend(SessionBackend):
             or "new task?" in normalized
             or "auto mode" in normalized
             or "/rc active" in normalized
+            or "how is claude doing this session?" in normalized
+            or re.search(r"\b1:\s*bad\b.*\b2:\s*fine\b.*\b3:\s*good\b.*\b0:\s*dismiss\b", normalized) is not None
             or normalized.startswith("[")
             or normalized.startswith("gpt-")
         )
