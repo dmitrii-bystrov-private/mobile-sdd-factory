@@ -8312,6 +8312,20 @@ class CoordinatorService:
                             "reason": "delivered_launcher_dispatch_missing_routed_work",
                         },
                     )
+                elif self._stalled_launcher_dispatch_buffered_pre_ready(active_dispatch):
+                    force_redispatch = True
+                    self._append_event(
+                        session_id=session.id,
+                        event_type="role_input_dispatch_repair_requested",
+                        producer_type="coordinator",
+                        payload={
+                            "role_name": role.role_name,
+                            "work_item_id": work_item.id,
+                            "stage_name": session.current_stage,
+                            "dispatch_token": active_dispatch.dispatch_token,
+                            "reason": "launcher_dispatch_buffered_pre_ready",
+                        },
+                    )
                 else:
                     return False
         else:
@@ -8397,6 +8411,13 @@ class CoordinatorService:
             return False
         workspace = self.role_workspace_manager.role_directory(session.task_key, role.role_name)
         return not (workspace / "ROUTED_WORK.md").is_file()
+
+    def _stalled_launcher_dispatch_buffered_pre_ready(self, active_dispatch: Dispatch) -> bool:
+        if active_dispatch.status != DispatchStatus.STALLED:
+            return False
+        return active_dispatch.error_text == (
+            "launcher-backed role was not ready; routed input is buffered but not yet visible"
+        )
 
     def _role_recently_dispatched(self, role: Role, *, window_seconds: int = 5) -> bool:
         if role.last_hydration_version <= 0:

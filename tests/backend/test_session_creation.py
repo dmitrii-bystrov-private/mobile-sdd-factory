@@ -8163,6 +8163,41 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(reconciled)
         self.assertEqual(sent_before, sent_after)
 
+    def test_reconcile_session_dispatch_repairs_pre_ready_buffered_dispatch(self) -> None:
+        backend = DispatchTraceRecordingBackend(delivery_state="buffered_pre_ready")
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004BUFFERREPAIR")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        self.assertIsNotNone(verifier_role)
+        sent_before = list(self.session_backend.get_sent_inputs(verifier_role.runtime_handle))
+        backend.delivery_state = "direct"
+        refreshed_session = self.session_repository.get_by_id(session.id)
+        assert refreshed_session is not None
+
+        reconciled = self.coordinator._reconcile_session_dispatch(refreshed_session)
+
+        dispatches = self.dispatch_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+        sent_after = self.session_backend.get_sent_inputs(verifier_role.runtime_handle)
+
+        self.assertTrue(reconciled)
+        self.assertEqual("superseded", dispatches[-2].status.value)
+        self.assertEqual("delivered", dispatches[-1].status.value)
+        self.assertGreater(len(sent_after), len(sent_before))
+        self.assertTrue(
+            any(
+                item.event_type == "role_input_dispatch_repair_requested"
+                and item.payload.get("reason") == "launcher_dispatch_buffered_pre_ready"
+                for item in events
+            )
+        )
+
     def test_reconcile_session_dispatch_repairs_delivered_launcher_dispatch_without_routed_work(
         self,
     ) -> None:
