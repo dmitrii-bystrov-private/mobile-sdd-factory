@@ -369,20 +369,37 @@ class CoordinatorService:
         )
 
         event_type = "task_prepared"
+        event_payload = {
+            "raw_task_key": raw_task_key,
+            "resolved_task_key": resolved_task_key,
+            "issue_type": issue_type,
+            "readiness": readiness,
+            "snapshot_exit_code": snapshot_result.returncode,
+        }
         if snapshot_result.returncode != 0:
             event_type = "task_preparation_failed"
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="intake_failed",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.FAILED)
+            event_payload.update(
+                {
+                    "summary": "Task bootstrap failed",
+                    "details": self._snapshot_failure_details(snapshot_result.stderr, snapshot_result.stdout),
+                    "stdout_path": str(stdout_path),
+                    "stderr_path": str(stderr_path),
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                }
+            )
 
         event = self._append_event(
             session_id=session.id,
             event_type=event_type,
             producer_type="coordinator",
-            payload={
-                "raw_task_key": raw_task_key,
-                "resolved_task_key": resolved_task_key,
-                "issue_type": issue_type,
-                "readiness": readiness,
-                "snapshot_exit_code": snapshot_result.returncode,
-            },
+            payload=event_payload,
         )
         details = {
             "resolved_task_key": resolved_task_key,
@@ -419,6 +436,15 @@ class CoordinatorService:
                 ).event_type
             session = self._get_session_or_raise(session.id)
         return session, event, created, details
+
+    def _snapshot_failure_details(self, stderr: str, stdout: str) -> str:
+        source = stderr.strip() or stdout.strip()
+        if not source:
+            return "Snapshot/bootstrap command exited non-zero without stderr output."
+        lines = [line.rstrip() for line in source.splitlines() if line.strip()]
+        if len(lines) <= 24:
+            return "\n".join(lines)
+        return "\n".join(lines[-24:])
 
     def _maybe_resume_subtasks_from_intake(
         self,

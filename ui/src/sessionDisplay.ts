@@ -17,6 +17,8 @@ const SESSION_STATUS_LABELS: Record<string, string> = {
   waiting_for_operator: "Waiting For Operator",
   paused: "Paused",
   completed: "Completed",
+  cancelled: "Cancelled",
+  failed: "Failed",
 };
 
 const SESSION_POLICY_LABELS: Record<string, string> = {

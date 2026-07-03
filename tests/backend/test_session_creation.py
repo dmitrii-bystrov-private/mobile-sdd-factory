@@ -158,6 +158,7 @@ class FakeSnapshotAdapter:
         self.calls: list[str] = []
         self.statuses_by_task: dict[str, str] = {}
         self.statuses_sequences_by_task: dict[str, list[str]] = {}
+        self.failures_by_task: dict[str, CommandResult] = {}
 
     def set_statuses_output(self, task_key: str, content: str) -> None:
         self.statuses_by_task[task_key] = content
@@ -165,8 +166,18 @@ class FakeSnapshotAdapter:
     def set_statuses_sequence(self, task_key: str, contents: list[str]) -> None:
         self.statuses_sequences_by_task[task_key] = list(contents)
 
+    def set_failure(self, task_key: str, *, stdout: str = "", stderr: str = "snapshot failed\n") -> None:
+        self.failures_by_task[task_key] = CommandResult(
+            command=["snapshot", task_key],
+            returncode=1,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
     def run(self, task_key: str) -> CommandResult:
         self.calls.append(task_key)
+        if task_key in self.failures_by_task:
+            return self.failures_by_task[task_key]
         if self.workdir_root is not None and task_key in self.statuses_sequences_by_task:
             sequence = self.statuses_sequences_by_task[task_key]
             content = sequence.pop(0) if len(sequence) > 1 else sequence[0]
@@ -1714,6 +1725,35 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Read HYDRATION.json for machine-readable routed IDs and paths.", sent_inputs[0])
         self.assertNotIn("Role-specific rules:", sent_inputs[0])
         self.assertNotIn("Use RAG tools first for code exploration", sent_inputs[0])
+
+    def test_prepare_task_session_marks_snapshot_failure_as_failed_intake(self) -> None:
+        self.snapshot_adapter.set_failure(
+            "IOS-30002FAIL",
+            stderr=(
+                "Running iOS bootstrap...\n"
+                "error: Failed to find credentials for 'https://github.com' in keychain: status -128\n"
+                "ERROR: iOS bootstrap: 'tuist install' failed\n"
+            ),
+        )
+
+        session, event, created, details = self.coordinator.prepare_task_session("IOS-30002FAIL")
+        artifacts = self.artifact_repository.list_for_session(session.id)
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertTrue(created)
+        self.assertEqual("task_preparation_failed", event.event_type)
+        self.assertEqual("failed", session.status.value)
+        self.assertEqual("intake_failed", session.current_stage)
+        self.assertIsNone(session.current_owner)
+        self.assertEqual(1, details["snapshot_exit_code"])
+        self.assertIsNone(details["followup_event_type"])
+        self.assertEqual([], work_items)
+        self.assertIn("Task bootstrap failed", event.payload["summary"])
+        self.assertIn("tuist install", event.payload["details"])
+        self.assertIn("snapshot.stdout.log", event.payload["stdout_path"])
+        self.assertIn("snapshot.stderr.log", event.payload["stderr_path"])
+        self.assertTrue(any(item.artifact_type == "snapshot_stdout" for item in artifacts))
+        self.assertTrue(any(item.artifact_type == "snapshot_stderr" for item in artifacts))
 
     def test_prepare_task_session_reuses_existing_policy_aware_session(self) -> None:
         session, _, created = self.coordinator.create_task_session(

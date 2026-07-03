@@ -12,7 +12,7 @@ import {
   workflowProfileDisplayName,
 } from "../sessionDisplay";
 import { stageDisplayName } from "../stageDisplay";
-import type { Role, RuntimeRoleStateSummary, Session, SessionBundle } from "../types";
+import type { EventItem, Role, RuntimeRoleStateSummary, Session, SessionBundle } from "../types";
 
 type SessionDetailProps = {
   session: Session | null;
@@ -25,6 +25,17 @@ type DeliveryFailureState = {
   summary: string;
   details: string | null;
 } | null;
+
+type PreparationFailureState = {
+  stageLabel: string;
+  summary: string;
+  details: string | null;
+} | null;
+
+function payloadString(event: EventItem | null, key: string): string | null {
+  const value = event?.payload[key];
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
 
 function humanizeEventType(value: string): string {
   return value
@@ -150,6 +161,7 @@ export function SessionDetail({
   const [workerActionError, setWorkerActionError] = useState<string | null>(null);
   const [showAllWorkflowRoles, setShowAllWorkflowRoles] = useState(false);
   const [deliveryFailure, setDeliveryFailure] = useState<DeliveryFailureState>(null);
+  const [preparationFailure, setPreparationFailure] = useState<PreparationFailureState>(null);
   const [deliveryRetryBusy, setDeliveryRetryBusy] = useState(false);
   const { showToast, showActivity, clearActivity } = useToast();
   const sessionId = session?.id ?? null;
@@ -211,6 +223,57 @@ export function SessionDetail({
           stageLabel: stageDisplayName(session.current_stage),
           summary: "The delivery step failed, but the stderr artifact could not be loaded.",
           details: null,
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bundle, session]);
+
+  useEffect(() => {
+    if (session === null || bundle === null || session.current_stage !== "intake_failed") {
+      setPreparationFailure(null);
+      return;
+    }
+
+    const latestFailureEvent =
+      [...bundle.events].reverse().find((event) => event.event_type === "task_preparation_failed") ?? null;
+    const latestStderrArtifact = [...bundle.artifacts]
+      .reverse()
+      .find((artifact) => artifact.artifact_type === "snapshot_stderr");
+    const fallbackDetails = payloadString(latestFailureEvent, "details");
+
+    if (!latestStderrArtifact) {
+      setPreparationFailure({
+        stageLabel: stageDisplayName(session.current_stage),
+        summary: payloadString(latestFailureEvent, "summary") ?? "Task bootstrap failed.",
+        details: fallbackDetails,
+      });
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const artifactDetail = await apiClient.getArtifact(latestStderrArtifact.id);
+        if (cancelled) {
+          return;
+        }
+        setPreparationFailure({
+          stageLabel: stageDisplayName(session.current_stage),
+          summary: payloadString(latestFailureEvent, "summary") ?? "Task bootstrap failed.",
+          details: artifactDetail.content?.trim() || fallbackDetails,
+        });
+      } catch {
+        if (cancelled) {
+          return;
+        }
+        setPreparationFailure({
+          stageLabel: stageDisplayName(session.current_stage),
+          summary: "Task bootstrap failed, but the stderr artifact could not be loaded.",
+          details: fallbackDetails,
         });
       }
     })();
@@ -439,6 +502,23 @@ export function SessionDetail({
             >
               {activeSession.current_stage === "mr_handoff_failed" ? "Retry MR handoff" : "Retry send to test"}
             </button>
+          </div>
+        </section>
+      ) : null}
+
+      {preparationFailure ? (
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Recovery</p>
+              <h3>{preparationFailure.stageLabel}</h3>
+            </div>
+          </div>
+          <div className="completed-followup-preview">
+            <strong className="completed-followup-preview-title">{preparationFailure.summary}</strong>
+            <pre className="completed-followup-preview-body">
+              {preparationFailure.details ?? "No bootstrap stderr details were captured."}
+            </pre>
           </div>
         </section>
       ) : null}
