@@ -345,6 +345,14 @@ class TmuxSessionBackend(SessionBackend):
         self.sent_inputs[role.role_id].append(text)
         if self._effective_mode == "tmux":
             self._restore_tmux_role_metadata_if_needed(role)
+            socket_path = self._socket_path(role.session_id)
+            if self.tmux_interactive_driver_enabled.get(role.role_id, False) and not self.tmux_role_ready.get(role.role_id, True):
+                self._refresh_launcher_ready_from_pane(
+                    role_id=role.role_id,
+                    socket_path=socket_path,
+                    runtime_handle=role.role_id,
+                    discard_buffered=True,
+                )
             if self.tmux_interactive_driver_enabled.get(role.role_id, False) and not self.tmux_role_ready.get(role.role_id, True):
                 payload_text = text
                 if "\n" in text:
@@ -364,7 +372,6 @@ class TmuxSessionBackend(SessionBackend):
                 )
                 self.tmux_buffered_inputs[role.role_id].append(payload_text)
                 return
-            socket_path = self._socket_path(role.session_id)
             if self.tmux_interactive_driver_enabled.get(role.role_id, False):
                 self.tmux_output_buffers[role.role_id] = ""
                 self.tmux_selection_blocker_emitted[role.role_id] = False
@@ -475,6 +482,23 @@ class TmuxSessionBackend(SessionBackend):
                 if retry.returncode == 0:
                     return retry.stdout
         return current
+
+    def launcher_role_ready(self, role: RuntimeRoleHandle) -> bool:
+        if self._effective_mode != "tmux":
+            return True
+        self._restore_tmux_role_metadata_if_needed(role)
+        if not self.tmux_interactive_driver_enabled.get(role.role_id, False):
+            return True
+        if self.tmux_role_ready.get(role.role_id, False):
+            return True
+        socket_path = self._socket_path(role.session_id)
+        self._refresh_launcher_ready_from_pane(
+            role_id=role.role_id,
+            socket_path=socket_path,
+            runtime_handle=role.role_id,
+            discard_buffered=False,
+        )
+        return self.tmux_role_ready.get(role.role_id, False)
 
     def maybe_poke_stalled_role(
         self,
@@ -868,6 +892,26 @@ class TmuxSessionBackend(SessionBackend):
                 return ""
             raise RuntimeError(result.stderr or result.stdout or "Failed to capture tmux pane")
         return result.stdout
+
+    def _refresh_launcher_ready_from_pane(
+        self,
+        *,
+        role_id: str,
+        socket_path: Path,
+        runtime_handle: str,
+        discard_buffered: bool,
+    ) -> None:
+        pane_text = self._capture_tmux_pane_text(socket_path, runtime_handle)
+        if not pane_text:
+            return
+        self._auto_advance_snapshot_bootstrap_prompts(role_id, pane_text)
+        normalized = self._normalize_terminal_text(pane_text)
+        if not self._contains_runner_ready_prompt(normalized):
+            return
+        self.tmux_role_ready[role_id] = True
+        self.tmux_pre_ready_unknown_chunks[role_id] = 0
+        if discard_buffered:
+            self.tmux_buffered_inputs.pop(role_id, None)
 
     def _confirm_tmux_launcher_input_visible(
         self,

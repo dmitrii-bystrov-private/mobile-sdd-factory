@@ -6695,6 +6695,60 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(result_path.exists())
         self.assertTrue(any(item.event_type == "role_result_protocol_violation_reported" for item in events))
 
+    def test_documentation_precheck_flags_verbose_swift_inline_comment_blocks(self) -> None:
+        repo_dir = Path(self.temp_dir.name) / "repo"
+        source_path = repo_dir / "Sources" / "BusinessInfoPresenter.swift"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(
+            "\n".join(
+                [
+                    "final class BusinessInfoPresenter {",
+                    "    // In the invalid selected-company recovery flow, the register submit can be",
+                    "    // rejected with a contract validation for a field the user cannot fix on this",
+                    "    // screen. Retry once with a simplified payload before surfacing the error.",
+                    "    // The condition intentionally keys off the stable class rather than a message.",
+                    "    private func shouldRetrySimplifiedRegister() -> Bool { true }",
+                    "}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        findings = self.coordinator._documentation_precheck_findings(
+            repo_dir,
+            ["Sources/BusinessInfoPresenter.swift"],
+        )
+
+        titles = {str(item["title"]) for item in findings}
+        self.assertIn("Verbose inline comment block", titles)
+        self.assertIn("Inline comment explains task mechanics instead of a stable invariant", titles)
+
+    def test_documentation_precheck_allows_short_swift_invariant_comments(self) -> None:
+        repo_dir = Path(self.temp_dir.name) / "repo"
+        source_path = repo_dir / "Sources" / "GenerationGuard.swift"
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(
+            "\n".join(
+                [
+                    "func applyResult() {",
+                    "    // The generation is checked again on main because cancellation can happen",
+                    "    // after the network result is accepted but before the UI callback runs.",
+                    "    guard generation == currentGeneration else { return }",
+                    "}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        findings = self.coordinator._documentation_precheck_findings(
+            repo_dir,
+            ["Sources/GenerationGuard.swift"],
+        )
+
+        self.assertEqual([], findings)
+
     def test_collect_role_output_escalates_doc_harvest_without_summary_or_details(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021FHPROTO",
@@ -8197,6 +8251,62 @@ class SessionCreationTests(unittest.TestCase):
                 for item in events
             )
         )
+
+    def test_reconcile_session_dispatch_waits_until_launcher_ready_for_pre_ready_buffer(self) -> None:
+        backend = DispatchTraceRecordingBackend(delivery_state="buffered_pre_ready")
+        backend.launcher_ready = False
+        backend.launcher_role_ready = lambda role: backend.launcher_ready  # type: ignore[attr-defined]
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004BUFFERWAIT")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        self.assertIsNotNone(verifier_role)
+        sent_before = list(self.session_backend.get_sent_inputs(verifier_role.runtime_handle))
+        refreshed_session = self.session_repository.get_by_id(session.id)
+        assert refreshed_session is not None
+
+        reconciled = self.coordinator._reconcile_session_dispatch(refreshed_session)
+
+        dispatches = self.dispatch_repository.list_for_session(session.id)
+        sent_after = self.session_backend.get_sent_inputs(verifier_role.runtime_handle)
+
+        self.assertFalse(reconciled)
+        self.assertEqual("stalled", dispatches[-1].status.value)
+        self.assertEqual(sent_before, sent_after)
+
+    def test_poll_session_output_repairs_ready_pre_ready_buffered_dispatch(self) -> None:
+        backend = DispatchTraceRecordingBackend(delivery_state="buffered_pre_ready")
+        backend.launcher_role_ready = lambda role: True  # type: ignore[attr-defined]
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004BUFFERPOLL")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        self.assertIsNotNone(verifier_role)
+        sent_before = list(self.session_backend.get_sent_inputs(verifier_role.runtime_handle))
+        backend.delivery_state = "direct"
+
+        _, event, _, chunk_count = self.coordinator.poll_session_output(session.id)
+
+        dispatches = self.dispatch_repository.list_for_session(session.id)
+        sent_after = self.session_backend.get_sent_inputs(verifier_role.runtime_handle)
+
+        self.assertIsNotNone(event)
+        assert event is not None
+        self.assertEqual("session_dispatch_reconciled_from_poll", event.event_type)
+        self.assertEqual(0, chunk_count)
+        self.assertEqual("superseded", dispatches[-2].status.value)
+        self.assertEqual("delivered", dispatches[-1].status.value)
+        self.assertGreater(len(sent_after), len(sent_before))
 
     def test_reconcile_session_dispatch_repairs_delivered_launcher_dispatch_without_routed_work(
         self,

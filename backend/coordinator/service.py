@@ -2466,6 +2466,17 @@ class CoordinatorService:
             total_chunks += len(chunks) + (1 if file_result is not None or protocol_violation else 0)
 
         if total_chunks == 0:
+            if self._reconcile_session_dispatch(session):
+                event = self._append_event(
+                    session_id=session.id,
+                    event_type="session_dispatch_reconciled_from_poll",
+                    producer_type="coordinator",
+                    payload={
+                        "current_stage": session.current_stage,
+                        "current_owner": session.current_owner,
+                    },
+                )
+                return session, event, len(roles), 0
             return session, None, len(roles), 0
 
         event = None
@@ -8312,7 +8323,11 @@ class CoordinatorService:
                             "reason": "delivered_launcher_dispatch_missing_routed_work",
                         },
                     )
-                elif self._stalled_launcher_dispatch_buffered_pre_ready(active_dispatch):
+                elif self._stalled_launcher_dispatch_buffered_pre_ready(
+                    session=session,
+                    role=role,
+                    active_dispatch=active_dispatch,
+                ):
                     force_redispatch = True
                     self._append_event(
                         session_id=session.id,
@@ -8412,12 +8427,35 @@ class CoordinatorService:
         workspace = self.role_workspace_manager.role_directory(session.task_key, role.role_name)
         return not (workspace / "ROUTED_WORK.md").is_file()
 
-    def _stalled_launcher_dispatch_buffered_pre_ready(self, active_dispatch: Dispatch) -> bool:
+    def _stalled_launcher_dispatch_buffered_pre_ready(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_dispatch: Dispatch,
+    ) -> bool:
         if active_dispatch.status != DispatchStatus.STALLED:
             return False
-        return active_dispatch.error_text == (
+        if active_dispatch.error_text != (
             "launcher-backed role was not ready; routed input is buffered but not yet visible"
+        ):
+            return False
+        if not self._launcher_role_ready_for_buffered_repair(session=session, role=role):
+            return False
+        return True
+
+    def _launcher_role_ready_for_buffered_repair(self, *, session: Session, role: Role) -> bool:
+        readiness_probe = getattr(self.session_backend, "launcher_role_ready", None)
+        if readiness_probe is None:
+            return True
+        if role.runtime_handle is None:
+            return False
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
         )
+        return bool(readiness_probe(runtime_role))
 
     def _role_recently_dispatched(self, role: Role, *, window_seconds: int = 5) -> bool:
         if role.last_hydration_version <= 0:
@@ -9312,7 +9350,7 @@ class CoordinatorService:
     def _documentation_precheck_findings(self, repo_dir: Path, changed_files: list[str]) -> list[dict[str, str | int]]:
         findings: list[dict[str, str | int]] = []
         history_pattern = re.compile(
-            r"\b(jira|follow[- ]?up|review finding|review history|moved from|no longer|task history)\b",
+            r"\b(jira|follow[- ]?up|review finding|review history|moved from|no longer|task history|workaround|temporary)\b",
             re.IGNORECASE,
         )
         task_pattern = re.compile(r"\b[A-Z]+-\d+\b")
@@ -9362,7 +9400,78 @@ class CoordinatorService:
                             "direction": "Avoid file listings in module READMEs unless they are genuinely stable key entry points.",
                         }
                     )
+            if path.suffix.lower() in {".swift", ".kt", ".kts", ".java"}:
+                findings.extend(self._inline_comment_block_findings(rel_path, lines))
         return findings[:100]
+
+    def _inline_comment_block_findings(self, rel_path: str, lines: list[str]) -> list[dict[str, str | int]]:
+        findings: list[dict[str, str | int]] = []
+        current_block: list[tuple[int, str]] = []
+
+        def flush_block() -> None:
+            if not current_block:
+                return
+            findings.extend(self._documentation_findings_for_comment_block(rel_path, current_block))
+            current_block.clear()
+
+        for index, line in enumerate(lines, start=1):
+            stripped = line.strip()
+            if stripped.startswith("//") and not stripped.startswith("///"):
+                current_block.append((index, stripped))
+                continue
+            flush_block()
+        flush_block()
+        return findings
+
+    def _documentation_findings_for_comment_block(
+        self,
+        rel_path: str,
+        block: list[tuple[int, str]],
+    ) -> list[dict[str, str | int]]:
+        if not block:
+            return []
+        findings: list[dict[str, str | int]] = []
+        comment_lines = [line for _index, line in block]
+        text = " ".join(line.removeprefix("//").strip() for line in comment_lines)
+        lower_text = text.lower()
+        first_line = block[0][0]
+        evidence = " / ".join(comment_lines)[:240]
+        if len(block) >= 3:
+            findings.append(
+                {
+                    "title": "Verbose inline comment block",
+                    "file": rel_path,
+                    "line": first_line,
+                    "evidence": evidence,
+                    "direction": (
+                        "Inline comments should usually be one or two lines and explain only the local "
+                        "non-obvious invariant, lifecycle, ownership, or call-order constraint."
+                    ),
+                }
+            )
+        history_terms = (
+            "retry once",
+            "fallback",
+            "recovery flow",
+            "before surfacing",
+            "backend message",
+            "history",
+            "workaround",
+        )
+        if len(block) >= 2 and any(term in lower_text for term in history_terms):
+            findings.append(
+                {
+                    "title": "Inline comment explains task mechanics instead of a stable invariant",
+                    "file": rel_path,
+                    "line": first_line,
+                    "evidence": evidence,
+                    "direction": (
+                        "Keep only the stable invariant needed by a local reader; move broader flow/history "
+                        "explanations to durable documentation or delete them when the code is self-explanatory."
+                    ),
+                }
+            )
+        return findings
 
     def _looks_like_comment_line(self, line: str) -> bool:
         return line.startswith("//") or line.startswith("///") or line.startswith("*") or line.startswith("/*")

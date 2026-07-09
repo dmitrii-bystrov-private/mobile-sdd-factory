@@ -418,6 +418,47 @@ class TmuxBackendTests(unittest.TestCase):
         submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
         self.assertEqual("submitted_unconfirmed", submit_trace["delivery_state"])
 
+    def test_tmux_launcher_ready_probe_discards_stale_pre_ready_buffer(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+                self.capture_count = 0
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    self.capture_count += 1
+                    if self.capture_count == 1:
+                        return subprocess.CompletedProcess(
+                            ["tmux", *args],
+                            0,
+                            "› Explain this codebase\n\n  gpt-5.4 medium · ~/repo\n",
+                            "",
+                        )
+                    return subprocess.CompletedProcess(["tmux", *args], 0, "fresh routed work", "")
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50012:convention-reviewer",
+            session_id="sdd-IOS-50012",
+            backend_name="tmux",
+        )
+        backend.tmux_interactive_driver_enabled[role.role_id] = True
+        backend.tmux_launcher_runners[role.role_id] = "codex"
+        backend.tmux_role_ready[role.role_id] = False
+        backend.tmux_buffered_inputs[role.role_id].append("stale routed work")
+
+        backend.send_input(role, "fresh routed work")
+
+        traces = backend.get_tmux_submit_traces(role.role_id)
+        self.assertTrue(backend.tmux_role_ready[role.role_id])
+        self.assertEqual([], backend.tmux_buffered_inputs.get(role.role_id, []))
+        self.assertEqual("direct", traces[-1]["source"])
+        self.assertIn(("send-keys", "-t", role.role_id, "fresh routed work", ""), backend.calls)
+        self.assertNotIn(("send-keys", "-t", role.role_id, "stale routed work", ""), backend.calls)
+
     def test_tmux_launcher_materialized_trigger_includes_dispatch_token_from_hydration(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self, runtime_root: Path) -> None:
