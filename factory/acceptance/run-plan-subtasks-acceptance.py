@@ -42,9 +42,8 @@ def main() -> None:
                 task_key="IOS-ACCEPT-PLAN-001",
                 workflow_profile="story_full",
                 policy={
-                    "self_review_policy": "disabled",
-                    "boy_scout_policy": "disabled",
-                    "doc_harvest_policy": "disabled",
+                    "review_policy": "disabled",
+                                        "doc_harvest_policy": "disabled",
                 },
             ),
             dependencies=deps,

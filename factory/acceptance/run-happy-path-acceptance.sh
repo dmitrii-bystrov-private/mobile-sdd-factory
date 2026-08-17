@@ -61,17 +61,21 @@ if ! curl -fsS "${BASE_URL}/sessions" >/dev/null 2>&1; then
   exec env PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}" "${REPO_ROOT}/.venv/bin/python" factory/acceptance/run-happy-path-acceptance.py
 fi
 
-CREATE_PAYLOAD='{"task_key":"IOS-ACCEPT-001","workflow_profile":"oneshot","prepare":true,"policy":{"self_review_policy":"required","boy_scout_policy":"disabled","doc_harvest_policy":"disabled"}}'
+CREATE_PAYLOAD='{"task_key":"IOS-ACCEPT-001","workflow_profile":"oneshot","prepare":true,"policy":{"review_policy":"required","doc_harvest_policy":"disabled"}}'
 CREATE_RESPONSE="$(curl -fsS -X POST "${BASE_URL}/sessions" -H 'content-type: application/json' -d "${CREATE_PAYLOAD}")"
 SESSION_ID="$(jq -r '.session.id' <<<"${CREATE_RESPONSE}")"
 jq -e '.followup_event_type == "implementation_requested"' <<<"${CREATE_RESPONSE}" >/dev/null
 
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
   -d "{\"session_id\":${SESSION_ID},\"role_name\":\"implementer\",\"output_type\":\"completed\",\"payload\":{\"summary\":\"implementation done\"}}" \
-  | jq -e '.followup_event_type == "self_review_requested"' >/dev/null
+  | jq -e '.followup_event_type == "convention_review_requested"' >/dev/null
 
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
-  -d "{\"session_id\":${SESSION_ID},\"role_name\":\"code-reviewer\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"clean review\"}}" \
+  -d "{\"session_id\":${SESSION_ID},\"role_name\":\"convention-reviewer\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"clean convention review\"}}" \
+  | jq -e '.followup_event_type == "requirements_review_requested"' >/dev/null
+
+curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
+  -d "{\"session_id\":${SESSION_ID},\"role_name\":\"requirements-reviewer\",\"output_type\":\"passed\",\"payload\":{\"summary\":\"clean requirements review\"}}" \
   | jq -e '.followup_event_type == "verification_requested"' >/dev/null
 
 curl -fsS -X POST "${BASE_URL}/roles/output" -H 'content-type: application/json' \
@@ -94,8 +98,10 @@ jq -e '
   ([.items[].event_type] | index("task_prepared")) != null and
   ([.items[].event_type] | index("implementation_requested")) != null and
   ([.items[].event_type] | index("implementation_completed")) != null and
-  ([.items[].event_type] | index("self_review_requested")) != null and
-  ([.items[].event_type] | index("self_review_passed")) != null and
+  ([.items[].event_type] | index("convention_review_requested")) != null and
+  ([.items[].event_type] | index("convention_review_passed")) != null and
+  ([.items[].event_type] | index("requirements_review_requested")) != null and
+  ([.items[].event_type] | index("requirements_review_passed")) != null and
   ([.items[].event_type] | index("verification_requested")) != null and
   ([.items[].event_type] | index("verification_failed")) != null and
   ([.items[].event_type] | index("verification_correction_requested")) != null and

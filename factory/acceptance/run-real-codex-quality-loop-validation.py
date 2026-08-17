@@ -43,7 +43,12 @@ def wait_for_stage(
     last_response = None
     while time.time() < deadline:
         dependencies.loop_runner.run_once()
-        for worker_role_name in ("implementer", "code-reviewer", "verification-coordinator"):
+        for worker_role_name in (
+            "implementer",
+            "convention-reviewer",
+            "requirements-reviewer",
+            "verification-coordinator",
+        ):
             collect_role_output(
                 CollectRoleOutputRequest(
                     session_id=session_id,
@@ -77,15 +82,15 @@ def main() -> None:
                 workflow_profile="oneshot",
                 prepare=True,
                 policy={
-                    "self_review_policy": "required",
-                    "boy_scout_policy": "disabled",
-                    "doc_harvest_policy": "disabled",
+                    "review_policy": "required",
+                                        "doc_harvest_policy": "disabled",
                 },
                 role_config=acceptance_role_config(
-                    ["implementer", "code-reviewer", "verification-coordinator"],
+                    ["implementer", "convention-reviewer", "requirements-reviewer", "verification-coordinator"],
                     runner_overrides={
                         "implementer": "codex",
-                        "code-reviewer": "codex",
+                        "convention-reviewer": "codex",
+                        "requirements-reviewer": "codex",
                         "verification-coordinator": "codex",
                     },
                 ),
@@ -122,8 +127,10 @@ def main() -> None:
 
         events = list_events(session_id=session_id, dependencies=deps).items
         event_types = [item.event_type for item in events]
-        assert "self_review_requested" in event_types
-        assert "self_review_passed" in event_types
+        assert "convention_review_requested" in event_types
+        assert "convention_review_passed" in event_types
+        assert "requirements_review_requested" in event_types
+        assert "requirements_review_passed" in event_types
         assert event_types.count("verification_requested") >= 2
         assert event_types.count("implementation_completed") >= 2
         assert "verification_failed" in event_types

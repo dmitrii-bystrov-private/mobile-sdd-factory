@@ -19,7 +19,6 @@ from backend.api.schemas import (
 )
 from backend.roles.contracts import (
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
-    CODE_REVIEWER_ROLE,
     CONSTRAINTS_WORKER_ROLE,
     IMPLEMENTER_ROLE,
     PROPOSAL_CONTEXT_WORKER_ROLE,
@@ -77,9 +76,8 @@ def main() -> None:
                 workflow_profile="story_full",
                 prepare=True,
                 policy={
-                    "self_review_policy": "disabled",
-                    "boy_scout_policy": "disabled",
-                    "doc_harvest_policy": "disabled",
+                    "review_policy": "disabled",
+                                        "doc_harvest_policy": "disabled",
                 },
                 role_config=acceptance_role_config(
                     [IMPLEMENTER_ROLE, VERIFICATION_COORDINATOR_ROLE]

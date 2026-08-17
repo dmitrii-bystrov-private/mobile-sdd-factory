@@ -37,9 +37,8 @@ def main() -> None:
                 task_key=task_key,
                 workflow_profile="oneshot",
                 policy={
-                    "self_review_policy": "disabled",
-                    "boy_scout_policy": "disabled",
-                    "doc_harvest_policy": "disabled",
+                    "review_policy": "disabled",
+                                        "doc_harvest_policy": "disabled",
                 },
                 role_config=acceptance_role_config(
                     ["implementer", "verification-coordinator"]

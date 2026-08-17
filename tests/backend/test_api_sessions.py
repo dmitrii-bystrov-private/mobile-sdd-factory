@@ -40,9 +40,6 @@ try:
     from backend.api.routes_operator import reopen_from_qa
     from backend.api.routes_operator import redirect_session
     from backend.api.routes_operator import complete_doc_harvest
-    from backend.api.routes_operator import skip_boy_scout
-    from backend.api.routes_operator import resolve_boy_scout_findings
-    from backend.api.routes_operator import complete_self_review
     from backend.api.routes_operator import create_mr
     from backend.api.routes_operator import create_subtasks_from_plan
     from backend.api.routes_operator import cleanup_task
@@ -63,12 +60,9 @@ try:
     from backend.api.routes_operator import update_runtime_defaults
     from backend.api.schemas import (
         CompleteDocHarvestRequest,
-        CompleteSelfReviewRequest,
         CleanupTaskRequest,
         CreateMrRequest,
         CreateSubtasksFromPlanRequest,
-        SkipBoyScoutRequest,
-        ResolveBoyScoutFindingsRequest,
         PollSessionOutputRequest,
         PauseSessionRequest,
         RefreshSnapshotRequest,
@@ -94,7 +88,6 @@ try:
         ACCEPTANCE_CRITERIA_WORKER_ROLE,
         ALLOWED_STAGE_ROLE_TARGETS,
         BUG_FIXER_ROLE,
-        CODE_REVIEWER_ROLE,
         CONSTRAINTS_WORKER_ROLE,
         DEFAULT_SESSION_ROLES,
         PROPOSAL_CONTEXT_WORKER_ROLE,
@@ -249,11 +242,9 @@ class FakeGitLabAdapter:
 class SessionApiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
-        self._original_boy_scout_default = session_policy_module.COMMON_DEFAULTS["boy_scout_policy"]
-        self._original_self_review_default = session_policy_module.COMMON_DEFAULTS["self_review_policy"]
+        self._original_review_default = session_policy_module.COMMON_DEFAULTS["review_policy"]
         self._original_doc_harvest_default = session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"]
-        session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = "disabled"
-        session_policy_module.COMMON_DEFAULTS["self_review_policy"] = "disabled"
+        session_policy_module.COMMON_DEFAULTS["review_policy"] = "disabled"
         session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"] = "disabled"
         self.db_path = Path(self.temp_dir.name) / "factory.sqlite3"
         self.database = Database(self.db_path)
@@ -319,8 +310,7 @@ class SessionApiTests(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
-        session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = self._original_boy_scout_default
-        session_policy_module.COMMON_DEFAULTS["self_review_policy"] = self._original_self_review_default
+        session_policy_module.COMMON_DEFAULTS["review_policy"] = self._original_review_default
         session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"] = self._original_doc_harvest_default
         self.dependencies.loop_runner.stop()
         self.temp_dir.cleanup()
@@ -329,6 +319,13 @@ class SessionApiTests(unittest.TestCase):
         task_dir = Path(self.temp_dir.name) / task_key
         task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / "statuses.md").write_text(content)
+
+    def write_passed_verification_outcome(self, task_key: str) -> None:
+        spec_dir = Path(self.temp_dir.name) / task_key / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "verification-outcome.json").write_text(
+            json.dumps({"status": "passed", "task_key": task_key}) + "\n"
+        )
 
     def test_create_session_route_returns_created_session(self) -> None:
         response = create_session(
@@ -499,44 +496,6 @@ class SessionApiTests(unittest.TestCase):
             [str(launch_script)],
             self.dependencies.session_backend.get_spawn_command(implementer_role.runtime_handle),
         )
-
-    def test_runtime_defaults_routes_roundtrip_project_local_settings(self) -> None:
-        response = get_runtime_defaults(dependencies=self.dependencies)
-
-        self.assertIsNone(response.default_runner)
-        self.assertIn("implementer", response.known_roles)
-        self.assertTrue(response.source_path.endswith(".sdd-factory/settings.local.json"))
-
-        updated = update_runtime_defaults(
-            UpdateRuntimeDefaultsRequest(
-                default_runner="codex",
-                role_defaults={
-                    "implementer": {
-                        "runner": "claude",
-                        "model": "sonnet",
-                        "effort": "high",
-                    }
-                },
-                policy_defaults={
-                    "story_full": {
-                        "requirements_clarification_mode": "ask-a-lot",
-                        "boy_scout_policy": "required",
-                    }
-                },
-            ),
-            dependencies=self.dependencies,
-        )
-
-        self.assertEqual("codex", updated.default_runner)
-        self.assertEqual("claude", updated.role_defaults["implementer"].runner)
-        self.assertEqual("sonnet", updated.role_defaults["implementer"].model)
-        self.assertEqual("high", updated.role_defaults["implementer"].effort)
-        self.assertEqual(
-            "ask-a-lot",
-            updated.policy_defaults["story_full"]["requirements_clarification_mode"],
-        )
-        self.assertEqual("required", updated.policy_defaults["story_full"]["boy_scout_policy"])
-        self.assertTrue(Path(updated.source_path).is_file())
 
     def test_list_sessions_route_returns_created_session(self) -> None:
         create_session(
@@ -1108,7 +1067,7 @@ class SessionApiTests(unittest.TestCase):
             CreateSessionRequest(
                 task_key="IOS-40002A",
                 workflow_profile="oneshot",
-                policy={"self_review_policy": "required"},
+                policy={"review_policy": "required"},
             ),
             dependencies=self.dependencies,
         )
@@ -1121,7 +1080,7 @@ class SessionApiTests(unittest.TestCase):
         self.assertFalse(response.created)
         self.assertEqual(create_response.session.id, response.session.id)
         self.assertEqual("oneshot", response.session.workflow_profile)
-        self.assertEqual("required", response.session.policy["self_review_policy"])
+        self.assertEqual("required", response.session.policy["review_policy"])
 
     def test_prepare_session_route_uses_bug_analysis_for_bug_full(self) -> None:
         from backend.api.routes_sessions import prepare_session
@@ -1550,66 +1509,6 @@ class SessionApiTests(unittest.TestCase):
         self.assertTrue(response.needs_operator_input)
         self.assertIn("Choose notification model", str(response.details))
 
-    def test_get_interactive_state_route_marks_self_review_cycle_as_runtime_input(self) -> None:
-        prepare_response = create_session(
-            CreateSessionRequest(
-                task_key="IOS-40003REVIEWINPUT",
-                workflow_profile="oneshot",
-                policy={
-                    "self_review_policy": "required",
-                    "boy_scout_policy": "disabled",
-                    "doc_harvest_policy": "disabled",
-                },
-            ),
-            dependencies=self.dependencies,
-        )
-        prepare_session(
-            PrepareSessionRequest(task_key="IOS-40003REVIEWINPUT"),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=prepare_response.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "implementation done"},
-            ),
-            dependencies=self.dependencies,
-        )
-        submit_role_output(
-            RoleOutputRequest(
-                session_id=prepare_response.session.id,
-                role_name=CODE_REVIEWER_ROLE,
-                output_type="blocked_review_cycle",
-                payload={
-                    "summary": "Repeated reducer violation remains unresolved.",
-                    "issues": [
-                        {
-                            "severity": "error",
-                            "file": "Sources/Feature/Reducer.swift",
-                            "problem": "The mutation still bypasses the reducer boundary.",
-                            "why_it_matters": "The same reducer violation will continue to bounce between passes.",
-                            "required_direction": "Route the touched mutation back through the reducer path.",
-                            "non_goals": "Do not redesign unrelated feature slices in this loop.",
-                        }
-                    ],
-                },
-            ),
-            dependencies=self.dependencies,
-        )
-
-        response = get_interactive_state(
-            prepare_response.session.id,
-            dependencies=self.dependencies,
-        )
-
-        self.assertTrue(response.available)
-        self.assertEqual("self_review_cycle", response.source_reason)
-        self.assertEqual(CODE_REVIEWER_ROLE, response.role_name)
-        self.assertTrue(response.needs_operator_input)
-        self.assertIn("## Issues", response.details or "")
-        self.assertIn("Why it matters", response.details or "")
-        self.assertIn("Required direction", response.details or "")
-
     def test_story_spec_completed_event_returns_task_decomposition_handoff(self) -> None:
         prepare_response = create_session(
             CreateSessionRequest(
@@ -1881,7 +1780,7 @@ class SessionApiTests(unittest.TestCase):
             CreateSessionRequest(
                 task_key="IOS-40004SUBTASK",
                 workflow_profile="story_full",
-                policy={"self_review_policy": "disabled"},
+                policy={"review_policy": "disabled"},
             ),
             dependencies=self.dependencies,
         )
@@ -2039,7 +1938,7 @@ class SessionApiTests(unittest.TestCase):
             CreateSessionRequest(
                 task_key="IOS-40005SUBAUTO",
                 workflow_profile="story_full",
-                policy={"self_review_policy": "disabled"},
+                policy={"review_policy": "disabled"},
             ),
             dependencies=self.dependencies,
         )
@@ -2804,276 +2703,6 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("reactivate_only", response.resume_strategy)
         self.assertFalse(response.needs_operator_input)
 
-    def test_requirements_clarifier_runtime_input_can_continue_story_flow(self) -> None:
-        create_response = create_session(
-            CreateSessionRequest(
-                task_key="IOS-40013REQINT",
-                workflow_profile="story_full",
-                policy={"boy_scout_policy": "disabled"},
-            ),
-            dependencies=self.dependencies,
-        )
-        prepare_session(
-            PrepareSessionRequest(task_key="IOS-40013REQINT"),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=create_response.session.id,
-                event_type="proposal_context_completed",
-                payload={"summary": "proposal ready"},
-            ),
-            dependencies=self.dependencies,
-        )
-        clarifier_role = self.dependencies.role_repository.get_by_name(
-            create_response.session.id,
-            REQUIREMENTS_CLARIFIER_WORKER_ROLE,
-        )
-        self.dependencies.session_backend.simulate_output(
-            clarifier_role.runtime_handle,
-            'SDD_ERROR: {"summary":"clarification required","details":"Need product decision about fallback behavior.","needs_operator_input":true}',
-        )
-        collect_role_output(
-            CollectRoleOutputRequest(
-                session_id=create_response.session.id,
-                role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
-            ),
-            dependencies=self.dependencies,
-        )
-
-        send_runtime_input(
-            SendOperatorRuntimeInputRequest(
-                session_id=create_response.session.id,
-                text="Use the existing fallback behavior and document it explicitly.",
-            ),
-            dependencies=self.dependencies,
-        )
-        active_work_item = next(
-            item
-            for item in self.dependencies.work_item_repository.list_for_session(create_response.session.id)
-            if item.owner_role_id == clarifier_role.id and item.status == WorkItemStatus.ASSIGNED
-        )
-        role_workspace = self.dependencies.coordinator_service.role_workspace_manager.role_directory(  # type: ignore[union-attr]
-            "IOS-40013REQINT",
-            REQUIREMENTS_CLARIFIER_WORKER_ROLE,
-        )
-        result_path = role_workspace / "RESULT.json"
-        result_path.write_text(
-            json.dumps(
-                {
-                    "output_type": "completed",
-                    "payload": {
-                        "work_item_id": active_work_item.id,
-                        "summary": "Requirements clarified",
-                        "assumptions": "Fallback stays unchanged.",
-                    },
-                }
-            )
-        )
-        self.dependencies.session_backend.simulate_output(
-            clarifier_role.runtime_handle,
-            'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"Requirements clarified","assumptions":"Fallback stays unchanged."}}',
-        )
-
-        response = collect_role_output(
-            CollectRoleOutputRequest(
-                session_id=create_response.session.id,
-                role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
-            ),
-            dependencies=self.dependencies,
-        )
-        events_response = list_events(create_response.session.id, dependencies=self.dependencies)
-
-        self.assertEqual("acceptance_criteria_requested", response.session.current_stage)
-        self.assertTrue(any(item.event_type == "requirements_completed" for item in events_response.items))
-
-    def test_skip_boy_scout_route_moves_session_to_verification(self) -> None:
-        create_response = create_session(
-            CreateSessionRequest(
-                task_key="IOS-40013BSKIP",
-                workflow_profile="oneshot",
-                policy={"boy_scout_policy": "enabled"},
-            ),
-            dependencies=self.dependencies,
-        )
-        prepare_session(
-            PrepareSessionRequest(task_key="IOS-40013BSKIP"),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=create_response.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "done"},
-            ),
-            dependencies=self.dependencies,
-        )
-        scout_role = self.dependencies.role_repository.get_by_name(
-            create_response.session.id,
-            "code-scout",
-        )
-        spec_dir = Path(self.temp_dir.name) / "IOS-40013BSKIP" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "diff.md").write_text(
-            "# Diff Artifact: IOS-40013BSKIP\n\n"
-            "## Changed Files\n\n"
-            "| Status | Path |\n|---|---|\n"
-            "| modified | `LegacyPresenter.swift` |\n\n"
-        )
-        (spec_dir / "findings.md").write_text(
-            "SCOUT_RESULT: findings_found\n\n"
-            "## Finding 1: Split legacy presenter\n\n"
-            "**Files**: `LegacyPresenter.swift`\n"
-            "**Principle**: SRP\n"
-            "**Problem**: Presenter does too much.\n"
-            "**Suggestion**: Split responsibilities.\n"
-        )
-        scout_response = submit_role_output(
-            RoleOutputRequest(
-                session_id=create_response.session.id,
-                role_name="code-scout",
-                output_type="completed",
-                payload={
-                    "result": "findings_found",
-                    "summary": "Found one improvement opportunity.",
-                    "findings_path": str(spec_dir / "findings.md"),
-                    "findings_count": 1,
-                },
-            ),
-            dependencies=self.dependencies,
-        )
-        self.assertEqual("session_escalated_to_operator", scout_response.followup_event_type)
-        self.assertEqual("waiting_for_operator", scout_response.session.status)
-        events = self.dependencies.event_repository.list_for_session(create_response.session.id)
-        escalation = next(item for item in reversed(events) if item.event_type == "session_escalated_to_operator")
-        self.assertTrue(
-            any("pass-01.md" in str(path) for path in (escalation.payload.get("review_report_paths") or []))
-        )
-
-        response = skip_boy_scout(
-            SkipBoyScoutRequest(
-                session_id=create_response.session.id,
-                reason="Track the refactor separately.",
-            ),
-            dependencies=self.dependencies,
-        )
-        artifacts_response = list_artifacts(
-            session_id=create_response.session.id,
-            dependencies=self.dependencies,
-        )
-        deferred_path = Path(self.temp_dir.name) / "IOS-40013BSKIP" / "spec" / "scout-deferred.md"
-
-        self.assertTrue(response.skipped)
-        self.assertEqual("boy_scout_skipped_by_operator", response.event_type)
-        self.assertEqual("verification_requested", response.followup_event_type)
-        self.assertEqual("verification_requested", response.session.current_stage)
-        self.assertTrue(any(item.artifact_type == "boy_scout_deferred_markdown" for item in artifacts_response.items))
-        self.assertTrue(deferred_path.is_file())
-        self.assertIn("Split legacy presenter", deferred_path.read_text())
-
-    def test_resolve_boy_scout_findings_route_creates_tech_debt_and_routes_remaining_work(self) -> None:
-        create_response = create_session(
-            CreateSessionRequest(
-                task_key="IOS-40013BSRESOLVE",
-                workflow_profile="oneshot",
-                policy={"boy_scout_policy": "enabled"},
-            ),
-            dependencies=self.dependencies,
-        )
-        prepare_session(
-            PrepareSessionRequest(task_key="IOS-40013BSRESOLVE"),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=create_response.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "done"},
-            ),
-            dependencies=self.dependencies,
-        )
-        scout_role = self.dependencies.role_repository.get_by_name(
-            create_response.session.id,
-            "code-scout",
-        )
-        spec_dir = Path(self.temp_dir.name) / "IOS-40013BSRESOLVE" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "diff.md").write_text(
-            "# Diff Artifact: IOS-40013BSRESOLVE\n\n"
-            "## Changed Files\n\n"
-            "| Status | Path |\n|---|---|\n"
-            "| added | `NewBuilder.swift` |\n"
-            "| modified | `LegacyPresenter.swift` |\n\n"
-        )
-        (spec_dir / "findings.md").write_text(
-            "SCOUT_RESULT: findings_found\n\n"
-            "## Finding 1: Extract builder helper\n\n"
-            "**Files**: `NewBuilder.swift`\n"
-            "**Principle**: DRY\n"
-            "**Problem**: Duplicate helper logic exists.\n"
-            "**Suggestion**: Extract a shared helper.\n\n"
-            "**Why it matters**: The duplicate helper logic can drift between the touched branches.\n\n"
-            "**Required direction**: Route both touched builder paths through one helper implementation.\n\n"
-            "**Non-goals**: Do not redesign unrelated builder APIs in this pass.\n\n"
-            "---\n\n"
-            "## Finding 2: Split legacy presenter\n\n"
-            "**Files**: `LegacyPresenter.swift`\n"
-            "**Principle**: SRP\n"
-            "**Problem**: Presenter does too much.\n"
-            "**Suggestion**: Split responsibilities.\n"
-            "**Why it matters**: The presenter already carries unrelated responsibilities that will keep growing.\n"
-            "**Required direction**: Separate the touched branch from the legacy presenter responsibilities.\n"
-            "**Non-goals**: Do not redesign the entire presenter graph in this task.\n"
-        )
-        scout_response = submit_role_output(
-            RoleOutputRequest(
-                session_id=create_response.session.id,
-                role_name="code-scout",
-                output_type="completed",
-                payload={
-                    "result": "findings_found",
-                    "summary": "Found two improvement opportunities.",
-                    "findings_path": str(spec_dir / "findings.md"),
-                    "findings_count": 2,
-                },
-            ),
-            dependencies=self.dependencies,
-        )
-        self.assertEqual("session_escalated_to_operator", scout_response.followup_event_type)
-        self.assertEqual("waiting_for_operator", scout_response.session.status)
-        interactive_state = get_interactive_state(
-            create_response.session.id,
-            dependencies=self.dependencies,
-        )
-        self.assertIn("## Implement Now", interactive_state.details or "")
-        self.assertIn("Why it matters", interactive_state.details or "")
-        self.assertIn("## Tech Debt Candidates", interactive_state.details or "")
-
-        response = resolve_boy_scout_findings(
-            ResolveBoyScoutFindingsRequest(
-                session_id=create_response.session.id,
-                resolution="create_tech_debt",
-            ),
-            dependencies=self.dependencies,
-        )
-        artifacts_response = list_artifacts(
-            session_id=create_response.session.id,
-            dependencies=self.dependencies,
-        )
-        deferred_path = Path(self.temp_dir.name) / "IOS-40013BSRESOLVE" / "spec" / "scout-deferred.md"
-        actionable_path = Path(self.temp_dir.name) / "IOS-40013BSRESOLVE" / "spec" / "boy-scout-actionable.md"
-
-        self.assertTrue(response.resolved)
-        self.assertEqual("boy_scout_tech_debt_created", response.event_type)
-        self.assertEqual("boy_scout_correction_requested", response.followup_event_type)
-        self.assertEqual("boy_scout_correction_requested", response.session.current_stage)
-        self.assertTrue(any(item.artifact_type == "boy_scout_deferred_markdown" for item in artifacts_response.items))
-        self.assertTrue(any(item.artifact_type == "boy_scout_actionable_markdown" for item in artifacts_response.items))
-        self.assertTrue(deferred_path.is_file())
-        self.assertTrue(actionable_path.is_file())
-        self.assertIn("Split legacy presenter", deferred_path.read_text())
-        self.assertIn("Extract builder helper", actionable_path.read_text())
-
     def test_get_environment_doctor_route_returns_report(self) -> None:
         fake_report = {
             "overall_status": "warn",
@@ -3196,36 +2825,6 @@ class SessionApiTests(unittest.TestCase):
         implementer = next(role for role in response.roles if role.role_name == "implementer")
         self.assertEqual("owner-active", implementer.live_state)
         self.assertTrue(implementer.is_current_owner)
-
-    def test_retired_mr_comments_role_is_hidden_from_existing_sessions(self) -> None:
-        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
-            PrepareSessionRequest(task_key="IOS-40013OLDMR"),
-            dependencies=self.dependencies,
-        )
-        self.dependencies.role_repository.create(
-            session_id=prepare_response.session.id,
-            role_name="mr-comments-analyst-worker",
-            runtime_backend="recording",
-            runtime_handle="legacy-runtime:mr-comments-analyst-worker",
-        )
-
-        roles_response = list_roles(
-            prepare_response.session.id,
-            dependencies=self.dependencies,
-        )
-        runtime_response = get_runtime_state(
-            prepare_response.session.id,
-            dependencies=self.dependencies,
-        )
-
-        self.assertNotIn(
-            "mr-comments-analyst-worker",
-            [role.role_name for role in roles_response.items],
-        )
-        self.assertNotIn(
-            "mr-comments-analyst-worker",
-            [role.role_name for role in runtime_response.roles],
-        )
 
     def test_get_runtime_state_route_returns_last_auto_recovery(self) -> None:
         from tests.backend.test_session_creation import AutoRecoveryRecordingBackend
@@ -3530,6 +3129,7 @@ class SessionApiTests(unittest.TestCase):
             prepare_response.session.id,
             SessionStatus.COMPLETED,
         )
+        self.write_passed_verification_outcome("IOS-40014MR")
 
         response = create_mr(
             CreateMrRequest(session_id=prepare_response.session.id),
@@ -3566,6 +3166,7 @@ class SessionApiTests(unittest.TestCase):
             prepare_response.session.id,
             SessionStatus.COMPLETED,
         )
+        self.write_passed_verification_outcome("IOS-40014ST")
 
         response = send_to_test(
             SendToTestRequest(session_id=prepare_response.session.id),
@@ -3653,138 +3254,6 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("doc_harvest_requested", response.session.current_stage)
         self.assertEqual("doc-harvest-worker", response.session.current_owner)
         self.assertEqual("active", response.session.status)
-
-    def test_implementation_completed_routes_to_self_review_when_policy_required(self) -> None:
-        create_response = create_session(
-            CreateSessionRequest(
-                task_key="IOS-40014SR",
-                workflow_profile="oneshot",
-                policy={"self_review_policy": "required"},
-            ),
-            dependencies=self.dependencies,
-        )
-        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
-            PrepareSessionRequest(task_key="IOS-40014SR"),
-            dependencies=self.dependencies,
-        )
-
-        response = inject_event(
-            InjectEventRequest(
-                session_id=create_response.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "done"},
-            ),
-            dependencies=self.dependencies,
-        )
-
-        self.assertEqual("self_review_requested", response.followup_event_type)
-        self.assertEqual("self_review_requested", response.session.current_stage)
-        self.assertEqual("active", response.session.status)
-
-    def test_implementation_completed_routes_to_self_review_when_policy_enabled(self) -> None:
-        create_response = create_session(
-            CreateSessionRequest(
-                task_key="IOS-40014SRE",
-                workflow_profile="oneshot",
-                policy={"self_review_policy": "enabled"},
-            ),
-            dependencies=self.dependencies,
-        )
-        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
-            PrepareSessionRequest(task_key="IOS-40014SRE"),
-            dependencies=self.dependencies,
-        )
-
-        response = inject_event(
-            InjectEventRequest(
-                session_id=create_response.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "done"},
-            ),
-            dependencies=self.dependencies,
-        )
-
-        self.assertEqual("self_review_requested", response.followup_event_type)
-        self.assertEqual("self_review_requested", response.session.current_stage)
-        self.assertEqual("active", response.session.status)
-
-    def test_complete_self_review_route_passed_marks_verification_requested(self) -> None:
-        create_response = create_session(
-            CreateSessionRequest(
-                task_key="IOS-40014SR2",
-                workflow_profile="oneshot",
-                policy={"self_review_policy": "enabled"},
-            ),
-            dependencies=self.dependencies,
-        )
-        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
-            PrepareSessionRequest(task_key="IOS-40014SR2"),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=create_response.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "done"},
-            ),
-            dependencies=self.dependencies,
-        )
-
-        response = complete_self_review(
-            CompleteSelfReviewRequest(
-                session_id=create_response.session.id,
-                outcome="passed",
-                summary="Reviewed implementation and found no blocking issues.",
-            ),
-            dependencies=self.dependencies,
-        )
-        artifacts_response = list_artifacts(
-            session_id=create_response.session.id,
-            dependencies=self.dependencies,
-        )
-
-        self.assertTrue(response.completed)
-        self.assertEqual("self_review_passed", response.event_type)
-        self.assertEqual("verification_requested", response.followup_event_type)
-        self.assertEqual("verification_requested", response.session.current_stage)
-        self.assertTrue(any(item.artifact_type == "self_review_summary" for item in artifacts_response.items))
-
-    def test_complete_self_review_route_with_issues_marks_correction_requested(self) -> None:
-        create_response = create_session(
-            CreateSessionRequest(
-                task_key="IOS-40014SR3",
-                workflow_profile="oneshot",
-                policy={"self_review_policy": "enabled"},
-            ),
-            dependencies=self.dependencies,
-        )
-        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
-            PrepareSessionRequest(task_key="IOS-40014SR3"),
-            dependencies=self.dependencies,
-        )
-        inject_event(
-            InjectEventRequest(
-                session_id=create_response.session.id,
-                event_type="implementation_completed",
-                payload={"summary": "done"},
-            ),
-            dependencies=self.dependencies,
-        )
-
-        response = complete_self_review(
-            CompleteSelfReviewRequest(
-                session_id=create_response.session.id,
-                outcome="issues_found",
-                summary="Found two naming issues and one missing guard branch.",
-            ),
-            dependencies=self.dependencies,
-        )
-
-        self.assertTrue(response.completed)
-        self.assertEqual("self_review_issues_found", response.event_type)
-        self.assertEqual("self_review_correction_requested", response.followup_event_type)
-        self.assertEqual("self_review_correction_requested", response.session.current_stage)
-        self.assertEqual("implementer", response.session.current_owner)
 
     def test_complete_doc_harvest_route_marks_lane_completed(self) -> None:
         create_response = create_session(
@@ -4082,7 +3551,6 @@ class SessionApiTests(unittest.TestCase):
         hidden_paths = {
             "/operator/redirect-session",
             "/operator/complete-doc-harvest",
-            "/operator/complete-self-review",
             "/operator/poll-session-output",
             "/operator/run-loop-once",
             "/operator/loop-status",

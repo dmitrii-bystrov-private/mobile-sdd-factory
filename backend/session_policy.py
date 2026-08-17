@@ -16,34 +16,29 @@ WORKFLOW_PROFILES = {"oneshot", "bug_full", "story_full"}
 
 PROFILE_POLICY_FIELDS: dict[str, tuple[str, ...]] = {
     "oneshot": (
-        "self_review_policy",
-        "boy_scout_policy",
+        "review_policy",
         "doc_harvest_policy",
     ),
     "bug_full": (
         "test_policy",
-        "self_review_policy",
-        "boy_scout_policy",
+        "review_policy",
         "doc_harvest_policy",
     ),
     "story_full": (
-        "self_review_policy",
-        "boy_scout_policy",
+        "review_policy",
         "doc_harvest_policy",
         "requirements_clarification_mode",
     ),
 }
 
 COMMON_DEFAULTS: dict[str, str] = {
-    "self_review_policy": "enabled",
-    "boy_scout_policy": "enabled",
+    "review_policy": "enabled",
     "doc_harvest_policy": "enabled",
 }
 
 FIELD_ALLOWED_VALUES: dict[str, set[str]] = {
     "test_policy": TRI_STATE_VALUES,
-    "self_review_policy": TRI_STATE_VALUES,
-    "boy_scout_policy": TRI_STATE_VALUES,
+    "review_policy": TRI_STATE_VALUES,
     "doc_harvest_policy": TRI_STATE_VALUES,
     "requirements_clarification_mode": REQUIREMENTS_CLARIFICATION_MODE_VALUES,
 }

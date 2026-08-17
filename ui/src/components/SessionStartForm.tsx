@@ -38,8 +38,7 @@ const REQUIREMENTS_CLARIFICATION_LABELS: Record<RequirementsClarificationMode, s
 };
 type DraftPolicy = {
   test_policy: SessionPolicyValue;
-  self_review_policy: SessionPolicyValue;
-  boy_scout_policy: SessionPolicyValue;
+  review_policy: SessionPolicyValue;
   doc_harvest_policy: SessionPolicyValue;
   requirements_clarification_mode: RequirementsClarificationMode;
 };
@@ -47,8 +46,7 @@ type DraftPolicy = {
 function defaultDraftPolicy(): DraftPolicy {
   return {
     test_policy: "enabled",
-    self_review_policy: "enabled",
-    boy_scout_policy: "enabled",
+    review_policy: "enabled",
     doc_harvest_policy: "enabled",
     requirements_clarification_mode: "ask-selectively",
   };
@@ -60,10 +58,8 @@ function mergePolicyDefaults(
 ): DraftPolicy {
   return {
     test_policy: (overrides?.test_policy as SessionPolicyValue | undefined) ?? base.test_policy,
-    self_review_policy:
-      (overrides?.self_review_policy as SessionPolicyValue | undefined) ?? base.self_review_policy,
-    boy_scout_policy:
-      (overrides?.boy_scout_policy as SessionPolicyValue | undefined) ?? base.boy_scout_policy,
+    review_policy:
+      (overrides?.review_policy as SessionPolicyValue | undefined) ?? base.review_policy,
     doc_harvest_policy:
       (overrides?.doc_harvest_policy as SessionPolicyValue | undefined) ?? base.doc_harvest_policy,
     requirements_clarification_mode:
@@ -102,8 +98,7 @@ export function SessionStartForm({
 
   const payload = useMemo(() => {
     const basePolicy = {
-      self_review_policy: policy.self_review_policy,
-      boy_scout_policy: policy.boy_scout_policy,
+      review_policy: policy.review_policy,
       doc_harvest_policy: policy.doc_harvest_policy,
     };
     if (workflowProfile === "bug_full") {
@@ -138,7 +133,7 @@ export function SessionStartForm({
     if (workflowProfile === "bug_full") {
       roleNames.push("bug-fixer");
     }
-    if (policy.self_review_policy !== "disabled") {
+    if (policy.review_policy !== "disabled") {
       roleNames.push("convention-reviewer", "requirements-reviewer");
     }
     if (policy.doc_harvest_policy !== "disabled") {
@@ -156,9 +151,8 @@ export function SessionStartForm({
     }
     return roleNames;
   }, [
-    policy.boy_scout_policy,
     policy.doc_harvest_policy,
-    policy.self_review_policy,
+    policy.review_policy,
     workflowProfile,
   ]);
 
@@ -390,26 +384,11 @@ export function SessionStartForm({
 
               <div className="followup-form-grid">
                 <label className="form-field">
-                  <span>Self Review</span>
+                  <span>Review Gate</span>
                     <select
                       className="select-input"
-                      onChange={(event) => updatePolicy("self_review_policy", event.target.value as SessionPolicyValue)}
-                      value={policy.self_review_policy}
-                    >
-                    {POLICY_OPTIONS.map((value) => (
-                      <option key={value} value={value}>
-                        {POLICY_OPTION_LABELS[value]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="form-field">
-                  <span>Code Scout</span>
-                    <select
-                      className="select-input"
-                      onChange={(event) => updatePolicy("boy_scout_policy", event.target.value as SessionPolicyValue)}
-                      value={policy.boy_scout_policy}
+                      onChange={(event) => updatePolicy("review_policy", event.target.value as SessionPolicyValue)}
+                      value={policy.review_policy}
                     >
                     {POLICY_OPTIONS.map((value) => (
                       <option key={value} value={value}>

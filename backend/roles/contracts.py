@@ -3,8 +3,6 @@
 IMPLEMENTER_ROLE = "implementer"
 BUG_FIXER_ROLE = "bug-fixer"
 VERIFICATION_COORDINATOR_ROLE = "verification-coordinator"
-CODE_REVIEWER_ROLE = "code-reviewer"
-CODE_SCOUT_ROLE = "code-scout"
 CONVENTION_REVIEWER_ROLE = "convention-reviewer"
 REQUIREMENTS_REVIEWER_ROLE = "requirements-reviewer"
 DOC_HARVEST_ROLE = "doc-harvest-worker"
@@ -16,10 +14,6 @@ CONSTRAINTS_WORKER_ROLE = "constraints-worker"
 SPEC_VERIFIER_WORKER_ROLE = "spec-verifier-worker"
 TASK_DECOMPOSER_WORKER_ROLE = "task-decomposer-worker"
 
-RETIRED_ROLE_NAMES = {
-    "mr-comments-analyst-worker",
-}
-
 DEFAULT_SESSION_ROLES = [
     IMPLEMENTER_ROLE,
     VERIFICATION_COORDINATOR_ROLE,
@@ -30,8 +24,6 @@ PERSISTENT_SESSION_ROLES = [
     VERIFICATION_COORDINATOR_ROLE,
     CONVENTION_REVIEWER_ROLE,
     REQUIREMENTS_REVIEWER_ROLE,
-    CODE_REVIEWER_ROLE,
-    CODE_SCOUT_ROLE,
     DOC_HARVEST_ROLE,
     DOCUMENTATION_REVIEWER_ROLE,
     BUG_FIXER_ROLE,
@@ -73,21 +65,11 @@ ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
         IMPLEMENTER_ROLE,
         BUG_FIXER_ROLE,
     },
-    "self_review_requested": {
-        CODE_REVIEWER_ROLE,
-    },
     "convention_review_requested": {
         CONVENTION_REVIEWER_ROLE,
     },
     "requirements_review_requested": {
         REQUIREMENTS_REVIEWER_ROLE,
-    },
-    "boy_scout_requested": {
-        CODE_SCOUT_ROLE,
-    },
-    "boy_scout_correction_requested": {
-        IMPLEMENTER_ROLE,
-        BUG_FIXER_ROLE,
     },
     "doc_harvest_requested": {
         DOC_HARVEST_ROLE,
@@ -96,10 +78,6 @@ ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
         DOCUMENTATION_REVIEWER_ROLE,
     },
     "documentation_review_correction_requested": {
-        IMPLEMENTER_ROLE,
-        BUG_FIXER_ROLE,
-    },
-    "self_review_correction_requested": {
         IMPLEMENTER_ROLE,
         BUG_FIXER_ROLE,
     },

@@ -34,13 +34,10 @@ from backend.roles.workspace import RoleWorkspaceManager
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
     BUG_FIXER_ROLE,
-    CODE_REVIEWER_ROLE,
-    CODE_SCOUT_ROLE,
     CONVENTION_REVIEWER_ROLE,
     DOCUMENTATION_REVIEWER_ROLE,
     DOC_HARVEST_ROLE,
     PERSISTENT_SESSION_ROLES,
-    RETIRED_ROLE_NAMES,
     ACCEPTANCE_CRITERIA_WORKER_ROLE,
     CONSTRAINTS_WORKER_ROLE,
     PROPOSAL_CONTEXT_WORKER_ROLE,
@@ -87,7 +84,6 @@ _ACTIVE_WORK_TYPE_BY_STAGE = {
     "requirements_requested": "requirements",
     "convention_review_requested": "convention_review",
     "requirements_review_requested": "requirements_review",
-    "boy_scout_requested": "boy_scout",
     "doc_harvest_requested": "doc_harvest",
     "documentation_review_requested": "documentation_review",
     "acceptance_criteria_requested": "acceptance_criteria",
@@ -96,12 +92,9 @@ _ACTIVE_WORK_TYPE_BY_STAGE = {
     "task_decomposition_requested": "task_decomposition",
     "subtask_implementation_requested": "subtask_implementation",
     "implementation_requested": "implementation",
-    "boy_scout_correction_requested": "boy_scout_correction",
     "convention_review_correction_requested": "convention_review_correction",
     "requirements_review_correction_requested": "requirements_review_correction",
     "documentation_review_correction_requested": "documentation_review_correction",
-    "self_review_requested": "self_review",
-    "self_review_correction_requested": "self_review_correction",
     "verification_requested": "verification",
     "verification_correction_requested": "verification_correction",
     "qa_reopen_requested": "followup_implementation",
@@ -115,11 +108,6 @@ _STORY_PLANNING_ROLES = {
     TASK_DECOMPOSER_WORKER_ROLE,
 }
 _INTERNAL_REVIEW_METRIC_EVENT_TYPES = {
-    "self_review_requested",
-    "self_review_passed",
-    "self_review_issues_found",
-    "self_review_blocked",
-    "self_review_correction_requested",
     "convention_review_requested",
     "convention_review_passed",
     "convention_review_issues_found",
@@ -130,11 +118,6 @@ _INTERNAL_REVIEW_METRIC_EVENT_TYPES = {
     "requirements_review_issues_found",
     "requirements_review_blocked",
     "requirements_review_correction_requested",
-    "boy_scout_completed",
-    "boy_scout_skipped_by_operator",
-    "boy_scout_implement_now_selected",
-    "boy_scout_tech_debt_created",
-    "boy_scout_correction_requested",
     "documentation_review_requested",
     "documentation_review_correction_requested",
     "session_escalated_to_operator",
@@ -711,15 +694,6 @@ class CoordinatorService:
             details = self._spec_verification_operator_details_from_history(events, source_event.id)
         implement_now_count = source_event.payload.get("implement_now_count")
         tech_debt_candidate_count = source_event.payload.get("tech_debt_candidate_count")
-        if source_event.payload.get("reason") == "boy_scout_findings":
-            implement_now_findings, tech_debt_findings = self._classify_boy_scout_findings(session)
-            if implement_now_findings or tech_debt_findings:
-                details = self._render_boy_scout_operator_details(
-                    implement_now_findings=implement_now_findings,
-                    tech_debt_findings=tech_debt_findings,
-                )
-                implement_now_count = len(implement_now_findings)
-                tech_debt_candidate_count = len(tech_debt_findings)
         return {
             "available": True,
             "role_name": source_event.payload.get("role_name"),
@@ -738,7 +712,27 @@ class CoordinatorService:
 
     def _interactive_blocker_is_stale_for_session(self, source_event: Event, session: Session) -> bool:
         event_stage = str(source_event.payload.get("current_stage") or "").strip()
-        return bool(event_stage and event_stage != session.current_stage)
+        if event_stage and event_stage != session.current_stage:
+            return True
+        if source_event.event_type not in {"session_escalated_to_operator", "role_runtime_error_reported"}:
+            return False
+        role_name = str(source_event.payload.get("role_name") or "").strip()
+        if not role_name:
+            return False
+        role = self.role_repository.get_by_name(session.id, role_name)
+        if role is None:
+            return False
+        pending_item = self._find_operator_pending_work_item(session.id)
+        if pending_item is None or pending_item.owner_role_id != role.id:
+            return False
+        replayed = self._replayed_runtime_error_from_prior_dispatch(
+            session=session,
+            role=role,
+            active_item=pending_item,
+            payload=source_event.payload,
+            current_event_id=source_event.id,
+        )
+        return replayed is not None
 
     def _interactive_review_context(self, payload: object) -> tuple[str | None, str | None]:
         if not isinstance(payload, dict):
@@ -747,10 +741,6 @@ class CoordinatorService:
         if review_lane:
             return "internal_review", review_lane
         reason = str(payload.get("reason") or "").strip()
-        if reason == "self_review_cycle":
-            return "internal_review", "self_review"
-        if reason == "boy_scout_findings":
-            return "internal_review", "code_scout"
         return None, None
 
     def _payload_truthy(self, value: object) -> bool:
@@ -786,9 +776,6 @@ class CoordinatorService:
             return session, followup_event
         if event_type == "requirements_completed":
             session, followup_event = self._handle_requirements_completed(session, accepted_event)
-            return session, followup_event
-        if event_type == "boy_scout_completed":
-            session, followup_event = self._handle_boy_scout_completed(session, accepted_event)
             return session, followup_event
         if event_type == "convention_review_passed":
             session, followup_event = self._handle_dual_review_passed(session, accepted_event, lane="convention")
@@ -983,230 +970,6 @@ class CoordinatorService:
             raise IntakeError("Doc harvest completion did not emit an event")
         session, _followup_event = self._enqueue_documentation_review(session=session, source_event=event)
         return session, event
-
-    def skip_boy_scout(
-        self,
-        session_id: int,
-        reason: str,
-    ) -> tuple[Session, Event, Event]:
-        session = self._get_session_or_raise(session_id)
-        normalized_reason = reason.strip()
-        if not normalized_reason:
-            raise IntakeError("Code Scout skip reason must not be empty")
-        if session.current_stage != "boy_scout_requested":
-            raise IntakeError(f"Session {session_id} is not waiting on Code Scout")
-        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
-            raise IntakeError(f"Session {session_id} does not have skippable Code Scout findings")
-        if self._optional_lane_policy_mode(session.policy, "boy_scout_policy") != "enabled":
-            raise IntakeError("Manual Code Scout skip is only allowed when boy_scout_policy is enabled")
-
-        pending_items = [
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "boy_scout_review" and item.status != WorkItemStatus.COMPLETED
-        ]
-        if not pending_items:
-            raise IntakeError(f"Session {session_id} has no pending Code Scout review decision")
-        self.work_item_repository.update_status(pending_items[0].id, WorkItemStatus.COMPLETED)
-        deferred_findings = self._active_boy_scout_findings(session)
-        self._materialize_boy_scout_deferred_entries(
-            session=session,
-            findings=deferred_findings,
-            reason=normalized_reason,
-            decision="skipped_by_operator",
-        )
-
-        event = self._append_event(
-            session_id=session.id,
-            event_type="boy_scout_skipped_by_operator",
-            producer_type="operator",
-            payload={
-                "task_key": session.task_key,
-                "reason": normalized_reason,
-                "current_stage": session.current_stage,
-            },
-        )
-        self._materialize_boy_scout_outcome_file(
-            session=session,
-            source_event=event,
-            status="skipped_by_operator",
-        )
-        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage=session.current_stage,
-            current_owner=None,
-        )
-        session, followup_event = self._enqueue_verification(session=session, source_event=event)
-        return session, event, followup_event
-
-    def resolve_boy_scout_findings(
-        self,
-        session_id: int,
-        resolution: str,
-    ) -> tuple[Session, Event, Event]:
-        session = self._get_session_or_raise(session_id)
-        if session.current_stage != "boy_scout_requested":
-            raise IntakeError(f"Session {session_id} is not waiting on Code Scout")
-        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
-            raise IntakeError(f"Session {session_id} does not have resolvable Code Scout findings")
-        if resolution not in {"implement_now", "create_tech_debt"}:
-            raise IntakeError("Code Scout resolution must be 'implement_now' or 'create_tech_debt'")
-
-        pending_items = [
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "boy_scout_review" and item.status != WorkItemStatus.COMPLETED
-        ]
-        if not pending_items:
-            raise IntakeError(f"Session {session_id} has no pending Code Scout review decision")
-        self.work_item_repository.update_status(pending_items[0].id, WorkItemStatus.COMPLETED)
-
-        implement_now_findings, tech_debt_findings = self._classify_boy_scout_findings(session)
-        if resolution == "create_tech_debt" and not tech_debt_findings:
-            raise IntakeError("No tech-debt-eligible Code Scout findings are available")
-
-        created_issues: list[dict[str, str]] = []
-        chosen_findings = list(implement_now_findings)
-        if resolution == "create_tech_debt":
-            created_issues = self._create_boy_scout_tech_debt_stories(session, tech_debt_findings)
-            self._materialize_boy_scout_deferred_entries(
-                session=session,
-                findings=tech_debt_findings,
-                reason="Operator chose to create tech debt and continue.",
-                decision="create_tech_debt",
-                created_issues=created_issues,
-            )
-        else:
-            chosen_findings = implement_now_findings + tech_debt_findings
-
-        event = self._append_event(
-            session_id=session.id,
-            event_type=(
-                "boy_scout_tech_debt_created"
-                if resolution == "create_tech_debt"
-                else "boy_scout_implement_now_selected"
-            ),
-            producer_type="operator",
-            payload={
-                "task_key": session.task_key,
-                "resolution": resolution,
-                "implement_now_count": len(chosen_findings),
-                "tech_debt_count": len(tech_debt_findings),
-                "created_issues": created_issues,
-                "current_stage": session.current_stage,
-            },
-        )
-        self._materialize_boy_scout_outcome_file(
-            session=session,
-            source_event=event,
-            status=(
-                "resolved_create_tech_debt"
-                if resolution == "create_tech_debt"
-                else "resolved_implement_now"
-            ),
-        )
-        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage=session.current_stage,
-            current_owner=None,
-        )
-
-        if chosen_findings:
-            actionable_path = self._materialize_boy_scout_actionable_findings(
-                session=session,
-                findings=chosen_findings,
-                filename="boy-scout-actionable.md",
-            )
-            session, followup_event = self._enqueue_boy_scout_correction(
-                session=session,
-                source_event=event,
-                actionable_findings_path=actionable_path,
-            )
-            return session, event, followup_event
-
-        session, followup_event = self._enqueue_verification(session=session, source_event=event)
-        return session, event, followup_event
-
-    def complete_self_review(
-        self,
-        session_id: int,
-        outcome: str,
-        summary: str,
-    ) -> tuple[Session, Event, Event]:
-        if self.artifacts_root is None:
-            raise IntakeError("Coordinator is missing artifact root")
-
-        session = self._get_session_or_raise(session_id)
-        normalized_summary = summary.strip()
-        if not normalized_summary:
-            raise IntakeError("Self review summary must not be empty")
-        if outcome not in {"passed", "issues_found"}:
-            raise IntakeError("Self review outcome must be 'passed' or 'issues_found'")
-        if session.current_stage != "self_review_requested":
-            raise IntakeError(f"Session {session_id} is not waiting for self review")
-        policy_mode = self._optional_lane_policy_mode(session.policy, "self_review_policy")
-        if policy_mode == "disabled":
-            raise IntakeError(f"Session {session_id} has self review disabled by policy")
-        if policy_mode != "enabled":
-            raise IntakeError("Manual self review completion is only allowed when self_review_policy is enabled")
-
-        review_output_type = "passed" if outcome == "passed" else "failed"
-        self._materialize_self_review_report(
-            session=session,
-            output_type=review_output_type,
-            payload={"summary": normalized_summary},
-        )
-
-        artifact_path = write_text_artifact(
-            self.artifacts_root,
-            session.task_key,
-            "self-review",
-            "self-review-summary.md",
-            normalized_summary,
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="self-review",
-            artifact_type="self_review_summary",
-            path=str(artifact_path),
-            metadata={
-                "outcome": outcome,
-                "summary_length": len(normalized_summary),
-            },
-        )
-
-        if outcome == "passed":
-            event = self._append_event(
-                session_id=session.id,
-                event_type="self_review_passed",
-                producer_type="coordinator",
-                payload={
-                    "task_key": session.task_key,
-                    "summary": normalized_summary,
-                    "summary_length": len(normalized_summary),
-                    "current_stage": session.current_stage,
-                    "status": session.status.value,
-                },
-            )
-            session, followup_event = self._handle_self_review_passed(session, event)
-            return session, event, followup_event
-
-        event = self._append_event(
-            session_id=session.id,
-            event_type="self_review_issues_found",
-            producer_type="coordinator",
-            payload={
-                "task_key": session.task_key,
-                "summary": normalized_summary,
-                "summary_length": len(normalized_summary),
-                "current_stage": session.current_stage,
-                "status": session.status.value,
-            },
-        )
-        session, followup_event = self._handle_self_review_issues_found(session, event)
-        return session, event, followup_event
 
     def send_to_test_handoff(
         self,
@@ -1811,19 +1574,17 @@ class CoordinatorService:
 
         loop_event, session_count, chunk_count = self.run_loop_once()
         session = self._get_session_or_raise(session.id)
-        followup_event = None
-        if loop_event is not None:
-            followup_event = self._append_event(
-                session_id=session.id,
-                event_type="snapshot_continue_processed",
-                producer_type="coordinator",
-                payload={
-                    "task_key": session.task_key,
-                    "session_count": session_count,
-                    "chunk_count": chunk_count,
-                    "loop_event_type": loop_event.event_type,
-                },
-            )
+        followup_event = self._append_event(
+            session_id=session.id,
+            event_type="snapshot_continue_processed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "session_count": session_count,
+                "chunk_count": chunk_count,
+                "loop_event_type": loop_event.event_type if loop_event is not None else None,
+            },
+        )
         return session, event, followup_event
 
     def reopen_from_qa(
@@ -2050,8 +1811,6 @@ class CoordinatorService:
             session, followup_event = self._handle_requirements_completed(session, accepted_event)
         elif mapped_event_type == "story_planning_blocked":
             session, followup_event = self._handle_story_planning_blocked(session, accepted_event)
-        elif mapped_event_type == "boy_scout_completed":
-            session, followup_event = self._handle_boy_scout_completed(session, accepted_event)
         elif mapped_event_type == "convention_review_passed":
             session, followup_event = self._handle_dual_review_passed(session, accepted_event, lane="convention")
         elif mapped_event_type == "convention_review_issues_found":
@@ -2090,12 +1849,6 @@ class CoordinatorService:
             session, followup_event = self._handle_verification_passed(session, accepted_event)
         elif mapped_event_type == "verification_blocked":
             session, followup_event = self._handle_verification_blocked(session, accepted_event)
-        elif mapped_event_type == "self_review_passed":
-            session, followup_event = self._handle_self_review_passed(session, accepted_event)
-        elif mapped_event_type == "self_review_issues_found":
-            session, followup_event = self._handle_self_review_issues_found(session, accepted_event)
-        elif mapped_event_type == "self_review_blocked":
-            session, followup_event = self._handle_self_review_blocked(session, accepted_event)
         return session, accepted_event, followup_event
 
     def _normalize_role_output_payload(
@@ -2107,19 +1860,8 @@ class CoordinatorService:
         payload: dict,
     ) -> dict:
         normalized_payload = dict(payload)
-        if role_name == CODE_SCOUT_ROLE and session.current_stage == "boy_scout_requested":
-            return self._normalize_boy_scout_output_payload(
-                session=session,
-                output_type=output_type,
-                payload=normalized_payload,
-            )
         if role_name == VERIFICATION_COORDINATOR_ROLE and session.current_stage == "verification_requested":
             return self._normalize_verification_output_payload(
-                output_type=output_type,
-                payload=normalized_payload,
-            )
-        if role_name == CODE_REVIEWER_ROLE and session.current_stage == "self_review_requested":
-            return self._normalize_self_review_output_payload(
                 output_type=output_type,
                 payload=normalized_payload,
             )
@@ -2130,7 +1872,7 @@ class CoordinatorService:
                 else "requirements_review_requested"
             )
             if session.current_stage == expected_stage:
-                return self._normalize_self_review_output_payload(
+                return self._normalize_review_output_payload(
                     output_type=output_type,
                     payload=normalized_payload,
                 )
@@ -2158,41 +1900,6 @@ class CoordinatorService:
             )
         return normalized_payload
 
-    def _normalize_boy_scout_output_payload(
-        self,
-        *,
-        session: Session,
-        output_type: str,
-        payload: dict,
-    ) -> dict:
-        if output_type == "skipped_not_needed":
-            payload.setdefault("result", "clean")
-            return payload
-        if output_type not in {"passed", "completed"}:
-            return payload
-
-        explicit_result = str(payload.get("result") or "").strip().lower()
-        if explicit_result not in {"clean", "findings_found"}:
-            raise IntakeError(
-                "Code Scout output must include payload.result set to 'clean' or 'findings_found'"
-            )
-        payload["result"] = explicit_result
-
-        if explicit_result == "findings_found":
-            findings_path = str(payload.get("findings_path") or "").strip()
-            if not findings_path:
-                raise IntakeError(
-                    "Code Scout findings output must include payload.findings_path"
-                )
-            payload["findings_path"] = findings_path
-
-            findings_count = payload.get("findings_count")
-            if not isinstance(findings_count, int) or findings_count <= 0:
-                raise IntakeError(
-                    "Code Scout findings output must include a positive payload.findings_count"
-                )
-        return payload
-
     def _normalize_verification_output_payload(
         self,
         *,
@@ -2215,7 +1922,7 @@ class CoordinatorService:
         payload["result"] = explicit_result
         return payload
 
-    def _normalize_self_review_output_payload(
+    def _normalize_review_output_payload(
         self,
         *,
         output_type: str,
@@ -2226,12 +1933,12 @@ class CoordinatorService:
         if output_type == "failed":
             if not any(str(payload.get(key) or "").strip() for key in ("summary", "details", "issues_markdown")):
                 raise IntakeError(
-                    "Self review failed output must include payload.summary, payload.details, or payload.issues_markdown"
+                    "Review failed output must include payload.summary, payload.details, or payload.issues_markdown"
                 )
             return payload
         if output_type == "blocked_review_cycle":
             if not str(payload.get("summary") or "").strip():
-                raise IntakeError("Blocked self review output must include payload.summary")
+                raise IntakeError("Blocked review output must include payload.summary")
             return payload
         return payload
 
@@ -3170,10 +2877,8 @@ class CoordinatorService:
                         "bug_analysis",
                         "subtask_implementation",
                         "implementation",
-                        "self_review_correction",
                         "convention_review_correction",
                         "requirements_review_correction",
-                        "boy_scout_correction",
                         "verification_correction",
                         "documentation_review_correction",
                         "followup_implementation",
@@ -3195,22 +2900,6 @@ class CoordinatorService:
         ):
             return True
         if (
-            role_name == CODE_REVIEWER_ROLE
-            and output_type in {"passed", "completed", "failed", "blocked_review_cycle", "error"}
-            and session.current_owner != CODE_REVIEWER_ROLE
-        ):
-            payload_work_item_id = output_payload.get("work_item_id") if isinstance(output_payload, dict) else None
-            if isinstance(payload_work_item_id, int):
-                matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
-                if (
-                    matching_item is not None
-                    and matching_item.session_id == session.id
-                    and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
-                    and matching_item.work_type == "self_review"
-                ):
-                    return False
-            return True
-        if (
             role_name in {CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE}
             and output_type in {"passed", "completed", "failed", "blocked_review_cycle", "skipped_not_needed", "error"}
             and session.current_owner != role_name
@@ -3228,22 +2917,6 @@ class CoordinatorService:
                     and matching_item.session_id == session.id
                     and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
                     and matching_item.work_type == expected_work_type
-                ):
-                    return False
-            return True
-        if (
-            role_name == CODE_SCOUT_ROLE
-            and output_type in {"passed", "completed", "skipped_not_needed", "error"}
-            and session.current_owner != CODE_SCOUT_ROLE
-        ):
-            payload_work_item_id = output_payload.get("work_item_id") if isinstance(output_payload, dict) else None
-            if isinstance(payload_work_item_id, int):
-                matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
-                if (
-                    matching_item is not None
-                    and matching_item.session_id == session.id
-                    and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
-                    and matching_item.work_type == "boy_scout"
                 ):
                     return False
             return True
@@ -3295,10 +2968,8 @@ class CoordinatorService:
                         "bug_analysis",
                         "subtask_implementation",
                         "implementation",
-                        "self_review_correction",
                         "convention_review_correction",
                         "requirements_review_correction",
-                        "boy_scout_correction",
                         "verification_correction",
                         "documentation_review_correction",
                         "followup_implementation",
@@ -3830,13 +3501,6 @@ class CoordinatorService:
         role = self.role_repository.get_by_id(work_item.owner_role_id)
         if role is None:
             raise IntakeError(f"Owner role {work_item.owner_role_id} is missing for session {session.id}")
-        if work_item.work_type == "self_review_cycle_review":
-            return self._send_self_review_cycle_operator_reply(
-                session=session,
-                work_item=work_item,
-                reviewer_role=role,
-                text=text,
-            )
         if role.runtime_handle is None:
             raise IntakeError(f"Role {role.role_name} has no runtime handle for session {session.id}")
         runtime_role = RuntimeRoleHandle(
@@ -3905,52 +3569,6 @@ class CoordinatorService:
                     force_redispatch=True,
                 )
         return session, event
-
-    def _send_self_review_cycle_operator_reply(
-        self,
-        session: Session,
-        work_item: WorkItem,
-        reviewer_role: Role,
-        text: str,
-    ) -> tuple[Session, Event]:
-        for item in self.work_item_repository.list_for_session(session.id):
-            if item.work_type != "self_review_cycle_review":
-                continue
-            if item.status == WorkItemStatus.COMPLETED:
-                continue
-            self.work_item_repository.update_status(item.id, WorkItemStatus.COMPLETED)
-        event = self._append_event(
-            session_id=session.id,
-            event_type="operator_runtime_input_sent",
-            producer_type="operator",
-            payload={
-                "role_name": reviewer_role.role_name,
-                "redirected_role_name": IMPLEMENTER_ROLE,
-                "work_item_id": work_item.id,
-                "current_stage": session.current_stage,
-                "continuation_stage": "self_review_correction_requested",
-                "input_length": len(text),
-                "operator_reply": text.strip(),
-            },
-        )
-        operator_reply = text.strip()
-        additional_context = (
-            "Operator guidance received after a blocked self-review cycle. "
-            "Apply the latest self-review findings without reintroducing earlier fixes, "
-            "and treat the operator reply below as authoritative additional guidance.\n\n"
-            f"Operator reply:\n{operator_reply}\n"
-        )
-        updated_session, _ = self._enqueue_self_review_correction(
-            session=session,
-            source_event=event,
-            additional_context=additional_context,
-            extra_hydration={
-                "operator_reply": operator_reply,
-                "operator_reply_event_id": event.id,
-                "review_cycle_resolution": "operator_guided_fix",
-            },
-        )
-        return updated_session, event
 
     def _operator_reply_live_message(self, text: str) -> str:
         normalized_reply = " ".join(str(text).split()).strip()
@@ -5461,10 +5079,6 @@ class CoordinatorService:
         )
         if commit_event is not None:
             return session, commit_event
-        if active_item.work_type == "boy_scout_correction":
-            return self._enqueue_verification(session=session, source_event=source_event)
-        if active_item.work_type == "self_review_correction":
-            return self._enqueue_self_review(session=session, source_event=source_event)
         if active_item.work_type in _DUAL_REVIEW_CORRECTION_WORK_TYPE_BY_LANE.values():
             return self._enqueue_dual_review(session=session, source_event=source_event, lane="convention")
         if active_item.work_type == "verification_correction":
@@ -5497,10 +5111,8 @@ class CoordinatorService:
                 "bug_analysis",
                 "subtask_implementation",
                 "implementation",
-                "self_review_correction",
                 "convention_review_correction",
                 "requirements_review_correction",
-                "boy_scout_correction",
                 "verification_correction",
                 "documentation_review_correction",
                 "followup_implementation",
@@ -5517,11 +5129,9 @@ class CoordinatorService:
 
         if (
             completed_work_type in {"implementation", "subtask_implementation"}
-            and self._optional_lane_policy_mode(session.policy, "self_review_policy") != "disabled"
+            and self._optional_lane_policy_mode(session.policy, "review_policy") != "disabled"
         ):
-            if self._uses_dual_review_lanes(session):
-                return self._enqueue_dual_review(session=session, source_event=source_event, lane="convention")
-            return self._enqueue_self_review(session=session, source_event=source_event)
+            return self._enqueue_dual_review(session=session, source_event=source_event, lane="convention")
 
         return self._enqueue_post_implementation_quality_gate(
             session=session,
@@ -5533,14 +5143,10 @@ class CoordinatorService:
             return "implementation pass"
         if work_type == "followup_implementation":
             return "follow-up pass"
-        if work_type == "self_review_correction":
-            return "self-review fixes"
         if work_type == "convention_review_correction":
             return "convention review fixes"
         if work_type == "requirements_review_correction":
             return "requirements review fixes"
-        if work_type == "boy_scout_correction":
-            return "boy-scout fixes"
         if work_type == "verification_correction":
             return "verification fixes"
         if work_type == "documentation_review_correction":
@@ -5628,125 +5234,6 @@ class CoordinatorService:
             },
         )
         return session, None
-
-    def _enqueue_self_review(
-        self,
-        session: Session,
-        source_event: Event,
-    ) -> tuple[Session, Event]:
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        if reviewer_role is None:
-            raise IntakeError("Code reviewer role is missing for the session")
-
-        review_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="self_review",
-            title=f"Self review for {session.task_key}",
-            owner_role_id=reviewer_role.id,
-            source_event_id=source_event.id,
-            priority=89,
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="self_review_requested",
-            current_owner=CODE_REVIEWER_ROLE,
-        )
-        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        instruction, review_hydration = self._self_review_dispatch_context(
-            session,
-            before_event_id=source_event.id,
-        )
-        self._dispatch_role_work(
-            session=session,
-            role=reviewer_role,
-            work_item=review_item,
-            stage_name="self_review_requested",
-            instruction=instruction,
-            extra_hydration=review_hydration,
-        )
-        event = self._append_event(
-            session_id=session.id,
-            event_type="self_review_requested",
-            producer_type="coordinator",
-            payload={
-                "task_key": session.task_key,
-                "role_name": CODE_REVIEWER_ROLE,
-                "work_item_id": review_item.id,
-                "source_event_id": source_event.id,
-                "current_stage": session.current_stage,
-                "status": session.status.value,
-            },
-        )
-        return session, event
-
-    def _self_review_dispatch_context(
-        self,
-        session: Session,
-        *,
-        before_event_id: int | None = None,
-    ) -> tuple[str, dict[str, str | int | None]]:
-        previous_review_reports = self._self_review_report_paths_for_current_chain(
-            session,
-            before_event_id=before_event_id,
-        )
-        review_report_path = self._next_self_review_report_target_path(session)
-        instruction = (
-            f"Review the current task changes for {session.task_key}. "
-            "Start from the current diff, read only the relevant convention sources, "
-            "write or refresh the current structured review report at the routed review report path, "
-            "and report a clean pass or remaining issues."
-        )
-        if previous_review_reports:
-            instruction += (
-                "\nPrevious review reports from this immediate correction chain "
-                "(read first and do not re-flag the same issues):\n"
-                + "\n".join(previous_review_reports)
-                + "\nOnly emit blocked_review_cycle when the current issue is the same unresolved issue "
-                "from this immediate correction chain. If a similar issue returns after later follow-up, "
-                "subtask, or implementation work, report it as a normal failed review finding."
-            )
-        operator_guidance_history = self._self_review_cycle_operator_guidance_history(
-            session.id,
-            before_event_id=before_event_id,
-        )
-        latest_operator_guidance = operator_guidance_history[-1] if operator_guidance_history else None
-        if operator_guidance_history:
-            guidance_lines = []
-            for guidance in operator_guidance_history:
-                guidance_lines.append(
-                    f"- event {guidance['operator_reply_event_id']}: {guidance['operator_reply']}"
-                )
-            instruction += (
-                "\nAuthoritative operator resolutions from prior blocked self-review cycles "
-                "(newer entries may be unrelated to the current finding; do not let an unrelated later reply "
-                "supersede an earlier relevant resolution for the same issue):\n"
-                + "\n".join(guidance_lines)
-            )
-        return instruction, {
-            "review_scope": "current_diff_only",
-            "review_report_path": str(review_report_path) if review_report_path is not None else None,
-            "previous_review_report_paths": "\n".join(previous_review_reports)
-            if previous_review_reports
-            else None,
-            "operator_reply": latest_operator_guidance["operator_reply"] if latest_operator_guidance is not None else None,
-            "operator_reply_event_id": (
-                latest_operator_guidance["operator_reply_event_id"] if latest_operator_guidance is not None else None
-            ),
-            "operator_resolution_history": json.dumps(operator_guidance_history, indent=2)
-            if operator_guidance_history
-            else None,
-            "review_cycle_resolution": (
-                "operator_guided_recheck" if operator_guidance_history else None
-            ),
-        }
-
-    def _uses_dual_review_lanes(self, session: Session) -> bool:
-        if self._optional_lane_policy_mode(session.policy, "self_review_policy") == "disabled":
-            return False
-        return all(
-            self.role_repository.get_by_name(session.id, role_name) is not None
-            for role_name in (CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE)
-        )
 
     def _enqueue_dual_review(
         self,
@@ -6217,389 +5704,6 @@ class CoordinatorService:
         session, send_event = self.send_to_test_handoff(session.id)
         return session, send_event
 
-    def _handle_boy_scout_completed(
-        self,
-        session: Session,
-        source_event: Event,
-    ) -> tuple[Session, Event]:
-        scout_items = [
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "boy_scout" and item.status != WorkItemStatus.COMPLETED
-        ]
-        if not scout_items:
-            raise IntakeError("No active Code Scout work item found for the session")
-
-        active_item = scout_items[0]
-        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
-        self._stop_on_demand_role(session, CODE_SCOUT_ROLE)
-
-        result = self._boy_scout_completion_result(session=session, source_event=source_event)
-        self._materialize_boy_scout_outcome_file(
-            session=session,
-            source_event=source_event,
-            status="findings_found" if result == "findings_found" else "clean",
-        )
-        if result == "findings_found":
-            active_findings = self._active_boy_scout_findings(session)
-            if not active_findings:
-                return self._enqueue_verification(session=session, source_event=source_event)
-            findings_path = None
-            if self.workdir_root is not None:
-                candidate = self.workdir_root / session.task_key / "spec" / "findings.md"
-                if candidate.is_file():
-                    findings_path = candidate
-            if findings_path is not None:
-                self.artifact_repository.create(
-                    session_id=session.id,
-                    stage_name="boy-scout",
-                    artifact_type="boy_scout_findings",
-                    path=str(findings_path),
-                    metadata={"result": result},
-                )
-            implement_now_findings, tech_debt_findings = self._classify_boy_scout_findings(session)
-            if implement_now_findings and not tech_debt_findings:
-                actionable_path = self._materialize_boy_scout_actionable_findings(
-                    session=session,
-                    findings=implement_now_findings,
-                    filename="boy-scout-actionable.md",
-                )
-                return self._enqueue_boy_scout_correction(
-                    session=session,
-                    source_event=source_event,
-                    actionable_findings_path=actionable_path,
-                )
-            self.work_item_repository.create(
-                session_id=session.id,
-                work_type="boy_scout_review",
-                title=f"Code Scout review decision for {session.task_key}",
-                owner_role_id=None,
-                source_event_id=source_event.id,
-                priority=91,
-                status=WorkItemStatus.WAITING_FOR_OPERATOR,
-            )
-            session = self.session_repository.update_stage_and_owner(
-                session.id,
-                current_stage="boy_scout_requested",
-                current_owner=None,
-            )
-            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
-            report_paths = self._previous_code_scout_report_paths(session.id)[-2:]
-            event = self._append_event(
-                session_id=session.id,
-                event_type="session_escalated_to_operator",
-                producer_type="coordinator",
-                payload={
-                    "role_name": CODE_SCOUT_ROLE,
-                    "reason": "boy_scout_findings",
-                    "summary": "code scout findings need operator decision",
-                    "details": self._render_boy_scout_operator_details(
-                        implement_now_findings=implement_now_findings,
-                        tech_debt_findings=tech_debt_findings,
-                    ),
-                    "needs_operator_input": False,
-                    "implement_now_count": len(implement_now_findings),
-                    "tech_debt_candidate_count": len(tech_debt_findings),
-                    "review_report_paths": report_paths,
-                    "current_stage": session.current_stage,
-                },
-            )
-            return session, event
-
-        return self._enqueue_verification(session=session, source_event=source_event)
-
-    def _enqueue_qa_followup(
-        self,
-        session: Session,
-        source_event: Event,
-    ) -> Event:
-        return self._enqueue_followup_implementation(
-            session=session,
-            source_event=source_event,
-            stage_name="qa_reopen_requested",
-            event_type="qa_reopen_requested",
-            title=f"QA reopen follow-up for {session.task_key}",
-            instruction=(
-                f"Apply QA reopen follow-up changes for {session.task_key}. "
-                "Use the latest QA comments artifact as the highest-priority scope."
-            ),
-            priority=115,
-            payload={},
-        )
-
-    def _enqueue_followup_implementation(
-        self,
-        session: Session,
-        source_event: Event,
-        stage_name: str,
-        event_type: str,
-        title: str,
-        instruction: str,
-        priority: int,
-        payload: dict,
-    ) -> Event:
-        coding_role = self._primary_coding_role_for_work_type(session, "followup_implementation")
-
-        work_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="followup_implementation",
-            title=title,
-            owner_role_id=coding_role.id,
-            source_event_id=source_event.id,
-            priority=priority,
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage=stage_name,
-            current_owner=coding_role.role_name,
-        )
-        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        effective_instruction = self._stage_instruction(
-            stage_name,
-            session.task_key,
-            workflow_profile=session.workflow_profile,
-            role_name=coding_role.role_name,
-            session_policy=session.policy,
-        )
-        if effective_instruction is None:
-            effective_instruction = instruction
-        self._dispatch_role_work(
-            session=session,
-            role=coding_role,
-            work_item=work_item,
-            stage_name=stage_name,
-            instruction=effective_instruction,
-        )
-        return self._append_event(
-            session_id=session.id,
-            event_type=event_type,
-            producer_type="coordinator",
-            payload={
-                "task_key": session.task_key,
-                "role_name": coding_role.role_name,
-                "work_item_id": work_item.id,
-                "current_stage": session.current_stage,
-                **payload,
-            },
-        )
-
-    def _enqueue_self_review_correction(
-        self,
-        session: Session,
-        source_event: Event,
-        additional_context: str | None = None,
-        extra_hydration: dict[str, str | int | None] | None = None,
-    ) -> tuple[Session, Event]:
-        coding_role = self._primary_coding_role_for_work_type(session, "self_review_correction")
-
-        correction_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="self_review_correction",
-            title=f"Self review corrections for {session.task_key}",
-            owner_role_id=coding_role.id,
-            source_event_id=source_event.id,
-            priority=92,
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="self_review_correction_requested",
-            current_owner=coding_role.role_name,
-        )
-        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        instruction = self._stage_instruction(
-            "self_review_correction_requested",
-            session.task_key,
-            workflow_profile=session.workflow_profile,
-            role_name=coding_role.role_name,
-            session_policy=session.policy,
-        )
-        if instruction is None:
-            raise IntakeError(
-                f"No self review correction instruction is available for role {coding_role.role_name}"
-            )
-        if additional_context:
-            instruction = f"{instruction}\n\n{additional_context}"
-        self._dispatch_role_work(
-            session=session,
-            role=coding_role,
-            work_item=correction_item,
-            stage_name="self_review_correction_requested",
-            instruction=instruction,
-            extra_hydration=extra_hydration,
-        )
-        event = self._append_event(
-            session_id=session.id,
-            event_type="self_review_correction_requested",
-            producer_type="coordinator",
-            payload={
-                "task_key": session.task_key,
-                "role_name": coding_role.role_name,
-                "work_item_id": correction_item.id,
-                "current_stage": session.current_stage,
-            },
-        )
-        return session, event
-
-    def _enqueue_boy_scout_correction(
-        self,
-        session: Session,
-        source_event: Event,
-        actionable_findings_path: Path,
-    ) -> tuple[Session, Event]:
-        coding_role = self._primary_coding_role_for_work_type(session, "boy_scout_correction")
-        correction_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="boy_scout_correction",
-            title=f"Code Scout improvements for {session.task_key}",
-            owner_role_id=coding_role.id,
-            source_event_id=source_event.id,
-            priority=93,
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="boy-scout",
-            artifact_type="boy_scout_actionable_markdown",
-            path=str(actionable_findings_path),
-            metadata={
-                "source_event_id": source_event.id,
-                "report_family": "internal_review",
-                "review_lane": "code_scout",
-                "artifact_role": "actionable",
-            },
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="boy_scout_correction_requested",
-            current_owner=coding_role.role_name,
-        )
-        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        instruction = self._stage_instruction(
-            "boy_scout_correction_requested",
-            session.task_key,
-            workflow_profile=session.workflow_profile,
-            role_name=coding_role.role_name,
-            session_policy=session.policy,
-        )
-        if instruction is None:
-            raise IntakeError(
-                f"No Code Scout correction instruction is available for role {coding_role.role_name}"
-            )
-        self._dispatch_role_work(
-            session=session,
-            role=coding_role,
-            work_item=correction_item,
-            stage_name="boy_scout_correction_requested",
-            instruction=instruction,
-        )
-        event = self._append_event(
-            session_id=session.id,
-            event_type="boy_scout_correction_requested",
-            producer_type="coordinator",
-            payload={
-                "task_key": session.task_key,
-                "role_name": coding_role.role_name,
-                "work_item_id": correction_item.id,
-                "current_stage": session.current_stage,
-            },
-        )
-        return session, event
-
-    def _handle_self_review_passed(
-        self,
-        session: Session,
-        source_event: Event,
-    ) -> tuple[Session, Event]:
-        self._materialize_self_review_outcome_file(session=session, source_event=source_event)
-        self._complete_active_self_review_work_item(session)
-        return self._enqueue_post_implementation_quality_gate(
-            session=session,
-            source_event=source_event,
-        )
-
-    def _self_review_cycle_operator_guidance_history(
-        self,
-        session_id: int,
-        *,
-        before_event_id: int | None = None,
-    ) -> list[dict[str, str | int]]:
-        guidance: list[dict[str, str | int]] = []
-        for event in self.event_repository.list_for_session(session_id):
-            if before_event_id is not None and event.id > before_event_id:
-                continue
-            if event.event_type != "operator_runtime_input_sent":
-                continue
-            continuation_stage = str(event.payload.get("continuation_stage") or "").strip()
-            current_stage = str(event.payload.get("current_stage") or "").strip()
-            if continuation_stage != "self_review_correction_requested" and current_stage != "self_review_correction_requested":
-                continue
-            operator_reply = str(event.payload.get("operator_reply") or "").strip()
-            if not operator_reply:
-                continue
-            guidance.append(
-                {
-                    "operator_reply": operator_reply,
-                    "operator_reply_event_id": event.id,
-                }
-            )
-        return guidance
-
-    def _handle_self_review_issues_found(
-        self,
-        session: Session,
-        source_event: Event,
-    ) -> tuple[Session, Event]:
-        self._materialize_self_review_outcome_file(session=session, source_event=source_event)
-        self._complete_active_self_review_work_item(session)
-        return self._enqueue_self_review_correction(
-            session=session,
-            source_event=source_event,
-        )
-
-    def _handle_self_review_blocked(
-        self,
-        session: Session,
-        source_event: Event,
-    ) -> tuple[Session, Event]:
-        self._materialize_self_review_outcome_file(session=session, source_event=source_event)
-        self._complete_active_self_review_work_item(session)
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        if reviewer_role is None:
-            raise IntakeError("Code reviewer role is missing for the session")
-        self.work_item_repository.create(
-            session_id=session.id,
-            work_type="self_review_cycle_review",
-            title=f"Self review cycle resolution for {session.task_key}",
-            owner_role_id=reviewer_role.id,
-            source_event_id=source_event.id,
-            priority=92,
-            status=WorkItemStatus.WAITING_FOR_OPERATOR,
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="self_review_requested",
-            current_owner=CODE_REVIEWER_ROLE,
-        )
-        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
-        report_paths = self._previous_self_review_report_paths(session.id)[-2:]
-        event = self._append_event(
-            session_id=session.id,
-            event_type="session_escalated_to_operator",
-            producer_type="coordinator",
-            payload={
-                "reason": "self_review_cycle",
-                "role_name": CODE_REVIEWER_ROLE,
-                "summary": str(source_event.payload.get("summary") or "").strip() or "self review cycle blocked",
-                "details": self._self_review_cycle_operator_details(
-                    source_event.payload,
-                    report_paths=report_paths,
-                ),
-                "needs_operator_input": True,
-                "review_report_paths": report_paths,
-                "current_stage": session.current_stage,
-            },
-        )
-        return session, event
-
     def _handle_dual_review_passed(
         self,
         session: Session,
@@ -6664,7 +5768,7 @@ class CoordinatorService:
                 "review_lane": lane,
                 "summary": str(source_event.payload.get("summary") or "").strip()
                 or f"{lane} review cycle blocked",
-                "details": self._self_review_cycle_operator_details(
+                "details": self._review_cycle_operator_details(
                     source_event.payload,
                     report_paths=report_paths,
                 ),
@@ -6729,6 +5833,56 @@ class CoordinatorService:
             },
         )
         return session, event
+
+    def _enqueue_qa_followup(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> Event:
+        coding_role = self._primary_coding_role_for_work_type(session, "followup_implementation")
+        followup_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="followup_implementation",
+            title=f"QA reopen follow-up for {session.task_key}",
+            owner_role_id=coding_role.id,
+            source_event_id=source_event.id,
+            priority=115,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="qa_reopen_requested",
+            current_owner=coding_role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = self._stage_instruction(
+            "qa_reopen_requested",
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(f"No QA reopen instruction is available for role {coding_role.role_name}")
+        self._dispatch_role_work(
+            session=session,
+            role=coding_role,
+            work_item=followup_item,
+            stage_name="qa_reopen_requested",
+            instruction=instruction,
+            extra_hydration=self._qa_followup_hydration(session),
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="qa_reopen_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": coding_role.role_name,
+                "work_item_id": followup_item.id,
+                "source_event_id": source_event.id,
+                "current_stage": session.current_stage,
+            },
+        )
 
     def _handle_implementation_blocked(
         self,
@@ -6799,7 +5953,7 @@ class CoordinatorService:
             return "The coding lane reported a blocked pass and needs an operator decision before continuing."
         return "\n".join(lines).strip()
 
-    def _self_review_cycle_operator_details(
+    def _review_cycle_operator_details(
         self,
         payload: dict | None,
         *,
@@ -6822,7 +5976,7 @@ class CoordinatorService:
                 return cleaned
         issues = payload.get("issues")
         if isinstance(issues, list) and issues:
-            rendered = self._render_self_review_issues_markdown(issues).strip()
+            rendered = self._render_review_issues_markdown(issues).strip()
             if rendered:
                 summary = str(payload.get("summary") or "").strip()
                 if summary:
@@ -6845,7 +5999,7 @@ class CoordinatorService:
                 return cleaned
         return "The reviewer reported a non-converging review cycle and stopped automatic retries."
 
-    def _render_self_review_issues_markdown(self, issues: list[object]) -> str:
+    def _render_review_issues_markdown(self, issues: list[object]) -> str:
         lines: list[str] = ["## Issues", ""]
         for raw_issue in issues:
             if isinstance(raw_issue, dict):
@@ -7330,69 +6484,7 @@ class CoordinatorService:
         session: Session,
         source_event: Event,
     ) -> tuple[Session, Event]:
-        if (session.policy or {}).get("boy_scout_policy") == "disabled":
-            return self._enqueue_verification(session=session, source_event=source_event)
-        return self._enqueue_boy_scout(session=session, source_event=source_event)
-
-    def _enqueue_boy_scout(
-        self,
-        session: Session,
-        source_event: Event,
-    ) -> tuple[Session, Event]:
-        scout_role = self._ensure_on_demand_role(session, CODE_SCOUT_ROLE)
-        scout_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="boy_scout",
-            title=f"Code Scout pass for {session.task_key}",
-            owner_role_id=scout_role.id,
-            source_event_id=source_event.id,
-            priority=91,
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="boy_scout_requested",
-            current_owner=CODE_SCOUT_ROLE,
-        )
-        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        findings_path = None
-        deferred_path = None
-        diff_path = None
-        if self.workdir_root is not None:
-            spec_root = self.workdir_root / session.task_key / "spec"
-            diff_path = str(spec_root / "diff.md")
-            findings_path = str(spec_root / "findings.md")
-            deferred_candidate = spec_root / "scout-deferred.md"
-            if deferred_candidate.is_file():
-                deferred_path = str(deferred_candidate)
-        self._dispatch_role_work(
-            session=session,
-            role=scout_role,
-            work_item=scout_item,
-            stage_name="boy_scout_requested",
-            instruction=(
-                f"Run a Code Scout maintainability pass for {session.task_key}. "
-                "Start from the routed diff input, inspect only the highest-signal changed files, "
-                "write the routed findings target only when real maintainability findings exist, "
-                "and otherwise return a clean result."
-            ),
-            extra_hydration={
-                "diff_path": self._existing_file_path(diff_path),
-                "findings_path": findings_path,
-                "deferred_findings_path": deferred_path,
-            },
-        )
-        event = self._append_event(
-            session_id=session.id,
-            event_type="boy_scout_requested",
-            producer_type="coordinator",
-            payload={
-                "task_key": session.task_key,
-                "role_name": CODE_SCOUT_ROLE,
-                "work_item_id": scout_item.id,
-                "current_stage": session.current_stage,
-            },
-        )
-        return session, event
+        return self._enqueue_verification(session=session, source_event=source_event)
 
 
     def _get_session_or_raise(self, session_id: int) -> Session:
@@ -7427,8 +6519,6 @@ class CoordinatorService:
                 return "subtask_completed"
             if session.current_stage in {
                 "implementation_requested",
-                "boy_scout_correction_requested",
-                "self_review_correction_requested",
                 "convention_review_correction_requested",
                 "requirements_review_correction_requested",
                 "verification_correction_requested",
@@ -7443,8 +6533,6 @@ class CoordinatorService:
             and session.current_stage in {
                 "subtask_implementation_requested",
                 "implementation_requested",
-                "boy_scout_correction_requested",
-                "self_review_correction_requested",
                 "convention_review_correction_requested",
                 "requirements_review_correction_requested",
                 "verification_correction_requested",
@@ -7470,22 +6558,11 @@ class CoordinatorService:
                 return "verification_failed"
             if output_type == "blocked_verification_cycle" and session.current_stage == "verification_requested":
                 return "verification_blocked"
-        if role_name == CODE_REVIEWER_ROLE and session.current_stage == "self_review_requested":
-            if output_type in {"passed", "completed"}:
-                return "self_review_passed"
-            if output_type == "skipped_not_needed":
-                if self._optional_lane_policy_mode(session.policy, "self_review_policy") != "enabled":
-                    raise IntakeError("Self review cannot be skipped when self_review_policy is required")
-                return "self_review_passed"
-            if output_type == "failed":
-                return "self_review_issues_found"
-            if output_type == "blocked_review_cycle":
-                return "self_review_blocked"
         if role_name == CONVENTION_REVIEWER_ROLE and session.current_stage == "convention_review_requested":
             if output_type in {"passed", "completed"}:
                 return "convention_review_passed"
             if output_type == "skipped_not_needed":
-                if self._optional_lane_policy_mode(session.policy, "self_review_policy") != "enabled":
+                if self._optional_lane_policy_mode(session.policy, "review_policy") != "enabled":
                     raise IntakeError("Convention review cannot be skipped when review gate policy is required")
                 return "convention_review_passed"
             if output_type == "failed":
@@ -7496,20 +6573,13 @@ class CoordinatorService:
             if output_type in {"passed", "completed"}:
                 return "requirements_review_passed"
             if output_type == "skipped_not_needed":
-                if self._optional_lane_policy_mode(session.policy, "self_review_policy") != "enabled":
+                if self._optional_lane_policy_mode(session.policy, "review_policy") != "enabled":
                     raise IntakeError("Requirements review cannot be skipped when review gate policy is required")
                 return "requirements_review_passed"
             if output_type == "failed":
                 return "requirements_review_issues_found"
             if output_type == "blocked_review_cycle":
                 return "requirements_review_blocked"
-        if role_name == CODE_SCOUT_ROLE and session.current_stage == "boy_scout_requested":
-            if output_type in {"passed", "completed"}:
-                return "boy_scout_completed"
-            if output_type == "skipped_not_needed":
-                if self._optional_lane_policy_mode(session.policy, "boy_scout_policy") != "enabled":
-                    raise IntakeError("Code Scout cannot be skipped when boy_scout_policy is required")
-                return "boy_scout_completed"
         if role_name == DOC_HARVEST_ROLE and session.current_stage == "doc_harvest_requested":
             if output_type in {"passed", "completed"}:
                 return "doc_harvest_completed"
@@ -7594,12 +6664,6 @@ class CoordinatorService:
             path=str(summary_path),
             metadata=metadata,
         )
-        if role_name == CODE_REVIEWER_ROLE and session.current_stage == "self_review_requested":
-            self._materialize_self_review_report(
-                session=session,
-                output_type=output_type,
-                payload=payload,
-            )
         if role_name in {CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE}:
             lane = "convention" if role_name == CONVENTION_REVIEWER_ROLE else "requirements"
             if session.current_stage == _DUAL_REVIEW_STAGE_BY_LANE[lane]:
@@ -8069,6 +7133,13 @@ class CoordinatorService:
                         "reason": "stale_runtime_error_for_inactive_work_item",
                         "payload_work_item_id": payload_work_item_id,
                     }
+            replayed_after_acceptance = self._replayed_runtime_error_after_role_result_acceptance(
+                session=session,
+                role=role,
+                payload=payload,
+            )
+            if replayed_after_acceptance is not None:
+                return replayed_after_acceptance
             return None
         replayed_after_reply = self._replayed_runtime_error_after_operator_reply(
             session=session,
@@ -8087,6 +7158,14 @@ class CoordinatorService:
             )
             if replayed_error is not None:
                 return replayed_error
+            replayed_from_prior_dispatch = self._replayed_runtime_error_from_prior_dispatch(
+                session=session,
+                role=role,
+                active_item=active_item,
+                payload=payload,
+            )
+            if replayed_from_prior_dispatch is not None:
+                return replayed_from_prior_dispatch
             return self._stale_runtime_error_subtask_mismatch(
                 session=session,
                 active_item=active_item,
@@ -8098,6 +7177,113 @@ class CoordinatorService:
             "reason": "address_mismatch",
             "expected_work_item_id": active_item.id,
             "payload_work_item_id": payload_work_item_id,
+        }
+
+    def _replayed_runtime_error_after_role_result_acceptance(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        payload: dict,
+        current_event_id: int | None = None,
+    ) -> dict[str, object] | None:
+        if self._runtime_error_payload_work_item_id(payload) is not None:
+            return None
+
+        current_signature = self._runtime_error_content_signature(payload)
+        events = self.event_repository.list_for_session(session.id)
+        latest_prior_error: Event | None = None
+        for event in reversed(events):
+            if current_event_id is not None and event.id >= current_event_id:
+                continue
+            if event.event_type != "role_runtime_error_reported":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if self._runtime_error_content_signature(event.payload) != current_signature:
+                continue
+            latest_prior_error = event
+            break
+        if latest_prior_error is None:
+            return None
+
+        accepted_event: Event | None = None
+        for event in events:
+            if event.id <= latest_prior_error.id:
+                continue
+            if current_event_id is not None and event.id >= current_event_id:
+                continue
+            if event.event_type != "role_result_ingress_accepted":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            accepted_event = event
+
+        if accepted_event is None:
+            return None
+
+        return {
+            "reason": "replayed_runtime_error_after_role_result_acceptance",
+            "payload_work_item_id": None,
+            "replayed_event_id": latest_prior_error.id,
+            "accepted_event_id": accepted_event.id,
+            "accepted_work_item_id": accepted_event.payload.get("work_item_id"),
+        }
+
+    def _replayed_runtime_error_from_prior_dispatch(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_item: WorkItem,
+        payload: dict,
+        current_event_id: int | None = None,
+    ) -> dict[str, object] | None:
+        if self._runtime_error_payload_work_item_id(payload) is not None:
+            return None
+
+        current_signature = self._runtime_error_content_signature(payload)
+        events = self.event_repository.list_for_session(session.id)
+        latest_current_dispatch: Event | None = None
+        for event in reversed(events):
+            if current_event_id is not None and event.id >= current_event_id:
+                continue
+            if event.event_type != "role_input_dispatched":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if event.payload.get("work_item_id") != active_item.id:
+                continue
+            if event.payload.get("stage_name") != session.current_stage:
+                continue
+            latest_current_dispatch = event
+            break
+        if latest_current_dispatch is None:
+            return None
+
+        latest_prior_error: Event | None = None
+        for event in reversed(events):
+            if current_event_id is not None and event.id >= current_event_id:
+                continue
+            if event.id >= latest_current_dispatch.id:
+                continue
+            if event.event_type != "role_runtime_error_reported":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if self._runtime_error_content_signature(event.payload) != current_signature:
+                continue
+            latest_prior_error = event
+            break
+        if latest_prior_error is None:
+            return None
+
+        return {
+            "reason": "replayed_runtime_error_from_prior_dispatch",
+            "expected_work_item_id": active_item.id,
+            "payload_work_item_id": None,
+            "replayed_event_id": latest_prior_error.id,
+            "dispatch_event_id": latest_current_dispatch.id,
         }
 
     def _replayed_runtime_error_after_accepted_result(
@@ -8220,7 +7406,7 @@ class CoordinatorService:
 
     def _runtime_error_content_signature(self, payload: dict) -> str:
         content = dict(payload)
-        for key in ("role_name", "marker_type", "current_stage"):
+        for key in ("role_name", "marker_type", "current_stage", "reason"):
             content.pop(key, None)
         return self._normalized_json_signature(content)
 
@@ -8370,9 +7556,7 @@ class CoordinatorService:
                     return False
 
         extra_hydration: dict[str, str | int | None] | None = None
-        if role.role_name == CODE_REVIEWER_ROLE and session.current_stage == "self_review_requested":
-            instruction, extra_hydration = self._self_review_dispatch_context(session)
-        elif role.role_name == CONVENTION_REVIEWER_ROLE and session.current_stage == "convention_review_requested":
+        if role.role_name == CONVENTION_REVIEWER_ROLE and session.current_stage == "convention_review_requested":
             instruction, extra_hydration = self._dual_review_dispatch_context(session, lane="convention")
         elif role.role_name == REQUIREMENTS_REVIEWER_ROLE and session.current_stage == "requirements_review_requested":
             instruction, extra_hydration = self._dual_review_dispatch_context(session, lane="requirements")
@@ -8559,6 +7743,33 @@ class CoordinatorService:
             source_event = self._latest_event_by_type(session.id, {"verification_passed"})
             if source_event is None:
                 return False
+            latest_doc_harvest = self._latest_event_after_by_type(
+                session.id,
+                source_event.id,
+                {"doc_harvest_requested"},
+            )
+            if latest_doc_harvest is not None:
+                doc_role = self.role_repository.get_by_name(session.id, DOC_HARVEST_ROLE)
+                if doc_role is None:
+                    return False
+                session = self.session_repository.update_stage_and_owner(
+                    session.id,
+                    current_stage="doc_harvest_requested",
+                    current_owner=DOC_HARVEST_ROLE,
+                )
+                self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+                self._append_event(
+                    session_id=session.id,
+                    event_type="session_outcome_reconciled",
+                    producer_type="coordinator",
+                    payload={
+                        "stage_name": "verification_requested",
+                        "outcome_status": "passed",
+                        "followup_event_type": latest_doc_harvest.event_type,
+                        "reason": "stage_restored_to_existing_followup",
+                    },
+                )
+                return True
             if self._has_event_after(
                 session.id,
                 source_event.id,
@@ -8593,6 +7804,33 @@ class CoordinatorService:
             source_event = self._latest_event_by_type(session.id, {"doc_harvest_completed"})
             if source_event is None:
                 return False
+            latest_documentation_review = self._latest_event_after_by_type(
+                session.id,
+                source_event.id,
+                {"documentation_review_requested"},
+            )
+            if latest_documentation_review is not None:
+                review_role = self.role_repository.get_by_name(session.id, DOCUMENTATION_REVIEWER_ROLE)
+                if review_role is None:
+                    return False
+                session = self.session_repository.update_stage_and_owner(
+                    session.id,
+                    current_stage="documentation_review_requested",
+                    current_owner=DOCUMENTATION_REVIEWER_ROLE,
+                )
+                self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+                self._append_event(
+                    session_id=session.id,
+                    event_type="session_outcome_reconciled",
+                    producer_type="coordinator",
+                    payload={
+                        "stage_name": "doc_harvest_requested",
+                        "outcome_status": "completed",
+                        "followup_event_type": latest_documentation_review.event_type,
+                        "reason": "stage_restored_to_existing_followup",
+                    },
+                )
+                return True
             if self._has_event_after(
                 session.id,
                 source_event.id,
@@ -8652,6 +7890,21 @@ class CoordinatorService:
             if event.event_type in event_types:
                 return True
         return False
+
+    def _latest_event_after_by_type(
+        self,
+        session_id: int,
+        after_event_id: int | None,
+        event_types: set[str],
+    ) -> Event | None:
+        if after_event_id is None:
+            return None
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.id <= after_event_id:
+                return None
+            if event.event_type in event_types:
+                return event
+        return None
 
     def _latest_event_by_type(self, session_id: int, event_types: set[str]) -> Event | None:
         return self.event_repository.latest_for_session_by_type(session_id, event_types)
@@ -8759,7 +8012,6 @@ class CoordinatorService:
             "bug_analysis",
             "subtask_implementation",
             "implementation",
-            "self_review_correction",
             "convention_review_correction",
             "requirements_review_correction",
             "verification_correction",
@@ -8768,21 +8020,6 @@ class CoordinatorService:
         }:
             return None
         return active_item
-
-    def _complete_active_self_review_work_item(self, session: Session) -> None:
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        if reviewer_role is None:
-            raise IntakeError("Code reviewer role is missing for the session")
-        review_items = [
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.owner_role_id == reviewer_role.id
-            and item.status != WorkItemStatus.COMPLETED
-            and item.work_type in {"self_review", "self_review_cycle_review"}
-        ]
-        if not review_items:
-            raise IntakeError("No active self review work item found for the session")
-        self.work_item_repository.update_status(review_items[0].id, WorkItemStatus.COMPLETED)
 
     def _complete_active_dual_review_work_item(self, session: Session, *, lane: str) -> None:
         role_name = _DUAL_REVIEW_ROLE_BY_LANE[lane]
@@ -8801,14 +8038,6 @@ class CoordinatorService:
         if not review_items:
             raise IntakeError(f"No active {lane} review work item found for the session")
         self.work_item_repository.update_status(review_items[0].id, WorkItemStatus.COMPLETED)
-
-    def _previous_self_review_report_paths(self, session_id: int) -> list[str]:
-        return self._internal_review_artifact_paths(
-            session_id,
-            review_lane="self_review",
-            artifact_role="report",
-            fallback_artifact_types={"self_review_report_markdown"},
-        )
 
     def _previous_dual_review_report_paths(self, session_id: int, *, lane: str) -> list[str]:
         return self._internal_review_artifact_paths(
@@ -8901,92 +8130,6 @@ class CoordinatorService:
             return None
         return work_item.source_event_id
 
-    def _self_review_report_paths_for_current_chain(
-        self,
-        session: Session,
-        *,
-        before_event_id: int | None,
-    ) -> list[str]:
-        review_event_id = self._current_self_review_source_event_id(
-            session,
-            before_event_id=before_event_id,
-        )
-        if review_event_id is None:
-            return []
-
-        events_by_id = {
-            event.id: event
-            for event in self.event_repository.list_for_session(session.id)
-            if event.id is not None
-        }
-        review_event = events_by_id.get(review_event_id)
-        if review_event is None:
-            return []
-
-        review_work_item_id = review_event.payload.get("work_item_id")
-        candidate_paths: list[str] = []
-        for artifact in self.artifact_repository.list_for_session(session.id):
-            metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
-            if str(metadata.get("report_family") or "").strip() != "internal_review":
-                continue
-            if str(metadata.get("review_lane") or "").strip() != "self_review":
-                continue
-            if str(metadata.get("artifact_role") or "").strip() != "report":
-                continue
-            if isinstance(review_work_item_id, int) and metadata.get("work_item_id") == review_work_item_id:
-                candidate_paths.append(artifact.path)
-
-        if candidate_paths:
-            return candidate_paths
-
-        # Older tests and manually injected results may omit work_item_id. In that
-        # case keep only the latest report instead of replaying the whole session.
-        all_paths = self._previous_self_review_report_paths(session.id)
-        return all_paths[-1:] if all_paths else []
-
-    def _current_self_review_source_event_id(
-        self,
-        session: Session,
-        *,
-        before_event_id: int | None,
-    ) -> int | None:
-        if before_event_id is None:
-            active_item = self._find_active_work_item_for_current_stage(session)
-            before_event_id = active_item.source_event_id if active_item is not None else None
-        if before_event_id is None:
-            return None
-
-        event = next(
-            (
-                item
-                for item in self.event_repository.list_for_session(session.id)
-                if item.id == before_event_id
-            ),
-            None,
-        )
-        if event is None:
-            return None
-        if event.event_type in {"self_review_issues_found", "self_review_blocked"}:
-            return event.id
-        if event.event_type != "implementation_completed":
-            return None
-
-        work_item_id = event.payload.get("work_item_id")
-        if not isinstance(work_item_id, int):
-            return None
-        work_item = self.work_item_repository.get_by_id(work_item_id)
-        if work_item is None or work_item.work_type != "self_review_correction":
-            return None
-        return work_item.source_event_id
-
-    def _previous_code_scout_report_paths(self, session_id: int) -> list[str]:
-        return self._internal_review_artifact_paths(
-            session_id,
-            review_lane="code_scout",
-            artifact_role="report",
-            fallback_artifact_types={"boy_scout_report_markdown"},
-        )
-
     def _latest_artifact_path(
         self,
         session_id: int,
@@ -9021,20 +8164,12 @@ class CoordinatorService:
         role: Role,
         stage_name: str,
     ) -> dict[str, str | int | None]:
-        if role.role_name == CODE_REVIEWER_ROLE and stage_name == "self_review_requested":
-            return {
-                "diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="source"),
-            }
         if role.role_name == CONVENTION_REVIEWER_ROLE and stage_name == "convention_review_requested":
             _instruction, payload = self._dual_review_dispatch_context(session, lane="convention")
             return payload
         if role.role_name == REQUIREMENTS_REVIEWER_ROLE and stage_name == "requirements_review_requested":
             _instruction, payload = self._dual_review_dispatch_context(session, lane="requirements")
             return payload
-        if role.role_name == CODE_SCOUT_ROLE and stage_name == "boy_scout_requested":
-            return {
-                "diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="source"),
-            }
         if role.role_name == DOC_HARVEST_ROLE and stage_name == "doc_harvest_requested":
             guide_path = None
             if self.workdir_root is not None:
@@ -9086,6 +8221,8 @@ class CoordinatorService:
         if role.role_name == IMPLEMENTER_ROLE:
             payload: dict[str, str | int | None] = {}
             payload.update(self._correction_dispatch_hydration(session.id, stage_name))
+            if stage_name == "qa_reopen_requested":
+                payload.update(self._qa_followup_hydration(session))
             if payload:
                 return payload
         if session.workflow_profile != "bug_full" or role.role_name != BUG_FIXER_ROLE:
@@ -9103,9 +8240,7 @@ class CoordinatorService:
         mode_by_stage = {
             "bug_analysis_requested": "analysis-only",
             "implementation_requested": "fix-only",
-            "boy_scout_correction_requested": "fix-only",
             "verification_correction_requested": "fix-only",
-            "self_review_correction_requested": "fix-only",
             "convention_review_correction_requested": "fix-only",
             "requirements_review_correction_requested": "fix-only",
             "documentation_review_correction_requested": "fix-only",
@@ -9116,13 +8251,18 @@ class CoordinatorService:
         if stage_name == "bug_analysis_requested":
             payload["primary_bug_inputs"] = "description.md + comments.md"
         if stage_name == "qa_reopen_requested":
-            payload["followup_comments_path"] = self._existing_file_path(
+            payload.update(self._qa_followup_hydration(session))
+        return payload
+
+    def _qa_followup_hydration(self, session: Session) -> dict[str, str | int | None]:
+        return {
+            "followup_comments_path": self._existing_file_path(
                 self._latest_artifact_path(
                     session.id,
                     "qa_reopen_comments",
                 )
             )
-        return payload
+        }
 
     def _correction_dispatch_hydration(
         self,
@@ -9130,12 +8270,6 @@ class CoordinatorService:
         stage_name: str,
     ) -> dict[str, str | int | None]:
         config_by_stage = {
-            "self_review_correction_requested": {
-                "source": "self_review",
-                "review_lane": "self_review",
-                "artifact_role": "report",
-                "fallback_artifact_types": {"self_review_report_markdown"},
-            },
             "convention_review_correction_requested": {
                 "source": "convention_review",
                 "review_lane": "convention",
@@ -9147,12 +8281,6 @@ class CoordinatorService:
                 "review_lane": "requirements",
                 "artifact_role": "report",
                 "fallback_artifact_types": {"requirements_review_report_markdown"},
-            },
-            "boy_scout_correction_requested": {
-                "source": "code_scout",
-                "review_lane": "code_scout",
-                "artifact_role": "actionable",
-                "fallback_artifact_types": {"boy_scout_actionable_markdown"},
             },
             "verification_correction_requested": {
                 "source": "verification",
@@ -9596,12 +8724,6 @@ class CoordinatorService:
                     f"Apply verification corrections for {task_key}. "
                     "Stay aligned to the verification findings, but fix the root cause cleanly and prevent regressions."
                 )
-            if stage_name == "self_review_correction_requested":
-                return (
-                    f"Mode: fix-only\n"
-                    f"Apply self review corrections for {task_key}. "
-                    "Stay aligned to the review findings, but fix the root cause cleanly and prevent regressions."
-                )
             if stage_name == "convention_review_correction_requested":
                 return (
                     f"Mode: fix-only\n"
@@ -9641,23 +8763,6 @@ class CoordinatorService:
                 f"Clarification mode: {clarification_mode}. "
                 "If critical ambiguity remains, ask the operator directly in the live session instead of guessing."
             )
-        if stage_name == "boy_scout_requested":
-            policy_mode = self._optional_lane_policy_mode(session_policy, "boy_scout_policy")
-            if policy_mode == "required":
-                return (
-                    f"Run a Code Scout maintainability pass for {task_key}. "
-                    "Start from the routed diff input, inspect only the highest-signal changed files, "
-                    "write the routed findings target only when real maintainability findings exist, "
-                    "and otherwise report a clean result. "
-                    "This Code Scout lane is required for this session, so do not emit skipped_not_needed."
-                )
-            return (
-                f"Run a Code Scout maintainability pass for {task_key}. "
-                "Start from the routed diff input, inspect only the highest-signal changed files, "
-                "write the routed findings target only when real maintainability findings exist, "
-                "and otherwise report a clean result. "
-                "Emit skipped_not_needed when the change surface is too weak to justify a meaningful maintainability pass."
-            )
         if stage_name == "acceptance_criteria_requested":
             return (
                 f"Prepare explicit acceptance criteria for story {task_key}. "
@@ -9690,11 +8795,6 @@ class CoordinatorService:
                 f"Start implementation work for {task_key}. "
                 "Read task snapshot inputs such as `description.md`, `comments.md`, and `spec/diff.md` when they exist before deciding that no concrete implementation work is present."
             )
-        if stage_name == "boy_scout_correction_requested":
-            return (
-                f"Apply Code Scout improvements for {task_key} from the routed findings file. "
-                "Stay aligned to the routed maintainability findings, but make any adjacent cleanup that is necessary to resolve them cleanly."
-            )
         if stage_name == "verification_requested":
             return (
                 f"Run deterministic verification for {task_key}. "
@@ -9722,23 +8822,6 @@ class CoordinatorService:
                 "Use statuses.md as canonical Jira task/subtask order and check cumulative requirements, explicit follow-up priority, regressions, edge cases, and focused test coverage. "
                 "Emit passed if clean, failed for grounded requirement issues, or blocked_review_cycle when the immediate correction chain no longer converges."
             )
-        if stage_name == "self_review_requested":
-            policy_mode = self._optional_lane_policy_mode(session_policy, "self_review_policy")
-            if policy_mode == "required":
-                return (
-                    f"Review the current task changes for {task_key}. "
-                    "Emit passed if the review is clean, failed if issues still require correction, "
-                    "or blocked_review_cycle if the same review loop is no longer converging and needs operator intervention. "
-                    "This self-review lane is required for this session, so do not emit skipped_not_needed."
-                )
-            return (
-                f"Review the current task changes for {task_key}. "
-                "Emit passed if the review is clean, failed if issues still require correction, "
-                "blocked_review_cycle if the same review loop is no longer converging, "
-                "or skipped_not_needed if this diff is too small or too low-signal to justify a real review pass."
-            )
-        if stage_name == "self_review_correction_requested":
-            return f"Apply self review corrections for {task_key}."
         if stage_name == "convention_review_correction_requested":
             return (
                 f"Apply convention review corrections for {task_key}. "
@@ -9778,7 +8861,7 @@ class CoordinatorService:
         role_names = list(self.default_roles)
         if workflow_profile == "bug_full" and BUG_FIXER_ROLE not in role_names:
             role_names.append(BUG_FIXER_ROLE)
-        if (policy or {}).get("self_review_policy") != "disabled":
+        if (policy or {}).get("review_policy") != "disabled":
             for role_name in (CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE):
                 if role_name not in role_names:
                     role_names.append(role_name)
@@ -9807,9 +8890,7 @@ class CoordinatorService:
         if work_type in {
             "bug_analysis",
             "implementation",
-            "boy_scout_correction",
             "followup_implementation",
-            "self_review_correction",
             "convention_review_correction",
             "requirements_review_correction",
             "verification_correction",
@@ -9905,11 +8986,7 @@ class CoordinatorService:
         session = self.session_repository.get_by_id(session_id)
         if session is None:
             raise IntakeError(f"Session {session_id} not found")
-        roles = [
-            role
-            for role in self.role_repository.list_for_session(session_id)
-            if role.role_name not in RETIRED_ROLE_NAMES
-        ]
+        roles = self.role_repository.list_for_session(session_id)
         runtime_session_id = None
         try:
             runtime_session_id = self._runtime_session_handle_for_session(session).session_id
@@ -10848,6 +9925,9 @@ class CoordinatorService:
         explicit_markdown = str(source_event.payload.get("final_verification_markdown") or "").strip()
         if explicit_markdown:
             content = explicit_markdown.rstrip() + "\n"
+            target_path.write_text(content)
+        elif target_path.is_file() and self._verification_event_outcome_status(source_event) == "passed":
+            content = target_path.read_text()
         else:
             summary = str(source_event.payload.get("summary") or "").strip()
             failures = source_event.payload.get("failures")
@@ -10996,8 +10076,7 @@ class CoordinatorService:
                         ]
                     )
             content = "\n".join(lines).rstrip() + "\n"
-
-        target_path.write_text(content)
+            target_path.write_text(content)
 
         artifact_path = write_text_artifact(
             self.artifacts_root,
@@ -11122,58 +10201,45 @@ class CoordinatorService:
             return explicit_result
         return "passed"
 
-    def _materialize_self_review_outcome_file(
-        self,
-        *,
-        session: Session,
-        source_event: Event,
-    ) -> None:
-        if self.workdir_root is None or self.artifacts_root is None:
-            return
+    def _verification_outcome_status(self, session: Session) -> str | None:
+        if self.workdir_root is not None:
+            outcome_path = self.workdir_root / session.task_key / "spec" / "verification-outcome.json"
+            if outcome_path.is_file():
+                try:
+                    payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    payload = None
+                if isinstance(payload, dict):
+                    status = str(payload.get("status") or "").strip().lower()
+                    if status in {"passed", "failed"}:
+                        return status
+        return None
 
-        review_root = self.workdir_root / session.task_key / "review"
-        review_root.mkdir(parents=True, exist_ok=True)
-        target_path = review_root / "self-review-outcome.json"
-        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
-        if source_event.event_type == "self_review_passed":
-            status = "passed"
-        elif source_event.event_type == "self_review_issues_found":
-            status = "issues_found"
-        else:
-            status = "blocked"
-        outcome = {
-            "task_key": session.task_key,
-            "source_event_id": source_event.id,
-            "source_event_type": source_event.event_type,
-            "status": status,
-            "summary": str(payload.get("summary") or "").strip(),
-            "details": str(payload.get("details") or "").strip(),
-            "issues_markdown": str(payload.get("issues_markdown") or "").strip(),
-            "work_item_id": payload.get("work_item_id"),
-        }
-        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
-        target_path.write_text(content)
-        artifact_path = write_text_artifact(
-            self.artifacts_root,
-            session.task_key,
-            "self-review",
-            "self-review-outcome.json",
-            content,
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="self-review",
-            artifact_type="self_review_outcome_json",
-            path=str(artifact_path),
-            metadata=self._review_outcome_metadata(
-                task_key=session.task_key,
-                source_path=str(target_path),
-                review_lane="self_review",
-                status=status,
-                source_event_id=source_event.id,
-                work_item_id=payload.get("work_item_id"),
-            ),
-        )
+    def _doc_harvest_outcome_status(self, session: Session) -> str | None:
+        if self.workdir_root is None:
+            return None
+        outcome_path = self.workdir_root / session.task_key / "spec" / "doc-harvest-outcome.json"
+        if not outcome_path.is_file():
+            return None
+        try:
+            payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        status = str(payload.get("status") or "").strip().lower()
+        return status or None
+
+    def _require_passed_verification_for_delivery(self, session: Session) -> None:
+        if not self._verification_gate_required_for_delivery(session):
+            return
+        if self._verification_outcome_status(session) != "passed":
+            raise IntakeError(
+                f"Session {session.id} cannot enter delivery because workflow verification did not pass"
+            )
+
+    def _verification_gate_required_for_delivery(self, session: Session) -> bool:
+        return session.workflow_profile in {"oneshot", "bug_full", "story_full"}
 
     def _materialize_dual_review_outcome_file(
         self,
@@ -11448,234 +10514,6 @@ class CoordinatorService:
         )
         return target_path
 
-    def _materialize_boy_scout_outcome_file(
-        self,
-        *,
-        session: Session,
-        source_event: Event,
-        status: str,
-    ) -> None:
-        if self.workdir_root is None or self.artifacts_root is None:
-            return
-
-        spec_root = self.workdir_root / session.task_key / "spec"
-        spec_root.mkdir(parents=True, exist_ok=True)
-        target_path = spec_root / "boy-scout-outcome.json"
-        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
-        outcome = {
-            "task_key": session.task_key,
-            "source_event_id": source_event.id,
-            "source_event_type": source_event.event_type,
-            "status": status,
-            "result": str(payload.get("result") or "").strip(),
-            "summary": str(payload.get("summary") or "").strip(),
-            "details": str(payload.get("details") or "").strip(),
-            "work_item_id": payload.get("work_item_id"),
-        }
-        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
-        target_path.write_text(content)
-        artifact_path = write_text_artifact(
-            self.artifacts_root,
-            session.task_key,
-            "boy-scout",
-            "boy-scout-outcome.json",
-            content,
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="boy-scout",
-            artifact_type="boy_scout_outcome_json",
-            path=str(artifact_path),
-            metadata=self._review_outcome_metadata(
-                task_key=session.task_key,
-                source_path=str(target_path),
-                review_lane="code_scout",
-                status=status,
-                source_event_id=source_event.id,
-                work_item_id=payload.get("work_item_id"),
-            ),
-        )
-        self._materialize_boy_scout_findings_state(session=session, status=status)
-        self._materialize_boy_scout_report(
-            session=session,
-            source_event=source_event,
-            status=status,
-        )
-
-    def _materialize_boy_scout_findings_state(self, *, session: Session, status: str) -> None:
-        if self.workdir_root is None:
-            return
-        findings_path = self.workdir_root / session.task_key / "spec" / "findings.md"
-        if status == "clean":
-            findings_path.parent.mkdir(parents=True, exist_ok=True)
-            findings_path.write_text("SCOUT_RESULT: clean\n", encoding="utf-8")
-
-    def _materialize_boy_scout_report(
-        self,
-        *,
-        session: Session,
-        source_event: Event,
-        status: str,
-    ) -> None:
-        if self.workdir_root is None or self.artifacts_root is None:
-            return
-
-        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
-        target_path = self._next_boy_scout_report_target_path(session)
-        if target_path is None:
-            return
-
-        findings_path = self.workdir_root / session.task_key / "spec" / "findings.md"
-        if status == "findings_found" and findings_path.is_file():
-            content = findings_path.read_text(encoding="utf-8").rstrip() + "\n"
-        else:
-            summary = str(payload.get("summary") or "").strip()
-            details = str(payload.get("details") or "").strip()
-            lines = [f"SCOUT_RESULT: {status}"]
-            if summary:
-                lines.extend(["", "## Summary", "", summary])
-            if details:
-                lines.extend(["", "## Details", "", details])
-            content = "\n".join(lines).rstrip() + "\n"
-
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(content, encoding="utf-8")
-        artifact_path = write_text_artifact(
-            self.artifacts_root,
-            session.task_key,
-            "code-scout",
-            target_path.name,
-            content,
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="code-scout",
-            artifact_type="boy_scout_report_markdown",
-            path=str(artifact_path),
-            metadata=self._review_report_metadata(
-                task_key=session.task_key,
-                source_path=str(target_path),
-                review_lane="code_scout",
-                status=status,
-                work_item_id=payload.get("work_item_id"),
-                source_event_id=source_event.id,
-            ),
-        )
-
-    def _next_boy_scout_report_target_path(self, session: Session) -> Path | None:
-        if self.workdir_root is None:
-            return None
-        scout_dir = self.workdir_root / session.task_key / "scout"
-        pass_count = len(
-            self._internal_review_artifact_paths(
-                session.id,
-                review_lane="code_scout",
-                artifact_role="report",
-                fallback_artifact_types={"boy_scout_report_markdown"},
-            )
-        )
-        return scout_dir / f"pass-{pass_count + 1:02d}.md"
-
-    def _verification_gate_required_for_delivery(self, session: Session) -> bool:
-        events = self.event_repository.list_for_session(session.id)
-        return any(item.event_type == "verification_requested" for item in events)
-
-    def _verification_outcome_status(self, session: Session) -> str | None:
-        if self.workdir_root is not None:
-            outcome_path = self.workdir_root / session.task_key / "spec" / "verification-outcome.json"
-            if outcome_path.is_file():
-                try:
-                    payload = json.loads(outcome_path.read_text(encoding="utf-8"))
-                except json.JSONDecodeError:
-                    payload = None
-                if isinstance(payload, dict):
-                    status = str(payload.get("status") or "").strip().lower()
-                    if status in {"passed", "failed"}:
-                        return status
-        return None
-
-    def _doc_harvest_outcome_status(self, session: Session) -> str | None:
-        if self.workdir_root is None:
-            return None
-        outcome_path = self.workdir_root / session.task_key / "spec" / "doc-harvest-outcome.json"
-        if not outcome_path.is_file():
-            return None
-        try:
-            payload = json.loads(outcome_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(payload, dict):
-            return None
-        status = str(payload.get("status") or "").strip().lower()
-        return status or None
-
-    def _require_passed_verification_for_delivery(self, session: Session) -> None:
-        if not self._verification_gate_required_for_delivery(session):
-            return
-        if self._verification_outcome_status(session) != "passed":
-            raise IntakeError(
-                f"Session {session.id} cannot enter delivery because workflow verification did not pass"
-            )
-
-    def _materialize_self_review_report(
-        self,
-        *,
-        session: Session,
-        output_type: str,
-        payload: dict,
-    ) -> None:
-        if self.workdir_root is None or self.artifacts_root is None:
-            return
-
-        target_path = self._next_self_review_report_target_path(session)
-        if target_path is None:
-            return
-        explicit_markdown = str(payload.get("review_markdown") or "").strip()
-        if explicit_markdown:
-            content = explicit_markdown.rstrip() + "\n"
-        else:
-            summary = str(payload.get("summary") or "").strip()
-            issues_markdown = str(payload.get("issues_markdown") or "").strip()
-            issues = payload.get("issues")
-            lines: list[str] = []
-            if output_type == "passed":
-                lines.extend(["REVIEW_RESULT: clean"])
-                if summary:
-                    lines.extend(["", "## Summary", "", summary])
-            else:
-                lines.extend(["REVIEW_RESULT: issues_found"])
-                if issues_markdown:
-                    lines.extend(["", issues_markdown])
-                elif isinstance(issues, list) and issues:
-                    lines.extend(["", self._render_self_review_issues_markdown(issues)])
-                elif summary:
-                    lines.extend(["", "## Issues", "", f"- {summary}"])
-            content = "\n".join(lines).rstrip() + "\n"
-
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(content)
-        artifact_path = write_text_artifact(
-            self.artifacts_root,
-            session.task_key,
-            "self-review",
-            target_path.name,
-            content,
-        )
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="self-review",
-            artifact_type="self_review_report_markdown",
-            path=str(artifact_path),
-            metadata=self._review_report_metadata(
-                task_key=session.task_key,
-                source_path=str(target_path),
-                review_lane="self_review",
-                status=self._self_review_report_status(output_type),
-                work_item_id=payload.get("work_item_id"),
-                output_type=output_type,
-            ),
-        )
-
     def _materialize_dual_review_report(
         self,
         *,
@@ -11707,7 +10545,7 @@ class CoordinatorService:
                 if issues_markdown:
                     lines.extend(["", issues_markdown])
                 elif isinstance(issues, list) and issues:
-                    lines.extend(["", self._render_self_review_issues_markdown(issues)])
+                    lines.extend(["", self._render_review_issues_markdown(issues)])
                 elif summary:
                     lines.extend(["", "## Issues", "", f"- {summary}"])
             content = "\n".join(lines).rstrip() + "\n"
@@ -11730,13 +10568,13 @@ class CoordinatorService:
                 task_key=session.task_key,
                 source_path=str(target_path),
                 review_lane=lane,
-                status=self._self_review_report_status(output_type),
+                status=self._review_report_status(output_type),
                 work_item_id=payload.get("work_item_id"),
                 output_type=output_type,
             ),
         )
 
-    def _self_review_report_status(self, output_type: str) -> str:
+    def _review_report_status(self, output_type: str) -> str:
         if output_type == "passed":
             return "clean"
         if output_type == "blocked_review_cycle":
@@ -11829,20 +10667,6 @@ class CoordinatorService:
         ):
             latest_path = path
         return latest_path
-
-    def _next_self_review_report_target_path(self, session: Session) -> Path | None:
-        if self.workdir_root is None:
-            return None
-        review_dir = self.workdir_root / session.task_key / "review"
-        pass_count = len(
-            self._internal_review_artifact_paths(
-                session.id,
-                review_lane="self_review",
-                artifact_role="report",
-                fallback_artifact_types={"self_review_report_markdown"},
-            )
-        )
-        return review_dir / f"pass-{pass_count + 1:02d}.md"
 
     def _next_dual_review_report_target_path(self, session: Session, *, lane: str) -> Path | None:
         if self.workdir_root is None:
@@ -12097,541 +10921,6 @@ class CoordinatorService:
                     keys.append(candidate)
                     seen.add(candidate)
         return keys
-
-    def _parse_boy_scout_labeled_fields(self, section: str) -> dict[str, str]:
-        label_keys = {
-            "files": "files",
-            "affected files": "files",
-            "principle": "principle",
-            "problem": "problem",
-            "suggestion": "suggestion",
-            "why it matters": "why_it_matters",
-            "required direction": "required_direction",
-            "non-goals": "non_goals",
-            "evidence": "evidence",
-            "suggested approach": "suggested_approach",
-            "test expectations": "test_expectations",
-        }
-        label_pattern = re.compile(
-            r"^(?:\*\*(?P<bold_label>[^*]+)\*\*|(?P<label>[A-Za-z][A-Za-z -]+)):\s*(?P<value>.*)$"
-        )
-        fields: dict[str, str] = {}
-        current_key: str | None = None
-        current_lines: list[str] = []
-
-        def flush_current() -> None:
-            nonlocal current_key, current_lines
-            if current_key is None:
-                return
-            value = "\n".join(current_lines).strip()
-            if value:
-                fields[current_key] = value
-            current_key = None
-            current_lines = []
-
-        for raw_line in section.splitlines():
-            line = raw_line.strip()
-            match = label_pattern.match(line)
-            raw_label = ""
-            if match:
-                raw_label = str(match.group("bold_label") or match.group("label") or "").strip().lower()
-            key = label_keys.get(raw_label)
-            if key:
-                flush_current()
-                current_key = key
-                initial_value = str(match.group("value") or "").strip() if match else ""
-                current_lines = [initial_value] if initial_value else []
-                continue
-            if current_key is not None:
-                current_lines.append(raw_line.rstrip())
-        flush_current()
-        return fields
-
-    def _parse_boy_scout_files(self, raw_files: str) -> list[str]:
-        files: list[str] = []
-        for raw_line in raw_files.splitlines():
-            line = raw_line.strip().lstrip("-*").strip()
-            if not line:
-                continue
-            backticked = re.findall(r"`([^`]+)`", line)
-            if backticked:
-                files.extend(item.strip() for item in backticked if item.strip())
-                continue
-            files.extend(item.strip().strip("`") for item in line.split(",") if item.strip().strip("`"))
-        return files
-
-    def _parse_boy_scout_findings(self, session: Session) -> list[dict[str, object]]:
-        if self.workdir_root is None:
-            return []
-        findings_path = self.workdir_root / session.task_key / "spec" / "findings.md"
-        if not findings_path.is_file():
-            return []
-        text = findings_path.read_text(encoding="utf-8")
-        sections = [section.strip() for section in text.split("\n---") if section.strip()]
-        findings: list[dict[str, object]] = []
-        for section in sections:
-            if section.startswith("SCOUT_RESULT:"):
-                _, _, remainder = section.partition("\n")
-                section = remainder.strip()
-            if not section:
-                continue
-            title_match = re.search(r"^## Finding \d+:\s+(.+)$", section, re.MULTILINE)
-            if not title_match:
-                continue
-            fields = self._parse_boy_scout_labeled_fields(section)
-            files = self._parse_boy_scout_files(fields.get("files", ""))
-            findings.append(
-                {
-                    "title": title_match.group(1).strip(),
-                    "files": files,
-                    "principle": fields.get("principle", ""),
-                    "problem": fields.get("problem", ""),
-                    "suggestion": fields.get("suggestion", ""),
-                    "why_it_matters": fields.get("why_it_matters", ""),
-                    "required_direction": fields.get("required_direction", ""),
-                    "non_goals": fields.get("non_goals", ""),
-                    "evidence": fields.get("evidence", ""),
-                    "suggested_approach": fields.get("suggested_approach", ""),
-                    "test_expectations": fields.get("test_expectations", ""),
-                }
-            )
-        return findings
-
-    def _boy_scout_completion_result(self, *, session: Session, source_event: Event) -> str:
-        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
-        explicit_result = str(payload.get("result") or "").strip().lower()
-        if explicit_result == "findings_found":
-            return "findings_found"
-        return "clean"
-
-    def _added_source_paths_from_diff(self, task_key: str) -> set[str]:
-        if self.workdir_root is None:
-            return set()
-        diff_path = self.workdir_root / task_key / "spec" / "diff.md"
-        if not diff_path.is_file():
-            return set()
-        added_paths: set[str] = set()
-        in_table = False
-        for raw_line in diff_path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if line == "## Changed Files":
-                in_table = True
-                continue
-            if in_table and line.startswith("## "):
-                break
-            if not in_table or not line.startswith("|"):
-                continue
-            if line.startswith("| Status |") or line.startswith("|---|"):
-                continue
-            parts = [part.strip() for part in line.strip("|").split("|")]
-            if len(parts) < 2:
-                continue
-            if parts[0] != "added":
-                continue
-            added_paths.add(parts[1].strip("`"))
-        return added_paths
-
-    def _classify_boy_scout_findings(self, session: Session) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
-        added_paths = self._added_source_paths_from_diff(session.task_key)
-        added_basenames = {Path(path).name for path in added_paths}
-        implement_now: list[dict[str, object]] = []
-        tech_debt: list[dict[str, object]] = []
-        for finding in self._active_boy_scout_findings(session):
-            files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
-            if files and all(file_path in added_paths or Path(file_path).name in added_basenames for file_path in files):
-                implement_now.append(finding)
-            else:
-                tech_debt.append(finding)
-        return implement_now, tech_debt
-
-    def _normalize_boy_scout_finding_text(self, value: object) -> str:
-        return " ".join(str(value or "").strip().lower().split())
-
-    def _boy_scout_finding_fingerprint(self, finding: dict[str, object]) -> str:
-        normalized_files = sorted(
-            self._normalize_boy_scout_finding_text(item)
-            for item in finding.get("files", [])
-            if self._normalize_boy_scout_finding_text(item)
-        )
-        identity = {
-            "title": self._normalize_boy_scout_finding_text(finding.get("title")),
-            "files": normalized_files,
-            "principle": self._normalize_boy_scout_finding_text(finding.get("principle")),
-            "problem": self._normalize_boy_scout_finding_text(finding.get("problem")),
-            "suggestion": self._normalize_boy_scout_finding_text(finding.get("suggestion")),
-            "why_it_matters": self._normalize_boy_scout_finding_text(finding.get("why_it_matters")),
-            "required_direction": self._normalize_boy_scout_finding_text(finding.get("required_direction")),
-            "non_goals": self._normalize_boy_scout_finding_text(finding.get("non_goals")),
-            "evidence": self._normalize_boy_scout_finding_text(finding.get("evidence")),
-            "suggested_approach": self._normalize_boy_scout_finding_text(finding.get("suggested_approach")),
-            "test_expectations": self._normalize_boy_scout_finding_text(finding.get("test_expectations")),
-        }
-        return hashlib.sha1(json.dumps(identity, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-
-    def _boy_scout_deferred_registry_path(self, session: Session) -> Path | None:
-        if self.workdir_root is None:
-            return None
-        spec_root = self.workdir_root / session.task_key / "spec"
-        spec_root.mkdir(parents=True, exist_ok=True)
-        return spec_root / "scout-deferred.json"
-
-    def _read_boy_scout_deferred_entries(self, session: Session) -> list[dict[str, object]]:
-        registry_path = self._boy_scout_deferred_registry_path(session)
-        if registry_path is None or not registry_path.is_file():
-            return []
-        try:
-            payload = json.loads(registry_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return []
-        entries = payload.get("entries")
-        if not isinstance(entries, list):
-            return []
-        normalized_entries: list[dict[str, object]] = []
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-            fingerprint = str(entry.get("fingerprint") or "").strip()
-            title = str(entry.get("title") or "").strip()
-            if not fingerprint or not title:
-                continue
-            files = [str(item).strip() for item in entry.get("files", []) if str(item).strip()]
-            normalized_entries.append(
-                {
-                    "fingerprint": fingerprint,
-                    "title": title,
-                    "files": files,
-                    "reason": str(entry.get("reason") or "").strip(),
-                    "decision": str(entry.get("decision") or "").strip(),
-                    "issue_key": str(entry.get("issue_key") or "").strip(),
-                }
-            )
-        return normalized_entries
-
-    def _boy_scout_deferred_fingerprints(self, session: Session) -> set[str]:
-        return {
-            str(entry.get("fingerprint") or "").strip()
-            for entry in self._read_boy_scout_deferred_entries(session)
-            if str(entry.get("fingerprint") or "").strip()
-        }
-
-    def _active_boy_scout_findings(self, session: Session) -> list[dict[str, object]]:
-        deferred_fingerprints = self._boy_scout_deferred_fingerprints(session)
-        if not deferred_fingerprints:
-            return self._parse_boy_scout_findings(session)
-        active_findings: list[dict[str, object]] = []
-        for finding in self._parse_boy_scout_findings(session):
-            fingerprint = self._boy_scout_finding_fingerprint(finding)
-            if fingerprint in deferred_fingerprints:
-                continue
-            active_findings.append({**finding, "fingerprint": fingerprint})
-        return active_findings
-
-    def _render_boy_scout_operator_details(
-        self,
-        *,
-        implement_now_findings: list[dict[str, object]],
-        tech_debt_findings: list[dict[str, object]],
-    ) -> str:
-        def append_field(lines: list[str], label: str, value: str) -> None:
-            if not value:
-                return
-            if "\n" not in value:
-                lines.append(f"- {label}: {value}")
-                return
-            lines.append(f"- {label}:")
-            lines.extend(f"  {line}" if line.strip() else "" for line in value.splitlines())
-
-        implement_now_count = len(implement_now_findings)
-        tech_debt_count = len(tech_debt_findings)
-        total_count = implement_now_count + tech_debt_count
-        lines = [
-            f"Code Scout found {total_count} maintainability finding{'' if total_count == 1 else 's'}.",
-            "",
-        ]
-
-        if implement_now_findings:
-            lines.extend(["## Implement Now", "", "These findings will be routed back to the coding lane if you choose `Implement Code Scout Findings`.", ""])
-            for finding in implement_now_findings[:5]:
-                title = str(finding.get("title") or "Finding").strip()
-                files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
-                problem = str(finding.get("problem") or "").strip()
-                why_it_matters = str(finding.get("why_it_matters") or "").strip()
-                required_direction = str(finding.get("required_direction") or "").strip() or str(finding.get("suggestion") or "").strip()
-                non_goals = str(finding.get("non_goals") or "").strip()
-                evidence = str(finding.get("evidence") or "").strip()
-                suggested_approach = str(finding.get("suggested_approach") or "").strip()
-                test_expectations = str(finding.get("test_expectations") or "").strip()
-                lines.append(f"### {title}")
-                if files:
-                    lines.append(f"- Files: {', '.join(f'`{item}`' for item in files[:3])}")
-                append_field(lines, "Problem", problem)
-                append_field(lines, "Why it matters", why_it_matters)
-                append_field(lines, "Required direction", required_direction)
-                append_field(lines, "Non-goals", non_goals)
-                append_field(lines, "Evidence", evidence)
-                append_field(lines, "Suggested approach", suggested_approach)
-                append_field(lines, "Test expectations", test_expectations)
-                lines.append("")
-            if len(implement_now_findings) > 5:
-                lines.append(f"- ...and {len(implement_now_findings) - 5} more")
-            lines.append("")
-
-        if tech_debt_findings:
-            lines.extend(["## Tech Debt Candidates", "", "These findings will be deferred into follow-up work if you choose `Create Tech Debt And Continue`.", ""])
-            for finding in tech_debt_findings[:5]:
-                title = str(finding.get("title") or "Finding").strip()
-                files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
-                problem = str(finding.get("problem") or "").strip()
-                why_it_matters = str(finding.get("why_it_matters") or "").strip()
-                required_direction = str(finding.get("required_direction") or "").strip() or str(finding.get("suggestion") or "").strip()
-                non_goals = str(finding.get("non_goals") or "").strip()
-                evidence = str(finding.get("evidence") or "").strip()
-                suggested_approach = str(finding.get("suggested_approach") or "").strip()
-                test_expectations = str(finding.get("test_expectations") or "").strip()
-                lines.append(f"### {title}")
-                if files:
-                    lines.append(f"- Files: {', '.join(f'`{item}`' for item in files[:3])}")
-                append_field(lines, "Problem", problem)
-                append_field(lines, "Why it matters", why_it_matters)
-                append_field(lines, "Required direction", required_direction)
-                append_field(lines, "Non-goals", non_goals)
-                append_field(lines, "Evidence", evidence)
-                append_field(lines, "Suggested approach", suggested_approach)
-                append_field(lines, "Test expectations", test_expectations)
-                lines.append("")
-            if len(tech_debt_findings) > 5:
-                lines.append(f"- ...and {len(tech_debt_findings) - 5} more")
-            lines.append("")
-
-        lines.append("Use `Skip Code Scout` only if you want to continue without addressing these findings in this run.")
-        return "\n".join(lines).strip()
-
-    def _render_boy_scout_findings_markdown(self, findings: list[dict[str, object]]) -> str:
-        lines = ["SCOUT_RESULT: findings_found", ""]
-        for index, finding in enumerate(findings, start=1):
-            title = str(finding.get("title") or f"Finding {index}").strip()
-            files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
-            principle = str(finding.get("principle") or "").strip()
-            problem = str(finding.get("problem") or "").strip()
-            suggestion = str(finding.get("suggestion") or "").strip()
-            why_it_matters = str(finding.get("why_it_matters") or "").strip()
-            required_direction = str(finding.get("required_direction") or "").strip()
-            non_goals = str(finding.get("non_goals") or "").strip()
-            evidence = str(finding.get("evidence") or "").strip()
-            suggested_approach = str(finding.get("suggested_approach") or "").strip()
-            test_expectations = str(finding.get("test_expectations") or "").strip()
-            lines.append(f"## Finding {index}: {title}")
-            lines.append("")
-            if files:
-                lines.append("**Files**: " + ", ".join(f"`{item}`" for item in files))
-            if principle:
-                lines.append(f"**Principle**: {principle}")
-            if problem:
-                lines.append(f"**Problem**: {problem}")
-            if suggestion:
-                lines.append(f"**Suggestion**: {suggestion}")
-            if why_it_matters:
-                lines.append(f"**Why it matters**: {why_it_matters}")
-            if required_direction:
-                lines.append(f"**Required direction**: {required_direction}")
-            if non_goals:
-                lines.append(f"**Non-goals**: {non_goals}")
-            if evidence:
-                lines.append(f"**Evidence**: {evidence}")
-            if suggested_approach:
-                lines.append(f"**Suggested approach**: {suggested_approach}")
-            if test_expectations:
-                lines.append(f"**Test expectations**: {test_expectations}")
-            lines.append("")
-            lines.append("---")
-            lines.append("")
-        if lines[-2:] == ["---", ""]:
-            lines = lines[:-2]
-        return "\n".join(lines).rstrip() + "\n"
-
-    def _materialize_boy_scout_actionable_findings(
-        self,
-        *,
-        session: Session,
-        findings: list[dict[str, object]],
-        filename: str,
-    ) -> Path:
-        if self.workdir_root is None:
-            raise IntakeError("Coordinator is missing workdir root")
-        spec_root = self.workdir_root / session.task_key / "spec"
-        spec_root.mkdir(parents=True, exist_ok=True)
-        target_path = spec_root / filename
-        rendered_findings = []
-        for index, finding in enumerate(findings):
-            rendered_findings.append(self._render_boy_scout_issue_description(finding).rstrip())
-            if index < len(findings) - 1:
-                rendered_findings.append("\n---\n")
-        target_path.write_text("\n".join(rendered_findings).rstrip() + "\n", encoding="utf-8")
-        return target_path
-
-    def _render_boy_scout_issue_description(self, finding: dict[str, object]) -> str:
-        title = str(finding.get("title") or "Code Scout finding").strip()
-        files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
-        principle = str(finding.get("principle") or "").strip()
-        problem = str(finding.get("problem") or "").strip()
-        suggestion = str(finding.get("suggestion") or "").strip()
-        why_it_matters = str(finding.get("why_it_matters") or "").strip()
-        required_direction = str(finding.get("required_direction") or "").strip()
-        non_goals = str(finding.get("non_goals") or "").strip()
-        evidence = str(finding.get("evidence") or "").strip()
-        suggested_approach = str(finding.get("suggested_approach") or "").strip()
-        test_expectations = str(finding.get("test_expectations") or "").strip()
-        lines = [f"# {title}", ""]
-        if files:
-            lines.extend(["## Files", ""])
-            lines.extend(f"- `{item}`" for item in files)
-            lines.append("")
-        if principle:
-            lines.extend(["## Principle", "", principle, ""])
-        if problem:
-            lines.extend(["## Problem", "", problem, ""])
-        if suggestion:
-            lines.extend(["## Suggested change", "", suggestion, ""])
-        if why_it_matters:
-            lines.extend(["## Why It Matters", "", why_it_matters, ""])
-        if required_direction:
-            lines.extend(["## Required Direction", "", required_direction, ""])
-        if non_goals:
-            lines.extend(["## Non-goals", "", non_goals, ""])
-        if evidence:
-            lines.extend(["## Evidence", "", evidence, ""])
-        if suggested_approach:
-            lines.extend(["## Suggested Approach", "", suggested_approach, ""])
-        if test_expectations:
-            lines.extend(["## Test Expectations", "", test_expectations, ""])
-        return "\n".join(lines).rstrip() + "\n"
-
-    def _create_boy_scout_tech_debt_stories(
-        self,
-        session: Session,
-        findings: list[dict[str, object]],
-    ) -> list[dict[str, str]]:
-        if self.jira_adapter is None or self.workdir_root is None:
-            raise IntakeError("Jira adapter is required to create Code Scout tech-debt stories")
-        if not findings:
-            return []
-        project = session.task_key.split("-", 1)[0]
-        tmp_dir = self.workdir_root / session.task_key / "tmp" / "boy-scout-tech-debt"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        created: list[dict[str, str]] = []
-        for index, finding in enumerate(findings, start=1):
-            title = str(finding.get("title") or f"Code Scout finding {index}").strip()
-            description_path = tmp_dir / f"{index:02d}-description.md"
-            description_path.write_text(
-                self._render_boy_scout_issue_description(finding),
-                encoding="utf-8",
-            )
-            result = self.jira_adapter.create_issue(
-                project=project,
-                issue_type="Story",
-                summary=f"[Tech debt] {title}",
-                description_file=description_path,
-            )
-            if result.returncode != 0:
-                raise IntakeError(f"Failed to create Code Scout tech-debt story for '{title}'")
-            issue_key = ""
-            issue_url = ""
-            for part in result.stdout.split():
-                if _TASK_KEY_PATTERN.match(part.strip()):
-                    issue_key = part.strip()
-                if part.startswith("http://") or part.startswith("https://"):
-                    issue_url = part.strip()
-            created.append({"title": title, "issue_key": issue_key, "issue_url": issue_url})
-        return created
-
-    def _materialize_boy_scout_deferred_entries(
-        self,
-        *,
-        session: Session,
-        findings: list[dict[str, object]],
-        reason: str,
-        decision: str,
-        created_issues: list[dict[str, str]] | None = None,
-    ) -> None:
-        if self.workdir_root is None:
-            return
-        spec_root = self.workdir_root / session.task_key / "spec"
-        spec_root.mkdir(parents=True, exist_ok=True)
-        created_issues = created_issues or []
-        issue_key_by_title = {
-            str(item.get("title") or "").strip(): str(item.get("issue_key") or "").strip()
-            for item in created_issues
-            if str(item.get("title") or "").strip()
-        }
-        existing_entries = self._read_boy_scout_deferred_entries(session)
-        entries_by_fingerprint = {
-            str(entry.get("fingerprint") or "").strip(): dict(entry)
-            for entry in existing_entries
-            if str(entry.get("fingerprint") or "").strip()
-        }
-        for finding in findings:
-            title = str(finding.get("title") or "Code Scout finding").strip()
-            fingerprint = str(finding.get("fingerprint") or self._boy_scout_finding_fingerprint(finding)).strip()
-            files = [str(item).strip() for item in finding.get("files", []) if str(item).strip()]
-            entries_by_fingerprint[fingerprint] = {
-                "fingerprint": fingerprint,
-                "title": title,
-                "files": files,
-                "reason": reason,
-                "decision": decision,
-                "issue_key": issue_key_by_title.get(title, ""),
-            }
-
-        registry_entries = list(entries_by_fingerprint.values())
-        registry_payload = {
-            "task_key": session.task_key,
-            "entry_count": len(registry_entries),
-            "entries": registry_entries,
-        }
-        registry_path = self._boy_scout_deferred_registry_path(session)
-        if registry_path is not None:
-            registry_path.write_text(
-                json.dumps(registry_payload, ensure_ascii=True, indent=2) + "\n",
-                encoding="utf-8",
-            )
-
-        deferred_path = spec_root / "scout-deferred.md"
-        lines = [
-            "# Deferred Code Scout Findings",
-            "",
-            f"Deferred by operator decision: {decision}",
-            "",
-        ]
-        if reason.strip():
-            lines.extend(["## Reason", "", reason.strip(), ""])
-        lines.extend(["## Deferred Findings", ""])
-        for entry in registry_entries:
-            title = str(entry.get("title") or "Code Scout finding").strip()
-            issue_key = str(entry.get("issue_key") or "").strip()
-            files = [str(item).strip() for item in entry.get("files", []) if str(item).strip()]
-            suffix_parts: list[str] = []
-            if issue_key:
-                suffix_parts.append(issue_key)
-            if files:
-                suffix_parts.append(", ".join(files[:2]))
-            suffix = f" ({' · '.join(suffix_parts)})" if suffix_parts else ""
-            lines.append(f"- {title}{suffix}")
-        deferred_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-        if self.artifacts_root is not None:
-            artifact_path = write_text_artifact(
-                self.artifacts_root,
-                session.task_key,
-                "boy-scout",
-                "scout-deferred.md",
-                deferred_path.read_text(encoding="utf-8"),
-            )
-            self.artifact_repository.create(
-                session_id=session.id,
-                stage_name="boy-scout",
-                artifact_type="boy_scout_deferred_markdown",
-                path=str(artifact_path),
-                metadata={"entry_count": len(registry_entries), "decision": decision},
-            )
 
     def _extract_mr_url(self, stdout: str) -> str | None:
         for line in stdout.splitlines():
@@ -13286,20 +11575,6 @@ class CoordinatorService:
             raise IntakeError(f"Session {session_id} does not exist")
         events = self.event_repository.list_for_session(session_id)
         work_items = self.work_item_repository.list_for_session(session_id)
-        self_review_passed_count = sum(1 for event in events if event.event_type == "self_review_passed")
-        self_review_issues_found_count = sum(1 for event in events if event.event_type == "self_review_issues_found")
-        self_review_blocked_count = sum(1 for event in events if event.event_type == "self_review_blocked")
-        code_scout_completed_events = [event for event in events if event.event_type == "boy_scout_completed"]
-        code_scout_clean_count = sum(
-            1
-            for event in code_scout_completed_events
-            if str((event.payload or {}).get("result") or "").strip() != "findings_found"
-        )
-        code_scout_findings_count = sum(
-            1
-            for event in code_scout_completed_events
-            if str((event.payload or {}).get("result") or "").strip() == "findings_found"
-        )
 
         internal_review_escalations = [
             event
@@ -13312,29 +11587,36 @@ class CoordinatorService:
             for event in internal_review_escalations
             if str((event.payload or {}).get("details") or "").strip()
         ]
-        code_scout_skip_count = sum(1 for event in events if event.event_type == "boy_scout_skipped_by_operator")
-        code_scout_findings_decision_count = sum(
-            1
-            for event in events
-            if event.event_type in {"boy_scout_implement_now_selected", "boy_scout_tech_debt_created"}
-        )
+        def review_lane_summary(lane: str) -> dict[str, int]:
+            prefix = _DUAL_REVIEW_EVENT_PREFIX_BY_LANE[lane]
+            work_type = _DUAL_REVIEW_WORK_TYPE_BY_LANE[lane]
+            return {
+                "report_count": sum(
+                    1
+                    for event in events
+                    if event.event_type
+                    in {f"{prefix}_passed", f"{prefix}_issues_found", f"{prefix}_blocked"}
+                ),
+                "clean_count": sum(1 for event in events if event.event_type == f"{prefix}_passed"),
+                "issues_found_count": sum(1 for event in events if event.event_type == f"{prefix}_issues_found"),
+                "blocked_count": sum(1 for event in events if event.event_type == f"{prefix}_blocked"),
+                "correction_round_count": sum(
+                    1
+                    for item in work_items
+                    if item.work_type == _DUAL_REVIEW_CORRECTION_WORK_TYPE_BY_LANE[lane]
+                ),
+                "cycle_review_count": sum(
+                    1
+                    for item in work_items
+                    if item.work_type == f"{work_type}_cycle_review"
+                ),
+            }
 
         return {
             "task_key": session.task_key,
-            "self_review": {
-                "report_count": self_review_passed_count + self_review_issues_found_count + self_review_blocked_count,
-                "clean_count": self_review_passed_count,
-                "issues_found_count": self_review_issues_found_count,
-                "blocked_count": self_review_blocked_count,
-                "correction_round_count": sum(1 for item in work_items if item.work_type == "self_review_correction"),
-            },
-            "code_scout": {
-                "report_count": len(code_scout_completed_events),
-                "clean_count": code_scout_clean_count,
-                "findings_count": code_scout_findings_count,
-                "operator_skip_count": code_scout_skip_count,
-                "operator_resolution_count": code_scout_findings_decision_count,
-                "correction_round_count": sum(1 for item in work_items if item.work_type == "boy_scout_correction"),
+            "reviews": {
+                "convention": review_lane_summary("convention"),
+                "requirements": review_lane_summary("requirements"),
             },
             "operator_escalations": {
                 "internal_review_count": len(internal_review_escalations),

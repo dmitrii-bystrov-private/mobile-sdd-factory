@@ -23,9 +23,7 @@ PLANNING_ROLES = {
     "task-decomposer-worker",
 }
 SUPPORTED_ROLES = {
-    "code-scout",
     "verification-coordinator",
-    "code-reviewer",
     "convention-reviewer",
     "requirements-reviewer",
     "spec-verifier-worker",
@@ -186,19 +184,11 @@ def resolve_submission_context(
 
 def _validate_role_output_type(role_name: str, output_type: str) -> None:
     allowed: dict[str, set[str]] = {
-        "code-scout": {"completed", "passed", "skipped_not_needed"},
         "verification-coordinator": {
             "completed",
             "passed",
             "failed",
             "blocked_verification_cycle",
-        },
-        "code-reviewer": {
-            "completed",
-            "passed",
-            "failed",
-            "blocked_review_cycle",
-            "skipped_not_needed",
         },
         "convention-reviewer": {
             "completed",
@@ -226,30 +216,6 @@ def _validate_role_output_type(role_name: str, output_type: str) -> None:
         allowed_types = allowed.get(role_name, set())
     if output_type not in allowed_types:
         raise ResultWriterError(f"{role_name} does not support output_type={output_type}")
-
-
-def _build_code_scout_payload(args: argparse.Namespace) -> dict[str, object]:
-    result = str(args.result or "").strip()
-    if result not in {"clean", "findings_found"}:
-        raise ResultWriterError("code-scout requires --result clean|findings_found")
-    payload: dict[str, object] = {
-        "work_item_id": args.work_item_id,
-        "result": result,
-    }
-    _clean_optional_text(payload, "summary", args.summary)
-    _clean_optional_text(payload, "details", args.details)
-
-    if result == "findings_found":
-        findings_path = str(args.findings_path or "").strip()
-        if not findings_path:
-            raise ResultWriterError("code-scout findings results require --findings-path")
-        if args.findings_count is None:
-            raise ResultWriterError("code-scout findings results require --findings-count")
-        if args.findings_count <= 0:
-            raise ResultWriterError("code-scout findings results require a positive --findings-count")
-        payload["findings_count"] = args.findings_count
-        payload["findings_path"] = findings_path
-    return payload
 
 
 def _build_verification_payload(args: argparse.Namespace) -> dict[str, object]:
@@ -381,11 +347,9 @@ def build_result_document(
         raise ResultWriterError("role name is required to build a terminal result document")
     _validate_role_output_type(resolved_role_name, args.output_type)
 
-    if resolved_role_name == "code-scout":
-        payload = _build_code_scout_payload(args)
-    elif resolved_role_name == "verification-coordinator":
+    if resolved_role_name == "verification-coordinator":
         payload = _build_verification_payload(args)
-    elif resolved_role_name in {"code-reviewer", "convention-reviewer", "requirements-reviewer"}:
+    elif resolved_role_name in {"convention-reviewer", "requirements-reviewer"}:
         payload = _build_code_reviewer_payload(args)
     elif resolved_role_name in CODING_ROLES:
         payload = _build_coding_payload(args)

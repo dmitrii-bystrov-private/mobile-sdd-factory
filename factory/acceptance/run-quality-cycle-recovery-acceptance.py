@@ -17,7 +17,7 @@ from backend.api.schemas import (
     ResumeSessionRequest,
     RoleOutputRequest,
 )
-from backend.roles.contracts import CODE_REVIEWER_ROLE, VERIFICATION_COORDINATOR_ROLE
+from backend.roles.contracts import CONVENTION_REVIEWER_ROLE, VERIFICATION_COORDINATOR_ROLE
 from run_roots import managed_run_root
 
 
@@ -37,15 +37,14 @@ def main() -> None:
     with managed_run_root(repo_root, "sdd-factory-quality-cycle-recovery") as temp_root:
         deps = acceptance.build_acceptance_dependencies(repo_root=repo_root, temp_root=temp_root)
 
-        # Reviewer-blocked self-review cycle.
+        # Reviewer-blocked convention review cycle.
         review_session = create_session(
             CreateSessionRequest(
                 task_key="IOS-ACCEPT-REVIEW-CYCLE-001",
                 workflow_profile="oneshot",
                 policy={
-                    "self_review_policy": "required",
-                    "boy_scout_policy": "disabled",
-                    "doc_harvest_policy": "disabled",
+                    "review_policy": "required",
+                                        "doc_harvest_policy": "disabled",
                 },
             ),
             dependencies=deps,
@@ -66,7 +65,7 @@ def main() -> None:
         blocked_review = submit_role_output(
             RoleOutputRequest(
                 session_id=review_session.id,
-                role_name=CODE_REVIEWER_ROLE,
+                role_name=CONVENTION_REVIEWER_ROLE,
                 output_type="blocked_review_cycle",
                 payload={
                     "summary": "Repeated review findings remain unresolved.",
@@ -85,8 +84,8 @@ def main() -> None:
         )
         assert blocked_review.followup_event_type == "session_escalated_to_operator"
         assert blocked_review.session.status == "waiting_for_operator"
-        assert blocked_review.session.current_stage == "self_review_requested"
-        assert blocked_review.session.current_owner == CODE_REVIEWER_ROLE
+        assert blocked_review.session.current_stage == "convention_review_requested"
+        assert blocked_review.session.current_owner == CONVENTION_REVIEWER_ROLE
         review_work_items = list_work_items(session_id=review_session.id, dependencies=deps).items
         assert any(item.status == "waiting_for_operator" for item in review_work_items)
 
@@ -96,14 +95,14 @@ def main() -> None:
         )
         assert resumed_review.followup_event_type == "role_input_dispatched"
         assert resumed_review.session.status == "active"
-        assert resumed_review.session.current_owner == CODE_REVIEWER_ROLE
+        assert resumed_review.session.current_owner == CONVENTION_REVIEWER_ROLE
 
-        reviewer_role = deps.role_repository.get_by_name(review_session.id, CODE_REVIEWER_ROLE)
+        reviewer_role = deps.role_repository.get_by_name(review_session.id, CONVENTION_REVIEWER_ROLE)
         reviewer_inputs = deps.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
         assert "blocked_review_cycle" in reviewer_inputs[-1]
 
         review_events = [item.event_type for item in list_events(session_id=review_session.id, dependencies=deps).items]
-        assert "self_review_blocked" in review_events
+        assert "convention_review_blocked" in review_events
         assert "session_resumed_by_operator" in review_events
 
         # Verifier-blocked verification cycle.
@@ -112,9 +111,8 @@ def main() -> None:
                 task_key="IOS-ACCEPT-VERIFY-CYCLE-001",
                 workflow_profile="oneshot",
                 policy={
-                    "self_review_policy": "disabled",
-                    "boy_scout_policy": "disabled",
-                    "doc_harvest_policy": "disabled",
+                    "review_policy": "disabled",
+                                        "doc_harvest_policy": "disabled",
                 },
             ),
             dependencies=deps,

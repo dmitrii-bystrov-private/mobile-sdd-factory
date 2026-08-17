@@ -16,8 +16,6 @@ from backend.models.work_item import WorkItemStatus
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
     BUG_FIXER_ROLE,
-    CODE_REVIEWER_ROLE,
-    CODE_SCOUT_ROLE,
     CONVENTION_REVIEWER_ROLE,
     DOCUMENTATION_REVIEWER_ROLE,
     DOC_HARVEST_ROLE,
@@ -296,11 +294,9 @@ class DispatchTraceRecordingBackend(RecordingSessionBackend):
 class SessionCreationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
-        self._original_boy_scout_default = session_policy_module.COMMON_DEFAULTS["boy_scout_policy"]
-        self._original_self_review_default = session_policy_module.COMMON_DEFAULTS["self_review_policy"]
+        self._original_review_default = session_policy_module.COMMON_DEFAULTS["review_policy"]
         self._original_doc_harvest_default = session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"]
-        session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = "disabled"
-        session_policy_module.COMMON_DEFAULTS["self_review_policy"] = "disabled"
+        session_policy_module.COMMON_DEFAULTS["review_policy"] = "disabled"
         session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"] = "disabled"
         self.db_path = Path(self.temp_dir.name) / "factory.sqlite3"
         self.database = Database(self.db_path)
@@ -346,8 +342,7 @@ class SessionCreationTests(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
-        session_policy_module.COMMON_DEFAULTS["boy_scout_policy"] = self._original_boy_scout_default
-        session_policy_module.COMMON_DEFAULTS["self_review_policy"] = self._original_self_review_default
+        session_policy_module.COMMON_DEFAULTS["review_policy"] = self._original_review_default
         session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"] = self._original_doc_harvest_default
         self.temp_dir.cleanup()
 
@@ -355,6 +350,13 @@ class SessionCreationTests(unittest.TestCase):
         task_dir = Path(self.temp_dir.name) / task_key
         task_dir.mkdir(parents=True, exist_ok=True)
         (task_dir / "statuses.md").write_text(content)
+
+    def write_passed_verification_outcome(self, task_key: str) -> None:
+        spec_dir = Path(self.temp_dir.name) / task_key / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "verification-outcome.json").write_text(
+            json.dumps({"status": "passed", "task_key": task_key}) + "\n"
+        )
 
     def test_create_task_session_creates_roles_and_event(self) -> None:
         session, event, created = self.coordinator.create_task_session(
@@ -614,9 +616,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30001",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "disabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "disabled",
+                                "doc_harvest_policy": "disabled",
             },
         )
         self.coordinator.prepare_task_session("IOS-30001")
@@ -656,8 +657,8 @@ class SessionCreationTests(unittest.TestCase):
                         "default_runner": "claude",
                         "role_defaults": {
                             "implementer": {
-                                "runner": "codex",
-                                "model": "gpt-5.5",
+                                "runner": "claude",
+                                "model": "sonnet",
                                 "effort": "high",
                             }
                         },
@@ -674,8 +675,8 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(
             {
-                "runner": "codex",
-                "model": "gpt-5.5",
+                "runner": "claude",
+                "model": "sonnet",
                 "effort": "high",
             },
             normalized["implementer"],
@@ -753,15 +754,14 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30001",
             workflow_profile="story_full",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
                 "requirements_clarification_mode": "ask-selectively",
             },
             role_config={
                 "proposal-context-worker": {
-                    "runner": "codex",
-                    "model": "gpt-5.5",
+                    "runner": "claude",
+                    "model": "sonnet",
                     "effort": "medium",
                 },
                 "requirements-clarifier-worker": {
@@ -770,13 +770,13 @@ class SessionCreationTests(unittest.TestCase):
                     "effort": "medium",
                 },
                 "convention-reviewer": {
-                    "runner": "codex",
-                    "model": "gpt-5.5",
+                    "runner": "claude",
+                    "model": "sonnet",
                     "effort": "high",
                 },
                 "requirements-reviewer": {
-                    "runner": "codex",
-                    "model": "gpt-5.5",
+                    "runner": "claude",
+                    "model": "sonnet",
                     "effort": "high",
                 },
                 "doc-harvest-worker": {
@@ -789,16 +789,16 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(
             {
-                "runner": "codex",
-                "model": "gpt-5.5",
+                "runner": "claude",
+                "model": "sonnet",
                 "effort": "medium",
             },
             session.role_config["proposal-context-worker"],
         )
         self.assertEqual(
             {
-                "runner": "codex",
-                "model": "gpt-5.5",
+                "runner": "claude",
+                "model": "sonnet",
                 "effort": "high",
             },
             session.role_config["convention-reviewer"],
@@ -818,9 +818,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30002",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "disabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "disabled",
+                                "doc_harvest_policy": "disabled",
             },
         )
         self.coordinator.prepare_task_session("IOS-30002")
@@ -854,9 +853,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30002DUALREPLY",
             workflow_profile="story_full",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "disabled",
             },
         )
         self.coordinator.prepare_task_session("IOS-30002DUALREPLY")
@@ -987,9 +985,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30003",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "disabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "disabled",
+                                "doc_harvest_policy": "disabled",
             },
         )
         self.coordinator.prepare_task_session("IOS-30003")
@@ -1019,9 +1016,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30004",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "disabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "disabled",
+                                "doc_harvest_policy": "disabled",
             },
         )
         self.coordinator.prepare_task_session("IOS-30004")
@@ -1130,9 +1126,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30004ACTIVE",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "disabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "disabled",
+                                "doc_harvest_policy": "disabled",
             },
         )
         self.coordinator.prepare_task_session("IOS-30004ACTIVE")
@@ -1157,9 +1152,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30004RUNTIME",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "disabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "disabled",
+                                "doc_harvest_policy": "disabled",
             },
         )
         self.coordinator.prepare_task_session("IOS-30004RUNTIME")
@@ -1185,9 +1179,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30004MCP",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "disabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "disabled",
+                                "doc_harvest_policy": "disabled",
             },
         )
         self.coordinator.prepare_task_session("IOS-30004MCP")
@@ -1212,7 +1205,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30000W",
             workflow_profile="oneshot",
-            policy={"self_review_policy": "required"},
+            policy={"review_policy": "required"},
         )
 
         self.assertIsNotNone(session.id)
@@ -1385,277 +1378,6 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.assertIsNone(self.coordinator._preferred_runtime_resume_mode(None))
 
-    def test_claude_launcher_generates_role_scoped_mcp_files(self) -> None:
-        repo_root = Path(self.temp_dir.name) / "repo-root-mcp"
-        (repo_root / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
-        (repo_root / ".claude" / "settings.local.json").write_text(
-            json.dumps(
-                {
-                    "env": {"DOC_HARVEST_ENABLED": "true"},
-                    "permissions": {
-                        "allow": [
-                            "Bash(git status)",
-                            "mcp__ios-rag__search",
-                            "mcp__frontend-rag__read_file",
-                            "mcp__extra-docs__search",
-                        ]
-                    },
-                    "enabledMcpjsonServers": [
-                        "ios-rag",
-                        "frontend-rag",
-                        "extra-docs",
-                    ],
-                }
-            )
-        )
-        (repo_root / ".mcp.json").write_text(
-            json.dumps(
-                {
-                    "mcpServers": {
-                        "ios-rag": {"type": "http", "url": "https://example.com/ios"},
-                        "frontend-rag": {"type": "http", "url": "https://example.com/frontend"},
-                        "extra-docs": {"type": "http", "url": "https://example.com/extra-docs"},
-                    }
-                }
-            )
-        )
-        (repo_root / ".claude" / "agents" / "implementer.md").write_text(
-            "\n".join(
-                [
-                    "---",
-                    "name: implementer",
-                    "model: sonnet",
-                    "effort: medium",
-                    "mcpServers:",
-                    "  - ios-rag",
-                    "  - frontend-rag",
-                    "---",
-                    "",
-                ]
-            )
-        )
-        (repo_root / ".claude" / "agents" / "code-reviewer.md").write_text(
-            "\n".join(
-                [
-                    "---",
-                    "name: code-reviewer",
-                    "model: sonnet",
-                    "effort: medium",
-                    "mcpServers: []",
-                    "---",
-                    "",
-                ]
-            )
-        )
-        (repo_root / ".claude" / "agents" / "proposal-collector.md").write_text(
-            "\n".join(
-                [
-                    "---",
-                    "name: proposal-collector",
-                    "model: sonnet",
-                    "effort: medium",
-                    "mcpServers:",
-                    "  - extra-docs",
-                    "---",
-                    "",
-                ]
-            )
-        )
-        (repo_root / ".claude" / "agents" / "context-collector.md").write_text(
-            "\n".join(
-                [
-                    "---",
-                    "name: context-collector",
-                    "model: sonnet",
-                    "effort: high",
-                    "mcpServers:",
-                    "  - ios-rag",
-                    "  - frontend-rag",
-                    "---",
-                    "",
-                ]
-            )
-        )
-
-        workspace_manager = RoleWorkspaceManager(
-            runtime_root=Path(self.temp_dir.name),
-            repo_root=repo_root,
-            workdir_root=Path(self.temp_dir.name),
-        )
-        launcher_manager = RoleLauncherManager(
-            repo_root=repo_root,
-            workdir_root=Path(self.temp_dir.name),
-        )
-        implementer_workspace = workspace_manager.ensure_role_workspace("IOS-30000MCP", "implementer")
-        launcher_manager.ensure_launch_plan(
-            task_key="IOS-30000MCP",
-            workspace=implementer_workspace,
-            role_config={"runner": "claude", "model": "sonnet", "effort": "medium"},
-        )
-
-        implementer_settings = json.loads(
-            (implementer_workspace.directory / "claude.settings.role.json").read_text()
-        )
-        self.assertNotIn("env", implementer_settings)
-        self.assertEqual(
-            ["ios-rag", "android-rag", "frontend-rag"],
-            implementer_settings["enabledMcpjsonServers"],
-        )
-        self.assertEqual(
-            [
-                "Bash(git status)",
-                "mcp__ios-rag__search",
-                "mcp__frontend-rag__read_file",
-            ],
-            implementer_settings["permissions"]["allow"],
-        )
-        implementer_mcp = json.loads(
-            (implementer_workspace.directory / "claude.mcp.role.json").read_text()
-        )
-        self.assertEqual(
-            {"ios-rag", "frontend-rag"},
-            set(implementer_mcp["mcpServers"].keys()),
-        )
-        implementer_script = (implementer_workspace.directory / "launch-role.sh").read_text()
-        self.assertIn("SDD_FACTORY_CLAUDE_SETTINGS=", implementer_script)
-        self.assertIn("SDD_FACTORY_CLAUDE_MCP_CONFIG=", implementer_script)
-
-        reviewer_workspace = workspace_manager.ensure_role_workspace("IOS-30000MCP", "code-reviewer")
-        launcher_manager.ensure_launch_plan(
-            task_key="IOS-30000MCP",
-            workspace=reviewer_workspace,
-            role_config={"runner": "claude", "model": "sonnet", "effort": "medium"},
-        )
-        reviewer_settings = json.loads(
-            (reviewer_workspace.directory / "claude.settings.role.json").read_text()
-        )
-        self.assertEqual([], reviewer_settings["enabledMcpjsonServers"])
-        reviewer_mcp = json.loads(
-            (reviewer_workspace.directory / "claude.mcp.role.json").read_text()
-        )
-        self.assertEqual({}, reviewer_mcp["mcpServers"])
-
-        proposal_context_workspace = workspace_manager.ensure_role_workspace(
-            "IOS-30000MCP",
-            PROPOSAL_CONTEXT_WORKER_ROLE,
-        )
-        launcher_manager.ensure_launch_plan(
-            task_key="IOS-30000MCP",
-            workspace=proposal_context_workspace,
-            role_config={"runner": "claude", "model": "sonnet", "effort": "medium"},
-        )
-        proposal_context_settings = json.loads(
-            (proposal_context_workspace.directory / "claude.settings.role.json").read_text()
-        )
-        self.assertEqual(
-            {"ios-rag", "android-rag", "frontend-rag"},
-            set(proposal_context_settings["enabledMcpjsonServers"]),
-        )
-        self.assertNotIn("env", proposal_context_settings)
-        proposal_context_mcp = json.loads(
-            (proposal_context_workspace.directory / "claude.mcp.role.json").read_text()
-        )
-        self.assertEqual(
-            {"ios-rag", "frontend-rag"},
-            set(proposal_context_mcp["mcpServers"].keys()),
-        )
-
-    def test_real_launcher_backed_runtime_keeps_persistent_role_context_across_rounds(self) -> None:
-        runtime_root = Path(self.temp_dir.name)
-        repo_root = Path(self.temp_dir.name) / "repo-root-real-launcher"
-        session_backend = RecordingSessionBackend()
-        coordinator = CoordinatorService(
-            session_repository=self.session_repository,
-            role_repository=self.role_repository,
-            event_repository=self.event_repository,
-            artifact_repository=self.artifact_repository,
-            work_item_repository=self.work_item_repository,
-            session_backend=session_backend,
-            default_roles=DEFAULT_SESSION_ROLES,
-            jira_adapter=FakeJiraAdapter(),
-            snapshot_adapter=FakeSnapshotAdapter(),
-            gitlab_adapter=FakeGitLabAdapter(),
-            artifacts_root=Path(self.temp_dir.name) / "artifacts-real-launcher",
-            workdir_root=Path(self.temp_dir.name),
-            event_bus=self.event_bus,
-            role_workspace_manager=RoleWorkspaceManager(
-                runtime_root=runtime_root,
-                repo_root=repo_root,
-                workdir_root=Path(self.temp_dir.name),
-            ),
-            role_launcher_manager=RoleLauncherManager(
-                repo_root=repo_root,
-                workdir_root=Path(self.temp_dir.name),
-            ),
-        )
-
-        session, _, _ = coordinator.create_task_session(
-            "IOS-30000E2E",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "enabled",
-            },
-        )
-        prepared_session, _, _, _ = coordinator.prepare_task_session("IOS-30000E2E")
-
-        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        verifier_role = self.role_repository.get_by_name(session.id, "verification-coordinator")
-
-        for role in (implementer_role, reviewer_role, verifier_role):
-            spawn_command = session_backend.get_spawn_command(role.runtime_handle)
-            self.assertEqual(1, len(spawn_command))
-            launch_script_text = Path(spawn_command[0]).read_text()
-            self.assertIn("/factory/scripts/run-role-agent.sh", launch_script_text)
-
-        coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="passed",
-            payload={"summary": "clean review"},
-        )
-        coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name="verification-coordinator",
-            output_type="failed",
-            payload={"summary": "verification failed", "failures": ["lint"]},
-        )
-        coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "verification correction done"},
-        )
-
-        implementer_inputs = session_backend.get_sent_inputs(implementer_role.runtime_handle)
-        reviewer_inputs = session_backend.get_sent_inputs(reviewer_role.runtime_handle)
-        verifier_inputs = session_backend.get_sent_inputs(verifier_role.runtime_handle)
-
-        self.assertEqual(2, len(implementer_inputs))
-        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory once now", implementer_inputs[0])
-        self.assertIn(
-            "Continue from your existing role context.",
-            implementer_inputs[1],
-        )
-
-        self.assertEqual(1, len(reviewer_inputs))
-        self.assertNotIn("Role-specific rules:", reviewer_inputs[0])
-        self.assertIn("Read AGENTS.md/CLAUDE.md", reviewer_inputs[0])
-        self.assertIn("review_scope", reviewer_inputs[0])
-
-        self.assertEqual(2, len(verifier_inputs))
-        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory once now", verifier_inputs[0])
-        self.assertIn(
-            "Continue from your existing role context.",
-            verifier_inputs[1],
-        )
-
     def test_create_task_session_is_idempotent_for_existing_key(self) -> None:
         first_session, _, _ = self.coordinator.create_task_session(
             "IOS-30001",
@@ -1672,7 +1394,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(created)
         self.assertEqual(first_session.id, second_session.id)
         self.assertEqual("task_session_reused", event.event_type)
-        self.assertEqual(3, len(roles))
+        self.assertEqual(2, len(roles))
 
     def test_create_task_session_rejects_conflicting_existing_policy(self) -> None:
         self.coordinator.create_task_session(
@@ -1685,7 +1407,7 @@ class SessionCreationTests(unittest.TestCase):
             self.coordinator.create_task_session(
                 "IOS-30001A",
                 workflow_profile="oneshot",
-                policy={"self_review_policy": "required"},
+                policy={"review_policy": "required"},
             )
 
     def test_prepare_task_session_runs_intake_and_registers_artifacts(self) -> None:
@@ -1760,9 +1482,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30002A",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "required",
+                                "doc_harvest_policy": "enabled",
             },
         )
 
@@ -1772,7 +1493,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(prepared_created)
         self.assertEqual(session.id, prepared_session.id)
         self.assertEqual("oneshot", prepared_session.workflow_profile)
-        self.assertEqual("required", prepared_session.policy["self_review_policy"])
+        self.assertEqual("required", prepared_session.policy["review_policy"])
         self.assertEqual("task_prepared", event.event_type)
         self.assertEqual("implementation_requested", details["followup_event_type"])
 
@@ -1827,7 +1548,7 @@ class SessionCreationTests(unittest.TestCase):
         work_items = self.work_item_repository.list_for_session(session.id)
         events = self.event_repository.list_for_session(session.id)
 
-        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
         self.assertEqual("verification_requested", followup_event.event_type)
         self.assertEqual([("IOS-30003", "implementation pass")], self.gitlab_adapter.commit_requests)
@@ -2105,7 +1826,7 @@ class SessionCreationTests(unittest.TestCase):
         verification_report = task_root / "spec" / "final-verification.md"
         report_text = verification_report.read_text()
 
-        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
         self.assertEqual("send_to_test_completed", followup_event.event_type)
         self.assertIn("### Impact Mapping", report_text)
         self.assertIn("Impacted areas: FinomCore", report_text)
@@ -2117,9 +1838,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30003R",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "required",
+                                "doc_harvest_policy": "enabled",
             },
         )
         prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003R")
@@ -2154,9 +1874,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30003RP",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "required",
+                                "doc_harvest_policy": "enabled",
             },
         )
         prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RP")
@@ -2222,9 +1941,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30003RF",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "required",
+                                "doc_harvest_policy": "enabled",
             },
         )
         prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RF")
@@ -2269,10 +1987,19 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("convention", report_artifact.metadata["review_lane"])
         self.assertEqual("report", report_artifact.metadata["artifact_role"])
         self.assertEqual("issues_found", report_artifact.metadata["status"])
-        self.assertIn('"issues_file_path"', sent_inputs[-1])
-        self.assertIn('"correction_source": "convention_review"', sent_inputs[-1])
-        self.assertIn('"correction_report_path"', sent_inputs[-1])
-        self.assertIn("pass-01.md", sent_inputs[-1])
+        hydration_path = (
+            Path(self.temp_dir.name)
+            / "IOS-30003RF"
+            / "runtime"
+            / "role-workspaces"
+            / IMPLEMENTER_ROLE
+            / "HYDRATION.json"
+        )
+        hydration = json.loads(hydration_path.read_text())
+        self.assertEqual("convention_review", hydration["correction_source"])
+        self.assertIn("issues_file_path", hydration)
+        self.assertIn("correction_report_path", hydration)
+        self.assertIn("pass-01.md", hydration["correction_report_path"])
         review_report = (Path(self.temp_dir.name) / "IOS-30003RF" / "review" / "convention" / "pass-01.md").read_text()
         self.assertIn("- Why it matters: Keeping the duplicate state path makes future regressions more likely.", review_report)
         self.assertIn("- Required direction: Use one shared retry path for the touched flow instead of parallel branches.", review_report)
@@ -2289,9 +2016,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30003RC",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "required",
+                                "doc_harvest_policy": "disabled",
             },
         )
         prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RC")
@@ -2324,578 +2050,13 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(CONVENTION_REVIEWER_ROLE, updated_session.current_owner)
         self.assertEqual("convention_review_requested", followup_event.event_type)
 
-    def test_reviewer_failed_output_requires_summary_details_or_issues_markdown(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RFINVALID",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "enabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RFINVALID")
-        self.coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-
-        with self.assertRaisesRegex(
-            IntakeError,
-            "Self review failed output must include payload.summary, payload.details, or payload.issues_markdown",
-        ):
-            self.coordinator.handle_role_output(
-                session_id=prepared_session.id,
-                role_name=CODE_REVIEWER_ROLE,
-                output_type="failed",
-                payload={},
-            )
-
-    def test_reviewer_can_block_non_converging_self_review_cycle(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RBLOCK",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RBLOCK")
-        self.coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="blocked_review_cycle",
-            payload={
-                "summary": "Repeated reducer violation remains unresolved.",
-                "details": "Two review passes raised the same reducer issue and the loop no longer converges.",
-                "issues": [
-                    {
-                        "severity": "error",
-                        "file": "Sources/Feature/FeatureViewModel.swift",
-                        "convention": "Feature template",
-                        "problem": "State mutation still bypasses the reducer.",
-                        "required_change": "Route the mutation through the reducer path.",
-                        "why_it_matters": "The repeated bypass keeps violating the core reducer invariant.",
-                        "required_direction": "Move the touched mutation path back behind the reducer boundary.",
-                        "non_goals": "Do not redesign the surrounding feature architecture in this cycle.",
-                        "evidence": "The touched view-model path still mutates retry state directly before the reducer event is emitted.",
-                        "suggested_approach": "Move the new mutation into the existing reducer-owned event path rather than patching another bypass.",
-                        "test_expectations": "Re-run the reducer test covering cancel plus retry invalidation to prove the invariant is restored.",
-                    }
-                ],
-            },
-        )
-        artifacts = self.artifact_repository.list_for_session(session.id)
-
-        self.assertEqual("self_review_blocked", mapped_event.event_type)
-        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
-        self.assertEqual("self_review_requested", updated_session.current_stage)
-        review_report = (Path(self.temp_dir.name) / "IOS-30003RBLOCK" / "review" / "pass-01.md").read_text()
-        self.assertIn("- Why it matters: The repeated bypass keeps violating the core reducer invariant.", review_report)
-        self.assertIn("- Required direction: Move the touched mutation path back behind the reducer boundary.", review_report)
-        self.assertIn("- Non-goals: Do not redesign the surrounding feature architecture in this cycle.", review_report)
-        self.assertIn("- Evidence: The touched view-model path still mutates retry state directly before the reducer event is emitted.", review_report)
-        self.assertIn("- Suggested approach: Move the new mutation into the existing reducer-owned event path rather than patching another bypass.", review_report)
-        self.assertIn("- Test expectations: Re-run the reducer test covering cancel plus retry invalidation to prove the invariant is restored.", review_report)
-        outcome_path = Path(self.temp_dir.name) / "IOS-30003RBLOCK" / "review" / "self-review-outcome.json"
-        self.assertTrue(outcome_path.exists())
-        self.assertEqual("blocked", json.loads(outcome_path.read_text())["status"])
-        self.assertEqual(CODE_REVIEWER_ROLE, updated_session.current_owner)
-
-    def test_reviewer_blocked_cycle_uses_report_text_when_details_missing(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RBLOCKREPORT",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RBLOCKREPORT")
-        self.coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="blocked_review_cycle",
-            payload={
-                "summary": "Review loop is repeating the same unresolved invalidation race.",
-                "issues": [
-                    {
-                        "severity": "error",
-                        "file": "Sources/Feature/RetryCoordinator.swift",
-                        "problem": "The invalidation race still leaves the retry branch live after cancel.",
-                        "why_it_matters": "The same race will continue to reappear across correction passes.",
-                        "required_direction": "Collapse the cancel path and retry invalidation onto one authoritative branch.",
-                        "non_goals": "Do not refactor unrelated retry UX in this cycle.",
-                    }
-                ],
-            },
-        )
-        artifacts = self.artifact_repository.list_for_session(session.id)
-
-        self.assertEqual("self_review_blocked", mapped_event.event_type)
-        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
-        self.assertIn("## Issues", str(followup_event.payload.get("details") or ""))
-        self.assertIn(
-            "Review loop is repeating the same unresolved invalidation race.",
-            str(followup_event.payload.get("details") or ""),
-        )
-        self.assertIn(
-            "- Why it matters: The same race will continue to reappear across correction passes.",
-            str(followup_event.payload.get("details") or ""),
-        )
-        self.assertIn(
-            "- Required direction: Collapse the cancel path and retry invalidation onto one authoritative branch.",
-            str(followup_event.payload.get("details") or ""),
-        )
-        self.assertIn(
-            "- Non-goals: Do not refactor unrelated retry UX in this cycle.",
-            str(followup_event.payload.get("details") or ""),
-        )
-        self.assertEqual("self_review_cycle", str(followup_event.payload.get("reason") or ""))
-        self.assertEqual(CODE_REVIEWER_ROLE, str(followup_event.payload.get("role_name") or ""))
-        self.assertTrue(bool(followup_event.payload.get("needs_operator_input") is True))
-        self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
-
-        summary = self.coordinator.get_interactive_state_summary(session.id)
-        self.assertTrue(summary["available"])
-        self.assertEqual("self_review_cycle", summary["source_reason"])
-        self.assertEqual("internal_review", summary["review_family"])
-        self.assertEqual("self_review", summary["review_lane"])
-        self.assertEqual(CODE_REVIEWER_ROLE, summary["role_name"])
-        self.assertTrue(summary["needs_operator_input"])
-        self.assertIn("## Issues", str(summary["details"] or ""))
-        self.assertIn(
-            "Review loop is repeating the same unresolved invalidation race.",
-            str(summary["details"] or ""),
-        )
-        self.assertIn(
-            "- Why it matters: The same race will continue to reappear across correction passes.",
-            str(summary["details"] or ""),
-        )
-
-    def test_operator_reply_to_blocked_self_review_cycle_redirects_to_implementer(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RCLEAN",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RCLEAN")
-        self.coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="blocked_review_cycle",
-            payload={
-                "summary": "blocked_review_cycle",
-                "details": "Needs one operator clarification before continuing.",
-            },
-        )
-        updated_session, operator_event = self.coordinator.send_operator_runtime_input(
-            session_id=prepared_session.id,
-            text="Continue with narrowed scope.",
-        )
-        cycle_item = next(
-            item for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "self_review_cycle_review"
-        )
-        correction_item = next(
-            item for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "self_review_correction"
-        )
-        cycle_item = self.work_item_repository.get_by_id(cycle_item.id)
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
-
-        self.assertEqual(WorkItemStatus.COMPLETED, cycle_item.status)
-        self.assertEqual("operator_runtime_input_sent", operator_event.event_type)
-        self.assertEqual("self_review_correction_requested", updated_session.current_stage)
-        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
-        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
-        self.assertEqual(WorkItemStatus.ASSIGNED, correction_item.status)
-        self.assertTrue(sent_inputs)
-        self.assertIn("Continue with narrowed scope.", sent_inputs[-1])
-        self.assertIn("operator_reply", (Path(self.temp_dir.name) / "IOS-30003RCLEAN" / "runtime" / "role-workspaces" / IMPLEMENTER_ROLE / "HYDRATION.json").read_text())
-        self.assertEqual(
-            "Continue with narrowed scope.",
-            str(operator_event.payload.get("operator_reply") or ""),
-        )
-
-    def test_reviewer_recheck_includes_operator_guidance_after_blocked_cycle_reply(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RGUIDE",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RGUIDE")
-        self.coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="blocked_review_cycle",
-            payload={
-                "summary": "blocked_review_cycle",
-                "details": "Needs one operator clarification before continuing.",
-            },
-        )
-        self.coordinator.send_operator_runtime_input(
-            session_id=prepared_session.id,
-            text="The previous warning-only premise is outdated; treat .error as authoritative.",
-        )
-
-        updated_session, _, _ = self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=IMPLEMENTER_ROLE,
-            output_type="completed",
-            payload={"summary": "corrections applied"},
-        )
-
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
-
-        self.assertEqual("self_review_requested", updated_session.current_stage)
-        self.assertTrue(sent_inputs)
-        self.assertIn("Authoritative operator resolutions", sent_inputs[-1])
-        self.assertIn("treat .error as authoritative", sent_inputs[-1])
-        self.assertIn("\"review_cycle_resolution\": \"operator_guided_recheck\"", sent_inputs[-1])
-        self.assertIn('"operator_resolution_history": "[', sent_inputs[-1])
-
-    def test_waiting_self_review_correction_completion_is_not_ignored_as_stale(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RRECOVER",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RRECOVER")
-        self.coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="blocked_review_cycle",
-            payload={
-                "summary": "blocked_review_cycle",
-                "details": "Needs one operator clarification before continuing.",
-            },
-        )
-        self.coordinator.send_operator_runtime_input(
-            session_id=prepared_session.id,
-            text="Use the latest authoritative premise.",
-        )
-        correction_item = next(
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "self_review_correction" and item.status == WorkItemStatus.ASSIGNED
-        )
-
-        self.work_item_repository.update_status(correction_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
-        self.session_repository.update_stage_and_owner(
-            prepared_session.id,
-            current_stage="self_review_correction_requested",
-            current_owner=None,
-        )
-        self.session_repository.update_status(prepared_session.id, SessionStatus.WAITING_FOR_OPERATOR)
-
-        updated_session, _, _ = self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=IMPLEMENTER_ROLE,
-            output_type="completed",
-            payload={
-                "work_item_id": correction_item.id,
-                "summary": "correction done",
-            },
-        )
-
-        correction_item = self.work_item_repository.get_by_id(correction_item.id)
-        self.assertEqual(WorkItemStatus.COMPLETED, correction_item.status)
-        self.assertEqual("self_review_requested", updated_session.current_stage)
-        self.assertEqual(CODE_REVIEWER_ROLE, updated_session.current_owner)
-        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
-
-    def test_self_review_correction_failed_with_operator_input_escalates_session(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RBLOCK",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RBLOCK")
-        self.coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="failed",
-            payload={
-                "summary": "review issue found",
-                "details": "Needs a correction.",
-            },
-        )
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=IMPLEMENTER_ROLE,
-            output_type="failed",
-            payload={
-                "summary": "review correction conflicts with accepted direction",
-                "details": "Need operator decision before continuing this correction pass.",
-                "needs_operator_input": True,
-                "conflict_point": "The requested revert would restore the stale warning haptic behavior.",
-                "reviewer_premise": "The review assumes wrong-PIN must still preserve the legacy warning mapping.",
-                "preferred_direction": "Keep the .error mapping and reject the revert request.",
-                "requested_decision": "Confirm whether the accepted task direction still requires .error for failed actions.",
-                "supporting_evidence": "The current acceptance criteria and follow-up scope both define wrong-PIN as a failed-action outcome.",
-            },
-        )
-        correction_item = next(
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "self_review_correction"
-        )
-
-        self.assertEqual("implementation_blocked", mapped_event.event_type)
-        self.assertIsNotNone(followup_event)
-        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
-        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
-        self.assertEqual("self_review_correction_requested", updated_session.current_stage)
-        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
-        self.assertEqual(WorkItemStatus.WAITING_FOR_OPERATOR, self.work_item_repository.get_by_id(correction_item.id).status)
-        self.assertEqual("implementation_blocked", str(followup_event.payload.get("reason") or ""))
-        self.assertTrue(bool(followup_event.payload.get("needs_operator_input")))
-        self.assertEqual(
-            "The requested revert would restore the stale warning haptic behavior.",
-            str(followup_event.payload.get("conflict_point") or ""),
-        )
-        self.assertEqual(
-            "Keep the .error mapping and reject the revert request.",
-            str(followup_event.payload.get("preferred_direction") or ""),
-        )
-        self.assertIn("## Reasoned Disagreement", str(followup_event.payload.get("details") or ""))
-        self.assertIn("Premise to challenge", str(followup_event.payload.get("details") or ""))
-
-    def test_reconcile_self_review_dispatch_keeps_operator_guidance(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RRECON",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RRECON")
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        assert reviewer_role is not None
-        work_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="self_review",
-            title=f"Self review for {session.task_key}",
-            owner_role_id=reviewer_role.id,
-            priority=89,
-        )
-        self.session_repository.update_stage_and_owner(
-            prepared_session.id,
-            current_stage="self_review_requested",
-            current_owner=CODE_REVIEWER_ROLE,
-        )
-        self.session_repository.update_status(prepared_session.id, SessionStatus.ACTIVE)
-        self.event_repository.append(
-            session_id=session.id,
-            event_type="operator_runtime_input_sent",
-            producer_type="operator",
-            payload={
-                "role_name": CODE_REVIEWER_ROLE,
-                "redirected_role_name": IMPLEMENTER_ROLE,
-                "work_item_id": 999,
-                "current_stage": "self_review_requested",
-                "continuation_stage": "self_review_correction_requested",
-                "input_length": 33,
-                "operator_reply": "Use .error; the old warning premise is outdated.",
-            },
-        )
-
-        refreshed = self.coordinator._get_session_or_raise(session.id)
-        redispatched = self.coordinator._reconcile_session_dispatch(refreshed)
-        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
-
-        self.assertTrue(redispatched)
-        self.assertTrue(sent_inputs)
-        self.assertIn("Authoritative operator resolutions", sent_inputs[-1])
-        self.assertIn("Use .error; the old warning premise is outdated.", sent_inputs[-1])
-        self.assertIn("\"review_cycle_resolution\": \"operator_guided_recheck\"", sent_inputs[-1])
-
-    def test_reviewer_recheck_keeps_earlier_relevant_operator_resolution_alongside_later_unrelated_one(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RSTACK",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RSTACK")
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        assert reviewer_role is not None
-        work_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="self_review",
-            title=f"Self review for {session.task_key}",
-            owner_role_id=reviewer_role.id,
-            priority=89,
-        )
-        self.session_repository.update_stage_and_owner(
-            prepared_session.id,
-            current_stage="self_review_requested",
-            current_owner=CODE_REVIEWER_ROLE,
-        )
-        self.session_repository.update_status(prepared_session.id, SessionStatus.ACTIVE)
-        self.event_repository.append(
-            session_id=session.id,
-            event_type="operator_runtime_input_sent",
-            producer_type="operator",
-            payload={
-                "role_name": CODE_REVIEWER_ROLE,
-                "redirected_role_name": IMPLEMENTER_ROLE,
-                "work_item_id": 101,
-                "current_stage": "self_review_requested",
-                "continuation_stage": "self_review_correction_requested",
-                "input_length": 44,
-                "operator_reply": "Wrong-PIN failure is a failed action and must remain .error.",
-            },
-        )
-        self.event_repository.append(
-            session_id=session.id,
-            event_type="operator_runtime_input_sent",
-            producer_type="operator",
-            payload={
-                "role_name": CODE_REVIEWER_ROLE,
-                "redirected_role_name": IMPLEMENTER_ROLE,
-                "work_item_id": 102,
-                "current_stage": "self_review_requested",
-                "continuation_stage": "self_review_correction_requested",
-                "input_length": 51,
-                "operator_reply": "Replay ownership belongs to app-level orchestration.",
-            },
-        )
-
-        refreshed = self.coordinator._get_session_or_raise(session.id)
-        redispatched = self.coordinator._reconcile_session_dispatch(refreshed)
-        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
-
-        self.assertTrue(redispatched)
-        self.assertTrue(sent_inputs)
-        self.assertIn("Wrong-PIN failure is a failed action and must remain .error.", sent_inputs[-1])
-
-    def test_reviewer_recheck_includes_operator_guidance_after_implementer_self_review_escalation(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RIMPLGUIDE",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RIMPLGUIDE")
-        self.coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="failed",
-            payload={
-                "summary": "review issues found",
-                "details": "Needs correction.",
-            },
-        )
-        self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=IMPLEMENTER_ROLE,
-            output_type="failed",
-            payload={
-                "summary": "correction conflicts with approved direction",
-                "details": "Need operator decision before continuing this correction pass.",
-                "needs_operator_input": True,
-            },
-        )
-        self.coordinator.send_operator_runtime_input(
-            session_id=prepared_session.id,
-            text="The accepted operator direction stands; do not reintroduce the old plumbing.",
-        )
-
-        updated_session, _, _ = self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=IMPLEMENTER_ROLE,
-            output_type="completed",
-            payload={"summary": "correction pass completed with operator guidance"},
-        )
-
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
-
-        self.assertEqual("self_review_requested", updated_session.current_stage)
-        self.assertTrue(sent_inputs)
-        self.assertIn("Authoritative operator resolutions", sent_inputs[-1])
-        self.assertIn("The accepted operator direction stands; do not reintroduce the old plumbing.", sent_inputs[-1])
-        self.assertIn("\"review_cycle_resolution\": \"operator_guided_recheck\"", sent_inputs[-1])
-
     def test_dual_review_recheck_includes_operator_guidance_from_prior_correction(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003DUALGUIDE",
             workflow_profile="story_full",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "disabled",
             },
         )
         prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003DUALGUIDE")
@@ -2934,9 +2095,8 @@ class SessionCreationTests(unittest.TestCase):
             "IOS-30003DUALIMPLGUIDE",
             workflow_profile="story_full",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "disabled",
             },
         )
         prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003DUALIMPLGUIDE")
@@ -2969,259 +2129,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("CardAlmostOrdered", str(hydration["operator_reply"]))
         self.assertIn("operator_guided_recheck", str(hydration["review_cycle_resolution"]))
         self.assertIn("operator_resolution_history", hydration)
-
-    def test_interactive_state_treats_persisted_numeric_operator_reply_flag_as_truthy(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003NUMERICFLAG",
-            workflow_profile="oneshot",
-            policy={"self_review_policy": "disabled"},
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003NUMERICFLAG")
-        self.session_repository.update_status(prepared_session.id, SessionStatus.WAITING_FOR_OPERATOR)
-        self.event_repository.append(
-            session_id=prepared_session.id,
-            event_type="session_escalated_to_operator",
-            producer_type="coordinator",
-            payload={
-                "reason": "self_review_cycle",
-                "role_name": CODE_REVIEWER_ROLE,
-                "summary": "blocked_review_cycle",
-                "details": "numeric persisted flag",
-                "needs_operator_input": 1,
-                "current_stage": "self_review_requested",
-            },
-        )
-
-        summary = self.coordinator.get_interactive_state_summary(prepared_session.id)
-
-        self.assertTrue(summary["available"])
-        self.assertTrue(summary["needs_operator_input"])
-
-    def test_resume_session_retries_reviewer_after_blocked_self_review_cycle(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RBLOCKRESUME",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RBLOCKRESUME")
-        self.coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="blocked_review_cycle",
-            payload={
-                "summary": "Repeated reducer violation remains unresolved.",
-                "details": "The review loop no longer converges.",
-                "issues": [
-                    {
-                        "severity": "error",
-                        "file": "Sources/Feature/FeatureViewModel.swift",
-                        "convention": "Feature template",
-                        "problem": "State mutation still bypasses the reducer.",
-                        "required_change": "Route the mutation through the reducer path.",
-                    }
-                ],
-            },
-        )
-
-        resumed_session, resumed_event, dispatch_event = self.coordinator.resume_session(session.id)
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
-
-        self.assertEqual("active", resumed_session.status.value)
-        self.assertEqual(CODE_REVIEWER_ROLE, resumed_session.current_owner)
-        self.assertEqual("session_resumed_by_operator", resumed_event.event_type)
-        self.assertIsNotNone(dispatch_event)
-        assert dispatch_event is not None
-        self.assertEqual("role_input_dispatched", dispatch_event.event_type)
-        self.assertIn("blocked_review_cycle", sent_inputs[-1])
-
-    def test_failed_self_review_with_blocked_cycle_summary_stays_failed(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RBLOCKSUMMARY",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RBLOCKSUMMARY")
-        self.coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="failed",
-            payload={
-                "summary": "blocked_review_cycle",
-                "failures": [
-                    "No new findings beyond the already reported issue; the review loop is no longer converging."
-                ],
-            },
-        )
-
-        self.assertEqual("self_review_issues_found", mapped_event.event_type)
-        self.assertEqual("self_review_correction_requested", followup_event.event_type)
-        self.assertEqual("active", updated_session.status.value)
-        self.assertEqual("self_review_correction_requested", updated_session.current_stage)
-
-    def test_second_self_review_dispatch_includes_previous_review_report_paths(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003R2",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003R2")
-        self.coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        _, review_event, _ = self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="failed",
-            payload={"summary": "issues remain"},
-        )
-
-        refreshed = self.coordinator._get_session_or_raise(session.id)
-        self.coordinator._enqueue_self_review(session=refreshed, source_event=review_event)
-
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
-        self.assertEqual(2, len(sent_inputs))
-        self.assertIn(
-            "Previous review reports from this immediate correction chain",
-            sent_inputs[-1],
-        )
-        self.assertIn("previous_review_report_paths", sent_inputs[-1])
-        self.assertIn("review_report_path", sent_inputs[-1])
-
-    def test_new_self_review_chain_does_not_replay_old_review_reports(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RCHAIN",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        prepared_session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003RCHAIN")
-        self.coordinator.handle_operator_event(
-            session_id=prepared_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="failed",
-            payload={"summary": "issues remain"},
-        )
-
-        correction_item = next(
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "self_review_correction"
-        )
-        updated_session, _, _ = self.coordinator.handle_role_output(
-            session_id=prepared_session.id,
-            role_name=IMPLEMENTER_ROLE,
-            output_type="completed",
-            payload={"work_item_id": correction_item.id, "summary": "corrections applied"},
-        )
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
-
-        self.assertEqual("self_review_requested", updated_session.current_stage)
-        self.assertIn("Previous review reports from this immediate correction chain", sent_inputs[-1])
-
-        new_work_event = self.event_repository.append(
-            session_id=session.id,
-            event_type="implementation_completed",
-            producer_type="role",
-            producer_id=IMPLEMENTER_ROLE,
-            payload={"work_item_id": 999999, "summary": "later follow-up implementation completed"},
-        )
-
-        instruction, hydration = self.coordinator._self_review_dispatch_context(  # noqa: SLF001
-            updated_session,
-            before_event_id=new_work_event.id,
-        )
-
-        self.assertNotIn("Previous review reports from this immediate correction chain", instruction)
-        self.assertIsNone(hydration["previous_review_report_paths"])
-
-    def test_previous_self_review_report_paths_accept_internal_review_metadata(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RMETA",
-            workflow_profile="oneshot",
-            policy={"self_review_policy": "enabled"},
-        )
-        review_dir = Path(self.temp_dir.name) / "IOS-30003RMETA" / "review"
-        review_dir.mkdir(parents=True, exist_ok=True)
-        custom_report = review_dir / "pass-custom.md"
-        custom_report.write_text("REVIEW_RESULT: issues_found\n", encoding="utf-8")
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="self-review",
-            artifact_type="custom_internal_review_report",
-            path=str(custom_report),
-            metadata={
-                "report_family": "internal_review",
-                "review_lane": "self_review",
-                "artifact_role": "report",
-            },
-        )
-
-        paths = self.coordinator._previous_self_review_report_paths(session.id)  # noqa: SLF001
-
-        self.assertEqual([str(custom_report)], paths)
-
-    def test_next_self_review_report_target_path_counts_internal_review_metadata(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003RNEXT",
-            workflow_profile="oneshot",
-            policy={"self_review_policy": "enabled"},
-        )
-        review_dir = Path(self.temp_dir.name) / "IOS-30003RNEXT" / "review"
-        review_dir.mkdir(parents=True, exist_ok=True)
-        existing_report = review_dir / "pass-01.md"
-        existing_report.write_text("REVIEW_RESULT: clean\n", encoding="utf-8")
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="self-review",
-            artifact_type="custom_internal_review_report",
-            path=str(existing_report),
-            metadata={
-                "report_family": "internal_review",
-                "review_lane": "self_review",
-                "artifact_role": "report",
-            },
-        )
-
-        next_path = self.coordinator._next_self_review_report_target_path(session)  # noqa: SLF001
-
-        self.assertIsNotNone(next_path)
-        self.assertTrue(str(next_path).endswith("pass-02.md"))
 
     def test_bug_analysis_completed_moves_session_to_implementation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -3520,28 +2427,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertNotIn("followup_comments_path", hydration)
         self.assertNotIn("followup_plan_index_path", hydration)
         self.assertNotIn("followup_plan_directory_path", hydration)
-
-    def test_boy_scout_dispatch_omits_missing_diff_input_path(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003SCOUTPATH",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30003SCOUTPATH")
-        updated_session, implementation_event = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
-        refreshed_scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
-        assert refreshed_scout_role is not None
-        sent_inputs = self.session_backend.get_sent_inputs(refreshed_scout_role.runtime_handle)
-
-        self.assertEqual("boy_scout_requested", updated_session.current_stage)
-        self.assertEqual("boy_scout_requested", implementation_event.event_type)
-        self.assertNotIn('"diff_path"', sent_inputs[-1])
-        self.assertIn('"findings_path"', sent_inputs[-1])
 
     def test_requirements_completed_moves_story_session_to_acceptance_criteria(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -4247,6 +3132,7 @@ class SessionCreationTests(unittest.TestCase):
                 "story_spec_completed",
                 "task_decomposition_completed",
                 "jira_subtasks_created",
+                "session_escalated_to_operator",
             ],
             [item.event_type for item in events],
         )
@@ -4811,7 +3697,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003SUBAUTO",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30003SUBAUTO")
         self.coordinator.handle_operator_event(
@@ -4980,7 +3866,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004SUBTASK",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30004SUBTASK")
         self.coordinator.handle_operator_event(
@@ -5079,7 +3965,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004SUBSKIP",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30004SUBSKIP")
         for event_type in (
@@ -5159,7 +4045,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004SUBREFRESH",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30004SUBREFRESH")
         self.coordinator.handle_operator_event(
@@ -5253,7 +4139,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004SUBTRUTH",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30004SUBTRUTH")
         self.coordinator.handle_operator_event(
@@ -5342,7 +4228,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004SUBFAIL",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30004SUBFAIL")
         for event_type in (
@@ -5400,7 +4286,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004REOPEN",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30004REOPEN")
         for event_type in (
@@ -5604,7 +4490,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004REFRESHQUEUE",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30004REFRESHQUEUE")
         for event_type in (
@@ -5685,7 +4571,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004RECONCILESUB",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30004RECONCILESUB")
         self.coordinator.handle_operator_event(
@@ -6015,7 +4901,7 @@ class SessionCreationTests(unittest.TestCase):
             )
         )
 
-    def test_verification_dispatch_includes_result_writer_path(self) -> None:
+    def test_verification_dispatch_includes_hydration_paths(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERWRITER")
         self.coordinator.handle_operator_event(
             session_id=session.id,
@@ -6026,10 +4912,17 @@ class SessionCreationTests(unittest.TestCase):
         verification_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
         assert verification_role is not None
         sent_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            "IOS-30004VERWRITER",
+            VERIFICATION_COORDINATOR_ROLE,
+        )
+        hydration = json.loads((role_workspace / "HYDRATION.json").read_text())
 
         self.assertEqual(1, len(sent_inputs))
-        self.assertIn("write-result.sh", sent_inputs[0])
-        self.assertIn("--work-item-id", sent_inputs[0])
+        self.assertIn("Read HYDRATION.json", sent_inputs[0])
+        self.assertEqual("verification_requested", hydration["current_stage"])
+        self.assertEqual("verification", hydration["work_item_type"])
+        self.assertIn("verification_report_path", hydration)
 
     def test_collect_role_output_accepts_helper_written_verification_failed_result(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERHELPER")
@@ -6111,113 +5004,13 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
         self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
 
-    def test_submit_role_result_document_accepts_code_scout_result_after_runtime_error_escalation(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30004SCOUTINGRESS",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30004SCOUTINGRESS")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        active_item = next(
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "boy_scout" and item.status == WorkItemStatus.ASSIGNED
-        )
-
-        self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
-        self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="boy_scout_requested",
-            current_owner=None,
-        )
-        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
-
-        updated_session, event, mapped_event_type, followup_event_type, ignored = (
-            self.coordinator.submit_role_result_document(
-                document={
-                    "output_type": "completed",
-                    "payload": {
-                        "work_item_id": active_item.id,
-                        "result": "clean",
-                        "summary": "No maintainability issues found.",
-                    },
-                }
-            )
-        )
-        events = self.event_repository.list_for_session(session.id)
-
-        self.assertEqual("role_output_collected", event.event_type)
-        self.assertEqual("boy_scout_completed", mapped_event_type)
-        self.assertEqual("verification_requested", followup_event_type)
-        self.assertFalse(ignored)
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertEqual(VERIFICATION_COORDINATOR_ROLE, updated_session.current_owner)
-        self.assertFalse(any(item.event_type == "stale_role_output_ignored" for item in events))
-
-    def test_submit_role_result_document_accepts_reviewer_result_after_runtime_error_escalation(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30004REVIEWINGRESS",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        self.coordinator.prepare_task_session("IOS-30004REVIEWINGRESS")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        active_item = next(
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "self_review" and item.status == WorkItemStatus.ASSIGNED
-        )
-
-        self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
-        self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="self_review_requested",
-            current_owner=None,
-        )
-        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
-
-        updated_session, event, mapped_event_type, followup_event_type, ignored = (
-            self.coordinator.submit_role_result_document(
-                document={
-                    "output_type": "failed",
-                    "payload": {
-                        "work_item_id": active_item.id,
-                        "summary": "Review found one issue.",
-                        "issues": ["Stale activation refresh can start polling for another session."],
-                    },
-                }
-            )
-        )
-        events = self.event_repository.list_for_session(session.id)
-
-        self.assertEqual("role_output_collected", event.event_type)
-        self.assertEqual("self_review_issues_found", mapped_event_type)
-        self.assertEqual("self_review_correction_requested", followup_event_type)
-        self.assertFalse(ignored)
-        self.assertEqual("self_review_correction_requested", updated_session.current_stage)
-        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
-        self.assertFalse(any(item.event_type == "stale_role_output_ignored" for item in events))
-
     def test_submit_role_result_document_accepts_documentation_review_after_runtime_error_escalation(
         self,
     ) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004DOCREVIEWINGRESS",
             workflow_profile="oneshot",
-            policy={"doc_harvest_policy": "enabled", "self_review_policy": "disabled"},
+            policy={"doc_harvest_policy": "enabled", "review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30004DOCREVIEWINGRESS")
         self.coordinator.handle_operator_event(
@@ -6273,7 +5066,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004DOCREVIEWDUP",
             workflow_profile="oneshot",
-            policy={"doc_harvest_policy": "enabled", "self_review_policy": "disabled"},
+            policy={"doc_harvest_policy": "enabled", "review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30004DOCREVIEWDUP")
         self.coordinator.handle_operator_event(
@@ -6324,7 +5117,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004DOCREVIEWERR",
             workflow_profile="oneshot",
-            policy={"doc_harvest_policy": "enabled", "self_review_policy": "disabled"},
+            policy={"doc_harvest_policy": "enabled", "review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30004DOCREVIEWERR")
         self.coordinator.handle_operator_event(
@@ -6420,42 +5213,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIsNone(updated_session.current_owner)
         self.assertTrue(any(item.event_type == "role_result_protocol_violation_reported" for item in events))
 
-    def test_collect_role_output_escalates_invalid_result_json_protocol_violation(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSPROTO",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSPROTO")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
-            session.task_key,
-            CODE_SCOUT_ROLE,
-        )
-        result_path = role_workspace / "RESULT.json"
-        result_path.write_text('{"output_type":"completed","payload":{"work_item_id":1}}*** End Patch', encoding="utf-8")
-
-        updated_session, event, chunk_count = self.coordinator.collect_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-        )
-        events = self.event_repository.list_for_session(session.id)
-        artifacts = self.artifact_repository.list_for_session(session.id)
-
-        self.assertEqual(1, chunk_count)
-        self.assertEqual("role_output_collected", event.event_type)
-        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
-        self.assertIsNone(updated_session.current_owner)
-        self.assertFalse(result_path.exists())
-        self.assertTrue(any(item.event_type == "role_result_protocol_violation_reported" for item in events))
-        self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
-        self.assertTrue(any(item.artifact_type == "invalid_role_result_raw" for item in artifacts))
-
     def test_collect_role_output_escalates_verification_schema_violation_as_protocol_violation(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERPROTO")
         self.coordinator.handle_operator_event(
@@ -6501,55 +5258,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(escalations)
         self.assertEqual("role_result_protocol_violation", escalations[-1].payload.get("reason"))
 
-    def test_collect_role_output_ignores_stale_verification_protocol_violation_after_handoff(self) -> None:
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERSTALE")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="self_review_passed",
-            payload={"summary": "review passed"},
-        )
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="boy_scout_clean",
-            payload={"summary": "boy scout clean"},
-        )
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="verification_passed",
-            payload={"summary": "verification passed"},
-        )
-
-        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
-        assert verifier_role is not None
-        verifier_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
-            session.task_key,
-            VERIFICATION_COORDINATOR_ROLE,
-        )
-        result_path = verifier_workspace / "RESULT.json"
-        result_path.write_text("hi", encoding="utf-8")
-
-        updated_session, event, chunk_count = self.coordinator.collect_role_output(
-            session_id=session.id,
-            role_name=VERIFICATION_COORDINATOR_ROLE,
-        )
-        events = self.event_repository.list_for_session(session.id)
-
-        self.assertEqual(1, chunk_count)
-        self.assertEqual("role_output_collected", event.event_type)
-        self.assertNotEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
-        self.assertFalse(result_path.exists())
-        self.assertTrue(
-            any(item.event_type == "stale_role_result_protocol_violation_ignored" for item in events)
-        )
-        self.assertFalse(
-            any(item.event_type == "session_escalated_to_operator" for item in events)
-        )
-
     def test_enqueue_verification_respawns_stopped_verification_role(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VERSTOP")
         verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
@@ -6578,7 +5286,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009RESPAWN",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         assert implementer_role is not None
@@ -6636,7 +5344,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009ESUBPROTO",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         assert implementer_role is not None
@@ -6851,55 +5559,6 @@ class SessionCreationTests(unittest.TestCase):
             any(item.id == stale_item.id and item.status == WorkItemStatus.ASSIGNED for item in work_items)
         )
 
-    def test_boy_scout_correction_completion_uses_payload_work_item_id(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30004BSCOUTPAYLOAD",
-            workflow_profile="oneshot",
-        )
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        assert implementer_role is not None
-        correction_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="boy_scout_correction",
-            title="Code Scout improvements for IOS-30004BSCOUTPAYLOAD",
-            owner_role_id=implementer_role.id,
-            status=WorkItemStatus.ASSIGNED,
-        )
-        stale_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="boy_scout_correction",
-            title="Code Scout improvements for IOS-30004BSCOUTPAYLOAD",
-            owner_role_id=implementer_role.id,
-            status=WorkItemStatus.ASSIGNED,
-        )
-        broken_session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="boy_scout_correction_requested",
-            current_owner=IMPLEMENTER_ROLE,
-        )
-
-        updated_session, followup_event = self.coordinator._handle_implementation_completed(
-            broken_session,
-            self.event_repository.append(
-                session_id=session.id,
-                event_type="implementation_completed",
-                producer_type="role_output",
-                producer_id=IMPLEMENTER_ROLE,
-                payload={"work_item_id": correction_item.id, "summary": "fixes applied"},
-            ),
-        )
-        work_items = self.work_item_repository.list_for_session(session.id)
-
-        self.assertEqual("verification_requested", followup_event.event_type)
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertEqual(VERIFICATION_COORDINATOR_ROLE, updated_session.current_owner)
-        self.assertTrue(
-            any(item.id == correction_item.id and item.status == WorkItemStatus.COMPLETED for item in work_items)
-        )
-        self.assertTrue(
-            any(item.id == stale_item.id and item.status == WorkItemStatus.ASSIGNED for item in work_items)
-        )
-
     def test_subtask_completed_uses_payload_work_item_id_over_stale_assigned_item(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004SUBTASKPAYLOAD",
@@ -6997,7 +5656,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004SUBTASKREUSE",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         assert implementer_role is not None
@@ -7391,57 +6050,6 @@ class SessionCreationTests(unittest.TestCase):
                 },
             )
 
-    def test_verification_correction_reenters_verification_without_reopening_optional_quality_lanes(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30004V2QUAL",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        self.coordinator.prepare_task_session("IOS-30004V2QUAL")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="passed",
-            payload={"summary": "review clean"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={"result": "clean", "summary": "no improvements"},
-        )
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="verification_failed",
-            payload={"failures": ["test"]},
-        )
-
-        updated_session, followup_event = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "verification corrections done"},
-        )
-
-        verification_role = self.role_repository.get_by_name(session.id, "verification-coordinator")
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        reviewer_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
-        verification_inputs = self.session_backend.get_sent_inputs(verification_role.runtime_handle)
-
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertEqual("verification-coordinator", updated_session.current_owner)
-        self.assertEqual("verification_requested", followup_event.event_type)
-        self.assertEqual(2, len(verification_inputs))
-        self.assertEqual(1, len(reviewer_inputs))
-
     def test_verification_passed_completes_session(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30005")
         self.coordinator.handle_operator_event(
@@ -7460,7 +6068,7 @@ class SessionCreationTests(unittest.TestCase):
         verification_report = Path(self.temp_dir.name) / "IOS-30005" / "spec" / "final-verification.md"
         verification_outcome = Path(self.temp_dir.name) / "IOS-30005" / "spec" / "verification-outcome.json"
 
-        self.assertEqual("verification_requested", updated_session.current_stage)
+        self.assertEqual("send_to_test_completed", updated_session.current_stage)
         self.assertIsNone(updated_session.current_owner)
         self.assertEqual("completed", updated_session.status.value)
         self.assertEqual("send_to_test_completed", followup_event.event_type)
@@ -7862,7 +6470,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertIsNone(event)
-        self.assertEqual(3, role_count)
+        self.assertEqual(2, role_count)
         self.assertEqual(2, chunk_count)
         self.assertEqual(
             2,
@@ -7897,7 +6505,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertIsNone(event)
-        self.assertEqual(3, role_count)
+        self.assertEqual(2, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertFalse(result_path.exists())
@@ -7936,7 +6544,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertIsNone(event)
-        self.assertEqual(3, role_count)
+        self.assertEqual(2, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertFalse(result_path.exists())
@@ -7966,7 +6574,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertIsNone(event)
-        self.assertEqual(3, role_count)
+        self.assertEqual(2, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertFalse(result_path.exists())
@@ -8001,7 +6609,7 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertEqual(session.id, updated_session.id)
         self.assertIsNone(event)
-        self.assertEqual(3, role_count)
+        self.assertEqual(2, role_count)
         self.assertEqual(1, chunk_count)
         self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
@@ -8046,9 +6654,8 @@ class SessionCreationTests(unittest.TestCase):
             task_key=f"IOS-31000TMUX-{Path(self.temp_dir.name).name.upper()}",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "disabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "disabled",
+                                "doc_harvest_policy": "disabled",
             },
         )
 
@@ -8314,8 +6921,14 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004MISSINGROUTED",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
-            role_config={"acceptance-criteria-worker": {"runner": "codex", "model": "gpt-5.4", "effort": "medium"}},
+            policy={"review_policy": "disabled"},
+            role_config={
+                "acceptance-criteria-worker": {
+                    "runner": "claude",
+                    "model": "sonnet",
+                    "effort": "medium",
+                }
+            },
         )
         acceptance_role = self.role_repository.get_by_name(session.id, ACCEPTANCE_CRITERIA_WORKER_ROLE)
         assert acceptance_role is not None
@@ -8533,58 +7146,6 @@ class SessionCreationTests(unittest.TestCase):
             any(item.event_type == "missing_result_file_recreation_requested" for item in events)
         )
 
-    def test_reconcile_session_dispatch_skips_full_redispatch_while_operator_continuation_is_pending(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30009OPCONT",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        self.coordinator.prepare_task_session("IOS-30009OPCONT")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="blocked_review_cycle",
-            payload={
-                "summary": "blocked_review_cycle",
-                "details": "Needs one operator clarification before continuing.",
-            },
-        )
-
-        waiting_session = self.session_repository.get_by_id(session.id)
-        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, waiting_session.status)
-        review_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        self.assertIsNotNone(review_role)
-        sent_before = list(self.session_backend.get_sent_inputs(review_role.runtime_handle))
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        self.assertIsNotNone(implementer_role)
-        implementer_sent_before = list(self.session_backend.get_sent_inputs(implementer_role.runtime_handle))
-
-        resumed_session, event = self.coordinator.send_operator_runtime_input(
-            session_id=session.id,
-            text="Accessibility identifiers are out of scope.",
-        )
-
-        self.assertEqual("operator_runtime_input_sent", event.event_type)
-        self.assertEqual(SessionStatus.ACTIVE, resumed_session.status)
-        reconciled = self.coordinator._reconcile_session_dispatch(resumed_session)
-        sent_after = self.session_backend.get_sent_inputs(review_role.runtime_handle)
-        implementer_sent_after = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
-        events = self.event_repository.list_for_session(session.id)
-
-        self.assertFalse(reconciled)
-        self.assertEqual(sent_before, sent_after)
-        self.assertEqual(implementer_sent_before + [implementer_sent_after[-1]], implementer_sent_after)
-        self.assertFalse(any(item.event_type == "session_dispatch_reconciled" for item in events))
-
     def test_reconcile_session_dispatch_skips_duplicate_redispatch_for_recent_dispatch(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009REDISPATCH",
@@ -8732,59 +7293,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(sent_before, sent_after)
         self.assertEqual(1, len(dispatch_events))
         self.assertEqual(1, refreshed_role.last_hydration_version)
-
-    def test_collect_role_output_does_not_recreate_old_result_when_newer_review_cycle_item_is_active(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30009RESULTREVIEWCYCLE",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "required",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        self.coordinator.prepare_task_session("IOS-30009RESULTREVIEWCYCLE")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="blocked_review_cycle",
-            payload={
-                "work_item_id": 356,
-                "summary": "blocked_review_cycle",
-                "details": "Needs scope clarification.",
-            },
-        )
-        review_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        self.assertIsNotNone(review_role)
-        self.coordinator.send_operator_runtime_input(
-            session_id=session.id,
-            text="Accessibility identifiers are out of scope.",
-        )
-        sent_before_collect = list(self.session_backend.get_sent_inputs(review_role.runtime_handle))
-        self.session_backend.simulate_output(
-            review_role.runtime_handle,
-            'SDD_OUTPUT: {"output_type":"failed","payload":{"work_item_id":356,"summary":"blocked_review_cycle"}}',
-        )
-
-        updated_session, event, chunk_count = self.coordinator.collect_role_output(
-            session_id=session.id,
-            role_name=CODE_REVIEWER_ROLE,
-        )
-        sent_after_collect = self.session_backend.get_sent_inputs(review_role.runtime_handle)
-        events = self.event_repository.list_for_session(session.id)
-
-        self.assertEqual(1, chunk_count)
-        self.assertEqual("role_output_collected", event.event_type)
-        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
-        self.assertEqual(sent_before_collect, sent_after_collect)
-        self.assertFalse(
-            any(item.event_type == "missing_result_file_recreation_requested" for item in events)
-        )
 
     def test_collect_role_output_preserves_spaces_in_wrapped_error_marker(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRWRAP")
@@ -8978,6 +7486,142 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.assertEqual(new_item.id, stale_events[-1].payload.get("expected_work_item_id"))
 
+    def test_collect_role_output_ignores_replayed_error_from_prior_dispatch(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRPRIOR")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        old_item = self.coordinator._find_active_work_item_for_role(session.id, implementer_role.id)
+        assert old_item is not None
+        stale_payload = {
+            "summary": "Convention finding pass-09 is a false positive",
+            "details": "The operator already rejected this finding for the SDK overloads.",
+            "needs_operator_input": True,
+        }
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_runtime_error_reported",
+            producer_type="role",
+            producer_id=IMPLEMENTER_ROLE,
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "marker_type": "error",
+                "current_stage": "convention_review_correction_requested",
+                **stale_payload,
+            },
+        )
+        self.work_item_repository.update_status(old_item.id, WorkItemStatus.COMPLETED)
+        new_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements_review_correction",
+            title=f"Requirements review corrections for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_review_correction_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            producer_type="coordinator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": new_item.id,
+                "stage_name": "requirements_review_correction_requested",
+            },
+        )
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            "SDD_ERROR: " + json.dumps(stale_payload, sort_keys=True),
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        stale_events = [item for item in events if item.event_type == "stale_role_output_ignored"]
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertTrue(stale_events)
+        self.assertEqual(
+            "replayed_runtime_error_from_prior_dispatch",
+            stale_events[-1].payload.get("reason"),
+        )
+        self.assertEqual(new_item.id, stale_events[-1].payload.get("expected_work_item_id"))
+
+    def test_collect_role_output_ignores_replayed_error_after_result_acceptance_without_active_item(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRAFTERRESULT")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        active_item = self.coordinator._find_active_work_item_for_role(session.id, implementer_role.id)
+        assert active_item is not None
+        stale_payload = {
+            "summary": "Convention finding pass-09 is a false positive",
+            "details": "The operator already rejected this finding for the SDK overloads.",
+            "needs_operator_input": True,
+        }
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_runtime_error_reported",
+            producer_type="role",
+            producer_id=IMPLEMENTER_ROLE,
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "marker_type": "error",
+                "current_stage": "convention_review_correction_requested",
+                **stale_payload,
+            },
+        )
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="convention_review_requested",
+            current_owner=CONVENTION_REVIEWER_ROLE,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_result_ingress_accepted",
+            producer_type="coordinator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": active_item.id,
+                "current_stage": "requirements_review_correction_requested",
+                "output_type": "completed",
+            },
+        )
+        self.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            "SDD_ERROR: " + json.dumps(stale_payload, sort_keys=True),
+        )
+
+        updated_session, event, chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=IMPLEMENTER_ROLE,
+        )
+        events = self.event_repository.list_for_session(session.id)
+        stale_events = [item for item in events if item.event_type == "stale_role_output_ignored"]
+
+        self.assertEqual(1, chunk_count)
+        self.assertEqual("role_output_collected", event.event_type)
+        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
+        self.assertEqual(CONVENTION_REVIEWER_ROLE, updated_session.current_owner)
+        self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertTrue(stale_events)
+        self.assertEqual(
+            "replayed_runtime_error_after_role_result_acceptance",
+            stale_events[-1].payload.get("reason"),
+        )
+        self.assertEqual(active_item.id, stale_events[-1].payload.get("accepted_work_item_id"))
+
     def test_collect_role_output_ignores_replayed_error_after_operator_reply(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRREPLY")
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
@@ -9028,6 +7672,70 @@ class SessionCreationTests(unittest.TestCase):
             stale_events[-1].payload.get("reason"),
         )
         self.assertEqual(active_item.id, stale_events[-1].payload.get("expected_work_item_id"))
+
+    def test_interactive_state_hides_replayed_error_from_prior_dispatch(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009ERRPRIORUI")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        old_item = self.coordinator._find_active_work_item_for_role(session.id, implementer_role.id)
+        assert old_item is not None
+        stale_payload = {
+            "summary": "Convention finding pass-09 is a false positive",
+            "details": "The operator already rejected this finding for the SDK overloads.",
+            "needs_operator_input": True,
+        }
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_runtime_error_reported",
+            producer_type="role",
+            producer_id=IMPLEMENTER_ROLE,
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "marker_type": "error",
+                "current_stage": "convention_review_correction_requested",
+                **stale_payload,
+            },
+        )
+        self.work_item_repository.update_status(old_item.id, WorkItemStatus.COMPLETED)
+        new_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements_review_correction",
+            title=f"Requirements review corrections for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_review_correction_requested",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            producer_type="coordinator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": new_item.id,
+                "stage_name": "requirements_review_correction_requested",
+            },
+        )
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "current_stage": "requirements_review_correction_requested",
+                "reason": "runtime_error",
+                **stale_payload,
+            },
+        )
+
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertFalse(summary["available"])
+        self.assertFalse(summary["needs_operator_input"])
 
     def test_collect_role_output_ignores_stale_runtime_error_token_for_previous_work_item(
         self,
@@ -9294,168 +8002,13 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(any(item.event_type == "verification_passed" for item in events))
         self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
 
-    def test_collect_role_output_ignores_stale_reviewer_result_during_self_review_correction(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30009D",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        self.coordinator.prepare_task_session("IOS-30009D")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name="code-reviewer",
-            output_type="failed",
-            payload={"summary": "review issues", "issues": ["narrow fix needed"]},
-        )
-        reviewer_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
-            session.task_key,
-            "code-reviewer",
-        )
-        result_path = reviewer_workspace / "RESULT.json"
-        result_path.write_text(
-            json.dumps(
-                {
-                    "output_type": "completed",
-                    "payload": {"summary": "late stale reviewer result"},
-                }
-            )
-        )
-
-        updated_session, event, chunk_count = self.coordinator.collect_role_output(
-            session_id=session.id,
-            role_name="code-reviewer",
-        )
-        events = self.event_repository.list_for_session(session.id)
-        artifacts = self.artifact_repository.list_for_session(session.id)
-
-        self.assertEqual(1, chunk_count)
-        self.assertEqual("role_output_collected", event.event_type)
-        self.assertEqual("self_review_correction_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
-        self.assertFalse(result_path.exists())
-        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
-        self.assertFalse(any(item.event_type == "self_review_passed" for item in events))
-        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
-
-    def test_collect_role_output_ignores_stale_reviewer_result_after_handoff_to_verification_correction(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30009F",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        self.coordinator.prepare_task_session("IOS-30009F")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name="code-reviewer",
-            output_type="passed",
-            payload={"summary": "review clean"},
-        )
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="verification_failed",
-            payload={"summary": "verification failed", "failures": ["lint"]},
-        )
-        reviewer_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
-            session.task_key,
-            "code-reviewer",
-        )
-        result_path = reviewer_workspace / "RESULT.json"
-        result_path.write_text(
-            json.dumps(
-                {
-                    "output_type": "completed",
-                    "payload": {"summary": "late stale reviewer result after verification handoff"},
-                }
-            )
-        )
-
-        updated_session, event, chunk_count = self.coordinator.collect_role_output(
-            session_id=session.id,
-            role_name="code-reviewer",
-        )
-        events = self.event_repository.list_for_session(session.id)
-        artifacts = self.artifact_repository.list_for_session(session.id)
-
-        self.assertEqual(1, chunk_count)
-        self.assertEqual("role_output_collected", event.event_type)
-        self.assertEqual("verification_correction_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
-        self.assertFalse(result_path.exists())
-        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
-        self.assertEqual(1, sum(1 for item in events if item.event_type == "self_review_passed"))
-        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
-
-    def test_collect_role_output_ignores_stale_implementer_result_after_handoff_to_reviewer(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30009E",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        self.coordinator.prepare_task_session("IOS-30009E")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        implementer_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
-            session.task_key,
-            "implementer",
-        )
-        result_path = implementer_workspace / "RESULT.json"
-        result_path.write_text(
-            json.dumps(
-                {
-                    "output_type": "completed",
-                    "payload": {"summary": "late stale implementer result"},
-                }
-            )
-        )
-
-        updated_session, event, chunk_count = self.coordinator.collect_role_output(
-            session_id=session.id,
-            role_name="implementer",
-        )
-        events = self.event_repository.list_for_session(session.id)
-        artifacts = self.artifact_repository.list_for_session(session.id)
-
-        self.assertEqual(1, chunk_count)
-        self.assertEqual("role_output_collected", event.event_type)
-        self.assertEqual("self_review_requested", updated_session.current_stage)
-        self.assertEqual("code-reviewer", updated_session.current_owner)
-        self.assertFalse(result_path.exists())
-        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
-        self.assertEqual(1, sum(1 for item in events if item.event_type == "implementation_completed"))
-        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
-
     def test_collect_role_output_ignores_stale_subtask_implementer_result_when_next_subtask_is_unassigned(
         self,
     ) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009ESUB",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         assert implementer_role is not None
@@ -9503,7 +8056,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009ESUB2",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         assert implementer_role is not None
@@ -9566,7 +8119,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009ERECENT",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         assert implementer_role is not None
@@ -9597,7 +8150,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009ESUB3",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         assert implementer_role is not None
@@ -9665,7 +8218,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009ESUBERR",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         assert implementer_role is not None
@@ -9727,7 +8280,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009ESUB4",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         assert implementer_role is not None
@@ -9805,7 +8358,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009ESUBRETRY",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
         assert implementer_role is not None
@@ -9866,51 +8419,13 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(any(item.event_type == "stale_role_output_ignored" for item in events))
         self.assertEqual(["IOS-30096R"], self.jira_adapter.completed_subtasks)
 
-    def test_poll_session_output_ignores_stale_implementer_runtime_marker_after_handoff_to_reviewer(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30009G",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        self.coordinator.prepare_task_session("IOS-30009G")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
-        self.session_backend.simulate_output(
-            implementer_role.runtime_handle,
-            'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"late stale implementer result"}}',
-        )
-
-        updated_session, event, role_count, chunk_count = self.coordinator.poll_session_output(
-            session_id=session.id,
-        )
-        events = self.event_repository.list_for_session(session.id)
-        artifacts = self.artifact_repository.list_for_session(session.id)
-
-        self.assertIsNone(event)
-        self.assertEqual(4, role_count)
-        self.assertEqual(1, chunk_count)
-        self.assertEqual("self_review_requested", updated_session.current_stage)
-        self.assertEqual("code-reviewer", updated_session.current_owner)
-        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
-        self.assertEqual(1, sum(1 for item in events if item.event_type == "implementation_completed"))
-        self.assertTrue(any(item.artifact_type == "runtime_output" for item in artifacts))
-
     def test_poll_session_output_deduplicates_repeated_stale_implementer_runtime_marker(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30009G2",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "disabled",
             },
         )
         self.coordinator.prepare_task_session("IOS-30009G2")
@@ -9935,52 +8450,6 @@ class SessionCreationTests(unittest.TestCase):
         stale_events = [item for item in events if item.event_type == "stale_role_output_ignored"]
 
         self.assertEqual(1, len(stale_events))
-
-    def test_poll_session_output_ignores_stale_code_scout_runtime_marker_after_handoff_to_verifier(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30009H",
-            workflow_profile="oneshot",
-            policy={
-                "self_review_policy": "disabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "disabled",
-            },
-        )
-        self.coordinator.prepare_task_session("IOS-30009H")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name="code-scout",
-            output_type="completed",
-            payload={"result": "clean", "summary": "boy scout clean"},
-        )
-        code_scout_role = self.role_repository.get_by_name(session.id, "code-scout")
-        self.session_backend.simulate_output(
-            code_scout_role.runtime_handle,
-            'SDD_OUTPUT: {"output_type":"completed","payload":{"summary":"late stale code scout result"}}',
-        )
-
-        updated_session, event, role_count, chunk_count = self.coordinator.poll_session_output(
-            session_id=session.id,
-        )
-        events = self.event_repository.list_for_session(session.id)
-        artifacts = self.artifact_repository.list_for_session(session.id)
-
-        self.assertIsNone(event)
-        self.assertEqual(4, role_count)
-        self.assertEqual(1, chunk_count)
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertEqual("verification-coordinator", updated_session.current_owner)
-        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
-        self.assertEqual(1, sum(1 for item in events if item.event_type == "boy_scout_completed"))
-        self.assertTrue(any(item.artifact_type == "runtime_output" for item in artifacts))
-        refreshed_role = self.role_repository.get_by_name(session.id, "code-scout")
-        assert refreshed_role is not None
-        self.assertEqual("running", refreshed_role.status.value)
 
     def test_collect_role_output_records_progress_marker_without_stage_transition(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30010")
@@ -10104,118 +8573,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
         self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
         self.assertFalse(any(item.artifact_type == "runtime_error_json" for item in artifacts))
-
-    def test_collect_role_output_ignores_stale_error_for_previous_work_item_of_same_role(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30014D",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30014D")
-        updated_session, _ = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.assertEqual("boy_scout_requested", updated_session.current_stage)
-        self.assertEqual("code-scout", updated_session.current_owner)
-
-        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
-        assert scout_role is not None
-        original_item = next(
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "boy_scout" and item.status == WorkItemStatus.ASSIGNED
-        )
-        self.work_item_repository.update_status(original_item.id, WorkItemStatus.COMPLETED)
-        retry_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="boy_scout",
-            title="Retry Code Scout pass",
-            owner_role_id=scout_role.id,
-            status=WorkItemStatus.ASSIGNED,
-        )
-        self.session_backend.simulate_output(
-            scout_role.runtime_handle,
-            (
-                "SDD_ERROR: "
-                '{"summary":"Deterministic result submission failed",'
-                f'"details":"write-result.sh for work_item_id {original_item.id} exited non-zero with status 20 and response: Internal Server Error."}}'
-            ),
-        )
-
-        updated_session, event, chunk_count = self.coordinator.collect_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-        )
-        events = self.event_repository.list_for_session(session.id)
-        artifacts = self.artifact_repository.list_for_session(session.id)
-
-        self.assertEqual(1, chunk_count)
-        self.assertEqual("role_output_collected", event.event_type)
-        self.assertEqual("boy_scout_requested", updated_session.current_stage)
-        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
-        self.assertEqual(CODE_SCOUT_ROLE, updated_session.current_owner)
-        self.assertFalse(any(item.event_type == "role_runtime_error_reported" for item in events))
-        self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
-        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
-        self.assertFalse(any(item.artifact_type == "runtime_error_json" for item in artifacts))
-        self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(retry_item.id).status)
-
-    def test_collect_role_output_ignores_stale_error_for_cli_work_item_flag(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30014E",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30014E")
-        updated_session, _ = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-        self.assertEqual("boy_scout_requested", updated_session.current_stage)
-        self.assertEqual("code-scout", updated_session.current_owner)
-
-        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
-        assert scout_role is not None
-        original_item = next(
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "boy_scout" and item.status == WorkItemStatus.ASSIGNED
-        )
-        self.work_item_repository.update_status(original_item.id, WorkItemStatus.COMPLETED)
-        retry_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="boy_scout",
-            title="Retry Code Scout pass",
-            owner_role_id=scout_role.id,
-            status=WorkItemStatus.ASSIGNED,
-        )
-        self.session_backend.simulate_output(
-            scout_role.runtime_handle,
-            (
-                "SDD_ERROR: "
-                '{"summary":"Verification result submission blocked by stage transition",'
-                f'"details":"write-result.sh --work-item-id {original_item.id} now fails with Unsupported role output."}}'
-            ),
-        )
-
-        updated_session, event, chunk_count = self.coordinator.collect_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-        )
-        events = self.event_repository.list_for_session(session.id)
-
-        self.assertEqual(1, chunk_count)
-        self.assertEqual("role_output_collected", event.event_type)
-        self.assertEqual("boy_scout_requested", updated_session.current_stage)
-        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
-        self.assertEqual(CODE_SCOUT_ROLE, updated_session.current_owner)
-        self.assertFalse(any(item.event_type == "role_runtime_error_reported" for item in events))
-        self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
-        self.assertTrue(any(item.event_type == "stale_role_output_ignored" for item in events))
-        self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(retry_item.id).status)
 
     def test_event_bus_receives_published_session_events(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30015")
@@ -10456,8 +8813,13 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Mode: fix-only", sent_inputs[-1])
         self.assertIn("Apply QA reopen follow-up changes for IOS-30021BUG.", sent_inputs[-1])
         self.assertIn("highest-priority follow-up scope", sent_inputs[-1])
-        self.assertIn('"followup_comments_path"', sent_inputs[-1])
-        self.assertNotIn('"bug_analysis_report_path"', sent_inputs[-1])
+        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            "IOS-30021BUG",
+            BUG_FIXER_ROLE,
+        )
+        hydration = json.loads((role_workspace / "HYDRATION.json").read_text())
+        self.assertIn("followup_comments_path", hydration)
+        self.assertNotIn("bug_analysis_report_path", hydration)
 
     def test_create_mr_handoff_marks_completed_session_as_handed_off(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021A")
@@ -10467,6 +8829,7 @@ class SessionCreationTests(unittest.TestCase):
             current_owner=None,
         )
         completed_session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        self.write_passed_verification_outcome("IOS-30021A")
 
         updated_session, event, mr_url = self.coordinator.create_mr_handoff(
             session_id=completed_session.id
@@ -10499,6 +8862,7 @@ class SessionCreationTests(unittest.TestCase):
             current_owner=None,
         )
         self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        self.write_passed_verification_outcome("IOS-30021B1")
 
         original_create_mr = self.gitlab_adapter.create_mr
         self.gitlab_adapter.create_mr = lambda task_key: CommandResult(
@@ -10533,6 +8897,7 @@ class SessionCreationTests(unittest.TestCase):
             current_owner=None,
         )
         self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        self.write_passed_verification_outcome("IOS-30021C")
 
         updated_session, event = self.coordinator.send_to_test_handoff(session_id=session.id)
         artifacts = self.artifact_repository.list_for_session(session.id)
@@ -10553,6 +8918,7 @@ class SessionCreationTests(unittest.TestCase):
             current_owner=None,
         )
         self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        self.write_passed_verification_outcome("IOS-30021CKEEP")
 
         updated_session, event = self.coordinator.send_to_test_handoff(session_id=session.id)
         roles = self.role_repository.list_for_session(session.id)
@@ -10576,6 +8942,7 @@ class SessionCreationTests(unittest.TestCase):
             current_owner=None,
         )
         self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        self.write_passed_verification_outcome("IOS-30021CCLEAN")
 
         updated_session, event = self.coordinator.send_to_test_handoff(session_id=session.id)
 
@@ -10703,6 +9070,7 @@ class SessionCreationTests(unittest.TestCase):
             current_owner=None,
         )
         self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        self.write_passed_verification_outcome("IOS-30021D1")
 
         original_send_to_test = self.jira_adapter.send_to_test
         self.jira_adapter.send_to_test = lambda task_key: CommandResult(
@@ -10772,1125 +9140,11 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(DOC_HARVEST_ROLE, updated_session.current_owner)
         self.assertEqual("doc_harvest_requested", followup_event.event_type)
 
-    def test_implementation_completed_routes_to_self_review_when_policy_required(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021SR1",
-            workflow_profile="oneshot",
-            policy={"self_review_policy": "required"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021SR1")
-
-        updated_session, followup_event = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        self.assertEqual("active", updated_session.status.value)
-        self.assertEqual("self_review_requested", updated_session.current_stage)
-        self.assertEqual("code-reviewer", updated_session.current_owner)
-        self.assertEqual("self_review_requested", followup_event.event_type)
-
-    def test_implementation_completed_routes_to_self_review_when_policy_enabled(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021SR1E",
-            workflow_profile="oneshot",
-            policy={"self_review_policy": "enabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021SR1E")
-
-        updated_session, followup_event = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        self.assertEqual("active", updated_session.status.value)
-        self.assertEqual("self_review_requested", updated_session.current_stage)
-        self.assertEqual("code-reviewer", updated_session.current_owner)
-        self.assertEqual("self_review_requested", followup_event.event_type)
-
-    def test_complete_self_review_passed_routes_to_verification(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021SR2",
-            workflow_profile="oneshot",
-            policy={"self_review_policy": "enabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021SR2")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        updated_session, event, followup_event = self.coordinator.complete_self_review(
-            session_id=session.id,
-            outcome="passed",
-            summary="Reviewed implementation and found no blocking issues.",
-        )
-        artifacts = self.artifact_repository.list_for_session(session.id)
-
-        self.assertEqual("self_review_passed", event.event_type)
-        self.assertEqual("verification_requested", followup_event.event_type)
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertEqual("verification-coordinator", updated_session.current_owner)
-        self.assertTrue(any(item.artifact_type == "self_review_summary" for item in artifacts))
-        self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
-
-    def test_default_hydration_refreshes_diff_for_self_review(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021SR2DIFF",
-            workflow_profile="oneshot",
-            policy={"self_review_policy": "enabled"},
-        )
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        assert reviewer_role is not None
-
-        with patch.object(
-            self.coordinator,
-            "_refresh_structured_diff_artifact",
-            return_value="/tmp/self-review-diff.md",
-        ) as refresh:
-            payload = self.coordinator._default_extra_hydration_for_dispatch(
-                session,
-                reviewer_role,
-                "self_review_requested",
-            )
-
-        self.assertEqual("/tmp/self-review-diff.md", payload["diff_path"])
-        refresh.assert_called_once_with("IOS-30021SR2DIFF", mode="source")
-
-    def test_self_review_skipped_not_needed_routes_to_verification_when_policy_enabled(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021SR2E",
-            workflow_profile="oneshot",
-            policy={"self_review_policy": "enabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021SR2E")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="skipped_not_needed",
-            payload={"summary": "The diff is too small to justify a meaningful self-review pass."},
-        )
-
-        self.assertEqual("self_review_passed", mapped_event.event_type)
-        self.assertIsNotNone(followup_event)
-        assert followup_event is not None
-        self.assertEqual("verification_requested", followup_event.event_type)
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertEqual("verification-coordinator", updated_session.current_owner)
-
-    def test_self_review_skipped_not_needed_is_rejected_when_policy_required(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021SR2R",
-            workflow_profile="oneshot",
-            policy={"self_review_policy": "required"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021SR2R")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        with self.assertRaisesRegex(
-            IntakeError,
-            "Self review cannot be skipped when self_review_policy is required",
-        ):
-            self.coordinator.handle_role_output(
-                session_id=session.id,
-                role_name=CODE_REVIEWER_ROLE,
-                output_type="skipped_not_needed",
-                payload={"summary": "The diff is too small to justify a meaningful self-review pass."},
-            )
-
-    def test_implementation_completed_routes_to_boy_scout_when_policy_enabled(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BS1",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BS1")
-
-        updated_session, followup_event = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-        work_items = self.work_item_repository.list_for_session(session.id)
-
-        self.assertEqual("active", updated_session.status.value)
-        self.assertEqual("boy_scout_requested", updated_session.current_stage)
-        self.assertEqual(CODE_SCOUT_ROLE, updated_session.current_owner)
-        self.assertEqual("boy_scout_requested", followup_event.event_type)
-        self.assertTrue(any(item.work_type == "boy_scout" for item in work_items))
-
-    def test_boy_scout_skipped_not_needed_routes_to_verification_when_policy_enabled(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BS1E",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BS1E")
-
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="skipped_not_needed",
-            payload={"summary": "The change is too small to justify a meaningful Code Scout pass."},
-        )
-
-        self.assertEqual("boy_scout_completed", mapped_event.event_type)
-        self.assertIsNotNone(followup_event)
-        assert followup_event is not None
-        self.assertEqual("verification_requested", followup_event.event_type)
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertEqual("verification-coordinator", updated_session.current_owner)
-        outcome_path = Path(self.temp_dir.name) / "IOS-30021BS1E" / "spec" / "boy-scout-outcome.json"
-        self.assertTrue(outcome_path.exists())
-        self.assertEqual("clean", json.loads(outcome_path.read_text())["status"])
-
-    def test_boy_scout_dispatch_includes_result_writer_path(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSWRITER",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSWRITER")
-
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
-        assert scout_role is not None
-        refreshed_scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
-        assert refreshed_scout_role is not None
-        sent_inputs = self.session_backend.get_sent_inputs(refreshed_scout_role.runtime_handle)
-
-        self.assertEqual(1, len(sent_inputs))
-        self.assertIn("write-result.sh", sent_inputs[0])
-        self.assertIn("--work-item-id", sent_inputs[0])
-
-    def test_collect_role_output_accepts_helper_written_boy_scout_clean_result(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSHELPER",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSHELPER")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        active_item = next(
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "boy_scout" and item.status.value == "assigned"
-        )
-        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
-            session.task_key,
-            CODE_SCOUT_ROLE,
-        )
-        result_path = role_workspace / "RESULT.json"
-        document = build_result_document(
-            SimpleNamespace(
-                role="code-scout",
-                output_type="completed",
-                output=str(result_path),
-                work_item_id=active_item.id,
-                result="clean",
-                findings_count=None,
-                findings_path=None,
-                summary=None,
-                details=None,
-            )
-        )
-        write_result_file(result_path, document)
-
-        updated_session, event, chunk_count = self.coordinator.collect_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-        )
-        artifacts = self.artifact_repository.list_for_session(session.id)
-
-        self.assertEqual(1, chunk_count)
-        self.assertEqual("role_output_collected", event.event_type)
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertEqual(VERIFICATION_COORDINATOR_ROLE, updated_session.current_owner)
-        self.assertFalse(result_path.exists())
-        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts))
-
-    def test_boy_scout_skipped_not_needed_is_rejected_when_policy_required(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BS1R",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "required", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BS1R")
-
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        with self.assertRaisesRegex(
-            IntakeError,
-            "Code Scout cannot be skipped when boy_scout_policy is required",
-        ):
-            self.coordinator.handle_role_output(
-                session_id=session.id,
-                role_name=CODE_SCOUT_ROLE,
-                output_type="skipped_not_needed",
-                payload={"summary": "The change is too small to justify a meaningful Code Scout pass."},
-            )
-
-    def test_default_hydration_refreshes_diff_for_boy_scout(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BS1DIFF",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
-        assert scout_role is not None
-
-        with patch.object(
-            self.coordinator,
-            "_refresh_structured_diff_artifact",
-            return_value="/tmp/boy-scout-diff.md",
-        ) as refresh:
-            payload = self.coordinator._default_extra_hydration_for_dispatch(
-                session,
-                scout_role,
-                "boy_scout_requested",
-            )
-
-        self.assertEqual("/tmp/boy-scout-diff.md", payload["diff_path"])
-        refresh.assert_called_once_with("IOS-30021BS1DIFF", mode="source")
-
-    def test_boy_scout_findings_for_new_code_route_directly_to_implementer(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSAUTO",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSAUTO")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSAUTO" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "diff.md").write_text(
-            "# Diff Artifact: IOS-30021BSAUTO\n\n"
-            "## Changed Files\n\n"
-            "| Status | Path |\n|---|---|\n"
-            "| added | `FeatureBuilder.swift` |\n"
-            "| added | `FeatureMapper.swift` |\n\n"
-        )
-        (spec_dir / "findings.md").write_text(
-            "SCOUT_RESULT: findings_found\n\n"
-            "## Finding 1: Extract helper\n\n"
-            "**Files**: `FeatureBuilder.swift`, `FeatureMapper.swift`\n"
-            "**Principle**: DRY\n"
-            "**Problem**: Duplicate mapping logic exists.\n"
-            "**Suggestion**: Extract a shared helper.\n"
-            "**Why it matters**: The duplicate mapper flow can drift during future edits.\n"
-            "**Required direction**: Consolidate the mapping path behind one shared helper.\n"
-            "**Non-goals**: Do not broaden this pass into unrelated presenter cleanup.\n"
-            "**Evidence**: Both builder branches duplicate the same mapper setup.\n"
-            "**Suggested approach**: Extract one mapper factory and route both builders through it.\n"
-            "**Test expectations**: Re-run the touched builder tests and verify both branches still map identically.\n"
-        )
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={
-                "result": "findings_found",
-                "summary": "Found one improvement opportunity.",
-                "findings_path": str(spec_dir / "findings.md"),
-                "findings_count": 1,
-            },
-        )
-        artifacts = self.artifact_repository.list_for_session(session.id)
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
-
-        self.assertEqual("boy_scout_completed", mapped_event.event_type)
-        self.assertIsNotNone(followup_event)
-        assert followup_event is not None
-        self.assertEqual("boy_scout_correction_requested", followup_event.event_type)
-        self.assertEqual("boy_scout_correction_requested", updated_session.current_stage)
-        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
-        outcome_path = Path(self.temp_dir.name) / "IOS-30021BSAUTO" / "spec" / "boy-scout-outcome.json"
-        self.assertTrue(outcome_path.exists())
-        self.assertEqual("findings_found", json.loads(outcome_path.read_text())["status"])
-        self.assertTrue(any(item.artifact_type == "boy_scout_actionable_markdown" for item in artifacts))
-        report_artifact = next(item for item in artifacts if item.artifact_type == "boy_scout_report_markdown")
-        self.assertEqual("internal_review", report_artifact.metadata["report_family"])
-        self.assertEqual("code_scout", report_artifact.metadata["review_lane"])
-        self.assertEqual("report", report_artifact.metadata["artifact_role"])
-        self.assertEqual("findings_found", report_artifact.metadata["status"])
-        scout_report_path = Path(self.temp_dir.name) / "IOS-30021BSAUTO" / "scout" / "pass-01.md"
-        self.assertTrue(scout_report_path.is_file())
-        scout_report = scout_report_path.read_text(encoding="utf-8")
-        self.assertIn("SCOUT_RESULT: findings_found", scout_report)
-        self.assertIn("Extract a shared helper.", scout_report)
-        self.assertIn("**Why it matters**: The duplicate mapper flow can drift during future edits.", scout_report)
-        self.assertIn("**Required direction**: Consolidate the mapping path behind one shared helper.", scout_report)
-        self.assertIn("**Non-goals**: Do not broaden this pass into unrelated presenter cleanup.", scout_report)
-        self.assertIn("**Evidence**: Both builder branches duplicate the same mapper setup.", scout_report)
-        self.assertIn("**Suggested approach**: Extract one mapper factory and route both builders through it.", scout_report)
-        self.assertIn("**Test expectations**: Re-run the touched builder tests and verify both branches still map identically.", scout_report)
-        self.assertIn('"issues_file_path"', sent_inputs[-1])
-        self.assertIn('"correction_source": "code_scout"', sent_inputs[-1])
-        self.assertIn('"correction_report_path"', sent_inputs[-1])
-        self.assertIn("boy-scout-actionable.md", sent_inputs[-1])
-        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
-        assert scout_role is not None
-        self.assertEqual(RoleStatus.RUNNING, scout_role.status)
-
-    def test_code_scout_correction_hydration_accepts_internal_review_metadata(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSMETA",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSMETA" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        actionable_path = spec_dir / "code-scout-actionable-v2.md"
-        actionable_path.write_text("# Extract helper\n", encoding="utf-8")
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="code-scout",
-            artifact_type="custom_internal_review_actionable",
-            path=str(actionable_path),
-            metadata={
-                "report_family": "internal_review",
-                "review_lane": "code_scout",
-                "artifact_role": "actionable",
-            },
-        )
-
-        hydration = self.coordinator._correction_dispatch_hydration(  # noqa: SLF001
-            session.id,
-            "boy_scout_correction_requested",
-        )
-
-        self.assertEqual("code_scout", hydration["correction_source"])
-        self.assertEqual(str(actionable_path), hydration["correction_report_path"])
-        self.assertEqual(str(actionable_path), hydration["issues_file_path"])
-
-    def test_next_code_scout_report_target_path_counts_internal_review_metadata(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSNEXT",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        scout_dir = Path(self.temp_dir.name) / "IOS-30021BSNEXT" / "scout"
-        scout_dir.mkdir(parents=True, exist_ok=True)
-        existing_report = scout_dir / "pass-01.md"
-        existing_report.write_text("SCOUT_RESULT: clean\n", encoding="utf-8")
-        self.artifact_repository.create(
-            session_id=session.id,
-            stage_name="code-scout",
-            artifact_type="custom_internal_review_report",
-            path=str(existing_report),
-            metadata={
-                "report_family": "internal_review",
-                "review_lane": "code_scout",
-                "artifact_role": "report",
-            },
-        )
-
-        next_path = self.coordinator._next_boy_scout_report_target_path(session)  # noqa: SLF001
-
-        self.assertIsNotNone(next_path)
-        self.assertTrue(str(next_path).endswith("pass-02.md"))
-
-    def test_boy_scout_findings_can_be_skipped_into_verification(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BS2",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BS2")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BS2" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
-
-        updated_session, _, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={
-                "result": "findings_found",
-                "summary": "Found one maintainability improvement opportunity.",
-                "findings_path": str(spec_dir / "findings.md"),
-                "findings_count": 1,
-            },
-        )
-
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
-        self.assertEqual("boy_scout_requested", updated_session.current_stage)
-        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
-
-        updated_session, event, verification_event = self.coordinator.skip_boy_scout(
-            session_id=session.id,
-            reason="Track the refactor separately; continue to final verification.",
-        )
-        artifacts = self.artifact_repository.list_for_session(session.id)
-        deferred_path = Path(self.temp_dir.name) / "IOS-30021BS2" / "spec" / "scout-deferred.md"
-
-        self.assertEqual("boy_scout_skipped_by_operator", event.event_type)
-        self.assertEqual("verification_requested", verification_event.event_type)
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertEqual("verification-coordinator", updated_session.current_owner)
-        self.assertTrue(any(item.artifact_type == "boy_scout_findings" for item in artifacts))
-        self.assertTrue(any(item.artifact_type == "boy_scout_deferred_markdown" for item in artifacts))
-        self.assertTrue(deferred_path.is_file())
-        self.assertIn("Extract helper", deferred_path.read_text())
-        outcome_path = Path(self.temp_dir.name) / "IOS-30021BS2" / "spec" / "boy-scout-outcome.json"
-        self.assertTrue(outcome_path.exists())
-        self.assertEqual("skipped_by_operator", json.loads(outcome_path.read_text())["status"])
-
-    def test_boy_scout_explicit_clean_overrides_stale_findings_file(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSCLEAN",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSCLEAN")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSCLEAN" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        findings_path = spec_dir / "findings.md"
-        findings_path.write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={"result": "clean", "summary": "Clean Code Scout pass."},
-        )
-
-        self.assertEqual("boy_scout_completed", mapped_event.event_type)
-        self.assertEqual("verification_requested", followup_event.event_type)
-        self.assertEqual("verification_requested", updated_session.current_stage)
-        self.assertEqual("verification-coordinator", updated_session.current_owner)
-        self.assertEqual("SCOUT_RESULT: clean\n", findings_path.read_text(encoding="utf-8"))
-        artifacts = self.artifact_repository.list_for_session(session.id)
-        self.assertTrue(any(item.artifact_type == "boy_scout_report_markdown" for item in artifacts))
-        outcome_artifact = next(item for item in artifacts if item.artifact_type == "boy_scout_outcome_json")
-        self.assertEqual("internal_review", outcome_artifact.metadata["report_family"])
-        self.assertEqual("code_scout", outcome_artifact.metadata["review_lane"])
-        self.assertEqual("clean", outcome_artifact.metadata["status"])
-        scout_report_path = Path(self.temp_dir.name) / "IOS-30021BSCLEAN" / "scout" / "pass-01.md"
-        self.assertTrue(scout_report_path.is_file())
-        scout_report = scout_report_path.read_text(encoding="utf-8")
-        self.assertIn("SCOUT_RESULT: clean", scout_report)
-        self.assertIn("## Summary", scout_report)
-        self.assertIn("Clean Code Scout pass.", scout_report)
-
-    def test_skipped_boy_scout_findings_do_not_escalate_again_on_next_run(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSSKIPREUSE",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSSKIPREUSE")
-        implementation_session, implementation_event = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSSKIPREUSE" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "findings.md").write_text(
-            "SCOUT_RESULT: findings_found\n\n"
-            "## Finding 1: Extract helper\n\n"
-            "**Files**: `LegacyPresenter.swift`\n"
-            "**Principle**: SRP\n"
-            "**Problem**: Presenter does too much.\n"
-            "**Suggestion**: Extract a helper.\n"
-            "**Why it matters**: Leaving the extra responsibility in place makes future fixes riskier.\n"
-            "**Required direction**: Isolate the helper logic behind a narrower collaborator.\n"
-            "**Non-goals**: Do not refactor unrelated screens in this pass.\n"
-        )
-
-        waiting_session, _, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={
-                "result": "findings_found",
-                "summary": "Found one maintainability improvement opportunity.",
-                "findings_path": str(spec_dir / "findings.md"),
-                "findings_count": 1,
-            },
-        )
-        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
-        self.assertEqual("waiting_for_operator", waiting_session.status.value)
-
-        resumed_session, skip_event, _ = self.coordinator.skip_boy_scout(
-            session_id=session.id,
-            reason="Known refactor; defer until the presenter area changes again.",
-        )
-
-        rerun_session, _ = self.coordinator._enqueue_boy_scout(  # noqa: SLF001
-            session=resumed_session,
-            source_event=skip_event,
-        )
-        rerun_session, mapped_event, rerun_followup_event = self.coordinator.handle_role_output(
-            session_id=rerun_session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={
-                "result": "findings_found",
-                "summary": "Found one maintainability improvement opportunity.",
-                "findings_path": str(spec_dir / "findings.md"),
-                "findings_count": 1,
-            },
-        )
-
-        self.assertEqual("boy_scout_completed", mapped_event.event_type)
-        self.assertEqual("verification_requested", rerun_followup_event.event_type)
-        self.assertEqual("verification_requested", rerun_session.current_stage)
-        self.assertEqual("active", rerun_session.status.value)
-
-    def test_boy_scout_clean_summary_without_explicit_result_is_rejected(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSCLEANSUMMARY",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSCLEANSUMMARY")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSCLEANSUMMARY" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        findings_path = spec_dir / "findings.md"
-        findings_path.write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
-
-        with self.assertRaisesRegex(
-            IntakeError,
-            "Code Scout output must include payload.result set to 'clean' or 'findings_found'",
-        ):
-            self.coordinator.handle_role_output(
-                session_id=session.id,
-                role_name=CODE_SCOUT_ROLE,
-                output_type="completed",
-                payload={"summary": "Clean Code Scout pass: no real maintainability findings in the highest-signal changed files"},
-            )
-
-        self.assertEqual("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n", findings_path.read_text(encoding="utf-8"))
-
-    def test_boy_scout_findings_count_requires_explicit_result(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSCOUNT",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSCOUNT")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSCOUNT" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
-
-        with self.assertRaisesRegex(
-            IntakeError,
-            "Code Scout output must include payload.result set to 'clean' or 'findings_found'",
-        ):
-            self.coordinator.handle_role_output(
-                session_id=session.id,
-                role_name=CODE_SCOUT_ROLE,
-                output_type="completed",
-                payload={
-                    "summary": "Found one maintainability improvement opportunity.",
-                    "findings_count": 1,
-                },
-            )
-
-    def test_boy_scout_findings_path_requires_explicit_result(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSPATH",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSPATH")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSPATH" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        findings_path = spec_dir / "findings.md"
-        findings_path.write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
-
-        with self.assertRaisesRegex(
-            IntakeError,
-            "Code Scout output must include payload.result set to 'clean' or 'findings_found'",
-        ):
-            self.coordinator.handle_role_output(
-                session_id=session.id,
-                role_name=CODE_SCOUT_ROLE,
-                output_type="completed",
-                payload={
-                    "summary": "Found one maintainability improvement opportunity.",
-                    "findings_path": str(findings_path),
-                },
-            )
-
-    def test_boy_scout_findings_with_explicit_result_and_path_route_to_operator(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSPATHRESULT",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSPATHRESULT")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSPATHRESULT" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        findings_path = spec_dir / "findings.md"
-        findings_path.write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={
-                "result": "findings_found",
-                "summary": "Found one maintainability improvement opportunity.",
-                "findings_path": str(findings_path),
-                "findings_count": 1,
-            },
-        )
-
-        self.assertEqual("boy_scout_completed", mapped_event.event_type)
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
-        self.assertEqual("boy_scout_requested", updated_session.current_stage)
-        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
-        outcome_path = Path(self.temp_dir.name) / "IOS-30021BSPATHRESULT" / "spec" / "boy-scout-outcome.json"
-        self.assertTrue(outcome_path.exists())
-        self.assertEqual("findings_found", json.loads(outcome_path.read_text())["status"])
-
-    def test_boy_scout_findings_result_requires_explicit_count_and_path_without_file_fallback(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSSTRICT",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSSTRICT")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        with self.assertRaisesRegex(
-            IntakeError,
-            "Code Scout findings output must include payload.findings_path",
-        ):
-            self.coordinator.handle_role_output(
-                session_id=session.id,
-                role_name=CODE_SCOUT_ROLE,
-                output_type="completed",
-                payload={
-                    "result": "findings_found",
-                    "findings_count": 1,
-                },
-            )
-
-        with self.assertRaisesRegex(
-            IntakeError,
-            "Code Scout findings output must include a positive payload.findings_count",
-        ):
-            self.coordinator.handle_role_output(
-                session_id=session.id,
-                role_name=CODE_SCOUT_ROLE,
-                output_type="completed",
-                payload={
-                    "result": "findings_found",
-                    "findings_path": "/tmp/fake-findings.md",
-                },
-            )
-
-    def test_resolve_boy_scout_findings_creates_tech_debt_and_routes_remaining_findings(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSMIX",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSMIX")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSMIX" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "diff.md").write_text(
-            "# Diff Artifact: IOS-30021BSMIX\n\n"
-            "## Changed Files\n\n"
-            "| Status | Path |\n|---|---|\n"
-            "| added | `NewBuilder.swift` |\n"
-            "| modified | `LegacyPresenter.swift` |\n\n"
-        )
-        (spec_dir / "findings.md").write_text(
-            "SCOUT_RESULT: findings_found\n\n"
-            "## Finding 1: Extract builder helper\n\n"
-            "**Files**: `NewBuilder.swift`\n"
-            "**Principle**: DRY\n"
-            "**Problem**: Duplicate helper logic exists.\n"
-            "**Suggestion**: Extract a shared helper.\n\n"
-            "**Why it matters**: The duplicated helper logic can drift between the new code paths.\n\n"
-            "**Required direction**: Route both builder branches through one helper implementation.\n\n"
-            "**Non-goals**: Do not rework unrelated builder APIs.\n\n"
-            "---\n\n"
-            "## Finding 2: Split legacy presenter\n\n"
-            "**Files**: `LegacyPresenter.swift`\n"
-            "**Principle**: SRP\n"
-            "**Problem**: Presenter does too much.\n"
-            "**Suggestion**: Split responsibilities.\n"
-            "**Why it matters**: The legacy presenter already carries too many unrelated responsibilities.\n"
-            "**Required direction**: Separate the new branch from the existing presenter responsibilities.\n"
-            "**Non-goals**: Do not redesign the full presenter module graph in this task.\n"
-        )
-
-        updated_session, _, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={
-                "result": "findings_found",
-                "summary": "Found two improvement opportunities.",
-                "findings_path": str(spec_dir / "findings.md"),
-                "findings_count": 2,
-            },
-        )
-        self.assertEqual("waiting_for_operator", updated_session.status.value)
-        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
-
-        updated_session, event, correction_event = self.coordinator.resolve_boy_scout_findings(
-            session_id=session.id,
-            resolution="create_tech_debt",
-        )
-        artifacts = self.artifact_repository.list_for_session(session.id)
-        deferred_path = Path(self.temp_dir.name) / "IOS-30021BSMIX" / "spec" / "scout-deferred.md"
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
-
-        self.assertEqual("boy_scout_tech_debt_created", event.event_type)
-        self.assertEqual("boy_scout_correction_requested", correction_event.event_type)
-        self.assertEqual("boy_scout_correction_requested", updated_session.current_stage)
-        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
-        self.assertTrue(any(item.artifact_type == "boy_scout_actionable_markdown" for item in artifacts))
-        self.assertTrue(any(item.artifact_type == "boy_scout_deferred_markdown" for item in artifacts))
-        self.assertTrue(deferred_path.is_file())
-        self.assertIn("Split legacy presenter", deferred_path.read_text())
-        self.assertIn('"issues_file_path"', sent_inputs[-1])
-        actionable_path = spec_dir / "boy-scout-actionable.md"
-        self.assertTrue(actionable_path.is_file())
-        actionable_text = actionable_path.read_text()
-        self.assertIn("Extract builder helper", actionable_text)
-        self.assertIn("## Why It Matters", actionable_text)
-        self.assertIn("## Required Direction", actionable_text)
-        self.assertIn("## Non-goals", actionable_text)
-        self.assertNotIn("Split legacy presenter", actionable_text)
-        outcome_path = Path(self.temp_dir.name) / "IOS-30021BSMIX" / "spec" / "boy-scout-outcome.json"
-        self.assertTrue(outcome_path.exists())
-        self.assertEqual("resolved_create_tech_debt", json.loads(outcome_path.read_text())["status"])
-
-    def test_get_interactive_state_summary_exposes_boy_scout_reason(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSREASON",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSREASON")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSREASON" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "findings.md").write_text(
-            "SCOUT_RESULT: findings_found\n\n"
-            "## Finding 1: Extract helper\n\n"
-            "**Files**: `Sources/Feature/RetryFlow.swift`\n"
-            "**Problem**: Retry helper logic is duplicated across two branches.\n"
-            "**Why it matters**: The duplicate path can drift and regress independently.\n"
-            "**Required direction**: Consolidate the retry helper behind one shared implementation.\n"
-            "**Non-goals**: Do not refactor unrelated flow wiring in this pass.\n"
-        )
-        _, _, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={
-                "result": "findings_found",
-                "summary": "Found one improvement opportunity.",
-                "findings_path": str(spec_dir / "findings.md"),
-                "findings_count": 1,
-            },
-        )
-
-        summary = self.coordinator.get_interactive_state_summary(session.id)
-
-        self.assertTrue(summary["available"])
-        self.assertEqual(CODE_SCOUT_ROLE, summary["role_name"])
-        self.assertEqual("boy_scout_findings", summary["source_reason"])
-        self.assertEqual("internal_review", summary["review_family"])
-        self.assertEqual("code_scout", summary["review_lane"])
-        self.assertEqual("boy_scout_requested", summary["current_stage"])
-        self.assertFalse(summary["needs_operator_input"])
-        self.assertIn("Code Scout found", str(summary["details"]))
-        self.assertIn("Extract helper", str(summary["details"]))
-        self.assertIn("Why it matters", str(summary["details"]))
-        self.assertIn("Required direction", str(summary["details"]))
-        self.assertNotIn("Clean Code Scout pass", str(summary["details"]))
-        self.assertTrue(
-            any("pass-01.md" in str(path) for path in (followup_event.payload.get("review_report_paths") or []))
-        )
-
-    def test_get_interactive_state_summary_exposes_section_style_boy_scout_reason(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSSECTIONS",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSSECTIONS")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSSECTIONS" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "findings.md").write_text(
-            "SCOUT_RESULT: findings_found\n\n"
-            "## Finding 1: Local-toggle availability is still gated in two separate layers\n\n"
-            "Affected files:\n"
-            "- `FinomReusable/PresentationLayer/Modules/Debug/DebugSettings/DebugSettingsInteractor.swift`\n"
-            "- `FinomCore/App Core/Services/Domain/LocalFeatureToggles/LocalFeatureToggleService.swift`\n\n"
-            "Why it matters:\n"
-            "The new local-toggle path now has two independent release guards.\n\n"
-            "Required direction:\n"
-            "Move the availability decision behind a single API boundary.\n\n"
-            "Evidence:\n"
-            "- `DebugSettingsInteractor.localFeatureToggleRows()` returns `[]` in release.\n"
-            "- `LocalFeatureToggleService.isEnabled` repeats the release guard.\n"
-        )
-        self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={
-                "result": "findings_found",
-                "summary": "Found one improvement opportunity.",
-                "findings_path": str(spec_dir / "findings.md"),
-                "findings_count": 1,
-            },
-        )
-        self.event_repository.append(
-            session_id=session.id,
-            event_type="session_escalated_to_operator",
-            producer_type="coordinator",
-            payload={
-                "role_name": CODE_SCOUT_ROLE,
-                "reason": "boy_scout_findings",
-                "summary": "code scout findings need operator decision",
-                "details": "### Local-toggle availability is still gated in two separate layers",
-                "needs_operator_input": False,
-                "implement_now_count": 0,
-                "tech_debt_candidate_count": 1,
-                "current_stage": "boy_scout_requested",
-            },
-        )
-
-        summary = self.coordinator.get_interactive_state_summary(session.id)
-
-        self.assertTrue(summary["available"])
-        self.assertIn("Local-toggle availability is still gated", str(summary["details"]))
-        self.assertIn("DebugSettingsInteractor.swift", str(summary["details"]))
-        self.assertIn("two independent release guards", str(summary["details"]))
-        self.assertIn("Move the availability decision", str(summary["details"]))
-        self.assertIn("DebugSettingsInteractor.localFeatureToggleRows()", str(summary["details"]))
-        self.assertNotEqual("### Local-toggle availability is still gated in two separate layers", summary["details"])
-
-    def test_internal_review_metrics_artifact_tracks_reviewer_and_scout_progress(self) -> None:
-        scout_session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021METRICSSCOUT",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021METRICSSCOUT")
-        self.coordinator.handle_operator_event(
-            session_id=scout_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=scout_session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={"result": "clean", "summary": "No actionable maintainability findings."},
-        )
-
-        reviewer_session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021METRICSREVIEW",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "disabled", "self_review_policy": "required"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021METRICSREVIEW")
-        self.coordinator.handle_operator_event(
-            session_id=reviewer_session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-        self.coordinator.handle_role_output(
-            session_id=reviewer_session.id,
-            role_name=CODE_REVIEWER_ROLE,
-            output_type="blocked_review_cycle",
-            payload={
-                "summary": "Blocked review cycle: reducer invariant still unresolved",
-                "details": "The same reducer invariant keeps failing across correction passes.",
-                "issues": [
-                    {
-                        "severity": "error",
-                        "file": "Sources/Feature/Reducer.swift",
-                        "problem": "Retry invalidation still bypasses the reducer.",
-                        "required_change": "Move the invalidation back behind the reducer path.",
-                    }
-                ],
-            },
-        )
-
-        scout_metrics_artifact = next(
-            item
-            for item in self.artifact_repository.list_for_session(scout_session.id)
-            if item.artifact_type == "internal_review_metrics_json"
-        )
-        scout_metrics = json.loads(Path(scout_metrics_artifact.path).read_text(encoding="utf-8"))
-        reviewer_metrics_artifact = next(
-            item
-            for item in self.artifact_repository.list_for_session(reviewer_session.id)
-            if item.artifact_type == "internal_review_metrics_json"
-        )
-        reviewer_metrics = json.loads(Path(reviewer_metrics_artifact.path).read_text(encoding="utf-8"))
-
-        self.assertEqual("IOS-30021METRICSSCOUT", scout_metrics["task_key"])
-        self.assertEqual(1, scout_metrics["code_scout"]["report_count"])
-        self.assertEqual(1, scout_metrics["code_scout"]["clean_count"])
-        self.assertEqual(0, scout_metrics["self_review"]["report_count"])
-
-        self.assertEqual("IOS-30021METRICSREVIEW", reviewer_metrics["task_key"])
-        self.assertEqual(1, reviewer_metrics["self_review"]["report_count"])
-        self.assertEqual(1, reviewer_metrics["self_review"]["blocked_count"])
-        self.assertEqual(1, reviewer_metrics["operator_escalations"]["internal_review_count"])
-        self.assertEqual(1, reviewer_metrics["operator_escalations"]["structured_details_count"])
-
-    def test_active_runtime_output_is_hidden_for_boy_scout_operator_gate_without_live_blocker_role(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BSOUTPUT",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BSOUTPUT")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BSOUTPUT" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
-
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        assert implementer_role is not None
-        self.session_backend.simulate_output(implementer_role.runtime_handle, "stale implementer output")
-
-        self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={
-                "result": "findings_found",
-                "summary": "Found one improvement opportunity.",
-                "findings_path": str(spec_dir / "findings.md"),
-                "findings_count": 1,
-            },
-        )
-        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
-        assert scout_role is not None
-        self.role_repository.update_status(scout_role.id, RoleStatus.STOPPED)
-
-        summary = self.coordinator.get_active_runtime_output_summary(session.id)
-
-        self.assertFalse(summary["available"])
-        self.assertIsNone(summary["role_name"])
-        self.assertEqual("", summary["content"])
-
     def test_active_runtime_output_ignores_standby_runtime_without_active_owner_or_stage_item(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021ACTIVEOUTPUT",
             workflow_profile="oneshot",
-            policy={"boy_scout_policy": "disabled", "self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30021ACTIVEOUTPUT")
 
@@ -11933,7 +9187,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021STALLPOKE",
             workflow_profile="oneshot",
-            policy={"boy_scout_policy": "disabled", "self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30021STALLPOKE")
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
@@ -11967,7 +9221,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021STALLRESULT",
             workflow_profile="oneshot",
-            policy={"boy_scout_policy": "disabled", "self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30021STALLRESULT")
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
@@ -12002,7 +9256,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021WAITNOPOKE",
             workflow_profile="oneshot",
-            policy={"boy_scout_policy": "disabled", "self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30021WAITNOPOKE")
         implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
@@ -12057,7 +9311,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021COLLECTSTALL",
             workflow_profile="oneshot",
-            policy={"boy_scout_policy": "disabled", "self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         self.coordinator.prepare_task_session("IOS-30021COLLECTSTALL")
 
@@ -12069,133 +9323,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(0, chunk_count)
         self.assertEqual(1, len(poke_events))
         self.assertEqual(IMPLEMENTER_ROLE, poke_events[0].payload["role_name"])
-
-    def test_boy_scout_manual_skip_is_rejected_when_policy_required(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BS2R",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "required", "self_review_policy": "disabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BS2R")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        spec_dir = Path(self.temp_dir.name) / "IOS-30021BS2R" / "spec"
-        spec_dir.mkdir(parents=True, exist_ok=True)
-        (spec_dir / "findings.md").write_text("SCOUT_RESULT: findings_found\n\n## Finding 1: Extract helper\n")
-        self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            output_type="completed",
-            payload={
-                "result": "findings_found",
-                "summary": "Found one maintainability improvement opportunity.",
-                "findings_path": str(spec_dir / "findings.md"),
-                "findings_count": 1,
-            },
-        )
-
-        with self.assertRaisesRegex(
-            IntakeError,
-            "Manual Code Scout skip is only allowed when boy_scout_policy is enabled",
-        ):
-            self.coordinator.skip_boy_scout(
-                session_id=session.id,
-                reason="operator shortcut",
-            )
-
-    def test_complete_self_review_with_issues_routes_to_implementer_correction(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021SR3",
-            workflow_profile="oneshot",
-            policy={"self_review_policy": "enabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021SR3")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        updated_session, event, followup_event = self.coordinator.complete_self_review(
-            session_id=session.id,
-            outcome="issues_found",
-            summary="Found two naming issues and one missing guard branch.",
-        )
-        work_items = self.work_item_repository.list_for_session(session.id)
-        artifacts = self.artifact_repository.list_for_session(session.id)
-        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
-
-        self.assertEqual("self_review_issues_found", event.event_type)
-        self.assertEqual("self_review_correction_requested", followup_event.event_type)
-        self.assertEqual("self_review_correction_requested", updated_session.current_stage)
-        self.assertEqual("implementer", updated_session.current_owner)
-        self.assertTrue(any(item.work_type == "self_review_correction" for item in work_items))
-        self.assertTrue(any(item.artifact_type == "self_review_report_markdown" for item in artifacts))
-        self.assertIn('"issues_file_path"', sent_inputs[-1])
-        self.assertIn('"correction_source": "self_review"', sent_inputs[-1])
-        self.assertIn('"correction_report_path"', sent_inputs[-1])
-        self.assertIn("pass-01.md", sent_inputs[-1])
-
-    def test_complete_self_review_is_rejected_when_policy_required(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021SR3R",
-            workflow_profile="oneshot",
-            policy={"self_review_policy": "required"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021SR3R")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-
-        with self.assertRaisesRegex(
-            IntakeError,
-            "Manual self review completion is only allowed when self_review_policy is enabled",
-        ):
-            self.coordinator.complete_self_review(
-                session_id=session.id,
-                outcome="passed",
-                summary="operator shortcut",
-            )
-
-    def test_self_review_correction_completed_reenters_self_review_loop(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021SR4",
-            workflow_profile="oneshot",
-            policy={"self_review_policy": "enabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021SR4")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-        self.coordinator.complete_self_review(
-            session_id=session.id,
-            outcome="issues_found",
-            summary="Found two naming issues and one missing guard branch.",
-        )
-
-        updated_session, followup_event = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "self review fixes done"},
-        )
-        reviewer_role = self.role_repository.get_by_name(session.id, CODE_REVIEWER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
-
-        self.assertEqual("self_review_requested", updated_session.current_stage)
-        self.assertEqual(CODE_REVIEWER_ROLE, updated_session.current_owner)
-        self.assertEqual("self_review_requested", followup_event.event_type)
-        self.assertIn("previous_review_report_paths", sent_inputs[-1])
-        self.assertIn("pass-01.md", sent_inputs[-1])
-        self.assertIn("pass-02.md", sent_inputs[-1])
 
     def test_complete_doc_harvest_marks_lane_completed(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -12455,34 +9582,6 @@ class SessionCreationTests(unittest.TestCase):
         )
 
         self.assertIsNone(self.coordinator._verification_outcome_status(session))
-
-    def test_persistent_session_roles_include_reusable_followup_roles(self) -> None:
-        self.assertIn(CODE_REVIEWER_ROLE, PERSISTENT_SESSION_ROLES)
-        self.assertIn(CODE_SCOUT_ROLE, PERSISTENT_SESSION_ROLES)
-        self.assertIn(DOC_HARVEST_ROLE, PERSISTENT_SESSION_ROLES)
-        self.assertIn(DOCUMENTATION_REVIEWER_ROLE, PERSISTENT_SESSION_ROLES)
-
-    def test_stale_runtime_cleanup_keeps_persistent_optional_roles_running(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021PERSISTOPT",
-            workflow_profile="oneshot",
-            policy={"boy_scout_policy": "enabled", "doc_harvest_policy": "enabled"},
-        )
-
-        self.coordinator._maybe_stop_stale_runtime_role(session=session, role_name=CODE_SCOUT_ROLE)
-        self.coordinator._maybe_stop_stale_runtime_role(session=session, role_name=DOC_HARVEST_ROLE)
-        self.coordinator._maybe_stop_stale_runtime_role(session=session, role_name=DOCUMENTATION_REVIEWER_ROLE)
-
-        scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
-        doc_role = self.role_repository.get_by_name(session.id, DOC_HARVEST_ROLE)
-        documentation_reviewer_role = self.role_repository.get_by_name(session.id, DOCUMENTATION_REVIEWER_ROLE)
-        assert scout_role is not None
-        assert doc_role is not None
-        assert documentation_reviewer_role is not None
-
-        self.assertEqual(RoleStatus.RUNNING, scout_role.status)
-        self.assertEqual(RoleStatus.RUNNING, doc_role.status)
-        self.assertEqual(RoleStatus.RUNNING, documentation_reviewer_role.status)
 
     def test_doc_harvest_skipped_not_needed_completes_session_when_policy_enabled(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -13015,48 +10114,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn(followup_event.event_type, {"jira_subtasks_created", "subtask_implementation_requested"})
         self.assertIn(retried_session.current_stage, {"subtask_creation_requested", "subtask_implementation_requested"})
 
-    def test_retry_session_retries_protocol_violation_with_same_work_item(self) -> None:
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022PROTO")
-        scout_role = self.role_repository.create(
-            session_id=session.id,
-            role_name=CODE_SCOUT_ROLE,
-            runtime_backend="recording",
-            runtime_handle="recording:code-scout",
-        )
-        active_scout_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="boy_scout",
-            title=f"Code Scout pass for {session.task_key}",
-            owner_role_id=scout_role.id,
-            source_event_id=None,
-            priority=91,
-            status=WorkItemStatus.ASSIGNED,
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="boy_scout_requested",
-            current_owner=CODE_SCOUT_ROLE,
-        )
-        blocked_session = self.coordinator._handle_role_result_protocol_violation(
-            session=session,
-            role=scout_role,
-            error_message="RESULT.json is invalid or does not match the required terminal schema",
-        )
-        self.assertEqual("waiting_for_operator", blocked_session.status.value)
-
-        retried_session, retried_event, dispatch_event = self.coordinator.retry_session(session.id)
-        refreshed_scout_role = self.role_repository.get_by_name(session.id, CODE_SCOUT_ROLE)
-        assert refreshed_scout_role is not None
-        sent_inputs = self.session_backend.get_sent_inputs(refreshed_scout_role.runtime_handle)
-
-        self.assertEqual("active", retried_session.status.value)
-        self.assertEqual(CODE_SCOUT_ROLE, retried_session.current_owner)
-        self.assertEqual("session_retried_by_operator", retried_event.event_type)
-        self.assertEqual("protocol_recovery", retried_event.payload.get("retry_mode"))
-        self.assertEqual("role_input_dispatched", dispatch_event.event_type)
-        self.assertEqual(active_scout_item.id, dispatch_event.payload.get("work_item_id"))
-        self.assertIn("Resubmit only the terminal outcome", sent_inputs[-1])
-
     def test_retry_session_picks_latest_operator_pending_item(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022LATEST")
         verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
@@ -13267,7 +10324,7 @@ class SessionCreationTests(unittest.TestCase):
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004PLANOWNER",
             workflow_profile="story_full",
-            policy={"self_review_policy": "disabled"},
+            policy={"review_policy": "disabled"},
         )
         constraints_role = self.role_repository.get_by_name(session.id, CONSTRAINTS_WORKER_ROLE)
         spec_verifier_role = self.role_repository.get_by_name(session.id, SPEC_VERIFIER_WORKER_ROLE)

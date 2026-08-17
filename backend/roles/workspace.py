@@ -84,16 +84,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Final verification report target: `{task_snapshot_root}/spec/final-verification.md`",
             "- Verification strategy input: `{task_snapshot_root}/spec/verification-strategy.json`",
         ]
-    if role_name == "code-reviewer":
-        return [
-            "- Task repo worktree: `{task_repo_root}`",
-            "- Task snapshot metadata: `{task_snapshot_root}`",
-            "- Review report directory and current pass target: `{task_snapshot_root}/review`",
-            "- Task-local runtime root: `{task_runtime_root}`",
-            "- Task-local temp root: `{task_tmp_root}`",
-            "- Task artifacts and review outputs: `{task_artifacts_root}`",
-            "- Project conventions: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
-        ]
     if role_name == "convention-reviewer":
         return [
             "- Task repo worktree: `{task_repo_root}`",
@@ -117,17 +107,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and review outputs: `{task_artifacts_root}`",
             "- Primary project guidance: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/README.md`",
-        ]
-    if role_name == "code-scout":
-        return [
-            "- Task snapshot metadata: `{task_snapshot_root}`",
-            "- Diff input: `{task_snapshot_root}/spec/diff.md`",
-            "- Findings target: `{task_snapshot_root}/spec/findings.md`",
-            "- Deferred findings input: `{task_snapshot_root}/spec/scout-deferred.md`",
-            "- Task repo worktree: `{task_repo_root}`",
-            "- Task-local runtime root: `{task_runtime_root}`",
-            "- Task-local temp root: `{task_tmp_root}`",
-            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
         ]
     if role_name == "doc-harvest-worker":
         return [
@@ -255,14 +234,6 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You validate changes through deterministic checks and review the resulting evidence.",
             "- Do not modify product code; report verification results and required corrections only.",
         ]
-    if role_name == "code-reviewer":
-        return [
-            "- You execute routed code review work for one task session.",
-            "- You review only the routed task changes and produce compact review outcomes plus a durable structured review report for the current pass.",
-            "- For real findings, include optional `Evidence`, `Suggested approach`, and `Test expectations` sections only when they are grounded by the touched diff and likely to help the next correction pass.",
-            "- Do not run build, test, or lint verification. Submit your review result; verification happens after this role finishes.",
-            "- Across repeated passes, retain reviewer context for the same task instead of reinitializing from zero.",
-        ]
     if role_name == "convention-reviewer":
         return [
             "- You execute one bounded convention review pass for one task session.",
@@ -277,13 +248,6 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You protect earlier accepted subtasks from regressions unless a newer Jira follow-up explicitly overrides them.",
             "- You do not review convention/style/documentation hygiene unless it directly breaks behavior or coverage.",
             "- Do not run build, test, or lint verification. Submit your review result; verification happens after this role finishes.",
-        ]
-    if role_name == "code-scout":
-        return [
-            "- You execute one bounded Code Scout pass for one completed coding session.",
-            "- You inspect only the changed code area for real maintainability improvements and do not modify product code yourself.",
-            "- For real findings, include optional `Evidence`, `Suggested approach`, and `Test expectations` sections only when they are grounded by the touched code and likely to help the next cleanup pass.",
-            "- You stop after writing either a clean result or structured findings for operator review.",
         ]
     if role_name == "doc-harvest-worker":
         return [
@@ -391,19 +355,6 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Keep the role evidence-first: summarize failures, but do not attempt fixes.",
             "- Do not modify product code.",
         ]
-    if role_name == "code-reviewer":
-        return [
-            "- Review only the routed diff and conventions relevant to that diff.",
-            "- Write or refresh the structured review report for the current pass before you finish.",
-            "- Structure real findings with enough direction to act: include the finding title or affected file/component, why it matters, required direction, and non-goals when they help keep the fix scoped.",
-            "- Read previous review reports from the immediate correction chain first when they are provided and do not re-flag the same issue twice.",
-            "- Read only the convention files relevant to the touched diff area; do not broaden the review scope speculatively.",
-            "- When the diff adds or edits tests, verify that the tests follow the existing local test conventions for naming, fixtures, setup, helpers, and assertion style in that area.",
-            "- Treat unnecessary test self-activity or ad-hoc testing patterns as real review findings when they diverge from established project conventions.",
-            "- Keep outputs compact and fixer-oriented.",
-            "- Do not re-flag issues that were already raised in the immediate correction chain when that context is provided.",
-            "- Treat similar issues that return after later follow-up, subtask, or implementation work as normal failed review findings, not blocked review cycles.",
-        ]
     if role_name == "convention-reviewer":
         return [
             "- Read the routed diff first, then inspect only touched full files and directly relevant local convention sources.",
@@ -434,15 +385,6 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- Keep outputs compact and fixer-oriented.",
             "- Do not re-flag issues already raised in the immediate correction chain when that context is provided.",
             "- Treat similar issues that return after later follow-up, subtask, or implementation work as normal failed review findings, not blocked review cycles.",
-        ]
-    if role_name == "code-scout":
-        return [
-            "- Start from `spec/diff.md` and use it to decide whether the branch has strong enough maintainability signals for a Code Scout pass.",
-            "- Read full current files only for the most promising changed code paths; do not analyze raw diff hunks alone.",
-            "- If signals are weak or no real findings exist, return a clean Code Scout result and stop.",
-            "- If real maintainability findings exist, write `spec/findings.md`, summarize the findings, and stop without changing product code.",
-            "- Structure each finding with a clear title, why it matters, required direction, and non-goals; affected files and additional context should be included when grounded by the diff.",
-            "- Skip style nits, convention-only feedback, and speculative improvements.",
         ]
     if role_name == "doc-harvest-worker":
         return [
@@ -533,7 +475,7 @@ def _terminal_result_contract(role_name: str) -> list[str]:
         "- Replace `<work_item_id>` and `<subtask_key>` with the exact values from `HYDRATION.json` when present.",
         "- Keep summaries short and operator-readable.",
     ]
-    if role_name in {"code-reviewer", "convention-reviewer", "requirements-reviewer"}:
+    if role_name in {"convention-reviewer", "requirements-reviewer"}:
         return [
             "- Clean review:",
             f"  `{helper} --work-item-id <work_item_id> --output-type passed --summary \"Review passed\"`",
@@ -571,16 +513,6 @@ def _terminal_result_contract(role_name: str) -> list[str]:
             f"  `{helper} --work-item-id <work_item_id> --output-type completed --subtask-key <subtask_key> --summary \"Subtask completed\"`",
             "- Implementation could not complete:",
             f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Implementation blocked\" --details \"<what prevented completion>\"`",
-            *common,
-        ]
-    if role_name == "code-scout":
-        return [
-            "- Clean scout pass:",
-            f"  `{helper} --work-item-id <work_item_id> --output-type completed --result clean --summary \"No maintainability findings\"`",
-            "- Maintainability findings found:",
-            f"  `{helper} --work-item-id <work_item_id> --output-type completed --result findings_found --findings-count <count> --findings-path <path> --summary \"Maintainability findings found\"`",
-            "- Scout not needed for this diff:",
-            f"  `{helper} --work-item-id <work_item_id> --output-type skipped_not_needed --result clean --summary \"Scout not needed\"`",
             *common,
         ]
     if role_name == "doc-harvest-worker":

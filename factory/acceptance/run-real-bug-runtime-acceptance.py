@@ -74,9 +74,8 @@ def main() -> None:
                 prepare=True,
                 policy={
                     "test_policy": "required",
-                    "self_review_policy": "disabled",
-                    "boy_scout_policy": "disabled",
-                    "doc_harvest_policy": "disabled",
+                    "review_policy": "disabled",
+                                        "doc_harvest_policy": "disabled",
                 },
                 role_config=acceptance_role_config(
                     [BUG_FIXER_ROLE, VERIFICATION_COORDINATOR_ROLE]

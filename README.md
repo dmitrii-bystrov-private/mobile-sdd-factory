@@ -97,8 +97,8 @@ For small, self-contained tasks where spec preparation would be overkill:
 ```
 prepare snapshot   →  Jira snapshot + task-local git repo/worktree prepared
 implementation     →  implementer reads the snapshot directly without story planning
-self-review        →  optional/required persistent reviewer lane
-boy scout          →  optional/required scout lane
+dual review        →  convention + requirements reviewer lanes
+documentation      →  documentation writer/reviewer lanes when needed
 verification       →  persistent verifier lane
 delivery           →  automatic MR handoff + automatic send-to-test
 ```
@@ -108,7 +108,6 @@ No proposal, no requirements pass, no plan. Just snapshot → implement → qual
 Human checkpoints still exist, but only where the workflow actually needs a person:
 
 - requirements clarification when the agent cannot proceed safely without answers
-- Boy Scout findings that may need to become tech-debt stories
 - blocked review / verification cycles that cannot converge automatically
 - external blockers such as missing MCP access, authentication, or VPN
 - manual cleanup and exceptional recovery actions
@@ -264,9 +263,8 @@ Example:
     },
     "policy_defaults": {
       "story_full": {
-        "self_review_policy": "enabled",
-        "boy_scout_policy": "enabled",
-        "doc_harvest_policy": "enabled",
+        "review_policy": "enabled",
+                "doc_harvest_policy": "enabled",
         "requirements_clarification_mode": "ask-selectively"
       }
     }
@@ -377,5 +375,4 @@ index.html        # local static presentation deck for the SDD workflow
 - [`docs/operator-guide.md`](docs/operator-guide.md) — practical operator workflow for the supported backend/UI runtime model
 - [`docs/runtime-model.md`](docs/runtime-model.md) — supported session, role, quality-loop, recovery, and cleanup model
 - [`docs/terminal-result-contract.md`](docs/terminal-result-contract.md) — deterministic terminal result submission contract for routed roles
-- [`docs/dual-review-lanes-migration-plan.md`](docs/dual-review-lanes-migration-plan.md) — working plan and checklist for replacing Code Scout with focused convention and requirements review lanes
 - [`AGENTS.md`](AGENTS.md) — repository conventions for contributors and coding agents

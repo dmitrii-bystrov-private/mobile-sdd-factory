@@ -83,7 +83,6 @@ export function OperatorActions({
   const supportsGenericRecovery =
     session.status === "waiting_for_operator" &&
     !needsInteractiveReply &&
-    interactiveStateSummary?.sourceReason !== "boy_scout_findings" &&
     interactiveStateSummary?.sourceReason !== "subtask_creation_failed" &&
     session.current_stage !== "subtask_creation_requested" &&
     !hasStageSpecificDeliveryRetry &&

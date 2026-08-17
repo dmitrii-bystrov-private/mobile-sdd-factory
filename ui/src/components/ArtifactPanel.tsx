@@ -2,13 +2,6 @@ import type { Artifact, EventItem } from "../types";
 import { stageDisplayName } from "../stageDisplay";
 
 const ARTIFACT_LABELS: Record<string, string> = {
-  self_review_report_markdown: "Self Review Report",
-  self_review_outcome_json: "Self Review Outcome",
-  boy_scout_report_markdown: "Code Scout Report",
-  boy_scout_outcome_json: "Code Scout Outcome",
-  boy_scout_actionable_markdown: "Code Scout Actionable Findings",
-  boy_scout_deferred_markdown: "Deferred Code Scout Findings",
-  boy_scout_findings: "Code Scout Findings Source",
   internal_review_metrics_json: "Internal Review Metrics",
   final_verification_markdown: "Verification Report",
 };
@@ -27,10 +20,6 @@ function artifactDisplayName(value: string): string {
 
 function reviewLaneDisplayName(value: string): string {
   switch (value) {
-    case "self_review":
-      return "Self Review";
-    case "code_scout":
-      return "Code Scout";
     default:
       return humanizeEventType(value);
   }

@@ -7,8 +7,7 @@ from pydantic import BaseModel
 
 class SessionPolicyPayload(BaseModel):
     test_policy: str | None = None
-    self_review_policy: str | None = None
-    boy_scout_policy: str | None = None
+    review_policy: str | None = None
     doc_harvest_policy: str | None = None
     requirements_clarification_mode: str | None = None
 
@@ -619,43 +618,6 @@ class CompleteDocHarvestResponse(BaseModel):
     completed: bool
     session: SessionResponse
     event_type: str
-
-
-class SkipBoyScoutRequest(BaseModel):
-    session_id: int
-    reason: str
-
-
-class SkipBoyScoutResponse(BaseModel):
-    skipped: bool
-    session: SessionResponse
-    event_type: str
-    followup_event_type: str | None = None
-
-
-class ResolveBoyScoutFindingsRequest(BaseModel):
-    session_id: int
-    resolution: str
-
-
-class ResolveBoyScoutFindingsResponse(BaseModel):
-    resolved: bool
-    session: SessionResponse
-    event_type: str
-    followup_event_type: str | None = None
-
-
-class CompleteSelfReviewRequest(BaseModel):
-    session_id: int
-    outcome: str
-    summary: str
-
-
-class CompleteSelfReviewResponse(BaseModel):
-    completed: bool
-    session: SessionResponse
-    event_type: str
-    followup_event_type: str | None = None
 
 
 class ReopenFromQaRequest(BaseModel):

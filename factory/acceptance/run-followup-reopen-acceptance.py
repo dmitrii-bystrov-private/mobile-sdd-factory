@@ -105,9 +105,8 @@ def main() -> None:
                 workflow_profile="oneshot",
                 prepare=True,
                 policy={
-                    "self_review_policy": "required",
-                    "boy_scout_policy": "disabled",
-                    "doc_harvest_policy": "disabled",
+                    "review_policy": "required",
+                                        "doc_harvest_policy": "disabled",
                 },
             ),
             dependencies=deps,
@@ -124,18 +123,29 @@ def main() -> None:
             ),
             dependencies=deps,
         )
-        assert implementation_response.followup_event_type == "self_review_requested"
+        assert implementation_response.followup_event_type == "convention_review_requested"
 
-        review_response = submit_role_output(
+        convention_response = submit_role_output(
             RoleOutputRequest(
                 session_id=session_id,
-                role_name="code-reviewer",
+                role_name="convention-reviewer",
                 output_type="passed",
-                payload={"summary": "clean review"},
+                payload={"summary": "clean convention review"},
             ),
             dependencies=deps,
         )
-        assert review_response.followup_event_type == "verification_requested"
+        assert convention_response.followup_event_type == "requirements_review_requested"
+
+        requirements_response = submit_role_output(
+            RoleOutputRequest(
+                session_id=session_id,
+                role_name="requirements-reviewer",
+                output_type="passed",
+                payload={"summary": "clean requirements review"},
+            ),
+            dependencies=deps,
+        )
+        assert requirements_response.followup_event_type == "verification_requested"
 
         verification_passed_response = submit_role_output(
             RoleOutputRequest(
@@ -192,8 +202,11 @@ def main() -> None:
             "implementation_requested",
             "implementation_completed",
             "role_input_dispatched",
-            "self_review_requested",
-            "self_review_passed",
+            "convention_review_requested",
+            "convention_review_passed",
+            "role_input_dispatched",
+            "requirements_review_requested",
+            "requirements_review_passed",
             "role_input_dispatched",
             "verification_requested",
             "verification_passed",

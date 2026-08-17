@@ -31,9 +31,8 @@ class RepositoryTests(unittest.TestCase):
             workflow_profile="bug_full",
             policy={
                 "test_policy": "enabled",
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
         loaded = repository.get_by_task_key("IOS-20000")
@@ -53,9 +52,8 @@ class RepositoryTests(unittest.TestCase):
             current_stage="intake",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
 
@@ -76,9 +74,8 @@ class RepositoryTests(unittest.TestCase):
             current_stage="intake",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
 
@@ -102,9 +99,8 @@ class RepositoryTests(unittest.TestCase):
             current_stage="intake",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
 
@@ -127,9 +123,8 @@ class RepositoryTests(unittest.TestCase):
             current_stage="intake",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
 
@@ -156,9 +151,8 @@ class RepositoryTests(unittest.TestCase):
             current_stage="intake",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
 
@@ -199,9 +193,8 @@ class RepositoryTests(unittest.TestCase):
             current_stage="intake",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
 
@@ -224,9 +217,8 @@ class RepositoryTests(unittest.TestCase):
             current_stage="intake",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
 
@@ -247,9 +239,8 @@ class RepositoryTests(unittest.TestCase):
             current_stage="implementation_requested",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
         role = role_repository.create(session.id, "implementer", "recording", "recording:implementer")

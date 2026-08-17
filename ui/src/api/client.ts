@@ -45,10 +45,6 @@ const STREAM_EVENT_TYPES = [
   "subtask_completed",
   "implementation_requested",
   "implementation_completed",
-  "self_review_requested",
-  "self_review_passed",
-  "self_review_issues_found",
-  "self_review_blocked",
   "convention_review_requested",
   "convention_review_passed",
   "convention_review_issues_found",
@@ -59,13 +55,6 @@ const STREAM_EVENT_TYPES = [
   "requirements_review_issues_found",
   "requirements_review_blocked",
   "requirements_review_correction_requested",
-  "boy_scout_requested",
-  "boy_scout_completed",
-  "boy_scout_skipped_by_operator",
-  "boy_scout_implement_now_selected",
-  "boy_scout_tech_debt_created",
-  "boy_scout_correction_requested",
-  "self_review_correction_requested",
   "doc_harvest_requested",
   "doc_harvest_completed",
   "documentation_review_requested",
@@ -108,8 +97,7 @@ type CreateSessionPayload = {
   workflow_profile: WorkflowProfile;
   prepare?: boolean;
   policy: {
-    self_review_policy: SessionPolicyValue;
-    boy_scout_policy: SessionPolicyValue;
+    review_policy: SessionPolicyValue;
     doc_harvest_policy: SessionPolicyValue;
     test_policy?: SessionPolicyValue;
     requirements_clarification_mode?: RequirementsClarificationMode;
@@ -521,42 +509,6 @@ export const apiClient = {
       method: "POST",
       body: JSON.stringify({
         session_id: sessionId,
-      }),
-    });
-  },
-
-  skipBoyScout(
-    sessionId: number,
-    reason: string,
-  ): Promise<{
-    skipped: boolean;
-    event_type: string;
-    followup_event_type: string | null;
-    session: Session;
-  }> {
-    return request("/operator/skip-boy-scout", {
-      method: "POST",
-      body: JSON.stringify({
-        session_id: sessionId,
-        reason,
-      }),
-    });
-  },
-
-  resolveBoyScoutFindings(
-    sessionId: number,
-    resolution: "implement_now" | "create_tech_debt",
-  ): Promise<{
-    resolved: boolean;
-    event_type: string;
-    followup_event_type: string | null;
-    session: Session;
-  }> {
-    return request("/operator/resolve-boy-scout-findings", {
-      method: "POST",
-      body: JSON.stringify({
-        session_id: sessionId,
-        resolution,
       }),
     });
   },

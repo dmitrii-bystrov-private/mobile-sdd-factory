@@ -82,44 +82,6 @@ class WriteResultScriptTests(unittest.TestCase):
         self.assertIn("--issues-markdown-file", result.stdout)
         self.assertNotIn("JSON decode error", result.stderr)
 
-    def test_code_scout_clean_result_is_minimal_and_valid(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-scout")
-            result = self._run(
-                env,
-                "--work-item-id",
-                str(work_item_id),
-                "--result",
-                "clean",
-            )
-
-            self.assertEqual(0, result.returncode, result.stderr)
-            payload = json.loads(output_path.read_text(encoding="utf-8"))
-            self.assertEqual(
-                {
-                    "output_type": "completed",
-                    "payload": {
-                        "work_item_id": work_item_id,
-                        "result": "clean",
-                    },
-                },
-                payload,
-            )
-
-    def test_code_scout_findings_require_count_and_path(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            env, _, work_item_id = self._create_context(temp_dir, role_name="code-scout")
-            result = self._run(
-                env,
-                "--work-item-id",
-                str(work_item_id),
-                "--result",
-                "findings_found",
-            )
-
-            self.assertEqual(2, result.returncode)
-            self.assertIn("--findings-path", result.stderr)
-
     def test_verification_failed_result_requires_explicit_failure_signal(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env, _, work_item_id = self._create_context(temp_dir, role_name="verification-coordinator")
@@ -174,7 +136,7 @@ class WriteResultScriptTests(unittest.TestCase):
 
     def test_code_reviewer_failed_result_can_include_issues_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-reviewer")
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="convention-reviewer")
             result = self._run(
                 env,
                 "--work-item-id",
@@ -266,7 +228,7 @@ class WriteResultScriptTests(unittest.TestCase):
 
     def test_code_reviewer_failed_result_can_read_issues_markdown_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-reviewer")
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="convention-reviewer")
             issues_path = Path(temp_dir) / "issues.md"
             issues_path.write_text(
                 "- `FinomCore/FinomCore/App Core/Service.swift`: `handleActivation()` issue\n",
@@ -292,7 +254,7 @@ class WriteResultScriptTests(unittest.TestCase):
 
     def test_code_reviewer_failed_result_rejects_inline_and_file_issues_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            env, _output_path, work_item_id = self._create_context(temp_dir, role_name="code-reviewer")
+            env, _output_path, work_item_id = self._create_context(temp_dir, role_name="convention-reviewer")
             issues_path = Path(temp_dir) / "issues.md"
             issues_path.write_text("- Issue 1\n", encoding="utf-8")
 
@@ -315,7 +277,7 @@ class WriteResultScriptTests(unittest.TestCase):
 
     def test_code_reviewer_passed_result_tolerates_zero_findings_count(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            env, output_path, work_item_id = self._create_context(temp_dir, role_name="code-reviewer")
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="convention-reviewer")
             result = self._run(
                 env,
                 "--work-item-id",
@@ -338,24 +300,6 @@ class WriteResultScriptTests(unittest.TestCase):
                 },
                 payload["payload"],
             )
-
-    def test_code_scout_findings_reject_zero_findings_count(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            env, _, work_item_id = self._create_context(temp_dir, role_name="code-scout")
-            result = self._run(
-                env,
-                "--work-item-id",
-                str(work_item_id),
-                "--result",
-                "findings_found",
-                "--findings-count",
-                "0",
-                "--findings-path",
-                "/tmp/findings.md",
-            )
-
-            self.assertEqual(2, result.returncode)
-            self.assertIn("positive --findings-count", result.stderr)
 
     def test_story_planning_blocked_result_can_carry_operator_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -530,18 +474,3 @@ class WriteResultScriptTests(unittest.TestCase):
                 "Confirm whether the accepted task direction still requires .error.",
                 payload["payload"]["requested_decision"],
             )
-
-    def test_rejects_work_item_from_other_runtime_role(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            env, _, work_item_id = self._create_context(temp_dir, role_name="code-scout")
-            env["SDD_FACTORY_ROLE_NAME"] = "verification-coordinator"
-            result = self._run(
-                env,
-                "--work-item-id",
-                str(work_item_id),
-                "--result",
-                "clean",
-            )
-
-            self.assertEqual(2, result.returncode)
-            self.assertIn("not current runtime", result.stderr)

@@ -14,10 +14,6 @@ from backend.api.schemas import (
     CompleteDocHarvestResponse,
     CleanupTaskRequest,
     CleanupTaskResponse,
-    ResolveBoyScoutFindingsRequest,
-    ResolveBoyScoutFindingsResponse,
-    SkipBoyScoutRequest,
-    SkipBoyScoutResponse,
     SkipCurrentSubtaskRequest,
     SkipCurrentSubtaskResponse,
     EnvironmentDoctorResponse,
@@ -30,8 +26,6 @@ from backend.api.schemas import (
     RefreshSnapshotResponse,
     RefreshSubtaskStateRequest,
     RefreshSubtaskStateResponse,
-    CompleteSelfReviewRequest,
-    CompleteSelfReviewResponse,
     CreateMrRequest,
     CreateMrResponse,
     ReviewMessagePreviewRequest,
@@ -472,74 +466,6 @@ def complete_doc_harvest(
         completed=True,
         session=to_session_response(session),
         event_type=event.event_type,
-    )
-
-
-@router.post("/skip-boy-scout", response_model=SkipBoyScoutResponse)
-def skip_boy_scout(
-    payload: SkipBoyScoutRequest,
-    dependencies: AppDependencies = Depends(get_dependencies),
-) -> SkipBoyScoutResponse:
-    try:
-        session, event, followup_event = dependencies.coordinator_service.skip_boy_scout(
-            session_id=payload.session_id,
-            reason=payload.reason,
-        )
-    except IntakeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return SkipBoyScoutResponse(
-        skipped=True,
-        session=to_session_response(session),
-        event_type=event.event_type,
-        followup_event_type=followup_event.event_type if followup_event else None,
-    )
-
-
-@router.post("/resolve-boy-scout-findings", response_model=ResolveBoyScoutFindingsResponse)
-def resolve_boy_scout_findings(
-    payload: ResolveBoyScoutFindingsRequest,
-    dependencies: AppDependencies = Depends(get_dependencies),
-) -> ResolveBoyScoutFindingsResponse:
-    try:
-        session, event, followup_event = dependencies.coordinator_service.resolve_boy_scout_findings(
-            session_id=payload.session_id,
-            resolution=payload.resolution,
-        )
-    except IntakeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return ResolveBoyScoutFindingsResponse(
-        resolved=True,
-        session=to_session_response(session),
-        event_type=event.event_type,
-        followup_event_type=followup_event.event_type if followup_event else None,
-    )
-
-
-@router.post(
-    "/complete-self-review",
-    response_model=CompleteSelfReviewResponse,
-    include_in_schema=False,
-)
-def complete_self_review(
-    payload: CompleteSelfReviewRequest,
-    dependencies: AppDependencies = Depends(get_dependencies),
-) -> CompleteSelfReviewResponse:
-    try:
-        session, event, followup_event = dependencies.coordinator_service.complete_self_review(
-            session_id=payload.session_id,
-            outcome=payload.outcome,
-            summary=payload.summary,
-        )
-    except IntakeError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return CompleteSelfReviewResponse(
-        completed=True,
-        session=to_session_response(session),
-        event_type=event.event_type,
-        followup_event_type=followup_event.event_type if followup_event else None,
     )
 
 

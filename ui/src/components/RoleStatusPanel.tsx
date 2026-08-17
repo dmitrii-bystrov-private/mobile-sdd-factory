@@ -26,10 +26,6 @@ function workTypeDisplayName(workType: string): string {
   switch (workType) {
     case "implementation":
       return "Implementation";
-    case "self_review_correction":
-      return "Self Review Correction";
-    case "boy_scout_correction":
-      return "Code Scout Correction";
     case "documentation_review":
       return "Documentation Review";
     case "documentation_review_correction":
@@ -44,10 +40,6 @@ function workTypeDisplayName(workType: string): string {
       return "Verification";
     case "review":
       return "Review";
-    case "self_review":
-      return "Self Review";
-    case "boy_scout":
-      return "Code Scout";
     default:
       return workType.replace(/_/g, " ");
   }

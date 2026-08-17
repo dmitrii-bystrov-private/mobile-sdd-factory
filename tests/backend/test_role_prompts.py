@@ -87,7 +87,7 @@ class RolePromptTests(unittest.TestCase):
         self.assertNotIn("coordinator", implementer.lower())
 
     def test_review_roles_have_strict_verification_boundary_without_tool_lists(self) -> None:
-        for role_name in ("code-reviewer", "convention-reviewer", "requirements-reviewer"):
+        for role_name in ("convention-reviewer", "requirements-reviewer"):
             agents = self._agents(role_name)
             self.assertIn(
                 "Do not run build, test, or lint verification. "

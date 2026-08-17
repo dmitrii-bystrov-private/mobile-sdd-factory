@@ -18,7 +18,7 @@ class FakeAdaptersTests(unittest.TestCase):
 
             self.assertEqual(0, result.returncode)
             task_dir = root / "workdir" / "IOS-FAKE-001"
-            runtime_role_dir = task_dir / "runtime" / "role-workspaces" / "code-reviewer"
+            runtime_role_dir = task_dir / "runtime" / "role-workspaces" / "convention-reviewer"
             runtime_role_dir.mkdir(parents=True, exist_ok=True)
 
             repo_top = subprocess.run(

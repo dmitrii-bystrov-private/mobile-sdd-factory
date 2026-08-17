@@ -28,9 +28,8 @@ class SseReplayTests(unittest.IsolatedAsyncioTestCase):
             current_stage="intake",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
         first = self.event_repository.append(
@@ -67,9 +66,8 @@ class SseReplayTests(unittest.IsolatedAsyncioTestCase):
             current_stage="intake",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
         session_b = self.session_repository.create(
@@ -77,9 +75,8 @@ class SseReplayTests(unittest.IsolatedAsyncioTestCase):
             current_stage="intake",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
         anchor = self.event_repository.append(
@@ -121,9 +118,8 @@ class SseReplayTests(unittest.IsolatedAsyncioTestCase):
             current_stage="intake",
             workflow_profile="oneshot",
             policy={
-                "self_review_policy": "enabled",
-                "boy_scout_policy": "enabled",
-                "doc_harvest_policy": "enabled",
+                "review_policy": "enabled",
+                                "doc_harvest_policy": "enabled",
             },
         )
         anchor = self.event_repository.append(

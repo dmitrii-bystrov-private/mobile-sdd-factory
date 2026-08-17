@@ -193,9 +193,8 @@ def _create_prepared_session(*, task_key: str, dependencies) -> int:
             workflow_profile="oneshot",
             prepare=True,
             policy={
-                "self_review_policy": "disabled",
-                "boy_scout_policy": "disabled",
-                "doc_harvest_policy": "disabled",
+                "review_policy": "disabled",
+                                "doc_harvest_policy": "disabled",
             },
             role_config=role_config,
         ),

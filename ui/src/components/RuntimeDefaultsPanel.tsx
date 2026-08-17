@@ -26,8 +26,7 @@ type DraftRoleDefault = {
 
 type DraftPolicyDefaults = {
   test_policy: SessionPolicyValue;
-  self_review_policy: SessionPolicyValue;
-  boy_scout_policy: SessionPolicyValue;
+  review_policy: SessionPolicyValue;
   doc_harvest_policy: SessionPolicyValue;
   requirements_clarification_mode: RequirementsClarificationMode;
 };
@@ -55,14 +54,12 @@ const WORKFLOW_PROFILE_DESCRIPTIONS: Record<WorkflowProfile, string> = {
 };
 
 const POLICY_DEFAULT_DESCRIPTIONS: Record<
-  "test_policy" | "self_review_policy" | "boy_scout_policy" | "doc_harvest_policy",
+  "test_policy" | "review_policy" | "doc_harvest_policy",
   string
 > = {
   test_policy: "Choose whether the bug flow treats testing as disabled, auto-started with agent skip semantics, or required.",
-  self_review_policy:
+  review_policy:
     "Choose whether the dual review gate is disabled, auto-started with reviewer skip semantics, or required.",
-  boy_scout_policy:
-    "Compatibility setting for legacy Code Scout sessions. New sessions use the dual review gate.",
   doc_harvest_policy:
     "Choose whether the Documentation Writer lane is disabled, auto-started with agent skip semantics, or required.",
 };
@@ -117,8 +114,7 @@ function roleFlowOrder(roleName: string, workflowProfile: WorkflowProfile): numb
 function defaultPolicyDefaults(): DraftPolicyDefaults {
   return {
     test_policy: "enabled",
-    self_review_policy: "enabled",
-    boy_scout_policy: "enabled",
+    review_policy: "enabled",
     doc_harvest_policy: "enabled",
     requirements_clarification_mode: "ask-selectively",
   };
@@ -315,19 +311,16 @@ export function RuntimeDefaultsPanel({
         roleDefaults: explicitRoleDefaults,
         policyDefaults: {
           oneshot: {
-            self_review_policy: policyDefaults.oneshot.self_review_policy,
-            boy_scout_policy: policyDefaults.oneshot.boy_scout_policy,
+            review_policy: policyDefaults.oneshot.review_policy,
             doc_harvest_policy: policyDefaults.oneshot.doc_harvest_policy,
           },
           bug_full: {
             test_policy: policyDefaults.bug_full.test_policy,
-            self_review_policy: policyDefaults.bug_full.self_review_policy,
-            boy_scout_policy: policyDefaults.bug_full.boy_scout_policy,
+            review_policy: policyDefaults.bug_full.review_policy,
             doc_harvest_policy: policyDefaults.bug_full.doc_harvest_policy,
           },
           story_full: {
-            self_review_policy: policyDefaults.story_full.self_review_policy,
-            boy_scout_policy: policyDefaults.story_full.boy_scout_policy,
+            review_policy: policyDefaults.story_full.review_policy,
             doc_harvest_policy: policyDefaults.story_full.doc_harvest_policy,
             requirements_clarification_mode: policyDefaults.story_full.requirements_clarification_mode,
           },
@@ -385,36 +378,18 @@ export function RuntimeDefaultsPanel({
                 </div>
             <div className="followup-form-grid">
               <label className="form-field">
-                <span>Self Review</span>
+                <span>Review Gate</span>
                 <select
                   className="select-input"
                   disabled={busy}
                   onChange={(event) =>
-                    updatePolicyDefault("oneshot", "self_review_policy", event.target.value as SessionPolicyValue)
+                    updatePolicyDefault("oneshot", "review_policy", event.target.value as SessionPolicyValue)
                   }
-                  title={POLICY_DEFAULT_DESCRIPTIONS.self_review_policy}
-                  value={policyDefaults.oneshot.self_review_policy}
+                  title={POLICY_DEFAULT_DESCRIPTIONS.review_policy}
+                  value={policyDefaults.oneshot.review_policy}
                 >
                   {POLICY_OPTIONS.map((value) => (
                     <option key={`oneshot-self-review-${value}`} value={value}>
-                      {POLICY_OPTION_LABELS[value]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="form-field">
-                <span>Code Scout</span>
-                <select
-                  className="select-input"
-                  disabled={busy}
-                  onChange={(event) =>
-                    updatePolicyDefault("oneshot", "boy_scout_policy", event.target.value as SessionPolicyValue)
-                  }
-                  title={POLICY_DEFAULT_DESCRIPTIONS.boy_scout_policy}
-                  value={policyDefaults.oneshot.boy_scout_policy}
-                >
-                  {POLICY_OPTIONS.map((value) => (
-                    <option key={`oneshot-boy-scout-${value}`} value={value}>
                       {POLICY_OPTION_LABELS[value]}
                     </option>
                   ))}
@@ -467,15 +442,15 @@ export function RuntimeDefaultsPanel({
                 </select>
               </label>
               <label className="form-field">
-                <span>Self Review</span>
+                <span>Review Gate</span>
                 <select
                   className="select-input"
                   disabled={busy}
                   onChange={(event) =>
-                    updatePolicyDefault("bug_full", "self_review_policy", event.target.value as SessionPolicyValue)
+                    updatePolicyDefault("bug_full", "review_policy", event.target.value as SessionPolicyValue)
                   }
-                  title={POLICY_DEFAULT_DESCRIPTIONS.self_review_policy}
-                  value={policyDefaults.bug_full.self_review_policy}
+                  title={POLICY_DEFAULT_DESCRIPTIONS.review_policy}
+                  value={policyDefaults.bug_full.review_policy}
                 >
                   {POLICY_OPTIONS.map((value) => (
                     <option key={`bug-self-review-${value}`} value={value}>
@@ -486,24 +461,6 @@ export function RuntimeDefaultsPanel({
               </label>
             </div>
             <div className="followup-form-grid">
-              <label className="form-field">
-                <span>Code Scout</span>
-                <select
-                  className="select-input"
-                  disabled={busy}
-                  onChange={(event) =>
-                    updatePolicyDefault("bug_full", "boy_scout_policy", event.target.value as SessionPolicyValue)
-                  }
-                  title={POLICY_DEFAULT_DESCRIPTIONS.boy_scout_policy}
-                  value={policyDefaults.bug_full.boy_scout_policy}
-                >
-                  {POLICY_OPTIONS.map((value) => (
-                    <option key={`bug-boy-scout-${value}`} value={value}>
-                      {POLICY_OPTION_LABELS[value]}
-                    </option>
-                  ))}
-                </select>
-              </label>
               <label className="form-field">
                 <span>Documentation Writer</span>
                 <select
@@ -533,36 +490,18 @@ export function RuntimeDefaultsPanel({
                 </div>
             <div className="followup-form-grid">
               <label className="form-field">
-                <span>Self Review</span>
+                <span>Review Gate</span>
                 <select
                   className="select-input"
                   disabled={busy}
                   onChange={(event) =>
-                    updatePolicyDefault("story_full", "self_review_policy", event.target.value as SessionPolicyValue)
+                    updatePolicyDefault("story_full", "review_policy", event.target.value as SessionPolicyValue)
                   }
-                  title={POLICY_DEFAULT_DESCRIPTIONS.self_review_policy}
-                  value={policyDefaults.story_full.self_review_policy}
+                  title={POLICY_DEFAULT_DESCRIPTIONS.review_policy}
+                  value={policyDefaults.story_full.review_policy}
                 >
                   {POLICY_OPTIONS.map((value) => (
                     <option key={`story-self-review-${value}`} value={value}>
-                      {POLICY_OPTION_LABELS[value]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="form-field">
-                <span>Code Scout</span>
-                <select
-                  className="select-input"
-                  disabled={busy}
-                  onChange={(event) =>
-                    updatePolicyDefault("story_full", "boy_scout_policy", event.target.value as SessionPolicyValue)
-                  }
-                  title={POLICY_DEFAULT_DESCRIPTIONS.boy_scout_policy}
-                  value={policyDefaults.story_full.boy_scout_policy}
-                >
-                  {POLICY_OPTIONS.map((value) => (
-                    <option key={`story-boy-scout-${value}`} value={value}>
                       {POLICY_OPTION_LABELS[value]}
                     </option>
                   ))}
