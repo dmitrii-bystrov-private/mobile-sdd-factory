@@ -17,7 +17,7 @@ The supported platform is the backend/UI/tmux runtime model:
 - `backend/` owns sessions, stages, work items, artifacts, operator recovery, and runtime contracts
 - `ui/` is the primary operator surface
 - `factory/` owns doctor, cleanup, local stack helpers, and acceptance harnesses
-- `scripts/` remains useful for direct helpers and compatibility automation
+- `scripts/` remains useful for direct helpers and workflow automation
 
 `.claude/settings.json` remains Claude launcher source material only; supported role contracts live in backend code.
 

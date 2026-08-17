@@ -7,7 +7,7 @@ The supported product model is:
 - `backend/` for API, coordinator, session lifecycle, runtime contracts, and state
 - `ui/` for the operator console
 - `factory/` for doctor, cleanup, acceptance harnesses, and local stack helpers
-- `scripts/` for direct shell helpers and compatibility automation
+- `scripts/` for direct shell helpers and workflow automation
 
 Treat the backend/UI/tmux runtime model as the source of truth.
 `.claude/settings.json` is only launcher-side Claude configuration source material.

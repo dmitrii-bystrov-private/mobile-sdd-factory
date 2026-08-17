@@ -209,7 +209,7 @@ bash scripts/generate-diff.sh <KEY> --mode full
   - `docs` → documentation files (`.md`, `.adoc`, `.rst`, `.txt`) written to `$SDD_WORKDIR/<KEY>/spec/doc-diff.md`
   - `full` → source + documentation files written to `$SDD_WORKDIR/<KEY>/spec/full-diff.md`
 - Excludes generated files and dependency directories such as `Pods/` and `node_modules/`.
-- Used by review/scout/documentation workflows that need a safer diff artifact than a raw patch alone.
+- Used by review and documentation workflows that need a safer diff artifact than a raw patch alone.
 
 Requires `SDD_WORKDIR` to be set.
 

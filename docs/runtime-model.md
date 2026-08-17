@@ -44,7 +44,7 @@ Important roles include:
 - `requirements-reviewer`
 - `verification-coordinator`
 - planning workers such as `proposal-context-worker`, `requirements-clarifier-worker`, `spec-verifier-worker`, and `task-decomposer-worker`
-- follow-up workers such as `doc-harvest-worker`
+- documentation workers such as `doc-harvest-worker` and `documentation-reviewer`
 
 Some roles are short planning lanes.
 Some roles are persistent long-runners.
@@ -72,7 +72,7 @@ This supports:
 
 The supported operational host is `tmux`.
 
-The platform no longer treats older host variants as supported operational modes.
+Other host variants are outside the supported operational model.
 
 `tmux` is used for:
 
@@ -125,6 +125,8 @@ This applies to optional quality/documentation lanes such as:
 
 - review gate
 - doc harvest
+
+When documentation harvest runs, `documentation-reviewer` checks the resulting documentation and source comments before the workflow proceeds to verification.
 
 ## Follow-Up Flows
 

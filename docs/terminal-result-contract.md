@@ -18,7 +18,7 @@ bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh" --work-item-id <work_item_
 
 The helper builds the structured result document, validates the role-specific contract, resolves the canonical role/workspace context from `work_item_id`, and submits it to the backend `/roles/submit-result` ingress.
 The backend records the accepted document as a `role_result_json` artifact.
-Worker-local `runtime/role-workspaces/<role>/RESULT.json` files are compatibility input files for older or interrupted sessions; roles should not create them manually.
+Worker-local `runtime/role-workspaces/<role>/RESULT.json` files are local recovery inputs for interrupted helper submissions; roles should not create them manually.
 
 The canonical submitted document has this shape:
 
@@ -265,7 +265,7 @@ Minimal example:
 }
 ```
 
-### Coding And MR Follow-Up Roles
+### Coding And Follow-Up Roles
 
 Applies to:
 - `implementer`
@@ -314,9 +314,7 @@ These fields are often useful for humans or artifacts, but they should not be re
 
 Keep those in dedicated files under `spec/`, `review/`, `plan/`, or task-local verification logs.
 
-## Next Migration Step
+## Supported Path
 
-The supported path is already the shared writer helper plus backend ingress.
-Remaining compatibility collection of runtime-authored `RESULT.json` files exists only so older or interrupted sessions can be recovered.
-
+The supported path is the shared writer helper plus backend ingress.
 New role guidance, tests, and runtime work should treat helper submission as the product behavior.

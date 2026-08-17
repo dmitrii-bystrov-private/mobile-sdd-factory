@@ -267,7 +267,7 @@ Detailed script reference: [`scripts/README.md`](scripts/README.md).
 backend/          FastAPI routes, coordinator, runtime contracts, repositories
 ui/               Vite/React operator console
 factory/          doctor, cleanup, acceptance harnesses, local stack helpers
-scripts/          direct shell helpers and compatibility automation
+scripts/          direct shell helpers and workflow automation
 tests/backend/    backend regression suite
 scripts/tests/    shell regression tests
 docs/             supported platform documentation
