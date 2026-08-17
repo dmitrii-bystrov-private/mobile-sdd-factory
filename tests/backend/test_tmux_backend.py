@@ -102,6 +102,70 @@ class TmuxBackendTests(unittest.TestCase):
             backend.calls,
         )
 
+    def test_tmux_mode_waits_for_session_socket_after_new_session(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self, runtime_root: Path) -> None:
+                super().__init__(mode="tmux", runtime_root=runtime_root)
+                self.calls: list[tuple[str, ...]] = []
+                self.has_session_attempts = 0
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args and args[0] == "new-session":
+                    return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+                if args[:2] == ("has-session", "-t"):
+                    self.has_session_attempts += 1
+                    if self.has_session_attempts == 1:
+                        return subprocess.CompletedProcess(
+                            ["tmux", *args],
+                            1,
+                            "",
+                            f"error connecting to {socket_path} (No such file or directory)",
+                        )
+                    return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            backend = FakeTmuxBackend(Path(temp_dir))
+
+            session = backend.create_task_session("IOS-50001READY")
+
+            self.assertEqual("sdd-IOS-50001READY", session.session_id)
+            self.assertEqual(2, backend.has_session_attempts)
+            self.assertIn(("has-session", "-t", "sdd-IOS-50001READY"), backend.calls)
+
+    def test_tmux_mode_retries_new_window_when_socket_is_not_ready(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self, runtime_root: Path) -> None:
+                super().__init__(mode="tmux", runtime_root=runtime_root)
+                self.calls: list[tuple[str, ...]] = []
+                self.new_window_attempts = 0
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:2] == ("list-windows", "-t"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+                if args and args[0] == "new-window":
+                    self.new_window_attempts += 1
+                    if self.new_window_attempts == 1:
+                        return subprocess.CompletedProcess(
+                            ["tmux", *args],
+                            1,
+                            "",
+                            f"error connecting to {socket_path} (No such file or directory)",
+                        )
+                    return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            backend = FakeTmuxBackend(Path(temp_dir))
+            session = backend.create_task_session("IOS-50001READY")
+
+            role = backend.spawn_role(session, "implementer")
+
+            self.assertEqual("sdd-IOS-50001READY:implementer", role.role_id)
+            self.assertEqual(2, backend.new_window_attempts)
+
     def test_terminal_idle_signature_detects_final_duration_followed_by_prompt(self) -> None:
         backend = TmuxSessionBackend(mode="recording")
 
@@ -283,7 +347,8 @@ class TmuxBackendTests(unittest.TestCase):
                     "-s",
                     "sdd-IOS-50001TMUXSIZE",
                     "sh",
-                )
+                ),
+                ("has-session", "-t", "sdd-IOS-50001TMUXSIZE"),
             ],
             backend.calls,
         )

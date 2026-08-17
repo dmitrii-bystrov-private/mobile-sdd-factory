@@ -113,6 +113,8 @@ class TmuxSessionBackend(SessionBackend):
     )
     _RUNNER_IDLE_PROMPT_RE = re.compile(r"^\s*[❯›»>](?:\s|$)")
     _SNAPSHOT_SCROLLBACK_LINES = 300
+    _TMUX_STARTUP_RETRIES = 5
+    _TMUX_STARTUP_DELAY_SECONDS = 0.1
     _LAUNCHER_INPUT_VISIBILITY_RETRIES = 4
     _LAUNCHER_INPUT_VISIBILITY_DELAY_SECONDS = 0.12
     _LAUNCHER_SUBMIT_PROGRESS_RETRIES = 4
@@ -228,6 +230,46 @@ class TmuxSessionBackend(SessionBackend):
             text=True,
         )
 
+    def _tmux_error_text(self, result: subprocess.CompletedProcess[str]) -> str:
+        return (result.stderr or result.stdout or "").strip()
+
+    def _tmux_socket_not_ready(self, result: subprocess.CompletedProcess[str]) -> bool:
+        if result.returncode == 0:
+            return False
+        text = self._tmux_error_text(result).lower()
+        return (
+            "no such file or directory" in text
+            or "connection refused" in text
+            or "server exited unexpectedly" in text
+        )
+
+    def _wait_for_tmux_session_ready(self, socket_path: Path, session_name: str) -> None:
+        last_result: subprocess.CompletedProcess[str] | None = None
+        for attempt in range(self._TMUX_STARTUP_RETRIES):
+            result = self._tmux(socket_path, "has-session", "-t", session_name)
+            if result.returncode == 0:
+                return
+            last_result = result
+            if not self._tmux_socket_not_ready(result):
+                break
+            if attempt + 1 < self._TMUX_STARTUP_RETRIES:
+                time.sleep(self._TMUX_STARTUP_DELAY_SECONDS)
+        error_text = self._tmux_error_text(last_result) if last_result is not None else ""
+        raise RuntimeError(error_text or "Failed to initialize tmux session")
+
+    def _run_tmux_with_socket_retry(
+        self,
+        socket_path: Path,
+        *args: str,
+    ) -> subprocess.CompletedProcess[str]:
+        result = self._tmux(socket_path, *args)
+        for _attempt in range(self._TMUX_STARTUP_RETRIES - 1):
+            if not self._tmux_socket_not_ready(result):
+                return result
+            time.sleep(self._TMUX_STARTUP_DELAY_SECONDS)
+            result = self._tmux(socket_path, *args)
+        return result
+
     def _extract_launcher_runner(self, launcher_script: Path) -> str:
         try:
             content = launcher_script.read_text()
@@ -288,6 +330,7 @@ class TmuxSessionBackend(SessionBackend):
             )
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to create tmux session")
+            self._wait_for_tmux_session_ready(socket_path, session_name)
         return RuntimeSessionHandle(session_id=session_name)
 
     def spawn_role(
@@ -316,7 +359,7 @@ class TmuxSessionBackend(SessionBackend):
             if start_directory is not None:
                 args.extend(["-c", str(start_directory)])
             args.extend(role_command)
-            result = self._tmux(socket_path, *args)
+            result = self._run_tmux_with_socket_retry(socket_path, *args)
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to create tmux window")
             interactive_driver_enabled = bool(role_command) and Path(role_command[0]).name == "launch-role.sh"

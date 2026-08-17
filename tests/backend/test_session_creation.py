@@ -1548,7 +1548,7 @@ class SessionCreationTests(unittest.TestCase):
         work_items = self.work_item_repository.list_for_session(session.id)
         events = self.event_repository.list_for_session(session.id)
 
-        self.assertEqual("send_to_test_completed", updated_session.current_stage)
+        self.assertEqual("verification_requested", updated_session.current_stage)
         self.assertEqual("verification-coordinator", updated_session.current_owner)
         self.assertEqual("verification_requested", followup_event.event_type)
         self.assertEqual([("IOS-30003", "implementation pass")], self.gitlab_adapter.commit_requests)
