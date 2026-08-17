@@ -97,7 +97,7 @@ pathspec_args=()
 for pattern in "${PATTERNS[@]}"; do
   pathspec_args+=("$pattern")
 done
-pathspec_args+=(':!*.generated.*' ':!Pods/' ':!node_modules/')
+pathspec_args+=(':!*.generated.*' ':!Tuist/.build/' ':!node_modules/')
 
 git -C "$REPO" diff --find-renames --name-status origin/master...HEAD -- "${pathspec_args[@]}" > "$name_status_file"
 git -C "$REPO" diff --find-renames --numstat origin/master...HEAD -- "${pathspec_args[@]}" > "$numstat_file"

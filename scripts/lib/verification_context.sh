@@ -56,6 +56,20 @@ verification_source_ios_env() {
   fi
 }
 
+verification_resolve_mise_cmd() {
+  local repo_dir="$1"
+  if [[ -x "$repo_dir/bin/mise" ]]; then
+    printf '%s\n' "$repo_dir/bin/mise"
+    return 0
+  fi
+  if command -v mise >/dev/null 2>&1; then
+    command -v mise
+    return 0
+  fi
+  echo "mise not found (expected $repo_dir/bin/mise or a global mise)" >&2
+  return 1
+}
+
 verification_print_failure_matches() {
   local log_path="$1"
   local pattern="$2"

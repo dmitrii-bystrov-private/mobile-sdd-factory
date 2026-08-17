@@ -69,7 +69,7 @@ bash scripts/snapshot.sh <PARENT-KEY>
 1. Fetches Jira data (parent + subtasks) and renders ADF descriptions/comments to Markdown.
 2. Creates a git worktree at `$SDD_WORKDIR/<KEY>/repo/` on `feature/<KEY>` (or `bugfix/<KEY>` for Bug type). Skips creation if the worktree already exists.
 3. Runs platform bootstrap for new worktrees:
-   - **iOS** (`IOS_DIR`): seeds repo-local `.mise`, `Tuist/.build`, and `Pods` with APFS copy-on-write when available, then runs `mise trust`, `mise install`, `tuist install`, `tuist generate`, `pod install`.
+   - **iOS** (`IOS_DIR`): seeds repo-local `.mise` and Tuist SPM cache (`Tuist/.build`) with APFS copy-on-write when available, then runs `mise trust`, `mise install`, `tuist install`, and `tuist generate`.
    - **Android** (`ANDROID_DIR`): seeds `.gradle` with APFS copy-on-write when available, symlinks `local.properties`, then runs `./gradlew clean`.
 4. Transitions the task to **In Progress** only for Bugs currently in **To Do**.
 5. Writes snapshot artifacts:
@@ -208,7 +208,7 @@ bash scripts/generate-diff.sh <KEY> --mode full
   - `source` (default) → source files (`.swift`, `.kt`, `.kts`, `.xml`) written to `$SDD_WORKDIR/<KEY>/spec/diff.md`
   - `docs` → documentation files (`.md`, `.adoc`, `.rst`, `.txt`) written to `$SDD_WORKDIR/<KEY>/spec/doc-diff.md`
   - `full` → source + documentation files written to `$SDD_WORKDIR/<KEY>/spec/full-diff.md`
-- Excludes generated files and dependency directories such as `Pods/` and `node_modules/`.
+- Excludes generated files and dependency directories such as `Tuist/.build/` and `node_modules/`.
 - Used by review and documentation workflows that need a safer diff artifact than a raw patch alone.
 
 Requires `SDD_WORKDIR` to be set.

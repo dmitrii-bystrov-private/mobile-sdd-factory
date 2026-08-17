@@ -66,6 +66,8 @@ elif expr == '.impact_mapping.preferred_scheme // empty':
 elif expr == '.phases[]? // empty':
     for item in payload.get("phases", []):
         print(item)
+elif expr == '.prepare.policy // "required"':
+    out(payload.get("prepare", {}).get("policy", "required"))
 elif expr == '.mode // ""':
     out(payload.get("mode", ""))
 elif expr == '.head // ""':
@@ -95,6 +97,16 @@ chmod +x "$WORKDIR/run-lint.sh"
 
 PATH="$WORKDIR:$PATH"
 
+mkdir -p "$REPO_DIR/bin"
+MISE_LOG="$WORKDIR/mise.log"
+cat >"$REPO_DIR/bin/mise" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s|LOADED_TUIST_ENV=%s\n' "\$*" "\${LOADED_TUIST_ENV:-}" >>"$MISE_LOG"
+exit 0
+EOF
+chmod +x "$REPO_DIR/bin/mise"
+
 cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
 {
   "impact_mapping": {
@@ -112,6 +124,15 @@ cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
   ]
 }
 EOF
+
+bash "$REPO_ROOT/scripts/ios-prepare.sh" "$KEY" >"$WORKDIR/prepare.stdout"
+grep -q 'exec -- tuist install|LOADED_TUIST_ENV=1' "$MISE_LOG"
+grep -q 'exec -- tuist generate --no-open|LOADED_TUIST_ENV=1' "$MISE_LOG"
+grep -q 'IOS PREPARE SUCCEEDED' "$WORKDIR/prepare.stdout"
+if [[ -e "$TASK_ROOT/tmp/verification/ios/logs/pod-install.log" ]]; then
+  echo "pod install log should not be created for SPM-only iOS prepare" >&2
+  exit 1
+fi
 
 bash "$REPO_ROOT/scripts/ios-test-without-building.sh" "$KEY" >"$WORKDIR/broad.stdout"
 grep -q 'test-without-building' "$XCODEBUILD_LOG"

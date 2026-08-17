@@ -344,7 +344,6 @@ if [[ "$PLATFORM" == "ios" ]] && $WORKTREE_CREATED; then
 
   seed_repo_local_mise "$PLATFORM_DIR" "$WORKTREE_PATH"
   seed_directory_cow_first "$PLATFORM_DIR/Tuist/.build" "$WORKTREE_PATH/Tuist/.build" "Tuist/.build"
-  seed_directory_cow_first "$PLATFORM_DIR/Pods" "$WORKTREE_PATH/Pods" "Pods"
 
   if ! MISE_CMD="$(resolve_mise_cmd "$WORKTREE_PATH")"; then
     err "iOS bootstrap: mise not found (expected $WORKTREE_PATH/bin/mise or a global mise)"
@@ -358,21 +357,21 @@ if [[ "$PLATFORM" == "ios" ]] && $WORKTREE_CREATED; then
   fi
   echo "  mise trust: OK"
 
-  # 3. mise install (installs pinned toolchain versions before tuist generate)
+  # 2. mise install (installs pinned toolchain versions before Tuist commands)
   if ! (cd "$WORKTREE_PATH" && "$MISE_CMD" install); then
     err "iOS bootstrap: 'mise install' failed in $WORKTREE_PATH"
     exit 1
   fi
   echo "  mise install: OK"
 
-  # 4. tuist install (fetches SPM dependencies for this worktree)
+  # 3. tuist install (resolves SPM dependencies for this worktree)
   if ! (cd "$WORKTREE_PATH" && GIT_TERMINAL_PROMPT=0 "$MISE_CMD" exec -- tuist install); then
     err "iOS bootstrap: 'tuist install' failed in $WORKTREE_PATH"
     exit 1
   fi
   echo "  tuist install: OK"
 
-  # 5. tuist generate — load .env.local first so Tuist receives TUIST_* variables
+  # 4. tuist generate — load .env.local first so Tuist receives TUIST_* variables
   if [[ -f "$WORKTREE_PATH/.env.local" ]]; then
     while IFS= read -r line || [ -n "$line" ]; do
       [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
@@ -392,13 +391,6 @@ if [[ "$PLATFORM" == "ios" ]] && $WORKTREE_CREATED; then
     exit 1
   fi
   echo "  tuist generate: OK"
-
-  # 6. pod install
-  if ! (cd "$WORKTREE_PATH" && pod install); then
-    err "iOS bootstrap: 'pod install' failed in $WORKTREE_PATH"
-    exit 1
-  fi
-  echo "  pod install: OK"
 
   echo "iOS bootstrap complete."
 elif [[ "$PLATFORM" == "ios" ]] && ! $WORKTREE_CREATED; then

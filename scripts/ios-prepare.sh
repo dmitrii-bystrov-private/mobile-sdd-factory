@@ -11,9 +11,10 @@ REPO_DIR="$(verification_resolve_repo_dir "$KEY")"
 cd "$REPO_DIR"
 verification_prepare_ios_context "$KEY"
 verification_source_ios_env "$REPO_DIR"
+MISE_CMD="$(verification_resolve_mise_cmd "$REPO_DIR")"
 
+TUIST_INSTALL_LOG="$SDD_IOS_VERIFICATION_LOGS_PATH/tuist-install.log"
 TUIST_LOG="$SDD_IOS_VERIFICATION_LOGS_PATH/tuist-generate.log"
-POD_LOG="$SDD_IOS_VERIFICATION_LOGS_PATH/pod-install.log"
 PREPARE_MARKER="$SDD_IOS_VERIFICATION_CONTEXT_ROOT/prepare.marker.json"
 PREPARE_POLICY="required"
 
@@ -26,17 +27,17 @@ if [[ "$PREPARE_POLICY" == "reuse_if_available" && -f "$PREPARE_MARKER" ]]; then
   exit 0
 fi
 
-echo "⏳ Generating Tuist project..."
-if ! mise exec -- tuist generate --no-open >"$TUIST_LOG" 2>&1; then
-  echo "❌ TUIST GENERATE FAILED"
-  verification_print_failure_matches "$TUIST_LOG" "error:|fatal:|failed|exception"
+echo "⏳ Installing Tuist SPM dependencies..."
+if ! GIT_TERMINAL_PROMPT=0 "$MISE_CMD" exec -- tuist install >"$TUIST_INSTALL_LOG" 2>&1; then
+  echo "❌ TUIST INSTALL FAILED"
+  verification_print_failure_matches "$TUIST_INSTALL_LOG" "error:|fatal:|failed|exception"
   exit 1
 fi
 
-echo "⏳ Installing pods..."
-if ! pod install >"$POD_LOG" 2>&1; then
-  echo "❌ POD INSTALL FAILED"
-  verification_print_failure_matches "$POD_LOG" "error:|fatal:|failed|exception"
+echo "⏳ Generating Tuist project..."
+if ! "$MISE_CMD" exec -- tuist generate --no-open >"$TUIST_LOG" 2>&1; then
+  echo "❌ TUIST GENERATE FAILED"
+  verification_print_failure_matches "$TUIST_LOG" "error:|fatal:|failed|exception"
   exit 1
 fi
 

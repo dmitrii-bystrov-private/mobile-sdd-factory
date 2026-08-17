@@ -121,6 +121,41 @@ EOF
   chmod +x "$MOCK_BIN/git"
 }
 
+write_mock_git_new_worktree() {
+  local log_path="$1"
+  cat > "$MOCK_BIN/git" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "\$*" >>"$log_path"
+if [[ "\${1:-}" == "-C" ]]; then
+  shift 2
+fi
+case "\${1:-}" in
+  rev-parse)
+    exit 1
+    ;;
+  fetch|checkout|pull)
+    exit 0
+    ;;
+  worktree)
+    if [[ "\${2:-}" == "add" ]]; then
+      for arg in "\$@"; do
+        if [[ "\$arg" == "$MOCK_WORKDIR/"*"/repo" ]]; then
+          mkdir -p "\$arg/Tuist"
+          cp -R "$MOCK_IOS_DIR/bin" "\$arg/bin"
+          cp "$MOCK_IOS_DIR/.env.local" "\$arg/.env.local"
+          exit 0
+        fi
+      done
+    fi
+    exit 0
+    ;;
+esac
+exit 0
+EOF
+  chmod +x "$MOCK_BIN/git"
+}
+
 # Write a mock acli. Modes:
 #   fail_parent          — exit 1 immediately (before any output)
 #   fail_subtask_IOS-102 — succeed for parent/IOS-101, fail for IOS-102
@@ -357,6 +392,70 @@ assert_file_exists  "subtask failure: parent comments.md written"        "$WDIR/
 assert_file_exists  "subtask failure: IOS-101 description.md written"    "$WDIR/IOS-101/description.md"
 assert_file_exists  "subtask failure: IOS-101 comments.md written"       "$WDIR/IOS-101/comments.md"
 assert_no_such_file "subtask failure: IOS-102 description.md not written" "$WDIR/IOS-102/description.md"
+
+rm -f "$STDERR"
+rm -rf "$TMP_ROOT"
+
+# ---------------------------------------------------------------------------
+# iOS bootstrap: SPM-only Tuist setup, no CocoaPods step
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- iOS SPM bootstrap ---"
+
+TMP_ROOT="$(mktemp -d)"
+MOCK_WORKDIR="$TMP_ROOT/workdir"
+MOCK_IOS_DIR="$TMP_ROOT/ios"
+MOCK_BIN="$TMP_ROOT/bin"
+MOCK_FIXTURES="$TMP_ROOT/fixtures"
+mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR/bin" "$MOCK_IOS_DIR/Tuist/.build/cache" "$MOCK_BIN" "$MOCK_FIXTURES"
+
+cp "$FIXTURES/parent_core.json"            "$MOCK_FIXTURES/IOS-100_core.json"
+cp "$FIXTURES/parent_comments.json"        "$MOCK_FIXTURES/IOS-100_comments.json"
+cp "$FIXTURES/subtasks_list.json"          "$MOCK_FIXTURES/subtasks_list.json"
+cp "$FIXTURES/subtask_IOS-101_core.json"   "$MOCK_FIXTURES/IOS-101_core.json"
+cp "$FIXTURES/subtask_IOS-101_comments.json" "$MOCK_FIXTURES/IOS-101_comments.json"
+cp "$FIXTURES/subtask_IOS-102_core.json"   "$MOCK_FIXTURES/IOS-102_core.json"
+cp "$FIXTURES/subtask_IOS-102_comments.json" "$MOCK_FIXTURES/IOS-102_comments.json"
+
+printf 'seed\n' > "$MOCK_IOS_DIR/Tuist/.build/cache/source.txt"
+printf 'TOKEN=fixture\n' > "$MOCK_IOS_DIR/.env.local"
+MISE_LOG="$TMP_ROOT/mise.log"
+cat > "$MOCK_IOS_DIR/bin/mise" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "\$*" >>"$MISE_LOG"
+exit 0
+EOF
+chmod +x "$MOCK_IOS_DIR/bin/mise"
+
+GIT_LOG="$TMP_ROOT/git.log"
+write_mock_git_new_worktree "$GIT_LOG"
+write_mock_acli "succeed"
+
+STDERR="$(mktemp)"
+ACTUAL_EXIT=0
+PATH="$MOCK_BIN:$PATH" SDD_WORKDIR="$MOCK_WORKDIR" IOS_DIR="$MOCK_IOS_DIR" \
+  bash "$SNAPSHOT" IOS-100 > "$TMP_ROOT/snapshot.stdout" 2>"$STDERR" || ACTUAL_EXIT=$?
+if [[ "$ACTUAL_EXIT" -eq 0 ]]; then
+  echo "  PASS  iOS bootstrap: snapshot succeeds"
+  (( PASS++ )) || true
+else
+  echo "  FAIL  iOS bootstrap: expected exit 0, got $ACTUAL_EXIT"
+  echo "        stderr: $(cat "$STDERR" 2>/dev/null || echo '(empty)')"
+  (( FAIL++ )) || true
+fi
+assert_file_exists "iOS bootstrap: Tuist cache seeded" "$MOCK_WORKDIR/IOS-100/repo/Tuist/.build/cache/source.txt"
+grep -q '^trust$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: mise trust ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: mise trust missing"; (( FAIL++ )) || true; }
+grep -q '^install$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: mise install ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: mise install missing"; (( FAIL++ )) || true; }
+grep -q '^exec -- tuist install$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: tuist install ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: tuist install missing"; (( FAIL++ )) || true; }
+grep -q '^exec -- tuist generate --no-open$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: tuist generate ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: tuist generate missing"; (( FAIL++ )) || true; }
+if grep -q 'pod install' "$TMP_ROOT/snapshot.stdout" "$STDERR" "$MISE_LOG" 2>/dev/null; then
+  echo "  FAIL  iOS bootstrap: pod install should not run"
+  (( FAIL++ )) || true
+else
+  echo "  PASS  iOS bootstrap: no pod install"
+  (( PASS++ )) || true
+fi
 
 rm -f "$STDERR"
 rm -rf "$TMP_ROOT"
