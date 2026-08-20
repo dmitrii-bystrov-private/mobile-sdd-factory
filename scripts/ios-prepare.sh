@@ -28,10 +28,25 @@ if [[ "$PREPARE_POLICY" == "reuse_if_available" && -f "$PREPARE_MARKER" ]]; then
 fi
 
 echo "⏳ Installing Tuist SPM dependencies..."
-if ! GIT_TERMINAL_PROMPT=0 "$MISE_CMD" exec -- tuist install >"$TUIST_INSTALL_LOG" 2>&1; then
-  echo "❌ TUIST INSTALL FAILED"
-  verification_print_failure_matches "$TUIST_INSTALL_LOG" "error:|fatal:|failed|exception"
-  exit 1
+run_tuist_install() {
+  GIT_TERMINAL_PROMPT=0 "$MISE_CMD" exec -- tuist install >"$TUIST_INSTALL_LOG" 2>&1
+}
+
+if ! run_tuist_install; then
+  if grep -Eiq "failed to find credentials.*keychain|keychain: status -128|status -128|errauthorizationcanceled" "$TUIST_INSTALL_LOG"; then
+    echo "⚠️  Tuist install hit headless keychain credential lookup; retrying once..."
+    if run_tuist_install; then
+      echo "  tuist install retry: OK"
+    else
+      echo "❌ TUIST INSTALL FAILED"
+      verification_print_failure_matches "$TUIST_INSTALL_LOG" "error:|fatal:|failed|exception"
+      exit 1
+    fi
+  else
+    echo "❌ TUIST INSTALL FAILED"
+    verification_print_failure_matches "$TUIST_INSTALL_LOG" "error:|fatal:|failed|exception"
+    exit 1
+  fi
 fi
 
 echo "⏳ Generating Tuist project..."

@@ -111,10 +111,16 @@ PATH="$WORKDIR:$PATH"
 
 mkdir -p "$REPO_DIR/bin"
 MISE_LOG="$WORKDIR/mise.log"
+MISE_FAIL_ONCE_MARKER="$WORKDIR/mise-install-failed-once"
 cat >"$REPO_DIR/bin/mise" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s|LOADED_TUIST_ENV=%s\n' "\$*" "\${LOADED_TUIST_ENV:-}" >>"$MISE_LOG"
+if [[ "\$*" == "exec -- tuist install" && ! -f "$MISE_FAIL_ONCE_MARKER" ]]; then
+  touch "$MISE_FAIL_ONCE_MARKER"
+  echo "error: Failed to find credentials for 'https://github.com' in keychain: status -128" >&2
+  exit 1
+fi
 exit 0
 EOF
 chmod +x "$REPO_DIR/bin/mise"
@@ -138,8 +144,13 @@ cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
 EOF
 
 bash "$REPO_ROOT/scripts/ios-prepare.sh" "$KEY" >"$WORKDIR/prepare.stdout"
-grep -q 'exec -- tuist install|LOADED_TUIST_ENV=1' "$MISE_LOG"
+if [[ "$(grep -c 'exec -- tuist install|LOADED_TUIST_ENV=1' "$MISE_LOG")" -ne 2 ]]; then
+  echo "tuist install should retry once after headless keychain failure" >&2
+  cat "$MISE_LOG" >&2
+  exit 1
+fi
 grep -q 'exec -- tuist generate --no-open|LOADED_TUIST_ENV=1' "$MISE_LOG"
+grep -q 'keychain credential lookup; retrying once' "$WORKDIR/prepare.stdout"
 grep -q 'IOS PREPARE SUCCEEDED' "$WORKDIR/prepare.stdout"
 if [[ -e "$TASK_ROOT/tmp/verification/ios/logs/pod-install.log" ]]; then
   echo "pod install log should not be created for SPM-only iOS prepare" >&2
