@@ -70,6 +70,42 @@ verification_resolve_mise_cmd() {
   return 1
 }
 
+verification_run_with_ios_simulator_lock() (
+  local device_id="$1"
+  shift
+
+  local safe_device_id
+  safe_device_id="$(printf '%s' "$device_id" | sed 's/[^A-Za-z0-9_.-]/_/g')"
+  local lock_root="${SDD_IOS_SIMULATOR_LOCK_ROOT:-${SDD_WORKDIR}/.locks}"
+  local lock_dir="$lock_root/ios-simulator-${safe_device_id}.lock"
+  local pid_file="$lock_dir/owner.pid"
+  local owner_file="$lock_dir/owner.txt"
+  local wait_logged=0
+
+  mkdir -p "$lock_root"
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    local owner_pid=""
+    if [[ -f "$pid_file" ]]; then
+      owner_pid="$(cat "$pid_file" 2>/dev/null || true)"
+    fi
+    if [[ -n "$owner_pid" ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
+      rm -rf "$lock_dir"
+      continue
+    fi
+    if [[ "$wait_logged" -eq 0 ]]; then
+      echo "⏳ Waiting for iOS simulator lock: $device_id"
+      wait_logged=1
+    fi
+    sleep 2
+  done
+
+  printf '%s\n' "${BASHPID-$$}" >"$pid_file"
+  printf 'device=%s task=%s started_at=%s\n' "$device_id" "${KEY:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$owner_file"
+  trap 'rm -rf "$lock_dir"' EXIT INT TERM
+
+  "$@"
+)
+
 verification_print_failure_matches() {
   local log_path="$1"
   local pattern="$2"

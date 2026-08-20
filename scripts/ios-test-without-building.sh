@@ -57,9 +57,13 @@ XCODEBUILD_CMD+=(
   CODE_SIGNING_REQUIRED=NO
 )
 
-if "${XCODEBUILD_CMD[@]}" >"$TEST_LOG" 2>&1; then
-  echo "✅ TEST SUCCEEDED"
-  exit 0
+run_tests_without_building() {
+  "${XCODEBUILD_CMD[@]}" >"$TEST_LOG" 2>&1
+}
+
+if verification_run_with_ios_simulator_lock "$TESTING_DEVICE_ID" run_tests_without_building; then
+    echo "✅ TEST SUCCEEDED"
+    exit 0
 fi
 
 echo "❌ TEST FAILED"

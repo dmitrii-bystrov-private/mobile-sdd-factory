@@ -22,6 +22,7 @@ export LOADED_TUIST_ENV=1
 EOF
 
 XCODEBUILD_LOG="$WORKDIR/xcodebuild.log"
+LOCK_CHECK_LOG="$WORKDIR/lock-check.log"
 JQ_LOG="$WORKDIR/jq.log"
 LINT_LOG="$WORKDIR/lint.log"
 
@@ -29,6 +30,17 @@ cat >"$WORKDIR/xcodebuild" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "\$*" >>"$XCODEBUILD_LOG"
+if [[ " \$* " == *" test-without-building "* ]]; then
+  if [[ ! -d "$SDD_WORKDIR/.locks/ios-simulator-SIM-123.lock" ]]; then
+    echo "missing simulator lock during test-without-building" >&2
+    exit 1
+  fi
+  if [[ ! -f "$SDD_WORKDIR/.locks/ios-simulator-SIM-123.lock/owner.pid" ]]; then
+    echo "missing simulator lock owner pid" >&2
+    exit 1
+  fi
+  printf 'locked %s\n' "\$*" >>"$LOCK_CHECK_LOG"
+fi
 exit 0
 EOF
 chmod +x "$WORKDIR/xcodebuild"
@@ -136,6 +148,11 @@ fi
 
 bash "$REPO_ROOT/scripts/ios-test-without-building.sh" "$KEY" >"$WORKDIR/broad.stdout"
 grep -q 'test-without-building' "$XCODEBUILD_LOG"
+grep -q '^locked ' "$LOCK_CHECK_LOG"
+if [[ -d "$SDD_WORKDIR/.locks/ios-simulator-SIM-123.lock" ]]; then
+  echo "simulator lock should be released after test-without-building" >&2
+  exit 1
+fi
 if grep -q -- '-only-testing:' "$XCODEBUILD_LOG"; then
   echo "unexpected only-testing selector in broad mode" >&2
   exit 1

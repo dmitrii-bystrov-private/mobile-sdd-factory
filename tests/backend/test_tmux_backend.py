@@ -1204,6 +1204,25 @@ class TmuxBackendTests(unittest.TestCase):
         codex_prompt_ready = backend._normalize_terminal_text(
             "› Summarize recent commits\n\ngpt-5.5 medium · ~/repo"
         )
+        codex_ready_after_trust_prompt = backend._normalize_terminal_text(
+            "> You are in /tmp/workspace\n"
+            "Do you trust the contents of this directory?\n"
+            "› 1. Yes, continue\n"
+            "  2. No, quit\n"
+            "  Press enter to continue\n\n"
+            "╭──╮\n"
+            "│ >_ OpenAI Codex │\n"
+            "╰──╯\n\n"
+            "› Run /review on my current changes\n\n"
+            "gpt-5.6-terra medium · ~/repo · Context 0% used"
+        )
+        codex_trust_prompt_only = backend._normalize_terminal_text(
+            "> You are in /tmp/workspace\n"
+            "Do you trust the contents of this directory?\n"
+            "› 1. Yes, continue\n"
+            "  2. No, quit\n"
+            "  Press enter to continue"
+        )
 
         self.assertTrue(backend._contains_workspace_trust_prompt(trust))
         self.assertTrue(backend._contains_generic_selection_blocker(selection))
@@ -1217,9 +1236,13 @@ class TmuxBackendTests(unittest.TestCase):
         self.assertTrue(backend._contains_runner_ready_prompt(prompt_ready))
         self.assertTrue(backend._contains_interactive_input_prompt(codex_prompt_ready))
         self.assertTrue(backend._contains_runner_ready_prompt(codex_prompt_ready))
+        self.assertTrue(backend._contains_workspace_trust_prompt(codex_ready_after_trust_prompt))
+        self.assertTrue(backend._contains_interactive_input_prompt(codex_ready_after_trust_prompt))
+        self.assertTrue(backend._contains_runner_ready_prompt(codex_ready_after_trust_prompt))
         self.assertFalse(backend._contains_interactive_input_prompt(trust))
         self.assertFalse(backend._contains_interactive_input_prompt(selection))
         self.assertFalse(backend._contains_interactive_input_prompt(confirmation))
+        self.assertFalse(backend._contains_interactive_input_prompt(codex_trust_prompt_only))
         self.assertTrue(
             backend._contains_model_capacity_blocker(
                 backend._normalize_terminal_text(

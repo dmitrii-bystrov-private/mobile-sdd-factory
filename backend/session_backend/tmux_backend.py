@@ -844,13 +844,22 @@ class TmuxSessionBackend(SessionBackend):
     def _contains_runner_working_signal(self, normalized_text: str) -> bool:
         return "working (" in normalized_text and "esc to interrupt" in normalized_text
 
+    def _latest_interactive_prompt_tail(self, normalized_text: str) -> str:
+        prompt_index = max(normalized_text.rfind(marker) for marker in ("❯", "›", "»", ">"))
+        if prompt_index < 0:
+            return ""
+        return normalized_text[prompt_index:]
+
     def _contains_interactive_input_prompt(self, normalized_text: str) -> bool:
+        prompt_tail = self._latest_interactive_prompt_tail(normalized_text)
+        if not prompt_tail:
+            return False
         return (
-            ("❯" in normalized_text or "›" in normalized_text)
-            and "quick safety check" not in normalized_text
-            and "do you trust the contents of this directory" not in normalized_text
-            and "enter to confirm" not in normalized_text
-            and "enter to select" not in normalized_text
+            "quick safety check" not in prompt_tail
+            and "do you trust the contents of this directory" not in prompt_tail
+            and "press enter to continue" not in prompt_tail
+            and "enter to confirm" not in prompt_tail
+            and "enter to select" not in prompt_tail
         )
 
     def _contains_launcher_bootstrap_noise(self, normalized_text: str) -> bool:
