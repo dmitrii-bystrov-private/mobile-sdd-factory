@@ -286,3 +286,13 @@ AGENTS.md         repository rules for contributors and coding agents
 - [`DEVELOPERS_GUIDE.md`](DEVELOPERS_GUIDE.md) - development and testing guide
 - [`scripts/README.md`](scripts/README.md) - direct CLI helper reference
 - [`AGENTS.md`](AGENTS.md) - repository conventions
+
+## Support
+
+This repository is published as-is. It is not a supported product or a general-purpose framework.
+
+Issues, pull requests, and feature requests may not be reviewed or answered. You are free to fork and adapt the project under the terms of the license.
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).
