@@ -12,9 +12,9 @@ set -euo pipefail
 #
 # Outputs:
 #   ✓ Updated: <KEY>
-#     https://pnlfintech.atlassian.net/browse/<KEY>
+#     <JIRA_BASE_URL>/<KEY>
 
-JIRA_BASE_URL="https://pnlfintech.atlassian.net/browse"
+JIRA_BASE_URL="${JIRA_BASE_URL:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 err() { echo "ERROR: $*" >&2; }
@@ -26,6 +26,9 @@ need_cmd() {
 need_cmd acli
 need_cmd jq
 need_cmd python3
+
+[[ -z "$JIRA_BASE_URL" ]] && { err "JIRA_BASE_URL is not set"; exit 1; }
+JIRA_BASE_URL="${JIRA_BASE_URL%/}"
 
 # shellcheck source=./md-to-adf.sh
 source "$SCRIPT_DIR/md-to-adf.sh"

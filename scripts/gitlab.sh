@@ -4,11 +4,13 @@ ME="dapper.chita"
 
 : "${IOS_DIR:?IOS_DIR is not set}"
 [ -d "$IOS_DIR" ] || { echo "IOS_DIR is not a directory: $IOS_DIR" >&2; exit 1; }
-IOS_PATH="M69%2Fmobile%2Fios%2Ffinomcommon"
+: "${SDD_GITLAB_IOS_PROJECT_PATH:?SDD_GITLAB_IOS_PROJECT_PATH is not set}"
+IOS_PATH="$SDD_GITLAB_IOS_PROJECT_PATH"
 
 : "${ANDROID_DIR:?ANDROID_DIR is not set}"
 [ -d "$ANDROID_DIR" ] || { echo "ANDROID_DIR is not a directory: $ANDROID_DIR" >&2; exit 1; }
-ANDROID_PATH="M69%2Fmobile%2Fandroid%2Ffinom"
+: "${SDD_GITLAB_ANDROID_PROJECT_PATH:?SDD_GITLAB_ANDROID_PROJECT_PATH is not set}"
+ANDROID_PATH="$SDD_GITLAB_ANDROID_PROJECT_PATH"
 
 fetch_unapproved() {
     local dir="$1"

@@ -12,6 +12,8 @@ Prints the first Jira key found in the MR title or description to stdout.
 Environment:
   IOS_DIR        Path to iOS repo (required for ios)
   ANDROID_DIR    Path to Android repo (required for android)
+  SDD_GITLAB_IOS_PROJECT_PATH      URL-encoded GitLab iOS project path
+  SDD_GITLAB_ANDROID_PROJECT_PATH  URL-encoded GitLab Android project path
 
 Exit codes:
   0  Success — key printed to stdout
@@ -38,15 +40,17 @@ command -v jq   >/dev/null 2>&1 || { err "jq is not installed or not on PATH";  
 case "$platform" in
   ios)
     : "${IOS_DIR:?IOS_DIR is not set}"
+    : "${SDD_GITLAB_IOS_PROJECT_PATH:?SDD_GITLAB_IOS_PROJECT_PATH is not set}"
     [ -d "$IOS_DIR" ] || { err "IOS_DIR is not a directory: $IOS_DIR"; exit 1; }
     project_dir="$IOS_DIR"
-    encoded_path="M69%2Fmobile%2Fios%2Ffinomcommon"
+    encoded_path="$SDD_GITLAB_IOS_PROJECT_PATH"
     ;;
   android)
     : "${ANDROID_DIR:?ANDROID_DIR is not set}"
+    : "${SDD_GITLAB_ANDROID_PROJECT_PATH:?SDD_GITLAB_ANDROID_PROJECT_PATH is not set}"
     [ -d "$ANDROID_DIR" ] || { err "ANDROID_DIR is not a directory: $ANDROID_DIR"; exit 1; }
     project_dir="$ANDROID_DIR"
-    encoded_path="M69%2Fmobile%2Fandroid%2Ffinom"
+    encoded_path="$SDD_GITLAB_ANDROID_PROJECT_PATH"
     ;;
   *)
     err "platform must be 'ios' or 'android' (got: $platform)"; exit 1

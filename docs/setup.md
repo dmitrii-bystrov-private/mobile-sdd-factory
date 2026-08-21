@@ -31,6 +31,9 @@ Optional but commonly useful:
 
 ```bash
 JIRA_BASE_URL=https://your-org.atlassian.net/browse/
+SDD_JIRA_TEAM_FIELD_ID=12345
+SDD_GITLAB_IOS_PROJECT_PATH=group%2Fmobile%2Fios-app
+SDD_GITLAB_ANDROID_PROJECT_PATH=group%2Fmobile%2Fandroid-app
 DEFAULT_JIRA_ASSIGNEE=you@example.com
 ```
 
@@ -66,6 +69,27 @@ Current built-in MCP access is:
 
 Roles such as `convention-reviewer`, `requirements-reviewer`, `verification-coordinator`, `doc-harvest-worker`, and `documentation-reviewer` receive an empty scoped MCP config by default.
 `env` values from `.claude/settings.json` or `.claude/settings.local.json` are not copied into role-scoped worker settings.
+
+MCP server endpoints are local machine configuration. To enable them, create a repo-local `.mcp.json`; it is ignored by git:
+
+```json
+{
+  "mcpServers": {
+    "ios-rag": {
+      "type": "http",
+      "url": "https://example.com/mcp/swift"
+    },
+    "android-rag": {
+      "type": "http",
+      "url": "https://example.com/mcp/kotlin"
+    },
+    "frontend-rag": {
+      "type": "http",
+      "url": "https://example.com/mcp/frontend"
+    }
+  }
+}
+```
 
 If they are unavailable because of authentication, VPN, or network problems, the platform should stop and move the session to `waiting_for_operator` until access is restored.
 

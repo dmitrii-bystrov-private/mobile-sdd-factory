@@ -187,10 +187,13 @@ Optional:
 
 ```bash
 JIRA_BASE_URL=https://your-org.atlassian.net/browse/
+SDD_JIRA_TEAM_FIELD_ID=12345
+SDD_GITLAB_IOS_PROJECT_PATH=group%2Fmobile%2Fios-app
+SDD_GITLAB_ANDROID_PROJECT_PATH=group%2Fmobile%2Fandroid-app
 DEFAULT_JIRA_ASSIGNEE=you@example.com
 ```
 
-For codebase semantic search, the runtime can use role-scoped MCP servers such as `ios-rag`, `android-rag`, and `frontend-rag` when available.
+For codebase semantic search, the runtime can use role-scoped MCP servers such as `ios-rag`, `android-rag`, and `frontend-rag` when available. Add them through a local-only `.mcp.json`; this file is intentionally ignored by git.
 
 See [`docs/setup.md`](docs/setup.md) for setup details.
 

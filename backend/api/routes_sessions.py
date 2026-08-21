@@ -46,8 +46,10 @@ def _session_task_title(workdir_root: Path, task_key: str) -> str | None:
     return None
 
 
-def _session_jira_url(task_key: str) -> str:
-    jira_base = os.environ.get("JIRA_BASE_URL", "https://pnlfintech.atlassian.net/browse/")
+def _session_jira_url(task_key: str) -> str | None:
+    jira_base = os.environ.get("JIRA_BASE_URL", "").strip()
+    if not jira_base:
+        return None
     normalized = jira_base.rstrip("/")
     return f"{normalized}/{task_key}"
 

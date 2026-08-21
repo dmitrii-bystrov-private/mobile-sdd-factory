@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import os
 import sqlite3
 import tempfile
 import time
@@ -527,11 +528,12 @@ class SessionApiTests(unittest.TestCase):
             )
         )
 
-        response = list_sessions(dependencies=self.dependencies)
+        with patch.dict(os.environ, {"JIRA_BASE_URL": "https://jira.example.com/browse/"}, clear=False):
+            response = list_sessions(dependencies=self.dependencies)
 
         self.assertEqual("Add biometric login", response.items[0].task_title)
         self.assertEqual(
-            "https://pnlfintech.atlassian.net/browse/IOS-40001TITLE",
+            "https://jira.example.com/browse/IOS-40001TITLE",
             response.items[0].jira_url,
         )
 

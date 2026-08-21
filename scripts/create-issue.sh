@@ -11,10 +11,10 @@ set -euo pipefail
 #
 # Outputs:
 #   <KEY>
-#   https://pnlfintech.atlassian.net/browse/<KEY>
+#   <JIRA_BASE_URL>/<KEY>
 
-JIRA_BASE_URL="https://pnlfintech.atlassian.net/browse"
-TEAM_FIELD_ID="11914"   # common-mobile (customfield_10625)
+JIRA_BASE_URL="${JIRA_BASE_URL:-}"
+TEAM_FIELD_ID="${SDD_JIRA_TEAM_FIELD_ID:-}"
 DEFAULT_ASSIGNEE="${DEFAULT_JIRA_ASSIGNEE:-}"
 DEFAULT_PRIORITY="Medium"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +28,10 @@ need_cmd() {
 need_cmd acli
 need_cmd jq
 need_cmd python3
+
+[[ -z "$TEAM_FIELD_ID" ]] && { err "SDD_JIRA_TEAM_FIELD_ID is not set"; exit 1; }
+[[ -z "$JIRA_BASE_URL" ]] && { err "JIRA_BASE_URL is not set"; exit 1; }
+JIRA_BASE_URL="${JIRA_BASE_URL%/}"
 
 # shellcheck source=./md-to-adf.sh
 source "$SCRIPT_DIR/md-to-adf.sh"

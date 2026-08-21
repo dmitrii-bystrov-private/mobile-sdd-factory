@@ -12,7 +12,9 @@ Options:
 Environment:
   IOS_DIR        Path to iOS repo (required for ios)
   ANDROID_DIR    Path to Android repo (required for android)
-  JIRA_BASE_URL  Optional. Default: https://pnlfintech.atlassian.net/browse/
+  JIRA_BASE_URL  Optional. Base URL for Jira issue links.
+  SDD_GITLAB_IOS_PROJECT_PATH      URL-encoded GitLab iOS project path
+  SDD_GITLAB_ANDROID_PROJECT_PATH  URL-encoded GitLab Android project path
 
 Output:
   Prints a 2–3 line Slack-ready message:
@@ -59,15 +61,17 @@ encoded_project_path=""
 case "$platform" in
   ios)
     : "${IOS_DIR:?IOS_DIR is not set}"
+    : "${SDD_GITLAB_IOS_PROJECT_PATH:?SDD_GITLAB_IOS_PROJECT_PATH is not set}"
     [ -d "$IOS_DIR" ] || { echo "ERROR: IOS_DIR is not a directory: $IOS_DIR" >&2; exit 1; }
     project_dir="$IOS_DIR"
-    encoded_project_path="M69%2Fmobile%2Fios%2Ffinomcommon"
+    encoded_project_path="$SDD_GITLAB_IOS_PROJECT_PATH"
     ;;
   android)
     : "${ANDROID_DIR:?ANDROID_DIR is not set}"
+    : "${SDD_GITLAB_ANDROID_PROJECT_PATH:?SDD_GITLAB_ANDROID_PROJECT_PATH is not set}"
     [ -d "$ANDROID_DIR" ] || { echo "ERROR: ANDROID_DIR is not a directory: $ANDROID_DIR" >&2; exit 1; }
     project_dir="$ANDROID_DIR"
-    encoded_project_path="M69%2Fmobile%2Fandroid%2Ffinom"
+    encoded_project_path="$SDD_GITLAB_ANDROID_PROJECT_PATH"
     ;;
   *)
     echo "ERROR: platform must be 'ios' or 'android' (got: $platform)" >&2
@@ -75,7 +79,10 @@ case "$platform" in
     ;;
 esac
 
-jira_base_url="${JIRA_BASE_URL:-https://pnlfintech.atlassian.net/browse/}"
+jira_base_url="${JIRA_BASE_URL:-}"
+if [ -n "$jira_base_url" ]; then
+  jira_base_url="${jira_base_url%/}/"
+fi
 
 mr_json="$(
   (cd "$project_dir" && glab api "projects/$encoded_project_path/merge_requests/$mr_iid" 2>/dev/null) \
@@ -136,6 +143,10 @@ if [ -n "$stats" ]; then
 fi
 
 if [ "$open_browser" = true ]; then
+  if [ -z "$jira_base_url" ]; then
+    echo "ERROR: JIRA_BASE_URL is required with --open" >&2
+    exit 1
+  fi
   tmp_html="/tmp/slack-msg-$jira_key.html"
   cat > "$tmp_html" <<EOF
 <!DOCTYPE html>
@@ -144,7 +155,7 @@ if [ "$open_browser" = true ]; then
 <body>
 <p>
   <a href="$jira_base_url$jira_key">$jira_key</a>: $title<br>
-  <a href="web_url">$web_url</a><br>
+  <a href="$web_url">$web_url</a><br>
   $stats
 </p>
 <script>
