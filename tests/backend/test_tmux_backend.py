@@ -733,6 +733,66 @@ class TmuxBackendTests(unittest.TestCase):
             submit_calls,
         )
 
+    def test_tmux_launcher_retry_ignores_stale_codex_trust_prompt(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+                self.enter_count = 0
+                self.pane_text = (
+                    "> You are in /tmp/workspace\n"
+                    "Do you trust the contents of this directory?\n"
+                    "› 1. Yes, continue\n"
+                    "  2. No, quit\n"
+                    "  Press enter to continue\n\n"
+                    "╭──╮\n"
+                    "│ >_ OpenAI Codex │\n"
+                    "╰──╯\n\n"
+                    "› Read ROUTED_WORK.md in the current directory. Dispatch token: hv2-wi3726.1\n\n"
+                    "gpt-5.6-terra medium · ~/repo · Context 0% used"
+                )
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                if args[:3] == ("send-keys", "-t", role.role_id) and len(args) >= 4:
+                    if args[3]:
+                        self.pane_text = f"{self.pane_text}\n{args[3]}"
+                    elif args[-1] == "Enter":
+                        self.enter_count += 1
+                        if self.enter_count >= 2:
+                            self.pane_text = "◦ Working (1s • esc to interrupt)"
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50009:convention-reviewer",
+            session_id="sdd-IOS-50009",
+            backend_name="tmux",
+        )
+        backend.tmux_interactive_driver_enabled[role.role_id] = True
+        backend.tmux_launcher_runners[role.role_id] = "codex"
+        backend.tmux_role_ready[role.role_id] = True
+
+        backend.send_input(role, "Read ROUTED_WORK.md in the current directory. Dispatch token: hv2-wi3726.1")
+
+        submit_calls = [
+            call
+            for call in backend.calls
+            if call[:3] == ("send-keys", "-t", role.role_id) and call[-1] == "Enter"
+        ]
+        self.assertEqual(
+            [
+                ("send-keys", "-t", role.role_id, "", "Enter"),
+                ("send-keys", "-t", role.role_id, "", "Enter"),
+            ],
+            submit_calls,
+        )
+        submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
+        self.assertEqual("retried", submit_trace["delivery_state"])
+        self.assertEqual("1", submit_trace["retry_count"])
+
     def test_tmux_restores_launcher_metadata_for_existing_role_after_backend_restart(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self, runtime_root: Path) -> None:

@@ -992,14 +992,15 @@ class TmuxSessionBackend(SessionBackend):
             normalized_pane = self._normalize_terminal_text(pane_text)
             if not normalized_pane:
                 return False
+            current_prompt_tail = self._latest_interactive_prompt_tail(normalized_pane) or normalized_pane
             if (
                 self._contains_runner_status_signal(normalized_pane)
                 or self._contains_runner_working_signal(normalized_pane)
-                or self._contains_generic_selection_blocker(normalized_pane)
-                or self._contains_generic_confirmation_blocker(normalized_pane)
-                or self._contains_model_capacity_blocker(normalized_pane)
-                or self._contains_workspace_trust_prompt(normalized_pane)
-                or self._contains_update_prompt(normalized_pane)
+                or self._contains_generic_selection_blocker(current_prompt_tail)
+                or self._contains_generic_confirmation_blocker(current_prompt_tail)
+                or self._contains_model_capacity_blocker(current_prompt_tail)
+                or self._contains_workspace_trust_prompt(current_prompt_tail)
+                or self._contains_update_prompt(current_prompt_tail)
             ):
                 return False
             if not self._contains_interactive_input_prompt(normalized_pane):
