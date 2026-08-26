@@ -650,6 +650,7 @@ class CoordinatorService:
                 and (
                     event.event_type == "session_escalated_to_operator"
                     or event.event_type == "role_runtime_error_reported"
+                    or event.event_type == "git_commit_failed"
                 )
             ):
                 blocker_event = event
@@ -673,6 +674,14 @@ class CoordinatorService:
         source_event = blocker_event
         if source_event is not None and self._interactive_blocker_is_stale_for_session(source_event, session):
             source_event = None
+        pending_operator_item = self._find_operator_pending_work_item(session.id)
+        if pending_operator_item is not None and self._operator_reply_requires_routed_continuation(pending_operator_item) and (
+            source_event is None
+            or not self._payload_truthy(source_event.payload.get("needs_operator_input"))
+        ):
+            pending_summary = self._operator_pending_interactive_summary(session, pending_operator_item)
+            if pending_summary is not None:
+                return pending_summary
         if source_event is None:
             return {
                 "available": False,
@@ -689,6 +698,9 @@ class CoordinatorService:
             }
 
         review_family, review_lane = self._interactive_review_context(source_event.payload)
+        if source_event.event_type == "git_commit_failed":
+            return self._git_commit_failed_interactive_summary(session, source_event)
+
         details = source_event.payload.get("details")
         if not str(details or "").strip() and source_event.payload.get("reason") == "spec_verification_blocked":
             details = self._spec_verification_operator_details_from_history(events, source_event.id)
@@ -710,10 +722,55 @@ class CoordinatorService:
             "tech_debt_candidate_count": tech_debt_candidate_count,
         }
 
+    def _operator_pending_interactive_summary(
+        self,
+        session: Session,
+        work_item: WorkItem,
+    ) -> dict[str, object] | None:
+        if work_item.owner_role_id is None:
+            return None
+        role = self.role_repository.get_by_id(work_item.owner_role_id)
+        if role is None:
+            return None
+        source_event: Event | None = None
+        for event in reversed(self.event_repository.list_for_session(session.id)):
+            if event.event_type != "session_escalated_to_operator":
+                continue
+            if not self._payload_truthy(event.payload.get("needs_operator_input")):
+                continue
+            event_role = str(event.payload.get("role_name") or "").strip()
+            if event_role and event_role != role.role_name:
+                continue
+            event_stage = str(event.payload.get("current_stage") or "").strip()
+            if event_stage and event_stage != session.current_stage:
+                continue
+            source_event = event
+            break
+
+        payload = source_event.payload if source_event is not None else {}
+        review_family, review_lane = self._interactive_review_context(payload)
+        return {
+            "available": True,
+            "role_name": role.role_name,
+            "current_stage": payload.get("current_stage", session.current_stage),
+            "summary": payload.get("summary") or work_item.title or "Operator input required",
+            "details": payload.get("details") or work_item.title,
+            "source_event_type": source_event.event_type if source_event is not None else "work_item_waiting_for_operator",
+            "source_reason": payload.get("reason") or work_item.work_type,
+            "review_family": review_family,
+            "review_lane": review_lane,
+            "needs_operator_input": True,
+            "resume_strategy": payload.get("resume_strategy"),
+            "implement_now_count": payload.get("implement_now_count"),
+            "tech_debt_candidate_count": payload.get("tech_debt_candidate_count"),
+        }
+
     def _interactive_blocker_is_stale_for_session(self, source_event: Event, session: Session) -> bool:
         event_stage = str(source_event.payload.get("current_stage") or "").strip()
         if event_stage and event_stage != session.current_stage:
             return True
+        if source_event.event_type == "git_commit_failed":
+            return False
         if source_event.event_type not in {"session_escalated_to_operator", "role_runtime_error_reported"}:
             return False
         role_name = str(source_event.payload.get("role_name") or "").strip()
@@ -733,6 +790,54 @@ class CoordinatorService:
             current_event_id=source_event.id,
         )
         return replayed is not None
+
+    def _git_commit_failed_interactive_summary(self, session: Session, source_event: Event) -> dict[str, object]:
+        context = str(source_event.payload.get("context") or "task state").strip()
+        returncode = source_event.payload.get("returncode")
+        details_parts = [f"The factory could not commit the {context} checkpoint for {session.task_key}."]
+        if returncode is not None:
+            details_parts.append(f"commit-task-state exited with code {returncode}.")
+        artifact_details = self._git_commit_failure_artifact_details(session, context)
+        if artifact_details:
+            details_parts.append(artifact_details)
+        else:
+            details_parts.append("No commit-task-state stderr/stdout details were captured.")
+        details_parts.append("Fix the commit/Jira environment issue, then retry the current stage.")
+        return {
+            "available": True,
+            "role_name": None,
+            "current_stage": source_event.payload.get("current_stage", session.current_stage),
+            "summary": "Task state checkpoint commit failed",
+            "details": "\n\n".join(details_parts),
+            "source_event_type": source_event.event_type,
+            "source_reason": "git_commit_failed",
+            "review_family": None,
+            "review_lane": None,
+            "needs_operator_input": False,
+            "resume_strategy": "retry_current_stage",
+            "implement_now_count": None,
+            "tech_debt_candidate_count": None,
+        }
+
+    def _git_commit_failure_artifact_details(self, session: Session, context: str) -> str | None:
+        artifacts = [
+            artifact
+            for artifact in self.artifact_repository.list_for_session(session.id)
+            if artifact.stage_name == "commit-task-state"
+            and artifact.metadata.get("context") == context
+            and artifact.artifact_type in {"commit_task_state_stderr", "commit_task_state_stdout"}
+        ]
+        lines: list[str] = []
+        for artifact in artifacts[-2:]:
+            try:
+                content = Path(artifact.path).read_text(encoding="utf-8").strip()
+            except OSError:
+                content = ""
+            if not content:
+                continue
+            heading = "stderr" if artifact.artifact_type.endswith("_stderr") else "stdout"
+            lines.append(f"{heading}: {content[:2000]}")
+        return "\n\n".join(lines) if lines else None
 
     def _interactive_review_context(self, payload: object) -> tuple[str | None, str | None]:
         if not isinstance(payload, dict):
@@ -2910,13 +3015,14 @@ class CoordinatorService:
                 if role_name == CONVENTION_REVIEWER_ROLE
                 else "requirements_review"
             )
+            expected_work_types = {expected_work_type, f"{expected_work_type}_cycle_review"}
             if isinstance(payload_work_item_id, int):
                 matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
                 if (
                     matching_item is not None
                     and matching_item.session_id == session.id
                     and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
-                    and matching_item.work_type == expected_work_type
+                    and matching_item.work_type in expected_work_types
                 ):
                     return False
             return True
@@ -3509,6 +3615,7 @@ class CoordinatorService:
             backend_name=role.runtime_backend,
         )
 
+        use_routed_operator_reply = self._operator_reply_requires_routed_continuation(work_item)
         self.work_item_repository.update_status(work_item.id, WorkItemStatus.ASSIGNED)
         session = self.session_repository.update_stage_and_owner(
             session.id,
@@ -3516,8 +3623,6 @@ class CoordinatorService:
             current_owner=role.role_name,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
-        if role.role_name in PERSISTENT_SESSION_ROLES:
-            self.session_backend.send_input(runtime_role, text)
         event = self._append_event(
             session_id=session.id,
             event_type="operator_runtime_input_sent",
@@ -3531,7 +3636,40 @@ class CoordinatorService:
                 "continuation_stage": session.current_stage,
             },
         )
-        if role.role_name not in PERSISTENT_SESSION_ROLES:
+        if use_routed_operator_reply:
+            instruction = self._stage_instruction(
+                session.current_stage,
+                session.task_key,
+                workflow_profile=session.workflow_profile,
+                role_name=role.role_name,
+                session_policy=session.policy,
+            )
+            if instruction is None:
+                raise IntakeError(
+                    f"Session {session.id} cannot continue operator reply for stage {session.current_stage}"
+                )
+            continuation_instruction = (
+                f"{instruction}\n\n"
+                "Operator reply received for this routed work item. Treat it as authoritative, "
+                "continue under the current work_item_id from HYDRATION.json, and do not submit a result "
+                "for any earlier work item.\n\n"
+                f"Operator reply:\n{text.strip()}\n"
+            )
+            self._dispatch_role_work(
+                session=session,
+                role=role,
+                work_item=work_item,
+                stage_name=session.current_stage,
+                instruction=continuation_instruction,
+                extra_hydration={
+                    "operator_reply": text,
+                    "operator_reply_event_id": event.id,
+                },
+                force_redispatch=True,
+            )
+        elif role.role_name in PERSISTENT_SESSION_ROLES:
+            self.session_backend.send_input(runtime_role, text)
+        else:
             if self.session_backend.is_role_alive(runtime_role):
                 self.session_backend.send_input(
                     runtime_role,
@@ -3569,6 +3707,13 @@ class CoordinatorService:
                     force_redispatch=True,
                 )
         return session, event
+
+    def _operator_reply_requires_routed_continuation(self, work_item: WorkItem) -> bool:
+        return work_item.work_type in {
+            "convention_review_cycle_review",
+            "requirements_review_cycle_review",
+            "verification_cycle_review",
+        }
 
     def _operator_reply_live_message(self, text: str) -> str:
         normalized_reply = " ".join(str(text).split()).strip()
@@ -3639,7 +3784,7 @@ class CoordinatorService:
 
         latest_blocker = self._latest_event_by_type(
             session.id,
-            {"session_escalated_to_operator", "role_runtime_error_reported"},
+            {"session_escalated_to_operator", "role_runtime_error_reported", "git_commit_failed"},
         )
         if (
             latest_blocker is not None
@@ -3727,6 +3872,9 @@ class CoordinatorService:
                 )
             return session, retried_event, dispatch_event
 
+        if latest_blocker is not None and latest_blocker.event_type == "git_commit_failed":
+            return self._retry_git_commit_failed_session(session, latest_blocker)
+
         previous_work_item = self._find_operator_pending_work_item(session.id)
         if previous_work_item is None:
             raise IntakeError(f"Session {session_id} has no operator-pending work item to retry")
@@ -3806,6 +3954,51 @@ class CoordinatorService:
             "Resubmit only the terminal outcome for the current routed work item using the deterministic writer helper. "
             "Reuse the work you already completed, preserve the same outcome, do not use manual files or fallback scripts, and stop immediately after the helper succeeds."
         )
+
+    def _retry_git_commit_failed_session(self, session: Session, blocker_event: Event) -> tuple[Session, Event, Event]:
+        context = str(blocker_event.payload.get("context") or "").strip()
+        subtask_match = re.fullmatch(r"subtask\s+([A-Z]+-\d+)", context)
+        if subtask_match is None:
+            raise IntakeError(
+                f"Session {session.id} cannot retry git commit failure for context {context or '<empty>'}"
+            )
+        subtask_key = subtask_match.group(1)
+        active_item = self._latest_completed_subtask_work_item(session.id, subtask_key)
+        if active_item is None:
+            raise IntakeError(f"Session {session.id} has no completed work item for subtask {subtask_key}")
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        retried_event = self._append_event(
+            session_id=session.id,
+            event_type="session_retried_by_operator",
+            producer_type="operator",
+            payload={
+                "retry_mode": "git_commit_failed",
+                "commit_context": context,
+                "blocked_event_id": blocker_event.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        session, commit_event = self._commit_task_state(session, context)
+        if commit_event is not None:
+            return session, retried_event, commit_event
+        next_session, next_event = self._continue_after_subtask_checkpoint(
+            session=session,
+            source_event=blocker_event,
+            active_item=active_item,
+            parsed_subtask={"key": subtask_key},
+        )
+        return next_session, retried_event, next_event
+
+    def _latest_completed_subtask_work_item(self, session_id: int, subtask_key: str) -> WorkItem | None:
+        for item in reversed(self.work_item_repository.list_for_session(session_id)):
+            if item.work_type != "subtask_implementation":
+                continue
+            if item.status != WorkItemStatus.COMPLETED:
+                continue
+            parsed = self._parse_subtask_work_item_title(item.title)
+            if parsed["key"] == subtask_key:
+                return item
+        return None
 
     def redirect_session(
         self,
@@ -4903,6 +5096,21 @@ class CoordinatorService:
         session, commit_event = self._commit_task_state(session, subtask_context)
         if commit_event is not None:
             return session, commit_event
+        return self._continue_after_subtask_checkpoint(
+            session=session,
+            source_event=source_event,
+            active_item=active_item,
+            parsed_subtask=parsed_subtask,
+        )
+
+    def _continue_after_subtask_checkpoint(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+        active_item: WorkItem,
+        parsed_subtask: dict[str, str | None],
+    ) -> tuple[Session, Event]:
         if parsed_subtask["key"] is not None:
             session, transition_event = self._complete_subtask_in_jira(
                 session=session,
@@ -5332,7 +5540,6 @@ class CoordinatorService:
             session.id,
             before_event_id=before_event_id,
         )
-        latest_operator_guidance = operator_guidance_history[-1] if operator_guidance_history else None
         if operator_guidance_history:
             guidance_lines = []
             for guidance in operator_guidance_history:
@@ -5372,10 +5579,6 @@ class CoordinatorService:
             if previous_review_reports
             else None,
             "diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="source"),
-            "operator_reply": latest_operator_guidance["operator_reply"] if latest_operator_guidance is not None else None,
-            "operator_reply_event_id": (
-                latest_operator_guidance["operator_reply_event_id"] if latest_operator_guidance is not None else None
-            ),
             "operator_resolution_history": json.dumps(operator_guidance_history, indent=2)
             if operator_guidance_history
             else None,
@@ -6226,7 +6429,7 @@ class CoordinatorService:
         ]
         if not review_items:
             raise IntakeError("No active documentation review work item found for the session")
-        self.work_item_repository.update_status(review_items[0].id, WorkItemStatus.COMPLETED)
+        self.work_item_repository.update_status(review_items[-1].id, WorkItemStatus.COMPLETED)
 
     def _handle_documentation_review_passed(
         self,
@@ -8321,12 +8524,9 @@ class CoordinatorService:
             "requirements_review_correction_requested",
         }:
             operator_guidance_history = self._dual_review_operator_guidance_history(session_id)
-            latest_operator_guidance = operator_guidance_history[-1] if operator_guidance_history else None
-            if latest_operator_guidance is not None:
+            if operator_guidance_history:
                 payload.update(
                     {
-                        "operator_reply": latest_operator_guidance["operator_reply"],
-                        "operator_reply_event_id": latest_operator_guidance["operator_reply_event_id"],
                         "operator_resolution_history": json.dumps(operator_guidance_history, indent=2),
                     }
                 )
@@ -9159,6 +9359,13 @@ class CoordinatorService:
             return
         if self._has_pending_role_result_file(session=session, role=role):
             return
+        active_item = self._find_active_work_item_for_role(session.id, role.id)
+        if self._has_unresolved_stall_poke(
+            session=session,
+            role=role,
+            active_work_item_id=active_item.id if active_item is not None else None,
+        ):
+            return
         try:
             if snapshot is None:
                 snapshot = self.session_backend.capture_output_snapshot(runtime_role)
@@ -9188,8 +9395,40 @@ class CoordinatorService:
                 "role_name": role.role_name,
                 "runtime_handle": role.runtime_handle,
                 **poke_result,
+                "current_stage": session.current_stage,
+                "work_item_id": active_item.id if active_item is not None else None,
             },
         )
+
+    def _has_unresolved_stall_poke(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_work_item_id: int | None,
+    ) -> bool:
+        for event in reversed(self.event_repository.list_for_session(session.id)):
+            if event.event_type in {
+                "role_input_dispatched",
+                "role_result_ingress_accepted",
+                "role_output_collected",
+                "operator_runtime_input_sent",
+                "session_retried_by_operator",
+                "session_resumed_by_operator",
+            }:
+                return False
+            if event.event_type != "runtime_role_stall_poked":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            event_stage = event.payload.get("current_stage")
+            if event_stage is not None and event_stage != session.current_stage:
+                continue
+            event_work_item_id = event.payload.get("work_item_id")
+            if event_work_item_id is not None and event_work_item_id != active_work_item_id:
+                continue
+            return True
+        return False
 
     def _has_pending_role_result_file(self, *, session: Session, role: Role) -> bool:
         candidate_paths: list[Path] = []

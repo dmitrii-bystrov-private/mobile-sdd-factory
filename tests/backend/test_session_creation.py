@@ -890,6 +890,129 @@ class SessionCreationTests(unittest.TestCase):
             event.payload.get("operator_reply"),
         )
 
+    def test_operator_reply_to_review_cycle_uses_fresh_routed_work_item(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30002REVIEWCYCLE",
+            workflow_profile="oneshot",
+            policy={
+                "review_policy": "enabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30002REVIEWCYCLE")
+        reviewer_role = self.role_repository.get_by_name(session.id, REQUIREMENTS_REVIEWER_ROLE)
+        self.assertIsNotNone(reviewer_role)
+        completed_review = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements_review",
+            title="Requirements review for IOS-30002REVIEWCYCLE",
+            owner_role_id=reviewer_role.id,
+            status=WorkItemStatus.COMPLETED,
+        )
+        cycle_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements_review_cycle_review",
+            title="Requirements review cycle resolution for IOS-30002REVIEWCYCLE",
+            owner_role_id=reviewer_role.id,
+            source_event_id=1,
+            priority=92,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_review_requested",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+
+        updated_session, event = self.coordinator.send_operator_runtime_input(
+            session_id=session.id,
+            text="Choose option 2; supersede the deadline requirement.",
+        )
+
+        self.assertEqual("operator_runtime_input_sent", event.event_type)
+        self.assertEqual(cycle_item.id, event.payload.get("work_item_id"))
+        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
+        self.assertEqual(REQUIREMENTS_REVIEWER_ROLE, updated_session.current_owner)
+        sent = self.session_backend.get_sent_inputs(reviewer_role.runtime_handle)
+        self.assertTrue(sent)
+        self.assertIn(f"Routed work item: {cycle_item.id}.", sent[-1])
+        self.assertIn("Operator reply received for this routed work item.", sent[-1])
+        self.assertIn("Choose option 2; supersede the deadline requirement.", sent[-1])
+        self.assertNotIn("Operator answer:", sent[-1])
+        refreshed_cycle_item = self.work_item_repository.get_by_id(cycle_item.id)
+        refreshed_review_item = self.work_item_repository.get_by_id(completed_review.id)
+        self.assertEqual(WorkItemStatus.ASSIGNED, refreshed_cycle_item.status)
+        self.assertEqual(WorkItemStatus.COMPLETED, refreshed_review_item.status)
+        dispatch_events = [
+            item
+            for item in self.event_repository.list_for_session(session.id)
+            if item.event_type == "role_input_dispatched"
+            and item.payload.get("work_item_id") == cycle_item.id
+        ]
+        self.assertTrue(dispatch_events)
+
+    def test_review_cycle_terminal_result_is_accepted_when_owner_was_cleared(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30002REVIEWCYCLEOWNER",
+            workflow_profile="oneshot",
+            policy={
+                "review_policy": "enabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30002REVIEWCYCLEOWNER")
+        reviewer_role = self.role_repository.get_by_name(session.id, REQUIREMENTS_REVIEWER_ROLE)
+        self.assertIsNotNone(reviewer_role)
+        cycle_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements_review_cycle_review",
+            title="Requirements review cycle resolution for IOS-30002REVIEWCYCLEOWNER",
+            owner_role_id=reviewer_role.id,
+            priority=92,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_review_requested",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+
+        updated_session, _event, mapped_event_type, followup_event_type, ignored = (
+            self.coordinator.submit_role_result_document(
+                document={
+                    "output_type": "failed",
+                    "payload": {
+                        "work_item_id": cycle_item.id,
+                        "summary": "Review found issues",
+                        "issues_markdown": "## Findings\n\n1. Add the operator-approved guard.",
+                    },
+                }
+            )
+        )
+
+        refreshed_cycle_item = self.work_item_repository.get_by_id(cycle_item.id)
+        correction_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "requirements_review_correction"
+        ]
+        stale_events = [
+            item
+            for item in self.event_repository.list_for_session(session.id)
+            if item.event_type == "stale_role_output_ignored"
+        ]
+        self.assertFalse(ignored)
+        self.assertEqual("requirements_review_issues_found", mapped_event_type)
+        self.assertEqual("requirements_review_correction_requested", followup_event_type)
+        self.assertEqual(WorkItemStatus.COMPLETED, refreshed_cycle_item.status)
+        self.assertEqual(1, len(correction_items))
+        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
+        self.assertEqual("requirements_review_correction_requested", updated_session.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertFalse(stale_events)
+
     def test_send_operator_runtime_input_sends_live_reply_to_alive_one_shot_role(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30002B",
@@ -1039,6 +1162,81 @@ class SessionCreationTests(unittest.TestCase):
 
         self.assertFalse(summary["available"])
         self.assertFalse(summary["needs_operator_input"])
+
+    def test_interactive_summary_prefers_pending_operator_item_over_secondary_runtime_error(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004REVIEWCYCLE",
+            workflow_profile="oneshot",
+            policy={
+                "review_policy": "enabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30004REVIEWCYCLE")
+        role = self.role_repository.get_by_name(session.id, REQUIREMENTS_REVIEWER_ROLE)
+        self.assertIsNotNone(role)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_review_requested",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "requirements_review_cycle",
+                "role_name": REQUIREMENTS_REVIEWER_ROLE,
+                "review_lane": "requirements",
+                "current_stage": "requirements_review_requested",
+                "summary": "Review cycle blocked",
+                "details": "Choose option 1 or option 2.",
+                "needs_operator_input": True,
+            },
+        )
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="operator_runtime_input_sent",
+            producer_type="operator",
+            payload={
+                "role_name": REQUIREMENTS_REVIEWER_ROLE,
+                "work_item_id": 100,
+                "current_stage": "requirements_review_requested",
+                "operator_reply": "Choose option 1.",
+            },
+        )
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "runtime_error",
+                "role_name": REQUIREMENTS_REVIEWER_ROLE,
+                "current_stage": "requirements_review_requested",
+                "summary": "Work item already delivered",
+                "details": "Work item 100 was already submitted.",
+                "needs_operator_input": False,
+            },
+        )
+        self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements_review_cycle_review",
+            title="Retry: Requirements review cycle resolution for IOS-30004REVIEWCYCLE",
+            owner_role_id=role.id,
+            priority=10,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertTrue(summary["available"])
+        self.assertEqual(REQUIREMENTS_REVIEWER_ROLE, summary["role_name"])
+        self.assertEqual("Review cycle blocked", summary["summary"])
+        self.assertEqual("requirements_review_cycle", summary["source_reason"])
+        self.assertEqual("internal_review", summary["review_family"])
+        self.assertEqual("requirements", summary["review_lane"])
+        self.assertTrue(summary["needs_operator_input"])
+        self.assertIn("Choose option 1", str(summary["details"]))
 
     def test_story_planning_replayed_blocker_is_ignored_after_operator_reply(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -1200,6 +1398,105 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("required mcp access unavailable", summary["summary"])
         self.assertEqual("reactivate_only", summary["resume_strategy"])
         self.assertFalse(summary["needs_operator_input"])
+
+    def test_get_interactive_state_summary_exposes_git_commit_failure(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004COMMIT",
+            workflow_profile="oneshot",
+            policy={
+                "review_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        stderr_path = Path(self.temp_dir.name) / "commit.stderr.log"
+        stderr_path.write_text("failed to fetch work item details\n")
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="commit-task-state",
+            artifact_type="commit_task_state_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "context": "subtask IOS-30004A",
+                "returncode": 1,
+            },
+        )
+        self.event_repository.append(
+            session_id=session.id,
+            event_type="git_commit_failed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "context": "subtask IOS-30004A",
+                "returncode": 1,
+                "current_stage": "subtask_implementation_requested",
+                "status": "waiting_for_operator",
+            },
+        )
+
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+
+        self.assertTrue(summary["available"])
+        self.assertEqual("Task state checkpoint commit failed", summary["summary"])
+        self.assertIn("failed to fetch work item details", summary["details"])
+        self.assertEqual("git_commit_failed", summary["source_reason"])
+        self.assertEqual("retry_current_stage", summary["resume_strategy"])
+        self.assertFalse(summary["needs_operator_input"])
+
+    def test_retry_session_continues_after_subtask_git_commit_failure(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004COMMITRETRY",
+            workflow_profile="oneshot",
+            policy={
+                "review_policy": "disabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, "implementer")
+        self.assertIsNotNone(implementer_role)
+        completed_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="subtask_implementation",
+            title="Subtask implementation for IOS-30005: Update docs",
+            owner_role_id=implementer_role.id,
+            priority=10,
+            status=WorkItemStatus.COMPLETED,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        blocker = self.event_repository.append(
+            session_id=session.id,
+            event_type="git_commit_failed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "context": "subtask IOS-30005",
+                "returncode": 1,
+                "current_stage": "subtask_implementation_requested",
+                "status": "waiting_for_operator",
+            },
+        )
+        self.assertIsNotNone(blocker)
+
+        updated_session, retry_event, next_event = self.coordinator.retry_session(session.id)
+
+        self.assertEqual("session_retried_by_operator", retry_event.event_type)
+        self.assertEqual("git_commit_failed", retry_event.payload["retry_mode"])
+        self.assertIn(("IOS-30004COMMITRETRY", "subtask IOS-30005"), self.gitlab_adapter.commit_requests)
+        self.assertIn("IOS-30005", self.jira_adapter.completed_subtasks)
+        self.assertEqual(WorkItemStatus.COMPLETED, self.work_item_repository.get_by_id(completed_item.id).status)
+        self.assertNotEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertIsNotNone(next_event)
 
     def test_create_task_session_creates_role_workspaces(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -2085,10 +2382,12 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Authoritative operator decisions from prior escalations in this session", instruction)
         self.assertIn("Use class-style screen keys", instruction)
         self.assertIn("do not re-flag", instruction)
-        self.assertEqual(operator_event.id, hydration["operator_reply_event_id"])
-        self.assertIn("snake_case screen tags", str(hydration["operator_reply"]))
+        self.assertNotIn("operator_reply_event_id", hydration)
+        self.assertNotIn("operator_reply", hydration)
         self.assertIn("operator_guided_recheck", str(hydration["review_cycle_resolution"]))
         self.assertIn("operator_resolution_history", hydration)
+        self.assertIn(str(operator_event.id), str(hydration["operator_resolution_history"]))
+        self.assertIn("snake_case screen tags", str(hydration["operator_resolution_history"]))
 
     def test_dual_review_recheck_includes_operator_guidance_from_implementation_escalation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -2125,10 +2424,46 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Authoritative operator decisions from prior escalations in this session", instruction)
         self.assertIn("The real target is CardAlmostOrdered", instruction)
         self.assertIn("Do not add a no-op mask to CardsAlmostReady", instruction)
-        self.assertEqual(operator_event.id, hydration["operator_reply_event_id"])
-        self.assertIn("CardAlmostOrdered", str(hydration["operator_reply"]))
+        self.assertNotIn("operator_reply_event_id", hydration)
+        self.assertNotIn("operator_reply", hydration)
         self.assertIn("operator_guided_recheck", str(hydration["review_cycle_resolution"]))
         self.assertIn("operator_resolution_history", hydration)
+        self.assertIn(str(operator_event.id), str(hydration["operator_resolution_history"]))
+        self.assertIn("CardAlmostOrdered", str(hydration["operator_resolution_history"]))
+
+    def test_review_correction_hydration_keeps_operator_guidance_as_history_only(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30003CORRGUIDE",
+            workflow_profile="oneshot",
+            policy={
+                "review_policy": "enabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30003CORRGUIDE")
+        operator_event = self.event_repository.append(
+            session_id=session.id,
+            event_type="operator_runtime_input_sent",
+            producer_type="operator",
+            payload={
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": 3775,
+                "current_stage": "convention_review_correction_requested",
+                "continuation_stage": "convention_review_correction_requested",
+                "operator_reply": "Do not put the timeout inside CallerLatch.",
+            },
+        )
+
+        hydration = self.coordinator._correction_dispatch_hydration(  # noqa: SLF001
+            session.id,
+            "requirements_review_correction_requested",
+        )
+
+        self.assertNotIn("operator_reply", hydration)
+        self.assertNotIn("operator_reply_event_id", hydration)
+        self.assertIn("operator_resolution_history", hydration)
+        self.assertIn(str(operator_event.id), str(hydration["operator_resolution_history"]))
+        self.assertIn("Do not put the timeout inside CallerLatch", str(hydration["operator_resolution_history"]))
 
     def test_bug_analysis_completed_moves_session_to_implementation(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -9203,6 +9538,45 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(1, len(poke_events))
         self.assertEqual(IMPLEMENTER_ROLE, poke_events[0].payload["role_name"])
         self.assertEqual(".", poke_events[0].payload["poke_text"])
+
+    def test_active_runtime_output_does_not_repeat_unresolved_stall_poke(self) -> None:
+        class StallPokeRecordingBackend(RecordingSessionBackend):
+            def __init__(self) -> None:
+                super().__init__()
+                self.poke_attempts = 0
+
+            def maybe_poke_stalled_role(self, role, *, snapshot=None):
+                self.poke_attempts += 1
+                return {
+                    "role_id": role.role_id,
+                    "stalled_seconds": 181.0,
+                    "threshold_seconds": 180.0,
+                    "terminal_idle_signature_length": len(snapshot or ""),
+                    "poke_text": ".",
+                }
+
+        backend = StallPokeRecordingBackend()
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021STALLONCE",
+            workflow_profile="oneshot",
+            policy={"review_policy": "disabled"},
+        )
+        self.coordinator.prepare_task_session("IOS-30021STALLONCE")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        assert implementer_role.runtime_handle is not None
+        backend.simulate_output(implementer_role.runtime_handle, "stable console snapshot")
+
+        self.coordinator.get_active_runtime_output_summary(session.id)
+        self.coordinator.get_active_runtime_output_summary(session.id)
+        events = self.event_repository.list_for_session(session.id)
+        poke_events = [event for event in events if event.event_type == "runtime_role_stall_poked"]
+
+        self.assertEqual(1, backend.poke_attempts)
+        self.assertEqual(1, len(poke_events))
+        self.assertEqual("implementation_requested", poke_events[0].payload["current_stage"])
 
     def test_active_runtime_output_does_not_poke_when_result_file_is_pending(self) -> None:
         class StallPokeRecordingBackend(RecordingSessionBackend):
