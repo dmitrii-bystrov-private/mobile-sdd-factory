@@ -231,7 +231,7 @@ class WriteResultScriptTests(unittest.TestCase):
             env, output_path, work_item_id = self._create_context(temp_dir, role_name="convention-reviewer")
             issues_path = Path(temp_dir) / "issues.md"
             issues_path.write_text(
-                "- `FinomCore/FinomCore/App Core/Service.swift`: `handleActivation()` issue\n",
+                "- `ExampleCore/App Core/Service.swift`: `handleActivation()` issue\n",
                 encoding="utf-8",
             )
 

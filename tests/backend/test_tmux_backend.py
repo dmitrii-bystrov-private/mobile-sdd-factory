@@ -188,7 +188,7 @@ class TmuxBackendTests(unittest.TestCase):
             "\n"
             "› Run /review on my current changes\n"
             "\n"
-            "  gpt-5.4 medium · ~/Projects/Finom/workdir/IOS-13093/runtime/role-workspaces/documentation-reviewer · Context 58% used · 5h 85% left · weekly 52% left\n"
+            "  gpt-5.4 medium · ~/Projects/ExampleCorp/workdir/IOS-13093/runtime/role-workspaces/documentation-reviewer · Context 58% used · 5h 85% left · weekly 52% left\n"
         )
 
         self.assertIn("churned for 5m 3s", claude_signature or "")

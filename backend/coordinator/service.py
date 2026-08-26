@@ -10210,13 +10210,10 @@ class CoordinatorService:
                         impact_reason = str(impact_mapping.get("reason") or "").strip()
                         fallback_required = bool(impact_mapping.get("fallback_required"))
                         impacted_areas = impact_mapping.get("impacted_areas")
-                        impacted_schemes = impact_mapping.get("impacted_schemes")
-                        impacted_test_targets = impact_mapping.get("impacted_test_targets")
                         impacted_modules = impact_mapping.get("impacted_modules")
                         impacted_build_tasks = impact_mapping.get("impacted_build_tasks")
                         impacted_test_tasks = impact_mapping.get("impacted_test_tasks")
                         impacted_lint_tasks = impact_mapping.get("impacted_lint_tasks")
-                        targeted_selectors = impact_mapping.get("targeted_selectors")
                         unmapped_files = impact_mapping.get("unmapped_files")
                         strategy_lines.extend(["", "### Impact Mapping", ""])
                         if impact_confidence:
@@ -10228,14 +10225,6 @@ class CoordinatorService:
                             rendered_areas = [str(item).strip() for item in impacted_areas if str(item).strip()]
                             if rendered_areas:
                                 strategy_lines.append(f"- Impacted areas: {', '.join(rendered_areas)}")
-                        if isinstance(impacted_schemes, list):
-                            rendered_schemes = [str(item).strip() for item in impacted_schemes if str(item).strip()]
-                            if rendered_schemes:
-                                strategy_lines.append(f"- Impacted schemes: {', '.join(rendered_schemes)}")
-                        if isinstance(impacted_test_targets, list):
-                            rendered_targets = [str(item).strip() for item in impacted_test_targets if str(item).strip()]
-                            if rendered_targets:
-                                strategy_lines.append(f"- Impacted test targets: {', '.join(rendered_targets)}")
                         if isinstance(impacted_modules, list):
                             rendered_modules = [str(item).strip() for item in impacted_modules if str(item).strip()]
                             if rendered_modules:
@@ -10252,12 +10241,6 @@ class CoordinatorService:
                             rendered_lint_tasks = [str(item).strip() for item in impacted_lint_tasks if str(item).strip()]
                             if rendered_lint_tasks:
                                 strategy_lines.append(f"- Lint tasks: {', '.join(rendered_lint_tasks)}")
-                        if isinstance(targeted_selectors, list):
-                            rendered_selectors = [str(item).strip() for item in targeted_selectors if str(item).strip()]
-                            if rendered_selectors:
-                                strategy_lines.append(
-                                    f"- Targeted selectors: {', '.join(rendered_selectors[:10])}"
-                                )
                         if isinstance(unmapped_files, list):
                             rendered_unmapped = [str(item).strip() for item in unmapped_files if str(item).strip()]
                             if rendered_unmapped:

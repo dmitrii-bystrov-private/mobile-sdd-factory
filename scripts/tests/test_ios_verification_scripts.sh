@@ -8,6 +8,8 @@ trap 'rm -rf "$WORKDIR"' EXIT
 
 export SDD_WORKDIR="$WORKDIR"
 export TESTING_DEVICE_ID="SIM-123"
+export SDD_IOS_DEFAULT_SCHEME="CustomApp"
+export SDD_IOS_WORKSPACE_NAME="CustomApp-Tuist.xcworkspace"
 
 KEY="IOS-TEST-VERIFY"
 TASK_ROOT="$WORKDIR/$KEY"
@@ -66,12 +68,7 @@ def out(value):
     else:
         sys.stdout.write(json.dumps(value))
 
-if expr == '.test_selection.mode // "broad"':
-    out(payload.get("test_selection", {}).get("mode", "broad"))
-elif expr == '.test_selection.selectors[]? // empty':
-    for item in payload.get("test_selection", {}).get("selectors", []):
-        print(item)
-elif expr == '.build_products_policy // "rebuild"':
+if expr == '.build_products_policy // "rebuild"':
     out(payload.get("build_products_policy", "rebuild"))
 elif expr == '.impact_mapping.preferred_scheme // empty':
     out(payload.get("impact_mapping", {}).get("preferred_scheme", ""))
@@ -128,7 +125,7 @@ chmod +x "$REPO_DIR/bin/mise"
 cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
 {
   "impact_mapping": {
-    "preferred_scheme": "Finom"
+    "preferred_scheme": "StrategyApp"
   },
   "test_selection": {
     "mode": "broad",
@@ -159,6 +156,8 @@ fi
 
 bash "$REPO_ROOT/scripts/ios-test-without-building.sh" "$KEY" >"$WORKDIR/broad.stdout"
 grep -q 'test-without-building' "$XCODEBUILD_LOG"
+grep -q -- '-workspace CustomApp-Tuist.xcworkspace' "$XCODEBUILD_LOG"
+grep -q -- '-scheme StrategyApp' "$XCODEBUILD_LOG"
 grep -q '^locked ' "$LOCK_CHECK_LOG"
 if [[ -d "$SDD_WORKDIR/.locks/ios-simulator-SIM-123.lock" ]]; then
   echo "simulator lock should be released after test-without-building" >&2
@@ -172,31 +171,7 @@ fi
 cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
 {
   "impact_mapping": {
-    "preferred_scheme": "Finom"
-  },
-  "test_selection": {
-    "mode": "only_testing",
-    "selectors": [
-      "FinomTests/ObservationListServiceTests",
-      "FinomTests/ObservationListViewModelTests"
-    ]
-  },
-  "build_products_policy": "rebuild",
-  "phases": [
-    "test_without_building"
-  ]
-}
-EOF
-
-: >"$XCODEBUILD_LOG"
-bash "$REPO_ROOT/scripts/ios-test-without-building.sh" "$KEY" >"$WORKDIR/targeted.stdout"
-grep -q -- '-only-testing:FinomTests/ObservationListServiceTests' "$XCODEBUILD_LOG"
-grep -q -- '-only-testing:FinomTests/ObservationListViewModelTests' "$XCODEBUILD_LOG"
-
-cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
-{
-  "impact_mapping": {
-    "preferred_scheme": "Finom"
+    "preferred_scheme": "StrategyApp"
   },
   "test_selection": {
     "mode": "broad",
@@ -225,7 +200,44 @@ fi
 cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
 {
   "impact_mapping": {
-    "preferred_scheme": "Finom"
+    "preferred_scheme": "StrategyApp"
+  },
+  "test_selection": {
+    "mode": "broad",
+    "selectors": []
+  },
+  "build_products_policy": "rebuild",
+  "phases": [
+    "build_for_testing",
+    "test_without_building",
+    "lint"
+  ]
+}
+EOF
+
+cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
+{
+  "impact_mapping": {},
+  "test_selection": {
+    "mode": "broad",
+    "selectors": []
+  },
+  "build_products_policy": "rebuild",
+  "phases": [
+    "build_for_testing"
+  ]
+}
+EOF
+
+: >"$XCODEBUILD_LOG"
+bash "$REPO_ROOT/scripts/ios-build-for-testing.sh" "$KEY" >"$WORKDIR/env-default-scheme.stdout"
+grep -q -- '-workspace CustomApp-Tuist.xcworkspace' "$XCODEBUILD_LOG"
+grep -q -- '-scheme CustomApp' "$XCODEBUILD_LOG"
+
+cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
+{
+  "impact_mapping": {
+    "preferred_scheme": "StrategyApp"
   },
   "test_selection": {
     "mode": "broad",

@@ -35,7 +35,13 @@ SDD_JIRA_TEAM_FIELD_ID=12345
 SDD_GITLAB_IOS_PROJECT_PATH=group%2Fmobile%2Fios-app
 SDD_GITLAB_ANDROID_PROJECT_PATH=group%2Fmobile%2Fandroid-app
 DEFAULT_JIRA_ASSIGNEE=you@example.com
+SDD_IOS_WORKSPACE_NAME=App-Tuist.xcworkspace
+SDD_IOS_DEFAULT_SCHEME=App
 ```
+
+`SDD_IOS_WORKSPACE_NAME` is passed to iOS `xcodebuild -workspace`.
+When it is not set, the verification scripts auto-detect a single `.xcworkspace` at the iOS repo root.
+`SDD_IOS_DEFAULT_SCHEME` is used when the generated verification strategy does not provide a preferred scheme.
 
 ## tmux
 

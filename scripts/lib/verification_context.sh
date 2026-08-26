@@ -141,12 +141,41 @@ verification_strategy_json_lines() {
 
 verification_ios_scheme() {
   local key="$1"
-  local scheme="Finom"
+  local scheme="${SDD_IOS_DEFAULT_SCHEME:-}"
   local resolved=""
 
   if resolved="$(verification_strategy_json_value "$key" '.impact_mapping.preferred_scheme // empty' 2>/dev/null)" && [[ -n "$resolved" ]]; then
     scheme="$resolved"
   fi
 
+  if [[ -z "$scheme" ]]; then
+    echo "Missing iOS scheme: set SDD_IOS_DEFAULT_SCHEME or provide impact_mapping.preferred_scheme in verification-strategy.json" >&2
+    return 1
+  fi
+
   printf '%s\n' "$scheme"
+}
+
+verification_ios_workspace() {
+  local repo_dir="${1:-.}"
+  if [[ -n "${SDD_IOS_WORKSPACE_NAME:-}" ]]; then
+    printf '%s\n' "$SDD_IOS_WORKSPACE_NAME"
+    return 0
+  fi
+
+  local workspaces=()
+  while IFS= read -r workspace; do
+    workspaces+=("$(basename "$workspace")")
+  done < <(find "$repo_dir" -maxdepth 1 -name "*.xcworkspace" -print | sort)
+
+  if [[ "${#workspaces[@]}" -eq 1 ]]; then
+    printf '%s\n' "${workspaces[0]}"
+    return 0
+  fi
+  if [[ "${#workspaces[@]}" -eq 0 ]]; then
+    echo "Missing iOS workspace: set SDD_IOS_WORKSPACE_NAME or add a .xcworkspace at the repo root" >&2
+  else
+    echo "Multiple iOS workspaces found; set SDD_IOS_WORKSPACE_NAME explicitly" >&2
+  fi
+  return 1
 }

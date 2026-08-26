@@ -460,7 +460,7 @@ class SessionCreationTests(unittest.TestCase):
             fake_home
             / ".claude"
             / "projects"
-            / "-Users-d-bystrov-Projects-Finom-workdir-IOS-30000CLAUDE-repo"
+            / "-Users-d-bystrov-Projects-ExampleCorp-workdir-IOS-30000CLAUDE-repo"
         )
         claude_dir.mkdir(parents=True, exist_ok=True)
         (claude_dir / "session.jsonl").write_text("{}\n")
@@ -559,7 +559,7 @@ class SessionCreationTests(unittest.TestCase):
             fake_home
             / ".claude"
             / "projects"
-            / f"-Users-d-bystrov-Projects-Finom-workdir-{task_key}-runtime-role-workspaces-implementer"
+            / f"-Users-d-bystrov-Projects-ExampleCorp-workdir-{task_key}-runtime-role-workspaces-implementer"
         )
         claude_dir.mkdir(parents=True, exist_ok=True)
         (claude_dir / "session.jsonl").write_text("{}\n")
@@ -1974,7 +1974,7 @@ class SessionCreationTests(unittest.TestCase):
             "## Changed Files\n\n"
             "| Status | Path |\n"
             "|---|---|\n"
-            "| modified | Finom/FinomTests/Sources/Feature/ExampleTests.swift |\n"
+            "| modified | App/Tests/Sources/Feature/ExampleTests.swift |\n"
         )
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERIOS")
         self.coordinator.handle_operator_event(
@@ -1997,46 +1997,14 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("reuse_if_available", strategy["prepare"]["policy"])
         self.assertEqual("reuse_if_same_head", strategy["build_products_policy"])
         self.assertTrue(strategy["signals"]["tests_only"])
-        self.assertEqual("only_testing", strategy["test_selection"]["mode"])
-        self.assertIn("FinomTests/ExampleTests", strategy["test_selection"]["selectors"])
-        self.assertEqual(["FinomApp"], strategy["impact_mapping"]["impacted_areas"])
+        self.assertEqual("broad", strategy["test_selection"]["mode"])
+        self.assertEqual([], strategy["test_selection"]["selectors"])
         self.assertEqual("high", strategy["impact_mapping"]["confidence"])
-        self.assertFalse(strategy["impact_mapping"]["fallback_required"])
-        self.assertEqual(["Finom"], strategy["impact_mapping"]["impacted_schemes"])
-        self.assertEqual(["FinomTests"], strategy["impact_mapping"]["impacted_test_targets"])
+        self.assertTrue(strategy["impact_mapping"]["fallback_required"])
         self.assertEqual(
             str(task_root / "tmp" / "verification" / "ios" / "derived-data"),
             strategy["ios_context"]["derived_data_path"],
         )
-
-    def test_verification_dispatch_marks_single_ios_area_impact_mapping(self) -> None:
-        task_root = Path(self.temp_dir.name) / "IOS-30003VERAREA"
-        repo_root = task_root / "repo" / "Tools" / "buildscripts"
-        repo_root.mkdir(parents=True, exist_ok=True)
-        spec_root = task_root / "spec"
-        spec_root.mkdir(parents=True, exist_ok=True)
-        (spec_root / "diff.md").write_text(
-            "# Diff Artifact: IOS-30003VERAREA\n\n"
-            "## Changed Files\n\n"
-            "| Status | Path |\n"
-            "|---|---|\n"
-            "| modified | FinomCore/Sources/ObservationList/ObservationListService.swift |\n"
-        )
-        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERAREA")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "implementation done"},
-        )
-
-        strategy_path = task_root / "spec" / "verification-strategy.json"
-        strategy = json.loads(strategy_path.read_text())
-        self.assertEqual("ios_impacted_area_gate", strategy["mode"])
-        self.assertEqual(["FinomCore"], strategy["impact_mapping"]["impacted_areas"])
-        self.assertEqual("high", strategy["impact_mapping"]["confidence"])
-        self.assertFalse(strategy["impact_mapping"]["fallback_required"])
-        self.assertEqual("Finom", strategy["impact_mapping"]["preferred_scheme"])
-        self.assertEqual(["FinomTests"], strategy["test_selection"]["test_targets"])
 
     def test_verification_dispatch_marks_ios_prepare_sensitive_changes_required(self) -> None:
         task_root = Path(self.temp_dir.name) / "IOS-30003VERPREP"
@@ -2078,7 +2046,7 @@ class SessionCreationTests(unittest.TestCase):
             "## Changed Files\n\n"
             "| Status | Path |\n"
             "|---|---|\n"
-            "| modified | FinomCore/FinomCore/App Core/README.md |\n"
+            "| modified | Sources/AppCore/README.md |\n"
         )
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERDOCS")
         self.coordinator.handle_operator_event(
@@ -2106,7 +2074,7 @@ class SessionCreationTests(unittest.TestCase):
             "## Changed Files\n\n"
             "| Status | Path |\n"
             "|---|---|\n"
-            "| modified | FinomCore/Sources/ObservationList/ObservationListService.swift |\n"
+            "| modified | Sources/ObservationList/ObservationListService.swift |\n"
         )
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003VERREPORT")
         self.coordinator.handle_operator_event(
@@ -2126,9 +2094,8 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("send_to_test_completed", updated_session.current_stage)
         self.assertEqual("send_to_test_completed", followup_event.event_type)
         self.assertIn("### Impact Mapping", report_text)
-        self.assertIn("Impacted areas: FinomCore", report_text)
-        self.assertIn("Impacted schemes: Finom", report_text)
-        self.assertIn("Impacted test targets: FinomTests", report_text)
+        self.assertIn("Broad fallback required: yes", report_text)
+        self.assertIn("iOS verification intentionally uses the broad workflow-level gate", report_text)
 
     def test_implementation_completed_routes_to_convention_reviewer_when_review_gate_required(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

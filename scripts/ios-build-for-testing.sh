@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/lib/verification_context.sh"
 KEY="${1:?Usage: ios-build-for-testing.sh <TASK-KEY>}"
 REPO_DIR="$(verification_resolve_repo_dir "$KEY")"
 SCHEME="$(verification_ios_scheme "$KEY")"
+WORKSPACE="$(verification_ios_workspace "$REPO_DIR")"
 
 cd "$REPO_DIR"
 verification_prepare_ios_context "$KEY"
@@ -45,7 +46,7 @@ fi
 rm -rf "$RESULT_BUNDLE"
 echo "⏳ Building for testing with task-local Xcode context..."
 if xcodebuild \
-  -workspace Finom-Tuist.xcworkspace \
+  -workspace "$WORKSPACE" \
   -scheme "$SCHEME" \
   -destination "platform=iOS Simulator,id=$TESTING_DEVICE_ID" \
   -derivedDataPath "$SDD_IOS_DERIVED_DATA_PATH" \
