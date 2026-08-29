@@ -6088,6 +6088,45 @@ class SessionCreationTests(unittest.TestCase):
         )
         self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory once now", sent_inputs[-1])
 
+    def test_implementer_can_escalate_verification_correction_via_failed_operator_input(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VCORRBLOCK")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="verification_failed",
+            payload={"failures": ["Missing iOS scheme"]},
+        )
+
+        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
+            session_id=session.id,
+            role_name="implementer",
+            output_type="failed",
+            payload={
+                "summary": "Verification environment needs configuration",
+                "details": "The correction cannot be made in product code because the verifier is missing SDD_IOS_DEFAULT_SCHEME.",
+                "needs_operator_input": True,
+                "requested_decision": "Set SDD_IOS_DEFAULT_SCHEME and rerun verification.",
+            },
+        )
+        work_items = self.work_item_repository.list_for_session(session.id)
+
+        self.assertEqual("implementation_blocked", mapped_event.event_type)
+        self.assertEqual("session_escalated_to_operator", followup_event.event_type)
+        self.assertEqual("waiting_for_operator", updated_session.status.value)
+        self.assertEqual("verification_correction_requested", updated_session.current_stage)
+        self.assertEqual("implementer", updated_session.current_owner)
+        self.assertTrue(
+            any(
+                item.work_type == "verification_correction"
+                and item.status == WorkItemStatus.WAITING_FOR_OPERATOR
+                for item in work_items
+            )
+        )
+
     def test_verifier_can_block_non_converging_verification_cycle(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004VBLOCK")
         self.coordinator.handle_operator_event(

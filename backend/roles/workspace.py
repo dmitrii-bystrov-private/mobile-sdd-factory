@@ -513,6 +513,8 @@ def _terminal_result_contract(role_name: str) -> list[str]:
             f"  `{helper} --work-item-id <work_item_id> --output-type completed --subtask-key <subtask_key> --summary \"Subtask completed\"`",
             "- Implementation could not complete:",
             f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Implementation blocked\" --details \"<what prevented completion>\"`",
+            "- Operator decision required before this implementation/correction can continue:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Operator decision needed\" --details \"<why blocked>\" --needs-operator-input`",
             *common,
         ]
     if role_name == "doc-harvest-worker":
@@ -608,7 +610,7 @@ def build_role_agents_md(
             "- After the helper exits successfully, stop immediately and do not submit the same work item again.",
             "- If the helper exits non-zero or the routed stage has already moved on, stop and wait for fresh routed work; do not retry through alternate scripts, alternate environment variables, or manual files.",
             "- You may emit `SDD_PROGRESS` for intermediate updates.",
-            "- For implementer/bug-fixer live escalations that need an operator decision before the current work item can continue, emit `SDD_ERROR` with `summary`, `details`, and `needs_operator_input: true` instead of forcing a terminal completion/error result.",
+            "- For implementer/bug-fixer escalations that need an operator decision before the current work item can continue, submit a terminal `failed` result through the helper with `--needs-operator-input`; do not rely on a plain `SDD_ERROR` chat marker for routed work item delivery.",
             "- When that escalation is a reasoned disagreement with a correction or review request, also include `conflict_point`, `reviewer_premise`, `preferred_direction`, `requested_decision`, and optional `supporting_evidence` when they are grounded.",
             "- If you also emit terminal completion text directly, use the exact `SDD_OUTPUT: {...}` format described here.",
             "",

@@ -155,6 +155,8 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("--output-type completed", agents)
         self.assertIn("--subtask-key <subtask_key>", agents)
         self.assertIn("--output-type failed", agents)
+        self.assertIn("--needs-operator-input", agents)
+        self.assertIn("do not rely on a plain `SDD_ERROR` chat marker", agents)
 
     def test_agents_require_successful_helper_exit_before_claiming_submission(self) -> None:
         agents = self._agents("implementer")
