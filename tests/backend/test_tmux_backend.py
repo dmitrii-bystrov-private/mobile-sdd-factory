@@ -863,6 +863,52 @@ class TmuxBackendTests(unittest.TestCase):
         self.assertIn("enter to confirm", normalized)
         self.assertIn("esc to cancel", normalized)
 
+    def test_tmux_auto_advances_claude_trust_prompt_when_no_is_selected(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role_id = "sdd-IOS-50012:implementer"
+        prompt = (
+            "Quick safety check: Is this a project you created or one you trust?\n"
+            "❯ No, exit\n"
+            "  Yes, I trust this folder\n"
+            "Enter to confirm · Esc to cancel\n"
+        )
+
+        backend._auto_advance_snapshot_bootstrap_prompts(role_id, prompt)
+
+        self.assertTrue(backend.tmux_trust_prompt_handled[role_id])
+        self.assertIn(("send-keys", "-t", role_id, "Down", "C-m"), backend.calls)
+
+    def test_tmux_waits_for_complete_claude_trust_prompt_before_marking_handled(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role_id = "sdd-IOS-50013:implementer"
+        partial_prompt = (
+            "Quick safety check: Is this a project you created or one you trust?\n"
+            "Claude Code'll be able to read, edit, and execute files here.\n"
+        )
+
+        backend._auto_advance_snapshot_bootstrap_prompts(role_id, partial_prompt)
+
+        self.assertFalse(backend.tmux_trust_prompt_handled[role_id])
+        self.assertEqual([], backend.calls)
+
     @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
     def test_tmux_mode_keeps_persistent_subprocess_across_rounds(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -7012,6 +7012,14 @@ class CoordinatorService:
                         marker_type=marker_type,
                         payload=payload,
                     )
+                    recovered_session = self._recover_review_result_from_helper_failure(
+                        session=session,
+                        role=role,
+                        payload=payload,
+                    )
+                    if recovered_session is not None:
+                        session = recovered_session
+                        continue
                     session = self._escalate_runtime_error(
                         session=session,
                         role=role,
@@ -7025,6 +7033,171 @@ class CoordinatorService:
                     payload=payload,
                 )
         return session
+
+    def _recover_review_result_from_helper_failure(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        payload: dict,
+    ) -> Session | None:
+        if not self._is_result_helper_failure_payload(payload):
+            return None
+        lane = self._dual_review_lane_for_role_stage(session=session, role=role)
+        if lane is None:
+            return None
+        active_work_item = self._find_active_work_item_for_role(session.id, role.id)
+        if active_work_item is None:
+            return None
+        payload_work_item_id = self._runtime_error_payload_work_item_id(payload)
+        if payload_work_item_id is not None and payload_work_item_id != active_work_item.id:
+            return None
+        dispatched_after = self._latest_role_dispatch_created_at(
+            session=session,
+            role=role,
+            work_item_id=active_work_item.id,
+        )
+        recovered = self._latest_dual_review_report_result_payload(
+            session=session,
+            lane=lane,
+            work_item_id=active_work_item.id,
+            created_after=dispatched_after,
+        )
+        if recovered is None:
+            return None
+        output_type, output_payload, report_path = recovered
+        try:
+            handled_session = self._handle_collected_role_output(
+                session=session,
+                role=role,
+                output_type=output_type,
+                output_payload=output_payload,
+            )
+        except IntakeError:
+            return None
+        self._append_event(
+            session_id=session.id,
+            event_type="review_result_recovered_from_helper_failure",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": active_work_item.id,
+                "review_lane": lane,
+                "output_type": output_type,
+                "report_path": str(report_path),
+                "runtime_error": dict(payload),
+            },
+        )
+        return handled_session or session
+
+    @staticmethod
+    def _is_result_helper_failure_payload(payload: dict) -> bool:
+        rendered = " ".join(
+            str(payload.get(key) or "")
+            for key in ("summary", "details", "error")
+        ).lower()
+        return (
+            "write-result.sh" in rendered
+            or "terminal result helper" in rendered
+            or "result submission helper" in rendered
+        ) and (
+            "non-zero" in rendered
+            or "exited" in rendered
+            or "failed" in rendered
+        )
+
+    @staticmethod
+    def _dual_review_lane_for_role_stage(*, session: Session, role: Role) -> str | None:
+        for lane, role_name in _DUAL_REVIEW_ROLE_BY_LANE.items():
+            if role.role_name == role_name and session.current_stage == _DUAL_REVIEW_STAGE_BY_LANE[lane]:
+                return lane
+        return None
+
+    def _latest_dual_review_report_result_payload(
+        self,
+        *,
+        session: Session,
+        lane: str,
+        work_item_id: int,
+        created_after: datetime | None,
+    ) -> tuple[str, dict, Path] | None:
+        if self.workdir_root is None:
+            return None
+        review_dir = self.workdir_root / session.task_key / "review" / lane
+        if not review_dir.is_dir():
+            return None
+        candidates = sorted(review_dir.glob("pass-*.md"), key=lambda path: path.stat().st_mtime, reverse=True)
+        for report_path in candidates:
+            if created_after is not None:
+                try:
+                    report_mtime = datetime.fromtimestamp(report_path.stat().st_mtime, UTC)
+                except OSError:
+                    continue
+                if report_mtime < created_after:
+                    continue
+            try:
+                report_text = report_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            output_type = self._dual_review_output_type_from_report(report_text)
+            if output_type is None:
+                continue
+            payload: dict[str, object] = {"work_item_id": work_item_id}
+            if output_type == "failed":
+                payload["summary"] = "Review found issues"
+                payload["issues_markdown"] = report_text
+            elif output_type == "passed":
+                payload["summary"] = "Review passed"
+            else:
+                payload["summary"] = "Review cycle blocked"
+                payload["issues_markdown"] = report_text
+            return output_type, payload, report_path
+        return None
+
+    @staticmethod
+    def _dual_review_output_type_from_report(report_text: str) -> str | None:
+        for line in report_text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped == "REVIEW_RESULT: issues_found":
+                return "failed"
+            if stripped in {"REVIEW_RESULT: passed", "REVIEW_RESULT: clean"}:
+                return "passed"
+            if stripped == "REVIEW_RESULT: blocked":
+                return "blocked_review_cycle"
+            return None
+        return None
+
+    def _latest_role_dispatch_created_at(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        work_item_id: int,
+    ) -> datetime | None:
+        event = self.event_repository.latest_for_session_by_type_and_payload(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            payload_matches={
+                "role_name": role.role_name,
+                "work_item_id": work_item_id,
+                "stage_name": session.current_stage,
+            },
+        )
+        if event is None:
+            return None
+        created_at = event.created_at
+        if created_at is None:
+            return None
+        if isinstance(created_at, str):
+            try:
+                return datetime.fromisoformat(created_at).replace(tzinfo=UTC)
+            except ValueError:
+                return None
+        if created_at.tzinfo is None:
+            return created_at.replace(tzinfo=UTC)
+        return created_at.astimezone(UTC)
 
     def _maybe_request_missing_result_file_recreation(
         self,

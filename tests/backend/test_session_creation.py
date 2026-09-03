@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -1012,6 +1013,143 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("requirements_review_correction_requested", updated_session.current_stage)
         self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
         self.assertFalse(stale_events)
+
+    def test_review_helper_failure_recovers_from_latest_requirements_report(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30002REVIEWHELPER",
+            workflow_profile="oneshot",
+            policy={
+                "review_policy": "enabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30002REVIEWHELPER")
+        reviewer_role = self.role_repository.get_by_name(session.id, REQUIREMENTS_REVIEWER_ROLE)
+        self.assertIsNotNone(reviewer_role)
+        review_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements_review",
+            title="Requirements review for IOS-30002REVIEWHELPER",
+            owner_role_id=reviewer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_review_requested",
+            current_owner=REQUIREMENTS_REVIEWER_ROLE,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            producer_type="coordinator",
+            payload={
+                "role_name": REQUIREMENTS_REVIEWER_ROLE,
+                "work_item_id": review_item.id,
+                "stage_name": "requirements_review_requested",
+            },
+        )
+        report_path = Path(self.temp_dir.name) / session.task_key / "review" / "requirements" / "pass-01.md"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(
+            "REVIEW_RESULT: issues_found\n\n"
+            "# Requirements Review\n\n"
+            "## Findings\n\n"
+            "1. Replace stale closure test calls with typed device-bound actions.\n"
+        )
+        self.session_backend.simulate_output(
+            reviewer_role.runtime_handle,
+            "SDD_ERROR: "
+            + json.dumps(
+                {
+                    "work_item_id": review_item.id,
+                    "error": "Terminal result helper exited non-zero; awaiting fresh routed work",
+                },
+                sort_keys=True,
+            ),
+        )
+
+        updated_session, _event, _chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=REQUIREMENTS_REVIEWER_ROLE,
+        )
+
+        refreshed_review_item = self.work_item_repository.get_by_id(review_item.id)
+        correction_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "requirements_review_correction"
+        ]
+        events = self.event_repository.list_for_session(session.id)
+        self.assertEqual(WorkItemStatus.COMPLETED, refreshed_review_item.status)
+        self.assertEqual(1, len(correction_items))
+        self.assertEqual(SessionStatus.ACTIVE, updated_session.status)
+        self.assertEqual("requirements_review_correction_requested", updated_session.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, updated_session.current_owner)
+        self.assertTrue(any(item.event_type == "requirements_review_issues_found" for item in events))
+        self.assertTrue(any(item.event_type == "review_result_recovered_from_helper_failure" for item in events))
+        self.assertFalse(any(item.event_type == "session_escalated_to_operator" for item in events))
+
+    def test_review_helper_failure_does_not_recover_from_stale_report(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30002REVIEWHELPERSTALE",
+            workflow_profile="oneshot",
+            policy={
+                "review_policy": "enabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30002REVIEWHELPERSTALE")
+        reviewer_role = self.role_repository.get_by_name(session.id, REQUIREMENTS_REVIEWER_ROLE)
+        self.assertIsNotNone(reviewer_role)
+        review_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements_review",
+            title="Requirements review for IOS-30002REVIEWHELPERSTALE",
+            owner_role_id=reviewer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        report_path = Path(self.temp_dir.name) / session.task_key / "review" / "requirements" / "pass-01.md"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("REVIEW_RESULT: issues_found\n\n# Old Requirements Review\n")
+        os.utime(report_path, (1, 1))
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_review_requested",
+            current_owner=REQUIREMENTS_REVIEWER_ROLE,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            producer_type="coordinator",
+            payload={
+                "role_name": REQUIREMENTS_REVIEWER_ROLE,
+                "work_item_id": review_item.id,
+                "stage_name": "requirements_review_requested",
+            },
+        )
+        self.session_backend.simulate_output(
+            reviewer_role.runtime_handle,
+            "SDD_ERROR: "
+            + json.dumps(
+                {
+                    "work_item_id": review_item.id,
+                    "error": "Terminal result helper exited non-zero; awaiting fresh routed work",
+                },
+                sort_keys=True,
+            ),
+        )
+
+        updated_session, _event, _chunk_count = self.coordinator.collect_role_output(
+            session_id=session.id,
+            role_name=REQUIREMENTS_REVIEWER_ROLE,
+        )
+
+        events = self.event_repository.list_for_session(session.id)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
+        self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
+        self.assertFalse(any(item.event_type == "review_result_recovered_from_helper_failure" for item in events))
 
     def test_send_operator_runtime_input_sends_live_reply_to_alive_one_shot_role(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

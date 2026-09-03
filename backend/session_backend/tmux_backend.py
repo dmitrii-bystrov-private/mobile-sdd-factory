@@ -612,8 +612,8 @@ class TmuxSessionBackend(SessionBackend):
             not self.tmux_trust_prompt_handled.get(role_id, False)
             and self._contains_workspace_trust_prompt(normalized)
         ):
-            self._tmux(socket_path, "send-keys", "-t", runtime_handle, "1", "C-m")
-            self.tmux_trust_prompt_handled[role_id] = True
+            if self._send_workspace_trust_prompt_confirmation(socket_path, runtime_handle, normalized):
+                self.tmux_trust_prompt_handled[role_id] = True
         if (
             not self.tmux_update_prompt_handled.get(role_id, False)
             and self._contains_update_prompt(normalized)
@@ -715,8 +715,8 @@ class TmuxSessionBackend(SessionBackend):
                 runtime_handle = role_id
                 session_id = runtime_handle.split(":", 1)[0]
                 socket_path = self._socket_path(session_id)
-                self._tmux(socket_path, "send-keys", "-t", runtime_handle, "1", "C-m")
-                self.tmux_trust_prompt_handled[role_id] = True
+                if self._send_workspace_trust_prompt_confirmation(socket_path, runtime_handle, normalized):
+                    self.tmux_trust_prompt_handled[role_id] = True
             if (
                 not self.tmux_update_prompt_handled.get(role_id, False)
                 and update_prompt
@@ -800,6 +800,43 @@ class TmuxSessionBackend(SessionBackend):
                 and "press enter to continue" in normalized_text
             )
         )
+
+    def _send_workspace_trust_prompt_confirmation(
+        self,
+        socket_path: Path,
+        runtime_handle: str,
+        normalized_text: str,
+    ) -> bool:
+        if self._workspace_trust_prompt_needs_down_navigation(normalized_text):
+            self._tmux(socket_path, "send-keys", "-t", runtime_handle, "Down", "C-m")
+            return True
+        if self._workspace_trust_prompt_accepts_numbered_yes(normalized_text):
+            self._tmux(socket_path, "send-keys", "-t", runtime_handle, "1", "C-m")
+            return True
+        return False
+
+    @staticmethod
+    def _workspace_trust_prompt_accepts_numbered_yes(normalized_text: str) -> bool:
+        return (
+            "1. yes" in normalized_text
+            and ("2. no" in normalized_text or "2. quit" in normalized_text)
+            and (
+                "press enter to continue" in normalized_text
+                or "enter to confirm" in normalized_text
+            )
+        )
+
+    @staticmethod
+    def _workspace_trust_prompt_needs_down_navigation(normalized_text: str) -> bool:
+        selected_index = normalized_text.rfind("❯")
+        if selected_index < 0:
+            return False
+        prompt_tail = normalized_text[selected_index:]
+        yes_index = prompt_tail.find("yes")
+        no_index = prompt_tail.find("no")
+        if yes_index < 0 or no_index < 0:
+            return False
+        return no_index < yes_index and "trust this folder" in prompt_tail
 
     def _contains_update_prompt(self, normalized_text: str) -> bool:
         return (
