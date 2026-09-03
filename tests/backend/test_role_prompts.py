@@ -140,6 +140,29 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("--output-type blocked_review_cycle", agents)
         self.assertIn("HYDRATION.json", agents)
 
+    def test_agents_use_universal_repository_guidance_entrypoints(self) -> None:
+        for role_name in (
+            "implementer",
+            "bug-fixer",
+            "convention-reviewer",
+            "requirements-reviewer",
+            "doc-harvest-worker",
+            "documentation-reviewer",
+            "proposal-context-worker",
+            "requirements-clarifier-worker",
+            "acceptance-criteria-worker",
+            "constraints-worker",
+            "spec-verifier-worker",
+            "task-decomposer-worker",
+        ):
+            agents = self._agents(role_name)
+            self.assertIn("Repository guidance", agents)
+            self.assertIn("AGENTS.md", agents)
+            self.assertIn("CLAUDE.md", agents)
+            self.assertIn("README.md", agents)
+            self.assertNotIn("DOCUMENTATION_GUIDE.md", agents)
+            self.assertNotIn("/.claude/", agents)
+
     def test_documentation_reviewer_requires_fresh_review_per_work_item(self) -> None:
         agents = self._agents("documentation-reviewer")
 

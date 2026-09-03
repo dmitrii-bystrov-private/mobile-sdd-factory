@@ -49,6 +49,13 @@ def _ensure_task_output_directories(workdir_root: Path, task_key: str) -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def _repo_guidance_entrypoints() -> str:
+    return (
+        "- Repository guidance entry points: `{task_repo_root}/AGENTS.md`, "
+        "`{task_repo_root}/CLAUDE.md`, `{task_repo_root}/README.md`, and linked local docs/templates"
+    )
+
+
 def _role_relevant_paths(role_name: str) -> list[str]:
     if role_name == "implementer":
         return [
@@ -58,7 +65,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and generated outputs: `{task_artifacts_root}`",
             "- Main repo scripts: `{repo_root}/scripts`",
-            "- Project conventions: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            _repo_guidance_entrypoints(),
         ]
     if role_name == "bug-fixer":
         return [
@@ -70,12 +77,12 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and bug analysis outputs: `{task_artifacts_root}`",
             "- Main repo scripts: `{repo_root}/scripts`",
-            "- Project conventions: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            _repo_guidance_entrypoints(),
         ]
     if role_name == "verification-coordinator":
         return [
             "- Task repo worktree: `{task_repo_root}`",
-            "- Documentation guide: `{task_repo_root}/DOCUMENTATION_GUIDE.md` when present",
+            _repo_guidance_entrypoints(),
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and verification outputs: `{task_artifacts_root}`",
@@ -93,7 +100,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and review outputs: `{task_artifacts_root}`",
-            "- Primary project guidance: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/README.md`",
+            _repo_guidance_entrypoints(),
         ]
     if role_name == "requirements-reviewer":
         return [
@@ -106,7 +113,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and review outputs: `{task_artifacts_root}`",
-            "- Primary project guidance: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/README.md`",
+            _repo_guidance_entrypoints(),
         ]
     if role_name == "doc-harvest-worker":
         return [
@@ -118,7 +125,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task-local temp root: `{task_tmp_root}`",
             "- Task artifacts and documentation outputs: `{task_artifacts_root}`",
             "- Main repo diff helper: `{repo_root}/scripts/generate-diff.sh`",
-            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            _repo_guidance_entrypoints(),
         ]
     if role_name == "documentation-reviewer":
         return [
@@ -127,7 +134,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Full diff input: `{task_snapshot_root}/spec/full-diff.md`",
             "- Deterministic documentation precheck: `{task_snapshot_root}/spec/documentation-precheck.md`",
             "- Task repo worktree: `{task_repo_root}`",
-            "- Documentation guide: `{task_repo_root}/DOCUMENTATION_GUIDE.md` when present",
+            _repo_guidance_entrypoints(),
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task artifacts and documentation review outputs: `{task_artifacts_root}`",
         ]
@@ -142,7 +149,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task repo worktree: `{task_repo_root}`",
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
-            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            _repo_guidance_entrypoints(),
         ]
     if role_name == "requirements-clarifier-worker":
         return [
@@ -153,7 +160,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task repo worktree: `{task_repo_root}`",
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
-            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            _repo_guidance_entrypoints(),
         ]
     if role_name == "acceptance-criteria-worker":
         return [
@@ -165,7 +172,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task repo worktree: `{task_repo_root}`",
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
-            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            _repo_guidance_entrypoints(),
         ]
     if role_name == "constraints-worker":
         return [
@@ -178,7 +185,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task repo worktree: `{task_repo_root}`",
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
-            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            _repo_guidance_entrypoints(),
         ]
     if role_name == "spec-verifier-worker":
         return [
@@ -192,7 +199,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task repo worktree: `{task_repo_root}`",
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
-            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            _repo_guidance_entrypoints(),
         ]
     if role_name == "task-decomposer-worker":
         return [
@@ -206,7 +213,7 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Task repo worktree: `{task_repo_root}`",
             "- Task-local runtime root: `{task_runtime_root}`",
             "- Task-local temp root: `{task_tmp_root}`",
-            "- Project conventions and templates: `{task_repo_root}/CLAUDE.md`, `{task_repo_root}/.claude/`",
+            _repo_guidance_entrypoints(),
         ]
     return [
         "- Task snapshot metadata: `{task_snapshot_root}`",
@@ -253,13 +260,13 @@ def _role_responsibility(role_name: str) -> list[str]:
         return [
             "- You execute one bounded documentation-harvest task for one completed task session.",
             "- You update or create feature-level README files from grounded diff evidence in the task worktree.",
-            "- You use the repository documentation guide when present and fall back to stable behavior/contract documentation rules when it is absent.",
+            "- You use repository guidance entry points and their linked documentation guidance when present, and fall back to stable behavior/contract documentation rules when they are absent.",
             "- You stop after committing only the documentation updates and reporting the compact result summary.",
         ]
     if role_name == "documentation-reviewer":
         return [
             "- You execute one bounded documentation quality review for one completed documentation pass.",
-            "- You verify production docs and doc comments against the repository documentation guide when present, otherwise against stable behavior/contract documentation rules.",
+            "- You verify production docs and doc comments against repository guidance entry points and their linked documentation guidance when present, otherwise against stable behavior/contract documentation rules.",
             "- You do not edit files; report either a clean pass, a skip, or actionable documentation-only findings.",
         ]
     if role_name == "proposal-context-worker":
@@ -358,7 +365,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
     if role_name == "convention-reviewer":
         return [
             "- Read the routed diff first, then inspect only touched full files and directly relevant local convention sources.",
-            "- Primary project guidance: read `CLAUDE.md` when present, read `README.md` when present, and follow their links to relevant local convention docs/templates for the touched diff.",
+            "- Repository guidance: read `AGENTS.md` and `CLAUDE.md` when present, read `README.md` when present, and follow their links to relevant local convention docs/templates for the touched diff.",
             "- Infer conventions from the repository context; do not import platform-, language-, or architecture-specific rules from this factory repo.",
             "- Treat local repository convention sources and stable nearby precedent as authoritative over downstream spec/decomposition text unless Jira/operator input explicitly says this task is meant to change the convention.",
             "- If a task intentionally changes a convention, expect the diff to update the relevant convention source or adjacent canonical examples; otherwise report the inconsistency instead of accepting a silent convention override.",
@@ -390,14 +397,14 @@ def _role_operating_rules(role_name: str) -> list[str]:
         return [
             "- Treat each routed work item as one bounded documentation pass: generate or refresh `spec/full-diff.md`, update grounded feature-level README targets, write one terminal result, and stop.",
             "- Use `spec/full-diff.md` as the primary source of truth for branch changes and prefer changed README/doc anchors over broad repo scanning.",
-            "- Use `DOCUMENTATION_GUIDE.md` when present; otherwise write durable behavior and contract documentation without preserving task/review history.",
+            "- Use repository guidance entry points (`AGENTS.md`/`CLAUDE.md`, `README.md`) and their linked documentation guides/templates when present; otherwise write durable behavior and contract documentation without preserving task/review history.",
             "- Read selectively and skip ambiguous multi-feature diffs instead of inventing a single arbitrary documentation target.",
             "- Commit only the README/doc files you changed, then report a compact summary.",
         ]
     if role_name == "documentation-reviewer":
         return [
             "- Treat each routed work item as one bounded documentation review pass: inspect the current documentation changes, write one terminal result, and stop.",
-            "- Start from `spec/documentation-precheck.md`, `spec/doc-diff.md`, `spec/full-diff.md`, and `DOCUMENTATION_GUIDE.md` when present; otherwise apply the stable documentation rules from this prompt.",
+            "- Start from `spec/documentation-precheck.md`, `spec/doc-diff.md`, `spec/full-diff.md`, repository guidance entry points (`AGENTS.md`/`CLAUDE.md`, `README.md`), and linked documentation guides/templates when present; otherwise apply the stable documentation rules from this prompt.",
             "- For each routed work item, perform a fresh review of the current documentation files. Do not reuse prior findings files or prior review conclusions after a documentation correction.",
             "- Review production README files, docs, public/doc comments, and ordinary inline source comments changed by the branch for stable-contract documentation quality.",
             "- For inline source comments, require a short local invariant/lifecycle/call-order explanation; flag verbose blocks, task mechanics, retry history, and comments that copy removed README/docs content into production code.",
