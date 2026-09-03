@@ -44,6 +44,38 @@ Universal rules:
 - Extra payload fields are allowed only when they are part of a documented role contract.
 - If helper submission fails with a backend transport error, stop and escalate; do not retry by manually creating `RESULT.json`.
 
+## Structured Terminal Markers
+
+Terminal markers are a narrow runtime telemetry and emergency-blocker channel. They are not the primary terminal outcome API.
+
+Rules:
+- Keep each marker on one line.
+- Put exactly one JSON object after the marker prefix.
+- Replace example `work_item_id` value `123` with the numeric `work_item_id` from `HYDRATION.json` when present.
+- Do not invent marker names, wrapper keys, markdown formats, or extra schema variants.
+- Do not use terminal markers for normal pass/fail/completed/skipped outcomes; use `scripts/write-result.sh`.
+
+Progress marker:
+
+```text
+SDD_PROGRESS: {"status":"in_progress","message":"<short status>","work_item_id":123}
+```
+
+Runtime/tooling blocker marker:
+
+```text
+SDD_ERROR: {"summary":"<short summary>","details":"<specific failure>","needs_operator_input":false,"work_item_id":123}
+```
+
+Operator-actionable runtime blocker marker:
+
+```text
+SDD_ERROR: {"summary":"<short summary>","details":"<what the operator must do>","needs_operator_input":true,"work_item_id":123}
+```
+
+Use `SDD_ERROR` only for runtime/protocol/tooling blockers where the helper cannot represent or deliver the current outcome.
+For implementer/bug-fixer operator decisions, prefer a `failed` helper result with `--needs-operator-input`; do not use `SDD_ERROR` as routed work delivery.
+
 ## Output Types
 
 The current backend consumes these terminal `output_type` values:

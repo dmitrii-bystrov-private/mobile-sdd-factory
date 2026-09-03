@@ -169,7 +169,11 @@ For live runtime escalations, roles should distinguish between:
 - interactive blockers that need a direct operator reply in the same live session
 - runtime/tooling/recovery blockers that need retry, resume, or external repair instead
 
-Use `SDD_ERROR` for both, but set `needs_operator_input: true` only for the first case.
+Use the structured `SDD_ERROR` marker only for runtime/protocol/tooling blockers where
+the terminal result helper cannot represent or deliver the current outcome. Set
+`needs_operator_input: true` only when the blocker requires a direct operator reply in
+the same live session. Normal routed pass/fail/completed/skipped outcomes must go
+through `scripts/write-result.sh`.
 
 The supported rule is:
 

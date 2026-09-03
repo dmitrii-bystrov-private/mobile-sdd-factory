@@ -515,6 +515,8 @@ def _terminal_result_contract(role_name: str) -> list[str]:
             f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Implementation blocked\" --details \"<what prevented completion>\"`",
             "- Operator decision required before this implementation/correction can continue:",
             f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Operator decision needed\" --details \"<why blocked>\" --needs-operator-input`",
+            "- Reasoned disagreement with a correction/review request:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Operator decision needed\" --details \"<why the requested correction should not be applied as-is>\" --needs-operator-input --conflict-point \"<what conflicts>\" --reviewer-premise \"<premise being challenged>\" --preferred-direction \"<recommended direction>\" --requested-decision \"<decision needed>\" --supporting-evidence \"<optional grounded evidence>\"`",
             *common,
         ]
     if role_name == "doc-harvest-worker":
@@ -553,6 +555,27 @@ def _terminal_result_contract(role_name: str) -> list[str]:
     ]
 
 
+def _structured_terminal_markers(role_name: str) -> list[str]:
+    common = [
+        "- These markers are parsed from terminal output. Keep each marker on one line and put exactly one JSON object after the marker prefix.",
+        "- Replace example `work_item_id` value `123` with the numeric `work_item_id` from `HYDRATION.json` when present.",
+        "- Do not invent marker names, wrapper keys, markdown formats, or extra schema variants.",
+        "- Do not use terminal markers for normal pass/fail/completed/skipped outcomes; use the helper commands in `Terminal Result Contract`.",
+        "- Progress marker format:",
+        '  `SDD_PROGRESS: {"status":"in_progress","message":"<short status>","work_item_id":123}`',
+        "- Runtime/tooling blocker marker format:",
+        '  `SDD_ERROR: {"summary":"<short summary>","details":"<specific failure>","needs_operator_input":false,"work_item_id":123}`',
+        "- Operator-actionable runtime blocker marker format:",
+        '  `SDD_ERROR: {"summary":"<short summary>","details":"<what the operator must do>","needs_operator_input":true,"work_item_id":123}`',
+        "- Use `SDD_ERROR` only for runtime/protocol/tooling blockers where the helper cannot represent or deliver the current outcome.",
+    ]
+    if role_name in {"implementer", "bug-fixer"}:
+        common.append(
+            "- For implementation blockers and operator decisions, prefer the `failed` helper command with `--needs-operator-input`; do not use `SDD_ERROR` as routed work delivery."
+        )
+    return common
+
+
 def build_role_agents_md(
     *,
     role_name: str,
@@ -575,6 +598,7 @@ def build_role_agents_md(
     responsibility = _role_responsibility(role_name)
     operating_rules = _role_operating_rules(role_name)
     terminal_result_contract = _terminal_result_contract(role_name)
+    structured_terminal_markers = _structured_terminal_markers(role_name)
     return "\n".join(
         [
             f"# {role_name} AGENTS",
@@ -609,14 +633,14 @@ def build_role_agents_md(
             "- When the routed hydration payload includes `work_item_id`, pass that same `work_item_id` into the helper unchanged. When it also includes `subtask_key`, pass that same `subtask_key` unchanged too.",
             "- After the helper exits successfully, stop immediately and do not submit the same work item again.",
             "- If the helper exits non-zero or the routed stage has already moved on, stop and wait for fresh routed work; do not retry through alternate scripts, alternate environment variables, or manual files.",
-            "- You may emit `SDD_PROGRESS` for intermediate updates.",
-            "- For implementer/bug-fixer escalations that need an operator decision before the current work item can continue, submit a terminal `failed` result through the helper with `--needs-operator-input`; do not rely on a plain `SDD_ERROR` chat marker for routed work item delivery.",
-            "- When that escalation is a reasoned disagreement with a correction or review request, also include `conflict_point`, `reviewer_premise`, `preferred_direction`, `requested_decision`, and optional `supporting_evidence` when they are grounded.",
-            "- If you also emit terminal completion text directly, use the exact `SDD_OUTPUT: {...}` format described here.",
             "",
             "## Operating Rules",
             "",
             *operating_rules,
+            "",
+            "## Structured Terminal Markers",
+            "",
+            *structured_terminal_markers,
             "",
             "## Terminal Result Contract",
             "",

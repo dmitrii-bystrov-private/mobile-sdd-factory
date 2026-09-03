@@ -156,7 +156,12 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("--subtask-key <subtask_key>", agents)
         self.assertIn("--output-type failed", agents)
         self.assertIn("--needs-operator-input", agents)
-        self.assertIn("do not rely on a plain `SDD_ERROR` chat marker", agents)
+        self.assertIn("do not use `SDD_ERROR` as routed work delivery", agents)
+        self.assertIn("--conflict-point \"<what conflicts>\"", agents)
+        self.assertIn("--reviewer-premise \"<premise being challenged>\"", agents)
+        self.assertIn("--preferred-direction \"<recommended direction>\"", agents)
+        self.assertIn("--requested-decision \"<decision needed>\"", agents)
+        self.assertNotIn("also include `conflict_point`", agents)
 
     def test_agents_require_successful_helper_exit_before_claiming_submission(self) -> None:
         agents = self._agents("implementer")
@@ -164,6 +169,18 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("exited 0", agents)
         self.assertIn("Do not say or imply that work was submitted", agents)
         self.assertIn("If you realize you described completion but did not run the helper", agents)
+
+    def test_agents_define_structured_terminal_marker_schema(self) -> None:
+        agents = self._agents("requirements-reviewer")
+
+        self.assertIn("## Structured Terminal Markers", agents)
+        self.assertIn("Replace example `work_item_id` value `123`", agents)
+        self.assertIn('SDD_PROGRESS: {"status":"in_progress","message":"<short status>","work_item_id":123}', agents)
+        self.assertIn('SDD_ERROR: {"summary":"<short summary>","details":"<specific failure>","needs_operator_input":false,"work_item_id":123}', agents)
+        self.assertIn("Do not invent marker names, wrapper keys, markdown formats, or extra schema variants.", agents)
+        self.assertIn("Do not use terminal markers for normal pass/fail/completed/skipped outcomes", agents)
+        self.assertNotIn("You may emit `SDD_PROGRESS`", agents)
+        self.assertNotIn("exact `SDD_OUTPUT: {...}`", agents)
 
     def test_verifier_agents_include_result_payload_templates(self) -> None:
         agents = self._agents("verification-coordinator")
