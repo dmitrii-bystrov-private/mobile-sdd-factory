@@ -54,6 +54,7 @@ class TmuxSessionBackend(SessionBackend):
         self.tmux_buffered_inputs: dict[str, list[str]] = defaultdict(list)
         self.tmux_submit_traces: dict[str, list[dict[str, str]]] = defaultdict(list)
         self.tmux_interactive_driver_enabled: dict[str, bool] = {}
+        self.tmux_recovered_launcher_roles: dict[str, bool] = defaultdict(bool)
         self.tmux_launcher_runners: dict[str, str] = {}
         self.tmux_role_ready: dict[str, bool] = defaultdict(lambda: True)
         self.tmux_output_buffers: dict[str, str] = defaultdict(str)
@@ -207,12 +208,13 @@ class TmuxSessionBackend(SessionBackend):
         interactive_driver_enabled = launcher_script.is_file()
         self.tmux_interactive_driver_enabled.setdefault(role_id, interactive_driver_enabled)
         if interactive_driver_enabled:
+            self.tmux_recovered_launcher_roles.setdefault(role_id, True)
             self.tmux_launcher_runners.setdefault(role_id, self._extract_launcher_runner(launcher_script))
             # Recovered launcher-backed roles already have a live TUI window; treat them as ready
             # so routed work keeps using the file-backed launcher path after backend restarts.
             self.tmux_role_ready.setdefault(role_id, True)
-            self.tmux_trust_prompt_handled.setdefault(role_id, True)
-            self.tmux_update_prompt_handled.setdefault(role_id, True)
+            self.tmux_trust_prompt_handled.setdefault(role_id, False)
+            self.tmux_update_prompt_handled.setdefault(role_id, False)
         else:
             self.tmux_role_ready.setdefault(role_id, True)
 
@@ -364,6 +366,7 @@ class TmuxSessionBackend(SessionBackend):
                 raise RuntimeError(result.stderr or result.stdout or "Failed to create tmux window")
             interactive_driver_enabled = bool(role_command) and Path(role_command[0]).name == "launch-role.sh"
             self.tmux_interactive_driver_enabled[role_id] = interactive_driver_enabled
+            self.tmux_recovered_launcher_roles[role_id] = False
             if interactive_driver_enabled and start_directory is not None:
                 self.tmux_launcher_runners[role_id] = self._extract_launcher_runner(start_directory / "launch-role.sh")
             self.tmux_role_ready[role_id] = not interactive_driver_enabled
@@ -395,6 +398,16 @@ class TmuxSessionBackend(SessionBackend):
                     socket_path=socket_path,
                     runtime_handle=role.role_id,
                     discard_buffered=True,
+                )
+            if (
+                self.tmux_interactive_driver_enabled.get(role.role_id, False)
+                and self.tmux_recovered_launcher_roles.get(role.role_id, False)
+                and self.tmux_role_ready.get(role.role_id, True)
+            ):
+                self._auto_advance_current_tmux_bootstrap_prompts(
+                    role_id=role.role_id,
+                    socket_path=socket_path,
+                    runtime_handle=role.role_id,
                 )
             if self.tmux_interactive_driver_enabled.get(role.role_id, False) and not self.tmux_role_ready.get(role.role_id, True):
                 payload_text = text
@@ -637,6 +650,7 @@ class TmuxSessionBackend(SessionBackend):
             self.tmux_buffered_inputs.pop(role.role_id, None)
             self.tmux_submit_traces.pop(role.role_id, None)
             self.tmux_interactive_driver_enabled.pop(role.role_id, None)
+            self.tmux_recovered_launcher_roles.pop(role.role_id, None)
             self.tmux_launcher_runners.pop(role.role_id, None)
             self.tmux_role_ready.pop(role.role_id, None)
             self.tmux_output_buffers.pop(role.role_id, None)
@@ -660,6 +674,7 @@ class TmuxSessionBackend(SessionBackend):
                 self.tmux_buffered_inputs.pop(role_id, None)
                 self.tmux_submit_traces.pop(role_id, None)
                 self.tmux_interactive_driver_enabled.pop(role_id, None)
+                self.tmux_recovered_launcher_roles.pop(role_id, None)
                 self.tmux_launcher_runners.pop(role_id, None)
                 self.tmux_role_ready.pop(role_id, None)
                 self.tmux_output_buffers.pop(role_id, None)
@@ -981,6 +996,25 @@ class TmuxSessionBackend(SessionBackend):
                 return ""
             raise RuntimeError(result.stderr or result.stdout or "Failed to capture tmux pane")
         return result.stdout
+
+    def _auto_advance_current_tmux_bootstrap_prompts(
+        self,
+        *,
+        role_id: str,
+        socket_path: Path,
+        runtime_handle: str,
+    ) -> None:
+        before_trust = self.tmux_trust_prompt_handled.get(role_id, False)
+        before_update = self.tmux_update_prompt_handled.get(role_id, False)
+        pane_text = self._capture_tmux_pane_text(socket_path, runtime_handle)
+        if not pane_text:
+            return
+        self._auto_advance_snapshot_bootstrap_prompts(role_id, pane_text)
+        if (
+            self.tmux_trust_prompt_handled.get(role_id, False) != before_trust
+            or self.tmux_update_prompt_handled.get(role_id, False) != before_update
+        ):
+            time.sleep(0.12)
 
     def _refresh_launcher_ready_from_pane(
         self,

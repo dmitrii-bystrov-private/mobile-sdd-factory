@@ -851,6 +851,65 @@ class TmuxBackendTests(unittest.TestCase):
         )
         self.assertIn(("capture-pane", "-p", "-S", "-40", "-t", role.role_id), backend.calls)
 
+    def test_tmux_recovered_launcher_auto_advances_pending_claude_trust_prompt(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self, runtime_root: Path) -> None:
+                super().__init__(mode="tmux", runtime_root=runtime_root)
+                self.calls: list[tuple[str, ...]] = []
+                self.pane_text = (
+                    "Quick safety check: Is this a project you created or one you trust?\n"
+                    "❯ No, exit\n"
+                    "  Yes, I trust this folder\n"
+                    "Enter to confirm · Esc to cancel\n"
+                )
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                if args[:3] == ("send-keys", "-t", role.role_id) and len(args) >= 4:
+                    sent = args[3]
+                    if sent == "Down":
+                        self.pane_text = self.pane_text.replace("❯ No, exit", "  No, exit").replace(
+                            "  Yes, I trust this folder",
+                            "❯ Yes, I trust this folder",
+                        )
+                    elif sent:
+                        self.pane_text += f"\n{sent}\n"
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            workspace = (
+                runtime_root
+                / "IOS-50009TRUST"
+                / "runtime"
+                / "role-workspaces"
+                / "doc-harvest-worker"
+            )
+            workspace.mkdir(parents=True, exist_ok=True)
+            (workspace / "launch-role.sh").write_text(
+                "#!/usr/bin/env bash\nexport SDD_FACTORY_ROLE_RUNNER='claude'\n"
+            )
+
+            backend = FakeTmuxBackend(runtime_root)
+            role = RuntimeRoleHandle(
+                role_id="sdd-IOS-50009TRUST:doc-harvest-worker",
+                session_id="sdd-IOS-50009TRUST",
+                backend_name="tmux",
+            )
+
+            backend.send_input(role, "Harvest documentation context.")
+
+            self.assertTrue(backend.tmux_trust_prompt_handled[role.role_id])
+            self.assertIn(("send-keys", "-t", role.role_id, "Down", "C-m"), backend.calls)
+            submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
+            self.assertEqual("claude", submit_trace["runner"])
+            self.assertIn(
+                ("send-keys", "-t", role.role_id, submit_trace["payload_text"], ""),
+                backend.calls,
+            )
+
     def test_normalize_terminal_text_strips_ansi_noise(self) -> None:
         backend = TmuxSessionBackend(mode="recording")
         noisy = (
