@@ -7,6 +7,7 @@ This directory contains shell scripts used by the assistant and as standalone CL
 - `glab` (GitLab CLI)
 - `jq`
 - `acli` (Atlassian/Jira CLI)
+- `twg` (Atlassian Teamwork Graph CLI; optional, used by `snapshot.sh` to prepare Story transitions)
 
 ### Required environment variables
 
@@ -15,6 +16,8 @@ This directory contains shell scripts used by the assistant and as standalone CL
 - `SDD_WORKDIR` — path to the per-task workdir root
 - `JIRA_BASE_URL` — optional Jira browse URL override used in generated links
 - `DEFAULT_JIRA_ASSIGNEE` — optional default assignee email for `create-issue.sh`
+- `SDD_JIRA_STORY_POINTS_VALUE` — optional Story Points value used when `snapshot.sh` fills empty Story points before transition; defaults to `1`
+- `SDD_JIRA_DEV_FINISH_DATE_FIELD_ID` / `SDD_JIRA_STORY_POINTS_FIELD_ID` — optional Jira custom field id overrides when TWG metadata cannot resolve names
 
 Scripts that use `IOS_DIR` / `ANDROID_DIR` will fail fast if the variable is not set or does not point to an existing directory.
 
@@ -71,7 +74,7 @@ bash scripts/snapshot.sh <PARENT-KEY>
 3. Runs platform bootstrap for new worktrees:
    - **iOS** (`IOS_DIR`): seeds repo-local `.mise` and Tuist SPM cache (`Tuist/.build`) with APFS copy-on-write when available, then runs `mise trust`, `mise install`, `tuist install`, and `tuist generate`.
    - **Android** (`ANDROID_DIR`): seeds `.gradle` with APFS copy-on-write when available, symlinks `local.properties`, then runs `./gradlew clean`.
-4. Transitions the task to **In Progress** only for Bugs currently in **To Do**.
+4. Transitions the task to **In Progress** when currently in **To Do**. Bugs use `acli`; Stories use `twg` to fill empty `Dev finish date` with today's date and empty `Story Points` first, then perform the transition. Set `SDD_JIRA_FILL_STORY_TRANSITION_FIELDS=0` to skip the Story field fill.
 5. Writes snapshot artifacts:
 
 ```

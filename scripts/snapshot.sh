@@ -40,6 +40,124 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { err "Missing required command: $1"; exit 1; }
 }
 
+_story_points_value() {
+  printf '%s\n' "${SDD_JIRA_STORY_POINTS_VALUE:-1}"
+}
+
+_dev_finish_date_value() {
+  date +%F
+}
+
+_json_is_empty_field_value() {
+  local json_path="$1" field_id="$2"
+  jq -e --arg field "$field_id" '
+    (.data[0] // .data)[$field] == null or ((.data[0] // .data)[$field] == "")
+  ' "$json_path" >/dev/null
+}
+
+_fill_story_transition_fields_with_twg() {
+  local key="$1"
+  local twg_cmd metadata_json current_json
+  local dev_finish_field story_points_field
+  local dev_finish_value story_points_value
+  local update_args=()
+
+  if [[ "${SDD_JIRA_FILL_STORY_TRANSITION_FIELDS:-1}" == "0" ]]; then
+    echo "  Story transition field fill disabled by SDD_JIRA_FILL_STORY_TRANSITION_FIELDS=0."
+    return 0
+  fi
+
+  if ! twg_cmd="$(command -v twg 2>/dev/null)"; then
+    echo "  WARN: twg is required to fill Story transition fields before moving $key to In Progress." >&2
+    return 1
+  fi
+
+  metadata_json="$TMPDIR_JIRA/story.update-metadata.json"
+  current_json="$TMPDIR_JIRA/story.current-transition-fields.json"
+
+  if ! "$twg_cmd" jira workitem field update-metadata --id "$key" -o json > "$metadata_json"; then
+    echo "  WARN: could not retrieve Jira update metadata with twg for $key." >&2
+    return 1
+  fi
+
+  dev_finish_field="${SDD_JIRA_DEV_FINISH_DATE_FIELD_ID:-}"
+  story_points_field="${SDD_JIRA_STORY_POINTS_FIELD_ID:-}"
+  if [[ -z "$dev_finish_field" ]]; then
+    dev_finish_field="$(jq -r 'first(.data.fields[] | select(.name == "Dev finish date") | .id) // ""' "$metadata_json")"
+  fi
+  if [[ -z "$story_points_field" ]]; then
+    story_points_field="$(jq -r 'first(.data.fields[] | select(.name == "Story Points") | .id) // ""' "$metadata_json")"
+  fi
+
+  if [[ -z "$dev_finish_field" || -z "$story_points_field" ]]; then
+    echo "  WARN: could not resolve Dev finish date / Story Points field ids with twg." >&2
+    echo "        Override with SDD_JIRA_DEV_FINISH_DATE_FIELD_ID and SDD_JIRA_STORY_POINTS_FIELD_ID." >&2
+    return 1
+  fi
+
+  if ! "$twg_cmd" jira workitem get "$key" \
+      --field "$dev_finish_field" \
+      --field "$story_points_field" \
+      --fields status,issuetype,summary \
+      -o json > "$current_json"; then
+    echo "  WARN: could not retrieve current Story transition field values with twg for $key." >&2
+    return 1
+  fi
+
+  dev_finish_value="$(_dev_finish_date_value)"
+  story_points_value="$(_story_points_value)"
+  if [[ ! "$story_points_value" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    echo "  WARN: Story Points value must be numeric; got '$story_points_value'." >&2
+    return 1
+  fi
+
+  if _json_is_empty_field_value "$current_json" "$dev_finish_field"; then
+    update_args+=(--field "$dev_finish_field=$dev_finish_value")
+  fi
+  if _json_is_empty_field_value "$current_json" "$story_points_field"; then
+    update_args+=(--field "$story_points_field=$story_points_value")
+  fi
+
+  if [[ ${#update_args[@]} -eq 0 ]]; then
+    echo "  Story transition fields already set."
+    return 0
+  fi
+
+  echo "  Filling Story transition fields with twg..."
+  if ! "$twg_cmd" jira workitem update --id "$key" "${update_args[@]}" -o json > "$TMPDIR_JIRA/story.update.output.json"; then
+    echo "  WARN: could not update Story transition fields with twg for $key." >&2
+    return 1
+  fi
+  echo "  Story transition fields filled."
+}
+
+_transition_story_to_in_progress_with_twg() {
+  local key="$1"
+  local twg_cmd transitions_json transition_id
+
+  if ! twg_cmd="$(command -v twg 2>/dev/null)"; then
+    echo "  WARN: twg is required to transition Story $key to In Progress." >&2
+    return 1
+  fi
+
+  transitions_json="$TMPDIR_JIRA/story.transitions.json"
+  if ! "$twg_cmd" jira workitem transition --id "$key" -o json > "$transitions_json"; then
+    echo "  WARN: could not discover Story transitions with twg for $key." >&2
+    return 1
+  fi
+
+  transition_id="$(jq -r '
+    first(.data.transitions[] | select(.toName == "In Progress" or .name == "In Progress") | .id) // ""
+  ' "$transitions_json")"
+  if [[ -z "$transition_id" ]]; then
+    echo "  WARN: In Progress transition is not available for Story $key." >&2
+    return 1
+  fi
+
+  echo "Transitioning $key to In Progress with twg..."
+  "$twg_cmd" jira workitem transition --id "$key" --transition-id "$transition_id" -o json
+}
+
 resolve_mise_cmd() {
   local repo_dir="$1"
   if [[ -x "$repo_dir/bin/mise" ]]; then
@@ -422,10 +540,7 @@ elif [[ "$PLATFORM" == "android" ]] && ! $WORKTREE_CREATED; then
 fi
 
 # ---------------------------------------------------------------------------
-# Stage 4: Transition to In Progress (Bugs only, when status is To Do)
-#
-# Stories require "Dev finish date" and "Story Points" to be set before
-# transitioning — these are set manually during sprint planning.
+# Stage 4: Transition to In Progress (when status is To Do)
 # ---------------------------------------------------------------------------
 
 _parent_status_now="$(jq -r '.fields.status.name' "$PARENT_CORE_JSON")"
@@ -439,6 +554,20 @@ if [[ "$PARENT_ISSUE_TYPE" == "Bug" && "$_parent_status_now" == "To Do" ]]; then
     echo "  Transitioned to In Progress."
   else
     echo "  WARN: could not transition $PARENT_KEY to In Progress." >&2
+    echo "  $_transition_output" >&2
+  fi
+fi
+
+if [[ "$PARENT_ISSUE_TYPE" == "Story" && "$_parent_status_now" == "To Do" ]]; then
+  _fill_story_transition_fields_with_twg "$PARENT_KEY" || true
+  set +e
+  _transition_output="$(_transition_story_to_in_progress_with_twg "$PARENT_KEY" 2>&1)"
+  _transition_exit=$?
+  set -e
+  if [[ $_transition_exit -eq 0 ]]; then
+    echo "  Transitioned to In Progress."
+  else
+    echo "  WARN: could not transition $PARENT_KEY to In Progress with twg." >&2
     echo "  $_transition_output" >&2
   fi
 fi

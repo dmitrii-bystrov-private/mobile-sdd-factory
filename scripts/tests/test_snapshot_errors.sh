@@ -48,6 +48,18 @@ assert_stderr_contains() {
   fi
 }
 
+assert_file_contains() {
+  local name="$1" pattern="$2" file="$3"
+  if grep -q "$pattern" "$file" 2>/dev/null; then
+    echo "  PASS  $name"
+    (( PASS++ )) || true
+  else
+    echo "  FAIL  $name (file does not contain '$pattern')"
+    echo "        file: $(cat "$file" 2>/dev/null || echo '(empty)')"
+    (( FAIL++ )) || true
+  fi
+}
+
 assert_file_exists() {
   local name="$1" file="$2"
   if [[ -f "$file" ]]; then
@@ -207,6 +219,61 @@ EOF
   chmod +x "$MOCK_BIN/acli"
 }
 
+write_mock_twg_story_transition() {
+  local log_path="$1"
+  cat > "$MOCK_BIN/twg" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "\$*" >>"$log_path"
+
+case "\$*" in
+  'jira workitem field update-metadata --id IOS-100 -o json')
+    cat <<'JSON'
+{"data":{"fields":[{"id":"customfield_10107","name":"Dev finish date","required":false,"schema":{"type":"date"},"operations":["set"]},{"id":"customfield_10023","name":"Story Points","required":false,"schema":{"type":"number"},"operations":["set"]}]}}
+JSON
+    ;;
+  'jira workitem get IOS-100 --field customfield_10107 --field customfield_10023 --fields status,issuetype,summary -o json')
+    cat <<'JSON'
+{"data":[{"key":"IOS-100","customfield_10107":null,"customfield_10023":null,"status":{"name":"To Do"}}]}
+JSON
+    ;;
+  'jira workitem update --id IOS-100 --field customfield_10107=2026-09-03 --field customfield_10023=1 -o json')
+    cat <<'JSON'
+{"data":{"key":"IOS-100"}}
+JSON
+    ;;
+  'jira workitem transition --id IOS-100 -o json')
+    cat <<'JSON'
+{"data":{"transitions":[{"id":"461","name":"In Progress","toName":"In Progress","requirements":[],"fields":[]}]}}
+JSON
+    ;;
+  'jira workitem transition --id IOS-100 --transition-id 461 -o json')
+    cat <<'JSON'
+{"data":{"key":"IOS-100","status":{"name":"In Progress"}}}
+JSON
+    ;;
+  *)
+    echo "unexpected twg command: \$*" >&2
+    exit 1
+    ;;
+esac
+EOF
+  chmod +x "$MOCK_BIN/twg"
+}
+
+write_mock_date_today() {
+  local today="$1"
+  cat > "$MOCK_BIN/date" << EOF
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "+%F" ]]; then
+  printf '%s\n' "$today"
+  exit 0
+fi
+/bin/date "\$@"
+EOF
+  chmod +x "$MOCK_BIN/date"
+}
+
 # Run snapshot.sh with the given extra env vars (key=value pairs after the key arg).
 # Captures stderr to TMP_STDERR. Returns snapshot.sh exit code.
 run_snapshot() {
@@ -347,6 +414,57 @@ assert_file_exists "transition failure: parent description.md written" "$WDIR/de
 assert_file_exists "transition failure: parent comments.md written" "$WDIR/comments.md"
 assert_file_exists "transition failure: IOS-101 description.md written" "$WDIR/IOS-101/description.md"
 assert_file_exists "transition failure: IOS-102 description.md written" "$WDIR/IOS-102/description.md"
+
+rm -f "$STDERR"
+rm -rf "$TMP_ROOT"
+
+# ---------------------------------------------------------------------------
+# Story transition: fill required fields and move to In Progress with twg
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- story transition via twg ---"
+
+TMP_ROOT="$(mktemp -d)"
+MOCK_WORKDIR="$TMP_ROOT/workdir"
+MOCK_IOS_DIR="$TMP_ROOT/ios"
+MOCK_BIN="$TMP_ROOT/bin"
+MOCK_FIXTURES="$TMP_ROOT/fixtures"
+mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR" "$MOCK_BIN" "$MOCK_FIXTURES"
+
+jq '.fields.status.name = "To Do" | .fields.issuetype.name = "Story"' "$FIXTURES/parent_core.json" > "$MOCK_FIXTURES/IOS-100_core.json"
+cp "$FIXTURES/parent_comments.json"        "$MOCK_FIXTURES/IOS-100_comments.json"
+cp "$FIXTURES/subtasks_list.json"          "$MOCK_FIXTURES/subtasks_list.json"
+cp "$FIXTURES/subtask_IOS-101_core.json"   "$MOCK_FIXTURES/IOS-101_core.json"
+cp "$FIXTURES/subtask_IOS-101_comments.json" "$MOCK_FIXTURES/IOS-101_comments.json"
+cp "$FIXTURES/subtask_IOS-102_core.json"   "$MOCK_FIXTURES/IOS-102_core.json"
+cp "$FIXTURES/subtask_IOS-102_comments.json" "$MOCK_FIXTURES/IOS-102_comments.json"
+
+TWG_LOG="$TMP_ROOT/twg.log"
+write_mock_git
+write_mock_acli "succeed"
+write_mock_twg_story_transition "$TWG_LOG"
+write_mock_date_today "2026-09-03"
+
+STDERR="$(mktemp)"
+ACTUAL_EXIT=0
+PATH="$MOCK_BIN:$PATH" \
+  SDD_WORKDIR="$MOCK_WORKDIR" \
+  IOS_DIR="$MOCK_IOS_DIR" \
+  SDD_JIRA_STORY_POINTS_VALUE="1" \
+  bash "$SNAPSHOT" IOS-100 > /dev/null 2>"$STDERR" || ACTUAL_EXIT=$?
+if [[ "$ACTUAL_EXIT" -eq 0 ]]; then
+  echo "  PASS  story transition via twg: snapshot succeeds"
+  (( PASS++ )) || true
+else
+  echo "  FAIL  story transition via twg: expected exit 0, got $ACTUAL_EXIT"
+  echo "        stderr: $(cat "$STDERR" 2>/dev/null || echo '(empty)')"
+  (( FAIL++ )) || true
+fi
+assert_file_contains "story transition via twg: metadata read" "jira workitem field update-metadata --id IOS-100 -o json" "$TWG_LOG"
+assert_file_contains "story transition via twg: current values read" "jira workitem get IOS-100 --field customfield_10107 --field customfield_10023" "$TWG_LOG"
+assert_file_contains "story transition via twg: missing fields updated" "jira workitem update --id IOS-100 --field customfield_10107=2026-09-03 --field customfield_10023=1 -o json" "$TWG_LOG"
+assert_file_contains "story transition via twg: transitions discovered" "jira workitem transition --id IOS-100 -o json" "$TWG_LOG"
+assert_file_contains "story transition via twg: transition executed" "jira workitem transition --id IOS-100 --transition-id 461 -o json" "$TWG_LOG"
 
 rm -f "$STDERR"
 rm -rf "$TMP_ROOT"

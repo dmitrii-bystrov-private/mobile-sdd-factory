@@ -171,6 +171,7 @@ Required tools:
 - `jq`
 - `glab`
 - `acli`
+- `twg` for automatic Story transition preparation
 - Python environment for backend/factory tooling
 - Node/npm for the UI
 - at least one live runner host: Claude Code or Codex CLI
@@ -188,12 +189,15 @@ Optional:
 ```bash
 JIRA_BASE_URL=https://your-org.atlassian.net/browse/
 SDD_JIRA_TEAM_FIELD_ID=12345
+SDD_JIRA_STORY_POINTS_VALUE=1
 SDD_GITLAB_IOS_PROJECT_PATH=group%2Fmobile%2Fios-app
 SDD_GITLAB_ANDROID_PROJECT_PATH=group%2Fmobile%2Fandroid-app
 DEFAULT_JIRA_ASSIGNEE=you@example.com
 SDD_IOS_WORKSPACE_NAME=App-Tuist.xcworkspace
 SDD_IOS_DEFAULT_SCHEME=App
 ```
+
+`snapshot.sh` uses `twg` to fill empty `Dev finish date` with today's date and empty `Story Points` before moving `To Do` Stories to `In Progress`.
 
 For codebase semantic search, the runtime can use role-scoped MCP servers such as `ios-rag`, `android-rag`, and `frontend-rag` when available. Add them through a local-only `.mcp.json`; this file is intentionally ignored by git.
 
