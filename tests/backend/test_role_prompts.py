@@ -170,6 +170,7 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("Do not reuse prior findings files", agents)
         self.assertIn("a local notes file is not delivered unless it is passed to the helper", agents)
         self.assertIn("--issues-markdown-file <path>", agents)
+        self.assertIn("do not rely on shell variables from earlier tool calls", agents)
 
     def test_implementer_agents_include_completion_and_subtask_result_templates(self) -> None:
         agents = self._agents("implementer")
