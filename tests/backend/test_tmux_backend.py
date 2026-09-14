@@ -598,12 +598,13 @@ class TmuxBackendTests(unittest.TestCase):
         submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
         self.assertEqual("claude", submit_trace["runner"])
         self.assertEqual("plain-enter-two-call", submit_trace["submit_style"])
+        send_key_calls = [call for call in backend.calls if call and call[0] == "send-keys"]
         self.assertEqual(
             [
                 ("send-keys", "-t", role.role_id, "Operator answer: full repo-wide cleanup.", ""),
                 ("send-keys", "-t", role.role_id, "", "Enter"),
             ],
-            backend.calls[:2],
+            send_key_calls[:2],
         )
         self.assertIn(("capture-pane", "-p", "-S", "-40", "-t", role.role_id), backend.calls)
 
@@ -645,12 +646,13 @@ class TmuxBackendTests(unittest.TestCase):
         submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
         self.assertEqual("codex", submit_trace["runner"])
         self.assertEqual("plain-enter-two-call", submit_trace["submit_style"])
+        send_key_calls = [call for call in backend.calls if call and call[0] == "send-keys"]
         self.assertEqual(
             [
                 ("send-keys", "-t", role.role_id, "Operator answer: full repo-wide cleanup.", ""),
                 ("send-keys", "-t", role.role_id, "", "Enter"),
             ],
-            backend.calls[:2],
+            send_key_calls[:2],
         )
         self.assertIn(("capture-pane", "-p", "-S", "-40", "-t", role.role_id), backend.calls)
 
@@ -679,12 +681,13 @@ class TmuxBackendTests(unittest.TestCase):
 
         submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
         self.assertEqual("submitted_unconfirmed", submit_trace["delivery_state"])
+        send_key_calls = [call for call in backend.calls if call and call[0] == "send-keys"]
         self.assertEqual(
             [
                 ("send-keys", "-t", role.role_id, "Review the routed work.", ""),
                 ("send-keys", "-t", role.role_id, "", "Enter"),
             ],
-            backend.calls[:2],
+            send_key_calls[:2],
         )
 
     def test_tmux_launcher_retries_submit_when_pane_stays_idle_after_first_enter(self) -> None:
@@ -870,9 +873,11 @@ class TmuxBackendTests(unittest.TestCase):
                 if args[:3] == ("send-keys", "-t", role.role_id) and len(args) >= 4:
                     sent = args[3]
                     if sent == "Down":
-                        self.pane_text = self.pane_text.replace("❯ No, exit", "  No, exit").replace(
-                            "  Yes, I trust this folder",
-                            "❯ Yes, I trust this folder",
+                        self.pane_text = (
+                            "SDD_FACTORY_ROLE_LAUNCHER_READY role=doc-harvest-worker task=IOS-50009TRUST lifecycle=persistent\n"
+                            "SDD_FACTORY_AGENT_BOOTSTRAP launcher=claude role=doc-harvest-worker task=IOS-50009TRUST lifecycle=persistent\n"
+                            "❯ Try \"fix lint\" or paste work here\n"
+                            "[Sonnet 4.6] 0% | $0.00 | 0m 2s\n"
                         )
                     elif sent:
                         self.pane_text += f"\n{sent}\n"
@@ -907,6 +912,111 @@ class TmuxBackendTests(unittest.TestCase):
             self.assertEqual("claude", submit_trace["runner"])
             self.assertIn(
                 ("send-keys", "-t", role.role_id, submit_trace["payload_text"], ""),
+                backend.calls,
+            )
+
+    def test_tmux_launcher_ready_probe_recaptures_after_claude_trust_prompt(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self, runtime_root: Path, role_id: str) -> None:
+                super().__init__(mode="tmux", runtime_root=runtime_root)
+                self.calls: list[tuple[str, ...]] = []
+                self.role_id = role_id
+                self.pane_text = (
+                    "SDD_FACTORY_ROLE_LAUNCHER_READY role=implementer task=IOS-50009NEW lifecycle=persistent\n"
+                    "SDD_FACTORY_AGENT_BOOTSTRAP launcher=claude role=implementer task=IOS-50009NEW lifecycle=persistent\n"
+                    "Quick safety check: Is this a project you created or one you trust?\n"
+                    "❯ No, exit\n"
+                    "  Yes, I trust this folder\n"
+                    "Enter to confirm · Esc to cancel\n"
+                )
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                if args == ("send-keys", "-t", self.role_id, "Down", "C-m"):
+                    self.pane_text = (
+                        "SDD_FACTORY_ROLE_LAUNCHER_READY role=implementer task=IOS-50009NEW lifecycle=persistent\n"
+                        "SDD_FACTORY_AGENT_BOOTSTRAP launcher=claude role=implementer task=IOS-50009NEW lifecycle=persistent\n"
+                        "❯ Try \"fix lint\" or paste work here\n"
+                        "[Sonnet 4.6] 0% | $0.00 | 0m 2s\n"
+                    )
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            role = RuntimeRoleHandle(
+                role_id="sdd-IOS-50009NEW:implementer",
+                session_id="sdd-IOS-50009NEW",
+                backend_name="tmux",
+            )
+            workspace = runtime_root / "IOS-50009NEW" / "runtime" / "role-workspaces" / "implementer"
+            workspace.mkdir(parents=True, exist_ok=True)
+            (workspace / "launch-role.sh").write_text(
+                "#!/usr/bin/env bash\nexport SDD_FACTORY_ROLE_RUNNER='claude'\n"
+            )
+            backend = FakeTmuxBackend(runtime_root, role.role_id)
+            backend.tmux_interactive_driver_enabled[role.role_id] = True
+            backend.tmux_role_ready[role.role_id] = False
+
+            self.assertTrue(backend.launcher_role_ready(role))
+
+            self.assertTrue(backend.tmux_trust_prompt_handled[role.role_id])
+            self.assertTrue(backend.tmux_role_ready[role.role_id])
+            self.assertIn(("send-keys", "-t", role.role_id, "Down", "C-m"), backend.calls)
+            capture_calls = [
+                call for call in backend.calls if call[:3] == ("capture-pane", "-p", "-S")
+            ]
+            self.assertGreaterEqual(len(capture_calls), 2)
+
+    def test_tmux_send_input_rebuffers_when_ready_role_is_still_on_trust_prompt(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self, runtime_root: Path, role_id: str) -> None:
+                super().__init__(mode="tmux", runtime_root=runtime_root)
+                self.calls: list[tuple[str, ...]] = []
+                self.role_id = role_id
+                self.pane_text = (
+                    "SDD_FACTORY_ROLE_LAUNCHER_READY role=implementer task=IOS-50009STALE lifecycle=persistent\n"
+                    "SDD_FACTORY_AGENT_BOOTSTRAP launcher=claude role=implementer task=IOS-50009STALE lifecycle=persistent\n"
+                    "Quick safety check: Is this a project you created or one you trust?\n"
+                    "❯ No, exit\n"
+                    "  Yes, I trust this folder\n"
+                    "Enter to confirm · Esc to cancel\n"
+                )
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runtime_root = Path(temp_dir)
+            role = RuntimeRoleHandle(
+                role_id="sdd-IOS-50009STALE:implementer",
+                session_id="sdd-IOS-50009STALE",
+                backend_name="tmux",
+            )
+            workspace = runtime_root / "IOS-50009STALE" / "runtime" / "role-workspaces" / "implementer"
+            workspace.mkdir(parents=True, exist_ok=True)
+            (workspace / "launch-role.sh").write_text(
+                "#!/usr/bin/env bash\nexport SDD_FACTORY_ROLE_RUNNER='claude'\n"
+            )
+            backend = FakeTmuxBackend(runtime_root, role.role_id)
+            backend.tmux_interactive_driver_enabled[role.role_id] = True
+            backend.role_working_directories[role.role_id] = workspace
+            backend.tmux_role_ready[role.role_id] = True
+
+            backend.send_input(role, "Implement the assigned change.")
+
+            self.assertFalse(backend.tmux_trust_prompt_handled[role.role_id])
+            self.assertFalse(backend.tmux_role_ready[role.role_id])
+            self.assertIn(("send-keys", "-t", role.role_id, "Down", "C-m"), backend.calls)
+            submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
+            self.assertEqual("buffered_pre_ready", submit_trace["delivery_state"])
+            self.assertEqual(["Implement the assigned change."], backend.tmux_buffered_inputs[role.role_id])
+            self.assertNotIn(
+                ("send-keys", "-t", role.role_id, "Implement the assigned change.", ""),
                 backend.calls,
             )
 
@@ -945,6 +1055,30 @@ class TmuxBackendTests(unittest.TestCase):
 
         self.assertTrue(backend.tmux_trust_prompt_handled[role_id])
         self.assertIn(("send-keys", "-t", role_id, "Down", "C-m"), backend.calls)
+
+    def test_tmux_auto_confirms_claude_trust_prompt_when_yes_is_selected(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role_id = "sdd-IOS-50012YES:implementer"
+        prompt = (
+            "Quick safety check: Is this a project you created or one you trust?\n"
+            "  No, exit\n"
+            "❯ Yes, I trust this folder\n"
+            "Enter to confirm · Esc to cancel\n"
+        )
+
+        backend._auto_advance_snapshot_bootstrap_prompts(role_id, prompt)
+
+        self.assertTrue(backend.tmux_trust_prompt_handled[role_id])
+        self.assertIn(("send-keys", "-t", role_id, "C-m"), backend.calls)
 
     def test_tmux_waits_for_complete_claude_trust_prompt_before_marking_handled(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):

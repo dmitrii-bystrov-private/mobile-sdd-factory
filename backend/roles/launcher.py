@@ -10,6 +10,7 @@ import re
 import shlex
 
 from backend.role_runtime_config import resolve_role_mcp_servers
+from backend.roles.agent_trust import trust_role_workspace
 from backend.roles.workspace import RoleWorkspace
 
 
@@ -66,6 +67,16 @@ class RoleLauncherManager:
         role_config: dict[str, str] | None = None,
         resume_mode: str | None = None,
     ) -> RoleLaunchPlan:
+        if os.environ.get("SDD_FACTORY_AGENT_PRETRUST_DISABLED", "").strip().lower() not in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            trust_role_workspace(
+                workspace.directory,
+                runner=(role_config or {}).get("runner", ""),
+            )
         claude_runtime_files = self._ensure_claude_runtime_files(
             task_key=task_key,
             workspace=workspace,

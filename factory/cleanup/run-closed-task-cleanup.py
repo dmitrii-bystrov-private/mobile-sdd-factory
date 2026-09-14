@@ -12,11 +12,15 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from backend.dependencies import build_dependencies  # noqa: E402
+from backend.roles.agent_trust import remove_stale_role_workspace_trust  # noqa: E402
 
 
 def main() -> int:
     dependencies = build_dependencies()
     results = dependencies.coordinator_service.cleanup_closed_tasks()
+    stale_trust_entries = remove_stale_role_workspace_trust(
+        workdir_root=dependencies.coordinator_service.workdir_root,
+    )
 
     cleaned = 0
     for item in results:
@@ -29,7 +33,13 @@ def main() -> int:
         cleaned += 1
 
     print("")
+    if stale_trust_entries:
+        print("Stale role workspace trust entries:")
+        for path in stale_trust_entries:
+            print(f"  removed {path}")
+        print("")
     print(f"Done. Cleaned: {cleaned}")
+    print(f"Done. Removed stale trust entries: {len(stale_trust_entries)}")
     return 0
 
 

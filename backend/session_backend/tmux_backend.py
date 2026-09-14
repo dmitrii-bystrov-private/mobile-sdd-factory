@@ -401,7 +401,6 @@ class TmuxSessionBackend(SessionBackend):
                 )
             if (
                 self.tmux_interactive_driver_enabled.get(role.role_id, False)
-                and self.tmux_recovered_launcher_roles.get(role.role_id, False)
                 and self.tmux_role_ready.get(role.role_id, True)
             ):
                 self._auto_advance_current_tmux_bootstrap_prompts(
@@ -434,6 +433,7 @@ class TmuxSessionBackend(SessionBackend):
                 self.tmux_confirmation_blocker_emitted[role.role_id] = False
                 self.tmux_generic_blocker_emitted[role.role_id] = False
                 self.tmux_pre_ready_unknown_chunks[role.role_id] = 0
+                self.tmux_buffered_inputs.pop(role.role_id, None)
                 self._write_tmux_launcher_input(role.role_id, socket_path, role.role_id, text, source="direct")
                 return
             result = self._tmux(socket_path, "send-keys", "-t", role.role_id, text, "Enter")
@@ -536,6 +536,7 @@ class TmuxSessionBackend(SessionBackend):
                     role.role_id,
                 )
                 if retry.returncode == 0:
+                    self._rearm_bootstrap_prompt_if_still_active(role.role_id, retry.stdout)
                     return retry.stdout
         return current
 
@@ -621,6 +622,13 @@ class TmuxSessionBackend(SessionBackend):
         runtime_handle = role_id
         session_id = runtime_handle.split(":", 1)[0]
         socket_path = self._socket_path(session_id)
+        if self._contains_active_workspace_trust_prompt(normalized):
+            self.tmux_trust_prompt_handled[role_id] = False
+        if (
+            self._contains_update_prompt(normalized)
+            and not self._contains_runner_ready_prompt(normalized)
+        ):
+            self.tmux_update_prompt_handled[role_id] = False
         if (
             not self.tmux_trust_prompt_handled.get(role_id, False)
             and self._contains_workspace_trust_prompt(normalized)
@@ -633,6 +641,16 @@ class TmuxSessionBackend(SessionBackend):
         ):
             self._tmux(socket_path, "send-keys", "-t", runtime_handle, "2", "C-m")
             self.tmux_update_prompt_handled[role_id] = True
+
+    def _rearm_bootstrap_prompt_if_still_active(self, role_id: str, text: str) -> None:
+        normalized = self._normalize_terminal_text(text)
+        if self._contains_active_workspace_trust_prompt(normalized):
+            self.tmux_trust_prompt_handled[role_id] = False
+        if (
+            self._contains_update_prompt(normalized)
+            and not self._contains_runner_ready_prompt(normalized)
+        ):
+            self.tmux_update_prompt_handled[role_id] = False
 
     def is_role_alive(self, role: RuntimeRoleHandle) -> bool:
         if self._effective_mode == "tmux":
@@ -816,6 +834,23 @@ class TmuxSessionBackend(SessionBackend):
             )
         )
 
+    def _contains_active_workspace_trust_prompt(self, normalized_text: str) -> bool:
+        if not self._contains_workspace_trust_prompt(normalized_text):
+            return False
+        prompt_tail = self._latest_interactive_prompt_tail(normalized_text)
+        if not prompt_tail:
+            return True
+        return (
+            (
+                "trust this folder" in prompt_tail
+                and ("enter to confirm" in prompt_tail or "yes" in prompt_tail)
+            )
+            or (
+                "do you trust the contents of this directory" in prompt_tail
+                and "press enter to continue" in prompt_tail
+            )
+        )
+
     def _send_workspace_trust_prompt_confirmation(
         self,
         socket_path: Path,
@@ -827,6 +862,9 @@ class TmuxSessionBackend(SessionBackend):
             return True
         if self._workspace_trust_prompt_accepts_numbered_yes(normalized_text):
             self._tmux(socket_path, "send-keys", "-t", runtime_handle, "1", "C-m")
+            return True
+        if self._workspace_trust_prompt_has_yes_selected(normalized_text):
+            self._tmux(socket_path, "send-keys", "-t", runtime_handle, "C-m")
             return True
         return False
 
@@ -852,6 +890,16 @@ class TmuxSessionBackend(SessionBackend):
         if yes_index < 0 or no_index < 0:
             return False
         return no_index < yes_index and "trust this folder" in prompt_tail
+
+    @staticmethod
+    def _workspace_trust_prompt_has_yes_selected(normalized_text: str) -> bool:
+        selected_index = normalized_text.rfind("❯")
+        if selected_index < 0:
+            return False
+        prompt_tail = normalized_text[selected_index:]
+        yes_index = prompt_tail.find("yes")
+        no_index = prompt_tail.find("no")
+        return yes_index >= 0 and (no_index < 0 or yes_index < no_index) and "trust this folder" in prompt_tail
 
     def _contains_update_prompt(self, normalized_text: str) -> bool:
         return (
@@ -1015,6 +1063,23 @@ class TmuxSessionBackend(SessionBackend):
             or self.tmux_update_prompt_handled.get(role_id, False) != before_update
         ):
             time.sleep(0.12)
+            refreshed_pane_text = self._capture_tmux_pane_text(socket_path, runtime_handle)
+            if refreshed_pane_text:
+                pane_text = refreshed_pane_text
+                self._rearm_bootstrap_prompt_if_still_active(role_id, pane_text)
+        normalized = self._normalize_terminal_text(pane_text)
+        if (
+            self._contains_active_workspace_trust_prompt(normalized)
+            or (
+                self._contains_update_prompt(normalized)
+                and not self._contains_runner_ready_prompt(normalized)
+            )
+        ):
+            self.tmux_role_ready[role_id] = False
+            return
+        if self._contains_runner_ready_prompt(normalized):
+            self.tmux_role_ready[role_id] = True
+            self.tmux_pre_ready_unknown_chunks[role_id] = 0
 
     def _refresh_launcher_ready_from_pane(
         self,
@@ -1027,7 +1092,18 @@ class TmuxSessionBackend(SessionBackend):
         pane_text = self._capture_tmux_pane_text(socket_path, runtime_handle)
         if not pane_text:
             return
+        before_trust = self.tmux_trust_prompt_handled.get(role_id, False)
+        before_update = self.tmux_update_prompt_handled.get(role_id, False)
         self._auto_advance_snapshot_bootstrap_prompts(role_id, pane_text)
+        if (
+            self.tmux_trust_prompt_handled.get(role_id, False) != before_trust
+            or self.tmux_update_prompt_handled.get(role_id, False) != before_update
+        ):
+            time.sleep(0.12)
+            refreshed_pane_text = self._capture_tmux_pane_text(socket_path, runtime_handle)
+            if refreshed_pane_text:
+                pane_text = refreshed_pane_text
+                self._rearm_bootstrap_prompt_if_still_active(role_id, pane_text)
         normalized = self._normalize_terminal_text(pane_text)
         if not self._contains_runner_ready_prompt(normalized):
             return

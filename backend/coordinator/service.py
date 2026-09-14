@@ -30,6 +30,7 @@ from backend.models.work_item import WorkItem
 from backend.role_runtime_config import normalize_role_runtime_config
 from backend.roles.prompts import role_handoff_prompt
 from backend.roles.launcher import RoleLauncherManager
+from backend.roles.agent_trust import remove_task_role_workspace_trust
 from backend.roles.workspace import RoleWorkspaceManager
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
@@ -11750,6 +11751,13 @@ class CoordinatorService:
     def _remove_runner_private_residue(self, task_key: str) -> list[str]:
         removed: list[str] = []
         task_key_lower = task_key.lower()
+        if self.workdir_root is not None:
+            removed.extend(
+                remove_task_role_workspace_trust(
+                    task_key,
+                    workdir_root=self.workdir_root,
+                )
+            )
         claude_projects_root = Path.home() / ".claude" / "projects"
         if claude_projects_root.exists() and claude_projects_root.is_dir():
             for child in claude_projects_root.iterdir():

@@ -32,6 +32,7 @@ from backend.roles.contracts import (
     TASK_DECOMPOSER_WORKER_ROLE,
     VERIFICATION_COORDINATOR_ROLE,
 )
+from backend.roles.agent_trust import remove_stale_role_workspace_trust
 from backend.roles.launcher import RoleLauncherManager
 from backend.role_runtime_config import normalize_role_runtime_config
 from backend.roles.workspace import RoleWorkspaceManager
@@ -552,6 +553,132 @@ class SessionCreationTests(unittest.TestCase):
             any(".codex/shell_snapshots" in path for path in result["removed_paths"]),
             "expected codex shell snapshot residue to be reported",
         )
+
+    def test_cleanup_task_removes_agent_trust_entries_for_role_workspaces(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30000TRUSTCLEAN",
+            workflow_profile="oneshot",
+            policy={},
+        )
+        fake_home = Path(self.temp_dir.name) / "home"
+        task_role_path = (
+            Path(self.temp_dir.name)
+            / "IOS-30000TRUSTCLEAN"
+            / "runtime"
+            / "role-workspaces"
+            / "implementer"
+        ).resolve()
+        other_role_path = (
+            Path(self.temp_dir.name)
+            / "IOS-39999OTHER"
+            / "runtime"
+            / "role-workspaces"
+            / "implementer"
+        ).resolve()
+        fake_home.mkdir(parents=True, exist_ok=True)
+        (fake_home / ".claude.json").write_text(
+            json.dumps(
+                {
+                    "projects": {
+                        str(task_role_path): {"hasTrustDialogAccepted": True},
+                        str(other_role_path): {"hasTrustDialogAccepted": True},
+                    }
+                }
+            )
+            + "\n"
+        )
+        codex_config = fake_home / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        codex_config.write_text(
+            "\n".join(
+                [
+                    f'[projects."{task_role_path}"]',
+                    'trust_level = "trusted"',
+                    "",
+                    f'[projects."{other_role_path}"]',
+                    'trust_level = "trusted"',
+                    "",
+                ]
+            )
+        )
+
+        with patch("backend.coordinator.service.Path.home", return_value=fake_home), patch(
+            "backend.roles.agent_trust.Path.home",
+            return_value=fake_home,
+        ):
+            result = self.coordinator.cleanup_task(session.id, cleanup_mode="soft")
+
+        claude_config = json.loads((fake_home / ".claude.json").read_text())
+        self.assertNotIn(str(task_role_path), claude_config["projects"])
+        self.assertIn(str(other_role_path), claude_config["projects"])
+        updated_codex_config = codex_config.read_text()
+        self.assertNotIn(str(task_role_path), updated_codex_config)
+        self.assertIn(str(other_role_path), updated_codex_config)
+        self.assertTrue(
+            any(".claude.json" in path for path in result["removed_paths"]),
+            "expected claude trust residue to be reported",
+        )
+        self.assertTrue(
+            any(".codex/config.toml" in path for path in result["removed_paths"]),
+            "expected codex trust residue to be reported",
+        )
+
+    def test_stale_agent_trust_cleanup_removes_missing_role_workspaces_only(self) -> None:
+        fake_home = Path(self.temp_dir.name) / "home"
+        workdir_root = Path(self.temp_dir.name) / "workdir"
+        stale_role_path = (
+            workdir_root / "IOS-30000STALE" / "runtime" / "role-workspaces" / "implementer"
+        ).resolve()
+        live_role_path = (
+            workdir_root / "IOS-30000LIVE" / "runtime" / "role-workspaces" / "implementer"
+        ).resolve()
+        regular_project_path = (Path(self.temp_dir.name) / "repo").resolve()
+        live_role_path.mkdir(parents=True, exist_ok=True)
+        fake_home.mkdir(parents=True, exist_ok=True)
+        (fake_home / ".claude.json").write_text(
+            json.dumps(
+                {
+                    "projects": {
+                        str(stale_role_path): {"hasTrustDialogAccepted": True},
+                        str(live_role_path): {"hasTrustDialogAccepted": True},
+                        str(regular_project_path): {"hasTrustDialogAccepted": True},
+                    }
+                }
+            )
+            + "\n"
+        )
+        codex_config = fake_home / ".codex" / "config.toml"
+        codex_config.parent.mkdir(parents=True, exist_ok=True)
+        codex_config.write_text(
+            "\n".join(
+                [
+                    f'[projects."{stale_role_path}"]',
+                    'trust_level = "trusted"',
+                    "",
+                    f'[projects."{live_role_path}"]',
+                    'trust_level = "trusted"',
+                    "",
+                    f'[projects."{regular_project_path}"]',
+                    'trust_level = "trusted"',
+                    "",
+                ]
+            )
+        )
+
+        removed = remove_stale_role_workspace_trust(
+            workdir_root=workdir_root,
+            home=fake_home,
+        )
+
+        claude_config = json.loads((fake_home / ".claude.json").read_text())
+        self.assertNotIn(str(stale_role_path), claude_config["projects"])
+        self.assertIn(str(live_role_path), claude_config["projects"])
+        self.assertIn(str(regular_project_path), claude_config["projects"])
+        updated_codex_config = codex_config.read_text()
+        self.assertNotIn(str(stale_role_path), updated_codex_config)
+        self.assertIn(str(live_role_path), updated_codex_config)
+        self.assertIn(str(regular_project_path), updated_codex_config)
+        self.assertEqual(2, len(removed))
 
     def test_cleanup_closed_tasks_finds_orphan_runner_private_residue(self) -> None:
         task_key = "IOS-39999"
@@ -1691,7 +1818,7 @@ class SessionCreationTests(unittest.TestCase):
             / CONVENTION_REVIEWER_ROLE
             / "AGENTS.md"
         ).read_text()
-        self.assertIn("Primary project guidance:", reviewer_agents)
+        self.assertIn("Repository guidance entry points:", reviewer_agents)
         self.assertIn("Do not run build, test, or lint verification.", reviewer_agents)
         self.assertIn("Keep outputs compact and fixer-oriented.", reviewer_agents)
 
@@ -1765,6 +1892,40 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("SDD_FACTORY_TASK_REPO_ROOT=", script_text)
         self.assertIn("/factory/scripts/run-role-agent.sh", script_text)
         self.assertIn("SDD_FACTORY_ROLE_LAUNCHER_READY", script_text)
+
+    def test_launcher_plan_pretrusts_explicit_agent_role_workspace(self) -> None:
+        fake_home = Path(self.temp_dir.name) / "home"
+        workspace_manager = RoleWorkspaceManager(
+            runtime_root=Path(self.temp_dir.name),
+            repo_root=Path(self.temp_dir.name) / "repo-root-pretrust",
+            workdir_root=Path(self.temp_dir.name),
+        )
+        launcher_manager = RoleLauncherManager(
+            repo_root=Path(self.temp_dir.name) / "repo-root-pretrust",
+            workdir_root=Path(self.temp_dir.name),
+        )
+        claude_workspace = workspace_manager.ensure_role_workspace("IOS-30000TRUST", "implementer")
+        codex_workspace = workspace_manager.ensure_role_workspace("IOS-30000TRUST", "requirements-reviewer")
+
+        with patch("backend.roles.agent_trust.Path.home", return_value=fake_home):
+            launcher_manager.ensure_launch_plan(
+                task_key="IOS-30000TRUST",
+                workspace=claude_workspace,
+                role_config={"runner": "claude", "model": "sonnet", "effort": "medium"},
+            )
+            launcher_manager.ensure_launch_plan(
+                task_key="IOS-30000TRUST",
+                workspace=codex_workspace,
+                role_config={"runner": "codex", "model": "gpt-5.3-codex-spark", "effort": "xhigh"},
+            )
+
+        claude_config = json.loads((fake_home / ".claude.json").read_text())
+        self.assertTrue(
+            claude_config["projects"][str(claude_workspace.directory.resolve())]["hasTrustDialogAccepted"]
+        )
+        codex_config = (fake_home / ".codex" / "config.toml").read_text()
+        self.assertIn(f'[projects."{codex_workspace.directory.resolve()}"]', codex_config)
+        self.assertIn('trust_level = "trusted"', codex_config)
 
     def test_role_workspace_scaffolds_task_output_directories(self) -> None:
         workspace_manager = RoleWorkspaceManager(

@@ -95,6 +95,24 @@ const PLANNING_STEP_DEFINITIONS = [
   },
 ] as const;
 
+const LIVE_REFRESH_FALLBACK_INTERVAL_MS = 5000;
+
+function needsLiveRefreshFallback(session: Session | null): boolean {
+  if (session === null) {
+    return false;
+  }
+  if (session.status === "active" || session.status === "waiting_for_operator" || session.status === "paused") {
+    return true;
+  }
+  if (session.status !== "completed") {
+    return false;
+  }
+  return (
+    session.current_stage === "completed" ||
+    session.current_stage === "mr_handoff_completed"
+  );
+}
+
 function latestPlanningArtifactForStage(
   artifacts: Artifact[],
   stageName: string,
@@ -568,6 +586,20 @@ export function SessionsPage(): JSX.Element {
       close();
     };
   }, [selectedSessionId, bundle?.events]);
+
+  useEffect(() => {
+    if (!needsLiveRefreshFallback(selectedSession)) {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshSelected();
+    }, LIVE_REFRESH_FALLBACK_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [selectedSession?.id, selectedSession?.status, selectedSession?.current_stage]);
 
   useEffect(() => {
     return () => {
