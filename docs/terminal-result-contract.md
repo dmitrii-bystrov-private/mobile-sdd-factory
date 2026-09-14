@@ -74,7 +74,7 @@ SDD_ERROR: {"summary":"<short summary>","details":"<what the operator must do>",
 ```
 
 Use `SDD_ERROR` only for runtime/protocol/tooling blockers where the helper cannot represent or deliver the current outcome.
-For implementer/bug-fixer operator decisions, prefer a `failed` helper result with `--needs-operator-input`; do not use `SDD_ERROR` as routed work delivery.
+For implementer operator decisions, prefer a `failed` helper result with `--needs-operator-input`; do not use `SDD_ERROR` as routed work delivery.
 
 ## Output Types
 
@@ -301,7 +301,6 @@ Minimal example:
 
 Applies to:
 - `implementer`
-- `bug-fixer`
 
 Required:
 - `output_type`

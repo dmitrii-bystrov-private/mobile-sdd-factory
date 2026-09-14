@@ -1,4 +1,4 @@
-export type WorkflowProfile = "oneshot" | "bug_full" | "story_full";
+export type WorkflowProfile = "oneshot" | "story_full";
 export type SessionPolicyValue = "disabled" | "enabled" | "required";
 export type RequirementsClarificationMode = "ask-a-lot" | "ask-selectively" | "autonomous";
 export type SessionPolicyEntry = SessionPolicyValue | RequirementsClarificationMode;

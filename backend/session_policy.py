@@ -12,15 +12,10 @@ REQUIREMENTS_CLARIFICATION_MODE_VALUES = {
     "ask-selectively",
     "autonomous",
 }
-WORKFLOW_PROFILES = {"oneshot", "bug_full", "story_full"}
+WORKFLOW_PROFILES = {"oneshot", "story_full"}
 
 PROFILE_POLICY_FIELDS: dict[str, tuple[str, ...]] = {
     "oneshot": (
-        "review_policy",
-        "doc_harvest_policy",
-    ),
-    "bug_full": (
-        "test_policy",
         "review_policy",
         "doc_harvest_policy",
     ),
@@ -45,7 +40,6 @@ FIELD_ALLOWED_VALUES: dict[str, set[str]] = {
 
 PROFILE_DEFAULTS: dict[str, dict[str, str]] = {
     "oneshot": {},
-    "bug_full": {"test_policy": "enabled"},
     "story_full": {"requirements_clarification_mode": "ask-selectively"},
 }
 
@@ -57,9 +51,6 @@ class SessionPolicyState:
 
 
 def infer_workflow_profile(issue_type: str) -> str:
-    normalized = issue_type.strip().lower()
-    if normalized == "bug":
-        return "bug_full"
     return "oneshot"
 
 

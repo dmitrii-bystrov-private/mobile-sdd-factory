@@ -16,7 +16,6 @@ from backend.models.enums import DispatchStatus, RoleStatus, SessionStatus
 from backend.models.work_item import WorkItemStatus
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
-    BUG_FIXER_ROLE,
     CONVENTION_REVIEWER_ROLE,
     DOCUMENTATION_REVIEWER_ROLE,
     DOC_HARVEST_ROLE,
@@ -92,10 +91,11 @@ class FakeJiraAdapter:
         )
 
     def get_issue_type(self, task_key: str) -> CommandResult:
+        issue_type = "Bug" if task_key.endswith("BUG") else "Story"
         return CommandResult(
             command=["get_issue_type", task_key],
             returncode=0,
-            stdout="Story\n",
+            stdout=f"{issue_type}\n",
             stderr="",
         )
 
@@ -363,16 +363,26 @@ class SessionCreationTests(unittest.TestCase):
     def test_create_task_session_creates_roles_and_event(self) -> None:
         session, event, created = self.coordinator.create_task_session(
             "IOS-30000",
-            workflow_profile="bug_full",
-            policy={"test_policy": "required"},
+            workflow_profile="oneshot",
         )
         roles = self.role_repository.list_for_session(session.id)
 
         self.assertTrue(created)
         self.assertEqual("task_started", event.event_type)
         self.assertEqual("active", session.status.value)
-        self.assertEqual("bug_full", session.workflow_profile)
-        self.assertEqual("required", session.policy["test_policy"])
+        self.assertEqual("oneshot", session.workflow_profile)
+        self.assertEqual({"review_policy": "disabled", "doc_harvest_policy": "disabled"}, session.policy)
+        self.assertTrue(any(role.role_name == IMPLEMENTER_ROLE for role in roles))
+
+    def test_create_task_session_rejects_removed_bug_full_profile(self) -> None:
+        with self.assertRaises(IntakeError) as context:
+            self.coordinator.create_task_session(
+                "IOS-30000BUG",
+                workflow_profile="bug_full",
+                policy={"test_policy": "required"},
+            )
+
+        self.assertIn("Unsupported workflow profile: bug_full", str(context.exception))
 
     def test_cleanup_task_soft_removes_runtime_and_tmp_but_keeps_task_directory(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -1822,30 +1832,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Do not run build, test, or lint verification.", reviewer_agents)
         self.assertIn("Keep outputs compact and fixer-oriented.", reviewer_agents)
 
-    def test_create_task_session_creates_bug_fixer_workspace_contract(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30000BUGW",
-            workflow_profile="bug_full",
-            policy={"test_policy": "required"},
-        )
-
-        self.assertIsNotNone(session.id)
-        bug_fixer_agents = (
-            Path(self.temp_dir.name)
-            / "IOS-30000BUGW"
-            / "runtime"
-            / "role-workspaces"
-            / BUG_FIXER_ROLE
-            / "AGENTS.md"
-        ).read_text()
-        self.assertIn("Task description and comments:", bug_fixer_agents)
-        self.assertIn("Bug analysis report target:", bug_fixer_agents)
-        self.assertIn("Support the routed bug modes inside one runtime identity", bug_fixer_agents)
-        self.assertIn("In `analysis-only` mode, read task description/comments first", bug_fixer_agents)
-        self.assertIn("If an `Issues file:` path is routed, treat it as the primary scoped input", bug_fixer_agents)
-        self.assertIn("fix the root cause cleanly and avoid regressions", bug_fixer_agents)
-        self.assertIn("If `Follow-up comments:` are routed, prioritize the latest follow-up comments", bug_fixer_agents)
-
     def test_create_task_session_creates_role_launch_scripts(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30000L",
@@ -2093,45 +2079,19 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("task_prepared", event.event_type)
         self.assertEqual("implementation_requested", details["followup_event_type"])
 
-    def test_prepare_task_session_routes_bug_full_into_bug_analysis(self) -> None:
-        session, _, created = self.coordinator.create_task_session(
-            "IOS-30002BUG",
-            workflow_profile="bug_full",
-            policy={"test_policy": "required"},
-        )
-
+    def test_prepare_task_session_routes_bug_issue_type_into_oneshot_implementation(self) -> None:
         prepared_session, event, prepared_created, details = self.coordinator.prepare_task_session("IOS-30002BUG")
         work_items = self.work_item_repository.list_for_session(prepared_session.id)
         events = self.event_repository.list_for_session(prepared_session.id)
-        bug_fixer_role = self.role_repository.get_by_name(prepared_session.id, BUG_FIXER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(bug_fixer_role.runtime_handle)
 
-        self.assertTrue(created)
-        self.assertFalse(prepared_created)
-        self.assertEqual(session.id, prepared_session.id)
+        self.assertTrue(prepared_created)
+        self.assertEqual("oneshot", prepared_session.workflow_profile)
         self.assertEqual("task_prepared", event.event_type)
-        self.assertEqual("bug_analysis_requested", details["followup_event_type"])
-        self.assertEqual("bug_analysis_requested", prepared_session.current_stage)
-        self.assertEqual(BUG_FIXER_ROLE, prepared_session.current_owner)
-        self.assertEqual("bug_analysis", work_items[0].work_type)
-        self.assertEqual(
-            [
-                "task_started",
-                "task_session_reused",
-                "task_prepared",
-                "role_input_delivery_confirmed",
-                "role_input_dispatched",
-                "bug_analysis_requested",
-            ],
-            [item.event_type for item in events],
-        )
-        self.assertEqual(1, len(sent_inputs))
-        self.assertIn("Mode: analysis-only", sent_inputs[0])
-        self.assertIn("Analyze bug IOS-30002BUG before implementation.", sent_inputs[0])
-        self.assertIn("Test policy for this session: required.", sent_inputs[0])
-        self.assertNotIn("Role-specific rules:", sent_inputs[0])
-        self.assertNotIn("In `analysis-only` mode, read task description/comments first", sent_inputs[0])
-        self.assertNotIn('"bug_analysis_report_path"', sent_inputs[0])
+        self.assertEqual("implementation_requested", details["followup_event_type"])
+        self.assertEqual("implementation_requested", prepared_session.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, prepared_session.current_owner)
+        self.assertEqual("implementation", work_items[0].work_type)
+        self.assertIn("implementation_requested", [item.event_type for item in events])
 
     def test_implementation_completed_moves_session_to_verification(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003")
@@ -2731,72 +2691,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn(str(operator_event.id), str(hydration["operator_resolution_history"]))
         self.assertIn("Do not put the timeout inside CallerLatch", str(hydration["operator_resolution_history"]))
 
-    def test_bug_analysis_completed_moves_session_to_implementation(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003BUG",
-            workflow_profile="bug_full",
-            policy={"test_policy": "required"},
-        )
-        self.coordinator.prepare_task_session("IOS-30003BUG")
-
-        updated_session, followup_event = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="bug_analysis_completed",
-            payload={
-                "summary": "Likely missing state reset in coordinator",
-                "test_strategy": "Add regression test for repeated resume path",
-            },
-        )
-        work_items = self.work_item_repository.list_for_session(session.id)
-        events = self.event_repository.list_for_session(session.id)
-        bug_fixer_role = self.role_repository.get_by_name(session.id, BUG_FIXER_ROLE)
-        bug_fixer_inputs = self.session_backend.get_sent_inputs(bug_fixer_role.runtime_handle)
-
-        self.assertEqual("implementation_requested", updated_session.current_stage)
-        self.assertEqual(BUG_FIXER_ROLE, updated_session.current_owner)
-        self.assertEqual("implementation_requested", followup_event.event_type)
-        self.assertEqual(
-            ["completed", "assigned"],
-            [work_items[0].status.value, work_items[1].status.value],
-        )
-        self.assertEqual(
-            [
-                "task_started",
-                "task_session_reused",
-                "task_prepared",
-                "role_input_delivery_confirmed",
-                "role_input_dispatched",
-                "bug_analysis_requested",
-                "bug_analysis_completed",
-                "role_input_delivery_confirmed",
-                "role_input_dispatched",
-                "implementation_requested",
-            ],
-            [item.event_type for item in events],
-        )
-        self.assertEqual(2, len(bug_fixer_inputs))
-        self.assertIn("Mode: fix-only", bug_fixer_inputs[-1])
-        self.assertIn("Implement the bug fix for IOS-30003BUG", bug_fixer_inputs[-1])
-        self.assertIn(
-            "Bug analysis summary: Likely missing state reset in coordinator",
-            bug_fixer_inputs[-1],
-        )
-        self.assertIn("Continue from your existing role context.", bug_fixer_inputs[-1])
-        self.assertNotIn('"bug_analysis_report_path"', bug_fixer_inputs[-1])
-        self.assertNotIn('"bug_mode": "fix-only"', bug_fixer_inputs[-1])
-        self.assertNotIn("In `fix-only` mode, read the saved `spec/bug-analysis.md` first", bug_fixer_inputs[-1])
-        bug_fixer_hydration = json.loads(
-            (
-                Path(self.temp_dir.name)
-                / "IOS-30003BUG"
-                / "runtime"
-                / "role-workspaces"
-                / BUG_FIXER_ROLE
-                / "HYDRATION.json"
-            ).read_text()
-        )
-        self.assertEqual("fix-only", bug_fixer_hydration["bug_mode"])
-
     def test_prepare_task_session_routes_story_full_into_proposal_context(self) -> None:
         session, _, created = self.coordinator.create_task_session(
             "IOS-30002STORY",
@@ -3005,29 +2899,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertNotIn("documentation_path", hydration)
         self.assertNotIn("implementation_patterns_path", hydration)
         self.assertNotIn("preconditions_path", hydration)
-
-    def test_bug_fixer_followup_hydration_omits_missing_optional_input_paths(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30003BUGHYD",
-            workflow_profile="bug_full",
-            policy=None,
-        )
-        bug_fixer_role = self.role_repository.get_by_name(session.id, BUG_FIXER_ROLE)
-        assert bug_fixer_role is not None
-
-        hydration = self.coordinator._sanitize_dispatch_hydration(  # type: ignore[attr-defined]
-            self.coordinator._default_extra_hydration_for_dispatch(  # type: ignore[attr-defined]
-                session,
-                bug_fixer_role,
-                "qa_reopen_requested",
-            )
-        )
-
-        self.assertEqual("fix-only", hydration["bug_mode"])
-        self.assertNotIn("bug_analysis_report_path", hydration)
-        self.assertNotIn("followup_comments_path", hydration)
-        self.assertNotIn("followup_plan_index_path", hydration)
-        self.assertNotIn("followup_plan_directory_path", hydration)
 
     def test_requirements_completed_moves_story_session_to_acceptance_criteria(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
@@ -6323,41 +6194,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual(next_item.id, pending_ios_39994[0].id)
         self.assertEqual(WorkItemStatus.ASSIGNED, pending_ios_39994[0].status)
 
-    def test_bug_full_verification_failed_routes_back_to_bug_fixer_with_fix_only_mode(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30004BUG",
-            workflow_profile="bug_full",
-            policy={"test_policy": "enabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30004BUG")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="bug_analysis_completed",
-            payload={"summary": "root cause found"},
-        )
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "bug fix done"},
-        )
-
-        updated_session, followup_event = self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="verification_failed",
-            payload={"failures": ["test"]},
-        )
-        bug_fixer_role = self.role_repository.get_by_name(session.id, BUG_FIXER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(bug_fixer_role.runtime_handle)
-
-        self.assertEqual("verification_correction_requested", updated_session.current_stage)
-        self.assertEqual(BUG_FIXER_ROLE, updated_session.current_owner)
-        self.assertEqual("verification_correction_requested", followup_event.event_type)
-        self.assertIn("Mode: fix-only", sent_inputs[-1])
-        self.assertIn("Apply verification corrections for IOS-30004BUG.", sent_inputs[-1])
-        self.assertIn("fix the root cause cleanly and prevent regressions", sent_inputs[-1])
-        self.assertNotIn('"issues_file_path"', sent_inputs[-1])
-        self.assertNotIn('"bug_analysis_report_path"', sent_inputs[-1])
-
     def test_second_verification_dispatch_uses_continuation_prompt(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004V2")
         self.coordinator.handle_operator_event(
@@ -6856,42 +6692,6 @@ class SessionCreationTests(unittest.TestCase):
                 "role_input_delivery_confirmed",
                 "role_input_dispatched",
                 "verification_requested",
-            ],
-            [item.event_type for item in events],
-        )
-
-    def test_role_output_completed_moves_bug_analysis_forward(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30006BUG",
-            workflow_profile="bug_full",
-            policy={"test_policy": "enabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30006BUG")
-
-        updated_session, mapped_event, followup_event = self.coordinator.handle_role_output(
-            session_id=session.id,
-            role_name=BUG_FIXER_ROLE,
-            output_type="completed",
-            payload={"summary": "Root cause isolated"},
-        )
-        events = self.event_repository.list_for_session(session.id)
-
-        self.assertEqual("bug_analysis_completed", mapped_event.event_type)
-        self.assertEqual("implementation_requested", followup_event.event_type)
-        self.assertEqual("implementation_requested", updated_session.current_stage)
-        self.assertEqual(BUG_FIXER_ROLE, updated_session.current_owner)
-        self.assertEqual(
-            [
-                "task_started",
-                "task_session_reused",
-                "task_prepared",
-                "role_input_delivery_confirmed",
-                "role_input_dispatched",
-                "bug_analysis_requested",
-                "bug_analysis_completed",
-                "role_input_delivery_confirmed",
-                "role_input_dispatched",
-                "implementation_requested",
             ],
             [item.event_type for item in events],
         )
@@ -9414,52 +9214,6 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "subtask_snapshot_refreshed" for item in events))
         self.assertTrue(any(item.event_type == "subtask_graph_requested" for item in events))
         self.assertTrue(any(item.event_type == "subtask_implementation_requested" for item in events))
-
-    def test_bug_full_qa_reopen_uses_bug_fixer_fix_only_followup(self) -> None:
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021BUG",
-            workflow_profile="bug_full",
-            policy={"test_policy": "enabled"},
-        )
-        self.coordinator.prepare_task_session("IOS-30021BUG")
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="bug_analysis_completed",
-            payload={"summary": "root cause found"},
-        )
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="implementation_completed",
-            payload={"summary": "done"},
-        )
-        self.coordinator.handle_operator_event(
-            session_id=session.id,
-            event_type="verification_passed",
-            payload={"summary": "all green"},
-        )
-
-        updated_session, event, followup_event = self.coordinator.reopen_from_qa(
-            session_id=session.id,
-            comment_text="QA: still broken on edge case",
-        )
-        bug_fixer_role = self.role_repository.get_by_name(session.id, BUG_FIXER_ROLE)
-        sent_inputs = self.session_backend.get_sent_inputs(bug_fixer_role.runtime_handle)
-
-        self.assertEqual("active", updated_session.status.value)
-        self.assertEqual("qa_reopen_requested", updated_session.current_stage)
-        self.assertEqual(BUG_FIXER_ROLE, updated_session.current_owner)
-        self.assertEqual("qa_reopened", event.event_type)
-        self.assertEqual("qa_reopen_requested", followup_event.event_type)
-        self.assertIn("Mode: fix-only", sent_inputs[-1])
-        self.assertIn("Apply QA reopen follow-up changes for IOS-30021BUG.", sent_inputs[-1])
-        self.assertIn("highest-priority follow-up scope", sent_inputs[-1])
-        role_workspace = self.coordinator.role_workspace_manager.role_directory(  # type: ignore[union-attr]
-            "IOS-30021BUG",
-            BUG_FIXER_ROLE,
-        )
-        hydration = json.loads((role_workspace / "HYDRATION.json").read_text())
-        self.assertIn("followup_comments_path", hydration)
-        self.assertNotIn("bug_analysis_report_path", hydration)
 
     def test_create_mr_handoff_marks_completed_session_as_handed_off(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30021A")

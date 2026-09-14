@@ -28,11 +28,10 @@ class RepositoryTests(unittest.TestCase):
         created = repository.create(
             task_key="IOS-20000",
             current_stage="intake",
-            workflow_profile="bug_full",
+            workflow_profile="oneshot",
             policy={
-                "test_policy": "enabled",
                 "review_policy": "enabled",
-                                "doc_harvest_policy": "enabled",
+                "doc_harvest_policy": "enabled",
             },
         )
         loaded = repository.get_by_task_key("IOS-20000")
@@ -41,8 +40,8 @@ class RepositoryTests(unittest.TestCase):
         self.assertIsNotNone(loaded)
         self.assertEqual("IOS-20000", loaded.task_key)
         self.assertEqual(SessionStatus.CREATED, loaded.status)
-        self.assertEqual("bug_full", loaded.workflow_profile)
-        self.assertEqual("enabled", loaded.policy["test_policy"])
+        self.assertEqual("oneshot", loaded.workflow_profile)
+        self.assertEqual("enabled", loaded.policy["review_policy"])
 
     def test_role_repository_lists_roles_for_session(self) -> None:
         session_repository = SessionRepository(self.database)

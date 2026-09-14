@@ -67,18 +67,6 @@ def _role_relevant_paths(role_name: str) -> list[str]:
             "- Main repo scripts: `{repo_root}/scripts`",
             _repo_guidance_entrypoints(),
         ]
-    if role_name == "bug-fixer":
-        return [
-            "- Task repo worktree: `{task_repo_root}`",
-            "- Task snapshot metadata: `{task_snapshot_root}`",
-            "- Task description and comments: `{task_snapshot_root}/description.md`, `{task_snapshot_root}/comments.md`",
-            "- Bug analysis report target: `{task_snapshot_root}/spec/bug-analysis.md`",
-            "- Task-local runtime root: `{task_runtime_root}`",
-            "- Task-local temp root: `{task_tmp_root}`",
-            "- Task artifacts and bug analysis outputs: `{task_artifacts_root}`",
-            "- Main repo scripts: `{repo_root}/scripts`",
-            _repo_guidance_entrypoints(),
-        ]
     if role_name == "verification-coordinator":
         return [
             "- Task repo worktree: `{task_repo_root}`",
@@ -229,12 +217,6 @@ def _role_responsibility(role_name: str) -> list[str]:
             "- You focus only on the currently assigned work item.",
             "- Work only on the current routed task. Do not inspect or modify unrelated task/session state.",
         ]
-    if role_name == "bug-fixer":
-        return [
-            "- You execute unified bug work for one bug task session.",
-            "- You retain bug-specific context across analysis, fix, and follow-up rounds.",
-            "- Work only on the current routed task. Do not inspect or modify unrelated task/session state.",
-        ]
     if role_name == "verification-coordinator":
         return [
             "- You execute routed verification work for one task session.",
@@ -328,22 +310,6 @@ def _role_operating_rules(role_name: str) -> list[str]:
             "- If a routed correction conflicts with already-authoritative product/operator direction or cannot be resolved safely without a fresh operator decision, stop and escalate instead of forcing a local patch.",
             "- In that escalation, provide a reasoned disagreement package: the concrete conflict, the premise you believe is wrong or outdated, the technical direction you recommend instead, and the exact operator decision needed.",
             "- Do not run build, test, or lint verification. Submit your implementation result; verification happens after this role finishes.",
-        ]
-    if role_name == "bug-fixer":
-        return [
-            "- Preserve bug-specific context across analysis, fix, and follow-up rounds.",
-            "- Support the routed bug modes inside one runtime identity: `analysis-only` before code changes, then `fix-only` for implementation, correction, and follow-up rounds.",
-            "- In implementation and fix-only rounds, read `description.md`, `comments.md`, and `spec/diff.md` when they exist before deciding there is no concrete bug-fix work to perform.",
-            "- Treat repository conventions as the default implementation contract. A task spec or follow-up overrides a local convention only when Jira/operator input explicitly states that this task is intentionally changing that convention.",
-            "- In `analysis-only` mode, read task description/comments first, investigate the code path, write or update `spec/bug-analysis.md`, and stop before product-code changes when confidence is low or when the routed pass is analysis-only.",
-            "- In `fix-only` mode, read the saved `spec/bug-analysis.md` first and treat it as the durable bug context unless a routed issues file or follow-up comments narrow the scope further.",
-            "- If an `Issues file:` path is routed, treat it as the primary scoped input for this round, but make any adjacent code changes that are necessary to fix the root cause cleanly and avoid regressions.",
-            "- If `Follow-up comments:` are routed, prioritize the latest follow-up comments over redoing the original bug analysis from scratch.",
-            "- Keep the current bug task scoped to the routed pass, saved bug analysis, and latest follow-up context.",
-            "- If a routed correction conflicts with already-authoritative product/operator direction or cannot be resolved safely without a fresh operator decision, stop and escalate instead of forcing a local patch.",
-            "- In that escalation, provide a reasoned disagreement package: the concrete conflict, the premise you believe is wrong or outdated, the technical direction you recommend instead, and the exact operator decision needed.",
-            "- Do not run build, test, or lint verification. Submit your implementation result; verification happens after this role finishes.",
-            "- Write or update `spec/bug-analysis.md` in bug-analysis rounds.",
         ]
     if role_name == "verification-coordinator":
         return [
@@ -512,7 +478,7 @@ def _terminal_result_contract(role_name: str) -> list[str]:
             f"  `{helper} --work-item-id <work_item_id> --output-type blocked_verification_cycle --summary \"Verification cycle blocked\" --details \"<why blocked>\"`",
             *common,
         ]
-    if role_name in {"implementer", "bug-fixer"}:
+    if role_name == "implementer":
         return [
             "- Implementation completed:",
             f"  `{helper} --work-item-id <work_item_id> --output-type completed --summary \"Implementation completed\"`",
@@ -576,7 +542,7 @@ def _structured_terminal_markers(role_name: str) -> list[str]:
         '  `SDD_ERROR: {"summary":"<short summary>","details":"<what the operator must do>","needs_operator_input":true,"work_item_id":123}`',
         "- Use `SDD_ERROR` only for runtime/protocol/tooling blockers where the helper cannot represent or deliver the current outcome.",
     ]
-    if role_name in {"implementer", "bug-fixer"}:
+    if role_name == "implementer":
         common.append(
             "- For implementation blockers and operator decisions, prefer the `failed` helper command with `--needs-operator-input`; do not use `SDD_ERROR` as routed work delivery."
         )

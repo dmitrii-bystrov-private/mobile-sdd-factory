@@ -7,7 +7,6 @@ import type {
 
 const WORKFLOW_PROFILE_LABELS: Record<WorkflowProfile, string> = {
   oneshot: "One-shot",
-  bug_full: "Bug Flow",
   story_full: "Story Flow",
 };
 

@@ -72,14 +72,12 @@ class RolePromptTests(unittest.TestCase):
 
     def test_coding_roles_have_strict_verification_boundary_in_agents(self) -> None:
         implementer = self._agents("implementer")
-        bug_fixer = self._agents("bug-fixer")
 
         expected = (
             "Do not run build, test, or lint verification. "
             "Submit your implementation result; verification happens after this role finishes."
         )
         self.assertIn(expected, implementer)
-        self.assertIn(expected, bug_fixer)
         self.assertNotIn("run-test.sh", implementer)
         self.assertNotIn("run-lint.sh", implementer)
         self.assertNotIn("run-build.sh", implementer)
@@ -143,7 +141,6 @@ class RolePromptTests(unittest.TestCase):
     def test_agents_use_universal_repository_guidance_entrypoints(self) -> None:
         for role_name in (
             "implementer",
-            "bug-fixer",
             "convention-reviewer",
             "requirements-reviewer",
             "doc-harvest-worker",

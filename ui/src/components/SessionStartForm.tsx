@@ -37,7 +37,6 @@ const REQUIREMENTS_CLARIFICATION_LABELS: Record<RequirementsClarificationMode, s
   autonomous: "Stay autonomous",
 };
 type DraftPolicy = {
-  test_policy: SessionPolicyValue;
   review_policy: SessionPolicyValue;
   doc_harvest_policy: SessionPolicyValue;
   requirements_clarification_mode: RequirementsClarificationMode;
@@ -45,7 +44,6 @@ type DraftPolicy = {
 
 function defaultDraftPolicy(): DraftPolicy {
   return {
-    test_policy: "enabled",
     review_policy: "enabled",
     doc_harvest_policy: "enabled",
     requirements_clarification_mode: "ask-selectively",
@@ -57,7 +55,6 @@ function mergePolicyDefaults(
   overrides: Record<string, string> | undefined,
 ): DraftPolicy {
   return {
-    test_policy: (overrides?.test_policy as SessionPolicyValue | undefined) ?? base.test_policy,
     review_policy:
       (overrides?.review_policy as SessionPolicyValue | undefined) ?? base.review_policy,
     doc_harvest_policy:
@@ -90,7 +87,6 @@ export function SessionStartForm({
   const [error, setError] = useState<string | null>(null);
   const previousPrefillRef = useRef<Record<string, { runner: string; model: string; effort: string }>>({});
 
-  const showTestPolicy = workflowProfile === "bug_full";
   const showRequirementsClarificationMode = workflowProfile === "story_full";
   const normalizedTaskKey = normalizeTaskKeyInput(taskKey);
   const hasTaskKeyInput = normalizedTaskKey.length > 0;
@@ -101,15 +97,6 @@ export function SessionStartForm({
       review_policy: policy.review_policy,
       doc_harvest_policy: policy.doc_harvest_policy,
     };
-    if (workflowProfile === "bug_full") {
-      return {
-        workflow_profile: workflowProfile,
-        policy: {
-          ...basePolicy,
-          test_policy: policy.test_policy,
-        },
-      };
-    }
     if (workflowProfile === "story_full") {
       return {
         workflow_profile: workflowProfile,
@@ -130,9 +117,6 @@ export function SessionStartForm({
       "implementer",
       "verification-coordinator",
     ];
-    if (workflowProfile === "bug_full") {
-      roleNames.push("bug-fixer");
-    }
     if (policy.review_policy !== "disabled") {
       roleNames.push("convention-reviewer", "requirements-reviewer");
     }
@@ -341,7 +325,6 @@ export function SessionStartForm({
             value={workflowProfile}
           >
             <option value="oneshot">{workflowProfileDisplayName("oneshot")}</option>
-            <option value="bug_full">{workflowProfileDisplayName("bug_full")}</option>
             <option value="story_full">{workflowProfileDisplayName("story_full")}</option>
           </select>
         </label>
@@ -363,25 +346,6 @@ export function SessionStartForm({
           </button>
           {showPolicyTuning ? (
             <div className="advanced-disclosure-body">
-              {showTestPolicy ? (
-                <div className="form-section-compact">
-                  <label className="form-field">
-                    <span>Test Policy</span>
-                    <select
-                      className="select-input"
-                      onChange={(event) => updatePolicy("test_policy", event.target.value as SessionPolicyValue)}
-                      value={policy.test_policy}
-                    >
-                      {POLICY_OPTIONS.map((value) => (
-                        <option key={value} value={value}>
-                          {POLICY_OPTION_LABELS[value]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              ) : null}
-
               <div className="followup-form-grid">
                 <label className="form-field">
                   <span>Review Gate</span>

@@ -2,7 +2,6 @@ const STAGE_LABELS: Record<string, string> = {
   task_started: "Task Started",
   task_prepared: "Task Prepared",
   intake_failed: "Bootstrap Failed",
-  bug_analysis_requested: "Bug Analysis",
   proposal_context_requested: "Context Builder",
   requirements_requested: "Requirements",
   acceptance_criteria_requested: "Acceptance Criteria",

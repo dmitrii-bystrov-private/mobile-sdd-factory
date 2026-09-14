@@ -8,6 +8,8 @@ import unittest
 from unittest.mock import patch
 
 try:
+    from fastapi import HTTPException
+
     from backend.models.enums import SessionStatus
     from backend.models.work_item import WorkItemStatus
     from backend import session_policy as session_policy_module
@@ -88,7 +90,6 @@ try:
     from backend.roles.contracts import (
         ACCEPTANCE_CRITERIA_WORKER_ROLE,
         ALLOWED_STAGE_ROLE_TARGETS,
-        BUG_FIXER_ROLE,
         CONSTRAINTS_WORKER_ROLE,
         DEFAULT_SESSION_ROLES,
         PROPOSAL_CONTEXT_WORKER_ROLE,
@@ -149,7 +150,8 @@ class FakeJiraAdapter:
         return CommandResult(["resolve_parent", task_key], 0, f"{task_key}\n", "")
 
     def get_issue_type(self, task_key: str) -> "CommandResult":
-        return CommandResult(["get_issue_type", task_key], 0, "Story\n", "")
+        issue_type = "Bug" if task_key.endswith("BUG") else "Story"
+        return CommandResult(["get_issue_type", task_key], 0, f"{issue_type}\n", "")
 
     def get_issue_status(self, task_key: str) -> "CommandResult":
         status = self.status_by_task.get(task_key, "In Progress")
@@ -332,17 +334,29 @@ class SessionApiTests(unittest.TestCase):
         response = create_session(
             CreateSessionRequest(
                 task_key="IOS-40000",
-                workflow_profile="bug_full",
-                policy={"test_policy": "required"},
+                workflow_profile="oneshot",
             ),
             dependencies=self.dependencies,
         )
 
         self.assertTrue(response.created)
         self.assertEqual("IOS-40000", response.session.task_key)
-        self.assertEqual("bug_full", response.session.workflow_profile)
-        self.assertEqual("required", response.session.policy["test_policy"])
+        self.assertEqual("oneshot", response.session.workflow_profile)
         self.assertEqual("task_started", response.event_type)
+
+    def test_create_session_route_rejects_removed_bug_full_profile(self) -> None:
+        with self.assertRaises(HTTPException) as context:
+            create_session(
+                CreateSessionRequest(
+                    task_key="IOS-40000BUG",
+                    workflow_profile="bug_full",
+                    policy={"test_policy": "required"},
+                ),
+                dependencies=self.dependencies,
+            )
+
+        self.assertEqual(400, context.exception.status_code)
+        self.assertIn("Unsupported workflow profile: bug_full", str(context.exception.detail))
 
     def test_create_session_route_can_prepare_in_one_call(self) -> None:
         response = create_session(
@@ -1084,29 +1098,20 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("oneshot", response.session.workflow_profile)
         self.assertEqual("required", response.session.policy["review_policy"])
 
-    def test_prepare_session_route_uses_bug_analysis_for_bug_full(self) -> None:
+    def test_prepare_session_route_uses_oneshot_for_bug_issue_type(self) -> None:
         from backend.api.routes_sessions import prepare_session
-
-        create_response = create_session(
-            CreateSessionRequest(
-                task_key="IOS-40002BUG",
-                workflow_profile="bug_full",
-                policy={"test_policy": "required"},
-            ),
-            dependencies=self.dependencies,
-        )
 
         response = prepare_session(
             PrepareSessionRequest(task_key="IOS-40002BUG"),
             dependencies=self.dependencies,
         )
 
-        self.assertFalse(response.created)
-        self.assertEqual(create_response.session.id, response.session.id)
-        self.assertEqual("bug_full", response.session.workflow_profile)
-        self.assertEqual("bug_analysis_requested", response.followup_event_type)
-        self.assertEqual("bug_analysis_requested", response.session.current_stage)
-        self.assertEqual(BUG_FIXER_ROLE, response.session.current_owner)
+        self.assertTrue(response.created)
+        self.assertEqual("Bug", response.issue_type)
+        self.assertEqual("oneshot", response.session.workflow_profile)
+        self.assertEqual("implementation_requested", response.followup_event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertEqual("implementer", response.session.current_owner)
 
     def test_event_and_work_item_routes_reflect_verification_handoff(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
@@ -1134,38 +1139,6 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("verification_requested", inject_response.followup_event_type)
         self.assertEqual("verification_requested", inject_response.session.current_stage)
         self.assertEqual(10, len(events_response.items))
-        self.assertEqual(2, len(work_items_response.items))
-
-    def test_bug_analysis_completed_event_returns_implementation_handoff(self) -> None:
-        prepare_response = create_session(
-            CreateSessionRequest(
-                task_key="IOS-40003BUG",
-                workflow_profile="bug_full",
-                policy={"test_policy": "enabled"},
-            ),
-            dependencies=self.dependencies,
-        )
-        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
-            PrepareSessionRequest(task_key="IOS-40003BUG"),
-            dependencies=self.dependencies,
-        )
-
-        response = inject_event(
-            InjectEventRequest(
-                session_id=prepare_response.session.id,
-                event_type="bug_analysis_completed",
-                payload={"summary": "Need to restore coordinator state"},
-            ),
-            dependencies=self.dependencies,
-        )
-        work_items_response = list_work_items(
-            session_id=prepare_response.session.id,
-            dependencies=self.dependencies,
-        )
-
-        self.assertEqual("implementation_requested", response.followup_event_type)
-        self.assertEqual("implementation_requested", response.session.current_stage)
-        self.assertEqual(BUG_FIXER_ROLE, response.session.current_owner)
         self.assertEqual(2, len(work_items_response.items))
 
     def test_prepare_session_route_uses_proposal_context_for_story_full(self) -> None:

@@ -22,8 +22,6 @@ const STREAM_EVENT_TYPES = [
   "task_session_reused",
   "task_prepared",
   "task_preparation_failed",
-  "bug_analysis_requested",
-  "bug_analysis_completed",
   "proposal_context_requested",
   "requirements_requested",
   "acceptance_criteria_requested",

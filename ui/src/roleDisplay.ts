@@ -1,7 +1,6 @@
 const ROLE_LABELS: Record<string, string> = {
   implementer: "Implementer",
   "verification-coordinator": "Build Verifier",
-  "bug-fixer": "Bug Fixer",
   "convention-reviewer": "Convention Reviewer",
   "requirements-reviewer": "Requirements Reviewer",
   "final-verifier": "Final Verifier",
@@ -25,7 +24,6 @@ const ROLE_LABELS: Record<string, string> = {
 const ROLE_DESCRIPTIONS: Record<string, string> = {
   implementer: "Delivers the code changes and correction passes for the active task or subtask.",
   "verification-coordinator": "Runs deterministic verification and decides whether the branch passes the gate.",
-  "bug-fixer": "Carries bug-specific analysis and fixes across the full bug workflow.",
   "convention-reviewer": "Checks the diff against local repository conventions and nearby code patterns.",
   "requirements-reviewer": "Checks the implementation against current Jira scope, follow-ups, edge cases, and regressions.",
   "doc-harvest-worker": "Updates feature-level docs and readme files from the completed diff.",

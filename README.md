@@ -74,24 +74,6 @@ send-to-test
 
 Jira subtasks are the execution source of truth after decomposition. Follow-up Jira subtasks can re-enter the same execution model.
 
-### `bug_full`
-
-For bug tickets:
-
-```text
-snapshot
-bug analysis
-bug fix
-convention review
-requirements review
-documentation harvest/review when needed
-workflow verification
-MR handoff
-send-to-test
-```
-
-The `bug-fixer` owns both analysis and fix passes.
-
 ### `oneshot`
 
 For small, self-contained work where full story planning would be overhead:
@@ -118,7 +100,6 @@ send-to-test
 | `spec-verifier-worker` | Checks the assembled planning package before decomposition. |
 | `task-decomposer-worker` | Produces temporary planning files used to create Jira subtasks. |
 | `implementer` | Implements normal tasks, subtasks, follow-ups, and correction passes. |
-| `bug-fixer` | Handles bug analysis and bug fix implementation. |
 | `convention-reviewer` | Reviews the diff against local project conventions, nearby patterns, and test style. |
 | `requirements-reviewer` | Reviews the diff against current Jira scope, follow-up priority, regressions, edge cases, and focused test coverage. |
 | `doc-harvest-worker` | Updates durable documentation when the completed diff justifies it. |
@@ -132,7 +113,7 @@ Long-running implementation, review, and verification roles keep their runtime c
 Use the UI for normal operation:
 
 - create and prepare sessions
-- choose `story_full`, `bug_full`, or `oneshot`
+- choose `story_full` or `oneshot`
 - inspect stage, owner, work items, artifacts, and live runtime output
 - send operator replies when a role asks a real question
 - retry or resume blocked sessions

@@ -34,7 +34,6 @@ from backend.roles.agent_trust import remove_task_role_workspace_trust
 from backend.roles.workspace import RoleWorkspaceManager
 from backend.roles.contracts import (
     ALLOWED_STAGE_ROLE_TARGETS,
-    BUG_FIXER_ROLE,
     CONVENTION_REVIEWER_ROLE,
     DOCUMENTATION_REVIEWER_ROLE,
     DOC_HARVEST_ROLE,
@@ -80,7 +79,6 @@ _STORY_PLANNING_WORK_TYPE_BY_STAGE = {
     "task_decomposition_requested": "task_decomposition",
 }
 _ACTIVE_WORK_TYPE_BY_STAGE = {
-    "bug_analysis_requested": "bug_analysis",
     "proposal_context_requested": "proposal_context",
     "requirements_requested": "requirements",
     "convention_review_requested": "convention_review",
@@ -402,12 +400,7 @@ class CoordinatorService:
                     details["followup_event_type"] = resumed_followup.event_type
                     session = self._get_session_or_raise(session.id)
                     return session, event, created, details
-            if session.workflow_profile == "bug_full":
-                details["followup_event_type"] = self._enqueue_bug_analysis(
-                    session=session,
-                    source_event=event,
-                ).event_type
-            elif session.workflow_profile == "story_full":
+            if session.workflow_profile == "story_full":
                 details["followup_event_type"] = self._enqueue_proposal_context(
                     session=session,
                     source_event=event,
@@ -871,9 +864,6 @@ class CoordinatorService:
             producer_type="operator",
             payload=payload,
         )
-        if event_type == "bug_analysis_completed":
-            session, followup_event = self._handle_bug_analysis_completed(session, accepted_event)
-            return session, followup_event
         if event_type == "proposal_context_completed":
             session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
             return session, followup_event
@@ -1907,9 +1897,7 @@ class CoordinatorService:
             payload=payload,
         )
         followup_event: Event | None = None
-        if mapped_event_type == "bug_analysis_completed":
-            session, followup_event = self._handle_bug_analysis_completed(session, accepted_event)
-        elif mapped_event_type == "proposal_context_completed":
+        if mapped_event_type == "proposal_context_completed":
             session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
         elif mapped_event_type == "spec_verification_blocked":
             session, followup_event = self._handle_spec_verification_blocked(session, accepted_event)
@@ -1982,7 +1970,7 @@ class CoordinatorService:
                     output_type=output_type,
                     payload=normalized_payload,
                 )
-        if role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE}:
+        if role_name == IMPLEMENTER_ROLE:
             return self._normalize_coding_output_payload(
                 session=session,
                 output_type=output_type,
@@ -2342,7 +2330,7 @@ class CoordinatorService:
                 payload_work_item_id = candidate_output_payload.get("work_item_id")
                 if candidate_output_type != "error" and payload_work_item_id != active_work_item.id:
                     allow_subtask_stale_intake = (
-                        role.role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE}
+                        role.role_name == IMPLEMENTER_ROLE
                         and active_work_item.work_type == "subtask_implementation"
                         and candidate_output_type == "completed"
                     )
@@ -2967,7 +2955,7 @@ class CoordinatorService:
         # already routed the implementer into verification corrections. Treat that late
         # result as stale instead of failing the whole session intake path.
         if (
-            role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE}
+            role_name == IMPLEMENTER_ROLE
             and output_type in {"completed", "error"}
             and session.current_owner != role_name
         ):
@@ -2980,7 +2968,6 @@ class CoordinatorService:
                     and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
                     and matching_item.work_type
                     in {
-                        "bug_analysis",
                         "subtask_implementation",
                         "implementation",
                         "convention_review_correction",
@@ -3059,7 +3046,7 @@ class CoordinatorService:
         output_type: str,
         output_payload: dict,
     ) -> dict[str, str | int | None] | None:
-        if role_name not in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE} or output_type != "completed":
+        if role_name != IMPLEMENTER_ROLE or output_type != "completed":
             return None
 
         payload_work_item_id = output_payload.get("work_item_id")
@@ -3072,7 +3059,6 @@ class CoordinatorService:
                     if item.id == payload_work_item_id
                     and item.work_type
                     in {
-                        "bug_analysis",
                         "subtask_implementation",
                         "implementation",
                         "convention_review_correction",
@@ -4137,65 +4123,6 @@ class CoordinatorService:
             },
         )
 
-    def _enqueue_bug_analysis(
-        self,
-        session: Session,
-        source_event: Event,
-        additional_context: str | None = None,
-    ) -> Event:
-        coding_role = self._primary_coding_role_for_work_type(session, "bug_analysis")
-
-        work_item = self.work_item_repository.create(
-            session_id=session.id,
-            work_type="bug_analysis",
-            title=f"Bug analysis for {session.task_key}",
-            owner_role_id=coding_role.id,
-            source_event_id=source_event.id,
-            priority=105,
-        )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="bug_analysis_requested",
-            current_owner=coding_role.role_name,
-        )
-        test_policy = (session.policy or {}).get("test_policy", "enabled")
-        base_instruction = self._stage_instruction(
-            "bug_analysis_requested",
-            session.task_key,
-            workflow_profile=session.workflow_profile,
-            role_name=coding_role.role_name,
-            session_policy=session.policy,
-        )
-        if base_instruction is None:
-            raise IntakeError(
-                f"No bug analysis instruction is available for role {coding_role.role_name}"
-            )
-        instruction = (
-            f"{base_instruction}\n"
-            f"Test policy for this session: {test_policy}."
-        )
-        if additional_context:
-            instruction = f"{instruction}\n\n{additional_context}"
-        self._dispatch_role_work(
-            session=session,
-            role=coding_role,
-            work_item=work_item,
-            stage_name="bug_analysis_requested",
-            instruction=instruction,
-        )
-        return self._append_event(
-            session_id=session.id,
-            event_type="bug_analysis_requested",
-            producer_type="coordinator",
-            payload={
-                "task_key": session.task_key,
-                "role_name": coding_role.role_name,
-                "work_item_id": work_item.id,
-                "current_stage": session.current_stage,
-                "test_policy": test_policy,
-            },
-        )
-
     def _enqueue_proposal_context(
         self,
         session: Session,
@@ -4487,40 +4414,6 @@ class CoordinatorService:
                 "current_stage": session.current_stage,
             },
         )
-
-    def _handle_bug_analysis_completed(
-        self,
-        session: Session,
-        source_event: Event,
-    ) -> tuple[Session, Event]:
-        analysis_items = [
-            item
-            for item in self.work_item_repository.list_for_session(session.id)
-            if item.work_type == "bug_analysis" and item.status != WorkItemStatus.COMPLETED
-        ]
-        if not analysis_items:
-            raise IntakeError("No active bug analysis work item found for the session")
-
-        active_item = analysis_items[0]
-        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
-
-        summary = str(source_event.payload.get("summary") or "").strip()
-        proposed_test = str(source_event.payload.get("test_strategy") or "").strip()
-        context_lines: list[str] = []
-        if summary:
-            context_lines.append(f"Bug analysis summary: {summary}")
-        if proposed_test:
-            context_lines.append(f"Suggested test strategy: {proposed_test}")
-        additional_context = "\n".join(context_lines) if context_lines else None
-
-        event = self._enqueue_initial_implementation(
-            session=session,
-            resolved_task_key=session.task_key,
-            source_event=source_event,
-            additional_context=additional_context,
-        )
-        session = self._get_session_or_raise(session.id)
-        return session, event
 
     def _handle_proposal_context_completed(
         self,
@@ -5317,7 +5210,6 @@ class CoordinatorService:
                 None,
             )
             if matching_item is not None and matching_item.work_type in {
-                "bug_analysis",
                 "subtask_implementation",
                 "implementation",
                 "convention_review_correction",
@@ -6716,9 +6608,7 @@ class CoordinatorService:
             )
         ):
             return "story_planning_blocked"
-        if role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE} and output_type == "completed":
-            if session.current_stage == "bug_analysis_requested":
-                return "bug_analysis_completed"
+        if role_name == IMPLEMENTER_ROLE and output_type == "completed":
             if session.current_stage == "subtask_implementation_requested":
                 return "subtask_completed"
             if session.current_stage in {
@@ -6731,7 +6621,7 @@ class CoordinatorService:
             }:
                 return "implementation_completed"
         if (
-            role_name in {IMPLEMENTER_ROLE, BUG_FIXER_ROLE}
+            role_name == IMPLEMENTER_ROLE
             and output_type == "failed"
             and self._payload_truthy(payload.get("needs_operator_input"))
             and session.current_stage in {
@@ -8386,7 +8276,6 @@ class CoordinatorService:
         if active_item is None:
             return None
         if active_item.work_type not in {
-            "bug_analysis",
             "subtask_implementation",
             "implementation",
             "convention_review_correction",
@@ -8530,11 +8419,6 @@ class CoordinatorService:
             latest_path = artifact.path
         return latest_path
 
-    def _bug_analysis_report_path(self, task_key: str) -> str | None:
-        if self.workdir_root is None:
-            return None
-        return str(self.workdir_root / task_key / "spec" / "bug-analysis.md")
-
     def _default_extra_hydration_for_dispatch(
         self,
         session: Session,
@@ -8602,34 +8486,7 @@ class CoordinatorService:
                 payload.update(self._qa_followup_hydration(session))
             if payload:
                 return payload
-        if session.workflow_profile != "bug_full" or role.role_name != BUG_FIXER_ROLE:
-            return {}
-
-        bug_analysis_report_path = self._bug_analysis_report_path(session.task_key)
-        payload: dict[str, str | int | None] = {}
-        if stage_name == "bug_analysis_requested":
-            if bug_analysis_report_path is not None:
-                payload["bug_analysis_report_path"] = bug_analysis_report_path
-        else:
-            existing_bug_analysis_report = self._existing_file_path(bug_analysis_report_path)
-            if existing_bug_analysis_report is not None:
-                payload["bug_analysis_report_path"] = existing_bug_analysis_report
-        mode_by_stage = {
-            "bug_analysis_requested": "analysis-only",
-            "implementation_requested": "fix-only",
-            "verification_correction_requested": "fix-only",
-            "convention_review_correction_requested": "fix-only",
-            "requirements_review_correction_requested": "fix-only",
-            "documentation_review_correction_requested": "fix-only",
-            "qa_reopen_requested": "fix-only",
-        }
-        if stage_name in mode_by_stage:
-            payload["bug_mode"] = mode_by_stage[stage_name]
-        if stage_name == "bug_analysis_requested":
-            payload["primary_bug_inputs"] = "description.md + comments.md"
-        if stage_name == "qa_reopen_requested":
-            payload.update(self._qa_followup_hydration(session))
-        return payload
+        return {}
 
     def _qa_followup_hydration(self, session: Session) -> dict[str, str | int | None]:
         return {
@@ -9080,47 +8937,6 @@ class CoordinatorService:
         role_name: str | None = None,
         session_policy: dict[str, str] | None = None,
     ) -> str | None:
-        if workflow_profile == "bug_full" and role_name == BUG_FIXER_ROLE:
-            if stage_name == "bug_analysis_requested":
-                return (
-                    f"Mode: analysis-only\n"
-                    f"Analyze bug {task_key} before implementation. "
-                    "Identify probable root cause, expected fix direction, and whether a regression test should be added."
-                )
-            if stage_name == "implementation_requested":
-                return (
-                    f"Mode: fix-only\n"
-                    f"Implement the bug fix for {task_key} using your current bug context and the saved bug analysis."
-                )
-            if stage_name == "verification_correction_requested":
-                return (
-                    f"Mode: fix-only\n"
-                    f"Apply verification corrections for {task_key}. "
-                    "Stay aligned to the verification findings, but fix the root cause cleanly and prevent regressions."
-                )
-            if stage_name == "convention_review_correction_requested":
-                return (
-                    f"Mode: fix-only\n"
-                    f"Apply convention review corrections for {task_key}. "
-                    "Stay aligned to the routed convention findings; fix the local consistency issue cleanly without unrelated cleanup."
-                )
-            if stage_name == "requirements_review_correction_requested":
-                return (
-                    f"Mode: fix-only\n"
-                    f"Apply requirements review corrections for {task_key}. "
-                    "Stay aligned to the routed requirement or regression findings; fix the behavior and focused tests without unrelated cleanup."
-                )
-            if stage_name == "qa_reopen_requested":
-                return (
-                    f"Mode: fix-only\n"
-                    f"Apply QA reopen follow-up changes for {task_key}. "
-                    "Prioritize the latest QA comments as the highest-priority follow-up scope."
-                )
-        if stage_name == "bug_analysis_requested":
-            return (
-                f"Analyze bug {task_key} before implementation. "
-                "Identify probable root cause, expected fix direction, and whether a regression test should be added."
-            )
         if stage_name == "proposal_context_requested":
             return (
                 f"Collect proposal and context foundations for story {task_key}. "
@@ -9233,8 +9049,6 @@ class CoordinatorService:
 
     def _effective_role_names(self, workflow_profile: str, policy: dict[str, str] | None) -> list[str]:
         role_names = list(self.default_roles)
-        if workflow_profile == "bug_full" and BUG_FIXER_ROLE not in role_names:
-            role_names.append(BUG_FIXER_ROLE)
         if (policy or {}).get("review_policy") != "disabled":
             for role_name in (CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE):
                 if role_name not in role_names:
@@ -9259,18 +9073,6 @@ class CoordinatorService:
     def _primary_coding_role_name_for_work_type(self, session: Session, work_type: str) -> str:
         if work_type == "doc_harvest":
             return DOC_HARVEST_ROLE
-        if session.workflow_profile != "bug_full":
-            return IMPLEMENTER_ROLE
-        if work_type in {
-            "bug_analysis",
-            "implementation",
-            "followup_implementation",
-            "convention_review_correction",
-            "requirements_review_correction",
-            "verification_correction",
-            "documentation_review_correction",
-        }:
-            return BUG_FIXER_ROLE
         return IMPLEMENTER_ROLE
 
     def _primary_coding_role_for_work_type(self, session: Session, work_type: str) -> Role:
@@ -10635,7 +10437,7 @@ class CoordinatorService:
             )
 
     def _verification_gate_required_for_delivery(self, session: Session) -> bool:
-        return session.workflow_profile in {"oneshot", "bug_full", "story_full"}
+        return session.workflow_profile in {"oneshot", "story_full"}
 
     def _materialize_dual_review_outcome_file(
         self,

@@ -413,7 +413,7 @@ class WriteResultScriptTests(unittest.TestCase):
             self.assertIn("SDD_RESULT_INGRESS_ERROR", result.stderr)
             self.assertFalse(output_path.exists())
 
-    def test_bug_fixer_completed_result_is_supported(self) -> None:
+    def test_removed_bug_fixer_role_is_not_supported(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env, output_path, work_item_id = self._create_context(temp_dir, role_name="bug-fixer")
             result = self._run(
@@ -424,9 +424,9 @@ class WriteResultScriptTests(unittest.TestCase):
                 "bug fixed",
             )
 
-            self.assertEqual(0, result.returncode, result.stderr)
-            payload = json.loads(output_path.read_text(encoding="utf-8"))
-            self.assertEqual(work_item_id, payload["payload"]["work_item_id"])
+            self.assertEqual(2, result.returncode)
+            self.assertIn("bug-fixer does not support output_type=completed", result.stderr)
+            self.assertFalse(output_path.exists())
 
     def test_implementer_failed_result_can_request_operator_input(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

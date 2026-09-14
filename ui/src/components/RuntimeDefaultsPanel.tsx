@@ -25,7 +25,6 @@ type DraftRoleDefault = {
 };
 
 type DraftPolicyDefaults = {
-  test_policy: SessionPolicyValue;
   review_policy: SessionPolicyValue;
   doc_harvest_policy: SessionPolicyValue;
   requirements_clarification_mode: RequirementsClarificationMode;
@@ -49,15 +48,13 @@ const REQUIREMENTS_CLARIFICATION_LABELS: Record<RequirementsClarificationMode, s
 };
 const WORKFLOW_PROFILE_DESCRIPTIONS: Record<WorkflowProfile, string> = {
   oneshot: "Direct implementation flow for straightforward tasks without the extended planning chain.",
-  bug_full: "Bug-focused workflow that keeps testing and verification policies close at hand.",
   story_full: "Story workflow with planning, subtask execution, and clarification controls.",
 };
 
 const POLICY_DEFAULT_DESCRIPTIONS: Record<
-  "test_policy" | "review_policy" | "doc_harvest_policy",
+  "review_policy" | "doc_harvest_policy",
   string
 > = {
-  test_policy: "Choose whether the bug flow treats testing as disabled, auto-started with agent skip semantics, or required.",
   review_policy:
     "Choose whether the dual review gate is disabled, auto-started with reviewer skip semantics, or required.",
   doc_harvest_policy:
@@ -73,14 +70,6 @@ const CLARIFICATION_MODE_DESCRIPTIONS: Record<RequirementsClarificationMode, str
 function roleFlowOrder(roleName: string, workflowProfile: WorkflowProfile): number {
   const oneshotOrder = [
     "implementer",
-    "convention-reviewer",
-    "requirements-reviewer",
-    "verification-coordinator",
-    "doc-harvest-worker",
-  ];
-  const bugFullOrder = [
-    "implementer",
-    "bug-fixer",
     "convention-reviewer",
     "requirements-reviewer",
     "verification-coordinator",
@@ -103,9 +92,7 @@ function roleFlowOrder(roleName: string, workflowProfile: WorkflowProfile): numb
   const orderedRoles =
     workflowProfile === "story_full"
       ? storyFullOrder
-      : workflowProfile === "bug_full"
-        ? bugFullOrder
-        : oneshotOrder;
+      : oneshotOrder;
 
   const index = orderedRoles.indexOf(roleName);
   return index === -1 ? orderedRoles.length + 1 : index;
@@ -113,7 +100,6 @@ function roleFlowOrder(roleName: string, workflowProfile: WorkflowProfile): numb
 
 function defaultPolicyDefaults(): DraftPolicyDefaults {
   return {
-    test_policy: "enabled",
     review_policy: "enabled",
     doc_harvest_policy: "enabled",
     requirements_clarification_mode: "ask-selectively",
@@ -130,7 +116,6 @@ export function RuntimeDefaultsPanel({
   const [roleDefaults, setRoleDefaults] = useState<Record<string, DraftRoleDefault>>({});
   const [policyDefaults, setPolicyDefaults] = useState<Record<WorkflowProfile, DraftPolicyDefaults>>({
     oneshot: defaultPolicyDefaults(),
-    bug_full: defaultPolicyDefaults(),
     story_full: defaultPolicyDefaults(),
   });
   const [policyProfileView, setPolicyProfileView] = useState<WorkflowProfile>("oneshot");
@@ -233,10 +218,6 @@ export function RuntimeDefaultsPanel({
         ...defaultPolicyDefaults(),
         ...(loadedRuntimeDefaults.policyDefaults.oneshot ?? {}),
       },
-      bug_full: {
-        ...defaultPolicyDefaults(),
-        ...(loadedRuntimeDefaults.policyDefaults.bug_full ?? {}),
-      },
       story_full: {
         ...defaultPolicyDefaults(),
         ...(loadedRuntimeDefaults.policyDefaults.story_full ?? {}),
@@ -314,11 +295,6 @@ export function RuntimeDefaultsPanel({
             review_policy: policyDefaults.oneshot.review_policy,
             doc_harvest_policy: policyDefaults.oneshot.doc_harvest_policy,
           },
-          bug_full: {
-            test_policy: policyDefaults.bug_full.test_policy,
-            review_policy: policyDefaults.bug_full.review_policy,
-            doc_harvest_policy: policyDefaults.bug_full.doc_harvest_policy,
-          },
           story_full: {
             review_policy: policyDefaults.story_full.review_policy,
             doc_harvest_policy: policyDefaults.story_full.doc_harvest_policy,
@@ -356,7 +332,7 @@ export function RuntimeDefaultsPanel({
         <div className="runtime-defaults-list">
           <div className="settings-profile-stack">
             <div className="inline-pill-row">
-              {(["oneshot", "bug_full", "story_full"] as const).map((profile) => (
+              {(["oneshot", "story_full"] as const).map((profile) => (
                 <button
                   key={profile}
                   className={`inline-pill inline-pill-button ${policyProfileView === profile ? "selected" : ""}`}
@@ -414,72 +390,6 @@ export function RuntimeDefaultsPanel({
                 ))}
               </select>
             </label>
-            </div>
-          ) : null}
-
-          {policyProfileView === "bug_full" ? (
-              <div className="runtime-default-card">
-                <div className="inline-summary-header">
-                  <strong>{workflowProfileDisplayName("bug_full")}</strong>
-                </div>
-            <div className="followup-form-grid">
-              <label className="form-field">
-                <span>Test Policy</span>
-                <select
-                  className="select-input"
-                  disabled={busy}
-                  onChange={(event) =>
-                    updatePolicyDefault("bug_full", "test_policy", event.target.value as SessionPolicyValue)
-                  }
-                  title={POLICY_DEFAULT_DESCRIPTIONS.test_policy}
-                  value={policyDefaults.bug_full.test_policy}
-                >
-                  {POLICY_OPTIONS.map((value) => (
-                    <option key={`bug-test-${value}`} value={value}>
-                      {POLICY_OPTION_LABELS[value]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="form-field">
-                <span>Review Gate</span>
-                <select
-                  className="select-input"
-                  disabled={busy}
-                  onChange={(event) =>
-                    updatePolicyDefault("bug_full", "review_policy", event.target.value as SessionPolicyValue)
-                  }
-                  title={POLICY_DEFAULT_DESCRIPTIONS.review_policy}
-                  value={policyDefaults.bug_full.review_policy}
-                >
-                  {POLICY_OPTIONS.map((value) => (
-                    <option key={`bug-self-review-${value}`} value={value}>
-                      {POLICY_OPTION_LABELS[value]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="followup-form-grid">
-              <label className="form-field">
-                <span>Documentation Writer</span>
-                <select
-                  className="select-input"
-                  disabled={busy}
-                  onChange={(event) =>
-                    updatePolicyDefault("bug_full", "doc_harvest_policy", event.target.value as SessionPolicyValue)
-                  }
-                  title={POLICY_DEFAULT_DESCRIPTIONS.doc_harvest_policy}
-                  value={policyDefaults.bug_full.doc_harvest_policy}
-                >
-                  {POLICY_OPTIONS.map((value) => (
-                    <option key={`bug-doc-harvest-${value}`} value={value}>
-                      {POLICY_OPTION_LABELS[value]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
             </div>
           ) : null}
 

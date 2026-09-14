@@ -11,7 +11,7 @@ The normal entry point is the operator UI.
 From the UI you can:
 
 - create a session for a Jira key
-- choose `story_full`, `bug_full`, or `oneshot`
+- choose `story_full` or `oneshot`
 - adjust per-role runtime config for this session
 - manage runtime state, recovery, and cleanup
 - inspect live runtime handles and tmux commands
@@ -23,7 +23,6 @@ When starting a new task:
 1. Enter the Jira key.
 2. Choose the workflow profile:
    - `story_full` for full planning + decomposition + execution
-   - `bug_full` for bug analysis/fix flow
    - `oneshot` for small direct implementation work
 3. Review the policy defaults.
 4. Override role runner/model/effort only if this session needs something different from project defaults.

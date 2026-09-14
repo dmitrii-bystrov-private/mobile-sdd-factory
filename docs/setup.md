@@ -73,7 +73,7 @@ Important MCP surfaces include:
 For Claude launcher sessions, MCP visibility is scoped per role from `backend/role_baselines.py`.
 Current built-in MCP access is:
 
-- `implementer` and `bug-fixer`: `ios-rag`, `android-rag`, `frontend-rag`
+- `implementer`: `ios-rag`, `android-rag`, `frontend-rag`
 - `proposal-context-worker`: `ios-rag`, `android-rag`, `frontend-rag`
 
 Roles such as `convention-reviewer`, `requirements-reviewer`, `verification-coordinator`, `doc-harvest-worker`, and `documentation-reviewer` receive an empty scoped MCP config by default.

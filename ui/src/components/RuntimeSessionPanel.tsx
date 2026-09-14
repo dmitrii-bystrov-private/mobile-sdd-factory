@@ -22,15 +22,6 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
     "doc-harvest-worker",
     "documentation-reviewer",
   ];
-  const bugFullOrder = [
-    "implementer",
-    "bug-fixer",
-    "convention-reviewer",
-    "requirements-reviewer",
-    "verification-coordinator",
-    "doc-harvest-worker",
-    "documentation-reviewer",
-  ];
   const storyFullOrder = [
     "proposal-context-worker",
     "requirements-clarifier-worker",
@@ -49,9 +40,7 @@ function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_prof
   const orderedRoles =
     workflowProfile === "story_full"
       ? storyFullOrder
-      : workflowProfile === "bug_full"
-        ? bugFullOrder
-        : oneshotOrder;
+      : oneshotOrder;
 
   const index = orderedRoles.indexOf(roleName);
   return index === -1 ? orderedRoles.length + 1 : index;

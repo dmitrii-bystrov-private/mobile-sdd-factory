@@ -1,7 +1,6 @@
 """Role names and coordinator-facing contracts."""
 
 IMPLEMENTER_ROLE = "implementer"
-BUG_FIXER_ROLE = "bug-fixer"
 VERIFICATION_COORDINATOR_ROLE = "verification-coordinator"
 CONVENTION_REVIEWER_ROLE = "convention-reviewer"
 REQUIREMENTS_REVIEWER_ROLE = "requirements-reviewer"
@@ -26,13 +25,9 @@ PERSISTENT_SESSION_ROLES = [
     REQUIREMENTS_REVIEWER_ROLE,
     DOC_HARVEST_ROLE,
     DOCUMENTATION_REVIEWER_ROLE,
-    BUG_FIXER_ROLE,
 ]
 
 ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
-    "bug_analysis_requested": {
-        BUG_FIXER_ROLE,
-    },
     "proposal_context_requested": {
         PROPOSAL_CONTEXT_WORKER_ROLE,
     },
@@ -56,14 +51,12 @@ ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     },
     "implementation_requested": {
         IMPLEMENTER_ROLE,
-        BUG_FIXER_ROLE,
     },
     "verification_requested": {
         VERIFICATION_COORDINATOR_ROLE,
     },
     "verification_correction_requested": {
         IMPLEMENTER_ROLE,
-        BUG_FIXER_ROLE,
     },
     "convention_review_requested": {
         CONVENTION_REVIEWER_ROLE,
@@ -79,14 +72,11 @@ ALLOWED_STAGE_ROLE_TARGETS: dict[str, set[str]] = {
     },
     "documentation_review_correction_requested": {
         IMPLEMENTER_ROLE,
-        BUG_FIXER_ROLE,
     },
     "convention_review_correction_requested": {
         IMPLEMENTER_ROLE,
-        BUG_FIXER_ROLE,
     },
     "requirements_review_correction_requested": {
         IMPLEMENTER_ROLE,
-        BUG_FIXER_ROLE,
     },
 }
