@@ -44,20 +44,20 @@ cat >"$PLAN_DIR/tasks.json" <<'EOF'
 }
 EOF
 
-ACLl_LOG="$WORKDIR/acli.log"
+TWG_LOG="$WORKDIR/twg.log"
 CREATE_LOG="$WORKDIR/create.log"
 
-cat >"$WORKDIR/acli" <<EOF
+cat >"$WORKDIR/twg" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "\$*" >>"$ACLl_LOG"
-if [[ "\$1 \$2 \$3" == "jira workitem search" ]]; then
+printf '%s\n' "\$*" >>"$TWG_LOG"
+if [[ "\$1 \$2 \$3" == "jira workitem query" ]]; then
   printf '[]\n'
   exit 0
 fi
 exit 1
 EOF
-chmod +x "$WORKDIR/acli"
+chmod +x "$WORKDIR/twg"
 
 cat >"$WORKDIR/create-subtask.sh" <<EOF
 #!/usr/bin/env bash

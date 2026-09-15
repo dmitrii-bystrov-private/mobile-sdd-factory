@@ -79,7 +79,7 @@ class EnvironmentDoctorTests(unittest.TestCase):
                 mapping = {
                     "python3": "/usr/bin/python3",
                     "jq": "/usr/bin/jq",
-                    "acli": "/usr/bin/acli",
+                    "twg": "/usr/bin/twg",
                     "glab": "/usr/bin/glab",
                     "node": "/usr/bin/node",
                     "npm": "/usr/bin/npm",

@@ -23,15 +23,14 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { err "Missing required command: $1"; exit 1; }
 }
 
-need_cmd acli
+need_cmd twg
 need_cmd jq
-need_cmd python3
 
 [[ -z "$JIRA_BASE_URL" ]] && { err "JIRA_BASE_URL is not set"; exit 1; }
 JIRA_BASE_URL="${JIRA_BASE_URL%/}"
 
-# shellcheck source=./md-to-adf.sh
-source "$SCRIPT_DIR/md-to-adf.sh"
+# shellcheck source=./twg-utils.sh
+source "$SCRIPT_DIR/twg-utils.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -67,38 +66,33 @@ if [[ -n "$DESCRIPTION_FILE" ]] && [[ ! -f "$DESCRIPTION_FILE" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Build acli arguments
+# Build twg arguments
 # ---------------------------------------------------------------------------
 
-TMPFILE_DESC="$(mktemp /tmp/update-issue-desc-XXXXXX.md)"
-trap 'rm -f "$TMPFILE_DESC"' EXIT
+TMPFILE_JSON="$(mktemp /tmp/update-issue-XXXXXX.json)"
+trap 'rm -f "$TMPFILE_JSON"' EXIT
 
-ACLI_ARGS=(jira workitem edit --key "$KEY" --yes)
+TWG_ARGS=(jira workitem update --id "$KEY")
 
 if [[ -n "$SUMMARY" ]]; then
-  ACLI_ARGS+=(--summary "$SUMMARY")
+  TWG_ARGS+=(--summary "$SUMMARY")
 fi
 
 if [[ -n "$DESCRIPTION_FILE" ]]; then
-  ADF_JSON="$(render_markdown_to_adf "$DESCRIPTION_FILE")"
-  printf '%s' "$ADF_JSON" > "$TMPFILE_DESC"
-  ACLI_ARGS+=(--description-file "$TMPFILE_DESC")
+  TWG_ARGS+=(--description "$(cat "$DESCRIPTION_FILE")" --description-format markdown)
 elif [[ -n "$DESCRIPTION" ]]; then
-  printf '%s' "$DESCRIPTION" > "$TMPFILE_DESC"
-  ADF_JSON="$(render_markdown_to_adf "$TMPFILE_DESC")"
-  printf '%s' "$ADF_JSON" > "$TMPFILE_DESC"
-  ACLI_ARGS+=(--description-file "$TMPFILE_DESC")
+  TWG_ARGS+=(--description "$DESCRIPTION" --description-format markdown)
 fi
 
 if [[ -n "$ASSIGNEE" ]]; then
-  ACLI_ARGS+=(--assignee "$ASSIGNEE")
+  TWG_ARGS+=(--assignee "$ASSIGNEE")
 fi
 
 # ---------------------------------------------------------------------------
 # Update issue
 # ---------------------------------------------------------------------------
 
-acli "${ACLI_ARGS[@]}"
+run_twg_json "$TMPFILE_JSON" "${TWG_ARGS[@]}"
 
 printf '✓ Updated: %s\n' "$KEY"
 printf '  %s/%s\n' "$JIRA_BASE_URL" "$KEY"

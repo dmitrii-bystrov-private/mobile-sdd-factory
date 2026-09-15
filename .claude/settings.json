@@ -3,7 +3,7 @@
   "permissions": {
     "allow": [
       "Bash(glab *)",
-      "Bash(acli *)",
+      "Bash(twg *)",
       "Bash(git *)",
       "Bash(jq *)",
       "Bash(bash *)",
@@ -32,7 +32,7 @@
       "Bash(git push --force *)",
       "Bash(glab mr merge *)",
       "Bash(glab mr close *)",
-      "Bash(acli jira workitem delete *)"
+      "Bash(twg jira workitem delete *)"
     ],
     "defaultMode": "auto"
   }

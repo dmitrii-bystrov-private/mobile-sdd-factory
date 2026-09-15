@@ -9,11 +9,18 @@
 set -euo pipefail
 
 KEY="${1:?Usage: get-issue-parent.sh <ISSUE_KEY>}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-command -v acli >/dev/null 2>&1 || { echo "Missing required command: acli" >&2; exit 1; }
+command -v twg >/dev/null 2>&1 || { echo "Missing required command: twg" >&2; exit 1; }
 command -v jq   >/dev/null 2>&1 || { echo "Missing required command: jq"   >&2; exit 1; }
 
-json="$(acli jira workitem view "$KEY" --fields 'issuetype,parent' --json)"
+source "$SCRIPT_DIR/twg-utils.sh"
+
+tmp_json="$(mktemp)"
+trap 'rm -f "$tmp_json"' EXIT
+
+twg_get_issue_legacy_json "$tmp_json" "$KEY" "issuetype,parent"
+json="$(cat "$tmp_json")"
 
 is_subtask="$(echo "$json" | jq -r '.fields.issuetype.subtask')"
 

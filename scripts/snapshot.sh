@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/adf-to-md.sh"
 # shellcheck source=scripts/snapshot-formatters.sh
 source "$SCRIPT_DIR/snapshot-formatters.sh"
+# shellcheck source=scripts/twg-utils.sh
+source "$SCRIPT_DIR/twg-utils.sh"
 
 # snapshot.sh — Prepare a Jira workspace: snapshot artifacts + git worktree.
 #
@@ -55,27 +57,28 @@ _json_is_empty_field_value() {
   ' "$json_path" >/dev/null
 }
 
-_fill_story_transition_fields_with_twg() {
+_fill_transition_fields_with_twg() {
   local key="$1"
+  local issue_type="$2"
   local twg_cmd metadata_json current_json
   local dev_finish_field story_points_field
   local dev_finish_value story_points_value
   local update_args=()
 
-  if [[ "${SDD_JIRA_FILL_STORY_TRANSITION_FIELDS:-1}" == "0" ]]; then
-    echo "  Story transition field fill disabled by SDD_JIRA_FILL_STORY_TRANSITION_FIELDS=0."
+  if [[ "${SDD_JIRA_FILL_TRANSITION_FIELDS:-1}" == "0" ]]; then
+    echo "  Jira transition field fill disabled."
     return 0
   fi
 
   if ! twg_cmd="$(command -v twg 2>/dev/null)"; then
-    echo "  WARN: twg is required to fill Story transition fields before moving $key to In Progress." >&2
+    echo "  WARN: twg is required to fill Jira transition fields before moving $key to In Progress." >&2
     return 1
   fi
 
-  metadata_json="$TMPDIR_JIRA/story.update-metadata.json"
-  current_json="$TMPDIR_JIRA/story.current-transition-fields.json"
+  metadata_json="$TMPDIR_JIRA/transition.update-metadata.json"
+  current_json="$TMPDIR_JIRA/transition.current-fields.json"
 
-  if ! "$twg_cmd" jira workitem field update-metadata --id "$key" -o json > "$metadata_json"; then
+  if ! run_twg_json "$metadata_json" jira workitem field update-metadata --id "$key"; then
     echo "  WARN: could not retrieve Jira update metadata with twg for $key." >&2
     return 1
   fi
@@ -95,12 +98,11 @@ _fill_story_transition_fields_with_twg() {
     return 1
   fi
 
-  if ! "$twg_cmd" jira workitem get "$key" \
+  if ! run_twg_json "$current_json" jira workitem get "$key" \
       --field "$dev_finish_field" \
       --field "$story_points_field" \
-      --fields status,issuetype,summary \
-      -o json > "$current_json"; then
-    echo "  WARN: could not retrieve current Story transition field values with twg for $key." >&2
+      --fields status,issuetype,summary; then
+    echo "  WARN: could not retrieve current Jira transition field values with twg for $key." >&2
     return 1
   fi
 
@@ -119,30 +121,31 @@ _fill_story_transition_fields_with_twg() {
   fi
 
   if [[ ${#update_args[@]} -eq 0 ]]; then
-    echo "  Story transition fields already set."
+    echo "  $issue_type transition fields already set."
     return 0
   fi
 
-  echo "  Filling Story transition fields with twg..."
-  if ! "$twg_cmd" jira workitem update --id "$key" "${update_args[@]}" -o json > "$TMPDIR_JIRA/story.update.output.json"; then
-    echo "  WARN: could not update Story transition fields with twg for $key." >&2
+  echo "  Filling $issue_type transition fields with twg..."
+  if ! run_twg_json "$TMPDIR_JIRA/transition.update.output.json" jira workitem update --id "$key" "${update_args[@]}"; then
+    echo "  WARN: could not update Jira transition fields with twg for $key." >&2
     return 1
   fi
-  echo "  Story transition fields filled."
+  echo "  $issue_type transition fields filled."
 }
 
-_transition_story_to_in_progress_with_twg() {
+_transition_to_in_progress_with_twg() {
   local key="$1"
+  local issue_type="$2"
   local twg_cmd transitions_json transition_id
 
   if ! twg_cmd="$(command -v twg 2>/dev/null)"; then
-    echo "  WARN: twg is required to transition Story $key to In Progress." >&2
+    echo "  WARN: twg is required to transition $issue_type $key to In Progress." >&2
     return 1
   fi
 
-  transitions_json="$TMPDIR_JIRA/story.transitions.json"
-  if ! "$twg_cmd" jira workitem transition --id "$key" -o json > "$transitions_json"; then
-    echo "  WARN: could not discover Story transitions with twg for $key." >&2
+  transitions_json="$TMPDIR_JIRA/transition.transitions.json"
+  if ! run_twg_json "$transitions_json" jira workitem transition --id "$key"; then
+    echo "  WARN: could not discover Jira transitions with twg for $key." >&2
     return 1
   fi
 
@@ -150,12 +153,12 @@ _transition_story_to_in_progress_with_twg() {
     first(.data.transitions[] | select(.toName == "In Progress" or .name == "In Progress") | .id) // ""
   ' "$transitions_json")"
   if [[ -z "$transition_id" ]]; then
-    echo "  WARN: In Progress transition is not available for Story $key." >&2
+    echo "  WARN: In Progress transition is not available for $issue_type $key." >&2
     return 1
   fi
 
   echo "Transitioning $key to In Progress with twg..."
-  "$twg_cmd" jira workitem transition --id "$key" --transition-id "$transition_id" -o json
+  run_twg_json "$TMPDIR_JIRA/transition.output.json" jira workitem transition --id "$key" --transition-id "$transition_id"
 }
 
 resolve_mise_cmd() {
@@ -260,7 +263,7 @@ else
 fi
 
 # 4. Required CLI tools
-need_cmd acli
+need_cmd twg
 need_cmd jq
 
 echo "Snapshot: $PARENT_KEY  platform=$PLATFORM  workdir=$SDD_WORKDIR"
@@ -278,9 +281,8 @@ PARENT_COMMENTS_JSON="$TMPDIR_JIRA/parent.comments.json"
 SUBTASKS_LIST_JSON="$TMPDIR_JIRA/subtasks.list.json"
 
 echo "Fetching parent $PARENT_KEY..."
-if ! acli jira workitem view "$PARENT_KEY" \
-    --fields key,issuetype,summary,status,description \
-    --json > "$PARENT_CORE_JSON" 2>"$TMPDIR_JIRA/parent.core.err"; then
+if ! twg_get_issue_legacy_json "$PARENT_CORE_JSON" "$PARENT_KEY" "key,issuetype,summary,status,description" \
+    2>"$TMPDIR_JIRA/parent.core.err"; then
   err "Failed to retrieve parent issue $PARENT_KEY"
   cat "$TMPDIR_JIRA/parent.core.err" >&2
   exit 1
@@ -327,19 +329,18 @@ if [[ "$_early_status" == "Resolved" ]]; then
   exit 0
 fi
 
-if ! acli jira workitem view "$PARENT_KEY" \
-    --fields key,comment \
-    --json > "$PARENT_COMMENTS_JSON" 2>"$TMPDIR_JIRA/parent.comments.err"; then
+if ! twg_get_issue_legacy_json "$PARENT_COMMENTS_JSON" "$PARENT_KEY" "key,comment" --comments \
+    2>"$TMPDIR_JIRA/parent.comments.err"; then
   err "Failed to retrieve comments for parent issue $PARENT_KEY"
   cat "$TMPDIR_JIRA/parent.comments.err" >&2
   exit 1
 fi
 
 echo "Fetching subtask list for $PARENT_KEY..."
-if ! acli jira workitem search \
-    --jql "parent = $PARENT_KEY ORDER BY key ASC" \
-    --fields key,issuetype,summary,status \
-    --json --paginate > "$SUBTASKS_LIST_JSON" 2>"$TMPDIR_JIRA/subtasks.list.err"; then
+if ! twg_query_issues_legacy_json "$SUBTASKS_LIST_JSON" \
+    "parent = $PARENT_KEY ORDER BY key ASC" \
+    "key,issuetype,summary,status" \
+    2>"$TMPDIR_JIRA/subtasks.list.err"; then
   err "Failed to retrieve subtask list for $PARENT_KEY"
   cat "$TMPDIR_JIRA/subtasks.list.err" >&2
   exit 1
@@ -361,18 +362,16 @@ if (( SUBTASK_COUNT > 0 )); then
     SUBKEY_COMMENTS_JSON="$TMPDIR_JIRA/subtask.${SUBKEY}.comments.json"
     SUBKEY_OK=true
 
-    if ! acli jira workitem view "$SUBKEY" \
-        --fields key,issuetype,summary,status,description \
-        --json > "$SUBKEY_CORE_JSON" 2>"$TMPDIR_JIRA/subtask.${SUBKEY}.core.err"; then
+    if ! twg_get_issue_legacy_json "$SUBKEY_CORE_JSON" "$SUBKEY" "key,issuetype,summary,status,description" \
+        2>"$TMPDIR_JIRA/subtask.${SUBKEY}.core.err"; then
       err "Failed to retrieve subtask $SUBKEY (core)"
       cat "$TMPDIR_JIRA/subtask.${SUBKEY}.core.err" >&2
       SUBKEY_OK=false
     fi
 
     if $SUBKEY_OK; then
-      if ! acli jira workitem view "$SUBKEY" \
-          --fields key,comment \
-          --json > "$SUBKEY_COMMENTS_JSON" 2>"$TMPDIR_JIRA/subtask.${SUBKEY}.comments.err"; then
+      if ! twg_get_issue_legacy_json "$SUBKEY_COMMENTS_JSON" "$SUBKEY" "key,comment" --comments \
+          2>"$TMPDIR_JIRA/subtask.${SUBKEY}.comments.err"; then
         err "Failed to retrieve subtask $SUBKEY (comments)"
         cat "$TMPDIR_JIRA/subtask.${SUBKEY}.comments.err" >&2
         SUBKEY_OK=false
@@ -544,24 +543,10 @@ fi
 # ---------------------------------------------------------------------------
 
 _parent_status_now="$(jq -r '.fields.status.name' "$PARENT_CORE_JSON")"
-if [[ "$PARENT_ISSUE_TYPE" == "Bug" && "$_parent_status_now" == "To Do" ]]; then
-  echo "Transitioning $PARENT_KEY to In Progress..."
+if [[ "$_parent_status_now" == "To Do" && ( "$PARENT_ISSUE_TYPE" == "Story" || "$PARENT_ISSUE_TYPE" == "Bug" ) ]]; then
+  _fill_transition_fields_with_twg "$PARENT_KEY" "$PARENT_ISSUE_TYPE" || true
   set +e
-  _transition_output="$(acli jira workitem transition --key "$PARENT_KEY" --status "In Progress" 2>&1)"
-  _transition_exit=$?
-  set -e
-  if [[ $_transition_exit -eq 0 && "$_transition_output" != *"Failure"* && "$_transition_output" != *"Error"* ]]; then
-    echo "  Transitioned to In Progress."
-  else
-    echo "  WARN: could not transition $PARENT_KEY to In Progress." >&2
-    echo "  $_transition_output" >&2
-  fi
-fi
-
-if [[ "$PARENT_ISSUE_TYPE" == "Story" && "$_parent_status_now" == "To Do" ]]; then
-  _fill_story_transition_fields_with_twg "$PARENT_KEY" || true
-  set +e
-  _transition_output="$(_transition_story_to_in_progress_with_twg "$PARENT_KEY" 2>&1)"
+  _transition_output="$(_transition_to_in_progress_with_twg "$PARENT_KEY" "$PARENT_ISSUE_TYPE" 2>&1)"
   _transition_exit=$?
   set -e
   if [[ $_transition_exit -eq 0 ]]; then
@@ -578,7 +563,7 @@ fi
 
 echo "Rendering ADF content to Markdown..."
 
-# Helper: transform raw acli comments JSON into [{id, created, body_md}] JSON array
+# Helper: transform raw Jira comments JSON into [{id, created, body_md}] JSON array
 _build_comments_md_json() {
   local raw_json="$1"
   local encoded_items

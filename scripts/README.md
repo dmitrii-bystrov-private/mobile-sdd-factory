@@ -6,8 +6,7 @@ This directory contains shell scripts used by the assistant and as standalone CL
 
 - `glab` (GitLab CLI)
 - `jq`
-- `acli` (Atlassian/Jira CLI)
-- `twg` (Atlassian Teamwork Graph CLI; optional, used by `snapshot.sh` to prepare Story transitions)
+- `twg` (Atlassian Teamwork Graph CLI)
 
 ### Required environment variables
 
@@ -16,7 +15,10 @@ This directory contains shell scripts used by the assistant and as standalone CL
 - `SDD_WORKDIR` — path to the per-task workdir root
 - `JIRA_BASE_URL` — optional Jira browse URL override used in generated links
 - `DEFAULT_JIRA_ASSIGNEE` — optional default assignee email for `create-issue.sh`
-- `SDD_JIRA_STORY_POINTS_VALUE` — optional Story Points value used when `snapshot.sh` fills empty Story points before transition; defaults to `1`
+- `SDD_JIRA_TEAM_FIELD_ID` — Jira team value id used by `create-issue.sh`
+- `SDD_JIRA_TEAM_CUSTOM_FIELD_ID` — optional Jira team custom field id override; defaults to `customfield_10625`
+- `SDD_JIRA_STORY_POINTS_VALUE` — optional Story Points value used when `snapshot.sh` fills empty Story Points before transition; defaults to `1`
+- `SDD_JIRA_FILL_TRANSITION_FIELDS` — set to `0` to skip automatic `Dev finish date` / `Story Points` filling for Stories and Bugs
 - `SDD_JIRA_DEV_FINISH_DATE_FIELD_ID` / `SDD_JIRA_STORY_POINTS_FIELD_ID` — optional Jira custom field id overrides when TWG metadata cannot resolve names
 
 Scripts that use `IOS_DIR` / `ANDROID_DIR` will fail fast if the variable is not set or does not point to an existing directory.
@@ -74,7 +76,7 @@ bash scripts/snapshot.sh <PARENT-KEY>
 3. Runs platform bootstrap for new worktrees:
    - **iOS** (`IOS_DIR`): seeds repo-local `.mise` and Tuist SPM cache (`Tuist/.build`) with APFS copy-on-write when available, then runs `mise trust`, `mise install`, `tuist install`, and `tuist generate`.
    - **Android** (`ANDROID_DIR`): seeds `.gradle` with APFS copy-on-write when available, symlinks `local.properties`, then runs `./gradlew clean`.
-4. Transitions the task to **In Progress** when currently in **To Do**. Bugs use `acli`; Stories use `twg` to fill empty `Dev finish date` with today's date and empty `Story Points` first, then perform the transition. Set `SDD_JIRA_FILL_STORY_TRANSITION_FIELDS=0` to skip the Story field fill.
+4. Transitions the task to **In Progress** when currently in **To Do**. Stories and Bugs use `twg` to fill empty `Dev finish date` with today's date and empty `Story Points` first, then perform the transition. Set `SDD_JIRA_FILL_TRANSITION_FIELDS=0` to skip the field fill.
 5. Writes snapshot artifacts:
 
 ```
@@ -101,7 +103,7 @@ scripts/create-subtask.sh --parent <KEY> --title <title> --description <file.md>
 ```
 
 - Reads the parent story's assignee from Jira and assigns the new subtask to them.
-- Passes the markdown description file directly to `acli` (no ADF conversion needed).
+- Passes the markdown description file directly to `twg`.
 - Prints the created subtask key to stdout on success.
 - Exits non-zero with an error message on failure.
 
@@ -243,7 +245,7 @@ bash scripts/send-to-test.sh <TASK-KEY>
 - Non-bug tasks transition to **Ready for test**.
 - If the task is in **To Do**, transitions through **In Progress** first.
 
-Requires `acli` and `jq`.
+Requires `twg` and `jq`.
 
 #### `get-mr-jira-key.sh`
 
@@ -275,7 +277,7 @@ bash scripts/create-issue.sh \
   [--assignee <email>]
 ```
 
-- Converts Markdown descriptions to Jira ADF via `md-to-adf.sh`.
+- Passes Markdown descriptions directly to `twg`.
 - Applies the shared team custom field automatically.
 - Uses `DEFAULT_JIRA_ASSIGNEE` when `--assignee` is omitted.
 - Prints both the created Jira key and browse URL.
@@ -294,14 +296,10 @@ scripts/update-issue.sh \
 ```
 
 - At least one optional field is required; exits with an error otherwise.
-- Converts Markdown descriptions to Jira ADF via `md-to-adf.sh`.
+- Passes Markdown descriptions directly to `twg`.
 - Prints `✓ Updated: <KEY>` and the browse URL on success.
 
-Note: `acli` does not support updating priority via CLI — change it in the Jira UI.
-
-#### `md-to-adf.sh`
-
-Library sourced by `create-issue.sh`, `update-issue.sh`, and `create-subtask.sh`. Provides `render_markdown_to_adf`, which converts Markdown to Jira ADF JSON. It can read either a file path or stdin.
+Note: `update-issue.sh` currently supports summary, description, and assignee updates.
 
 #### `gitlab.sh`
 
@@ -325,7 +323,7 @@ bash scripts/standup.sh
 
 - Lists your open iOS and Android MRs.
 - Lists MRs waiting on your review, including whether you already commented.
-- Dumps a Jira backlog filter result (`acli jira workitem search --filter 10494 ...`).
+- Dumps a Jira backlog filter result through `twg`.
 - Runs `check-updates.sh` automatically on Mondays.
 
 The script is user-specific as committed today:
@@ -358,16 +356,16 @@ bash scripts/cleanup.sh
 - Prints a one-line status per task and a final summary (`Cleaned / Skipped / Errors`).
 - Invoked automatically by the `/cleanup` skill.
 
-#### `acli-dump-issue.sh`
+#### `twg-dump-issue.sh`
 
-Debug helper — dumps raw Jira issue JSON for a given key. Useful when investigating acli output format.
+Debug helper — dumps normalized Jira issue JSON for a given key. Useful when investigating TWG output format and snapshot inputs.
 
 ```bash
-bash scripts/acli-dump-issue.sh <ISSUE-KEY> [output-dir]
+bash scripts/twg-dump-issue.sh <ISSUE-KEY> [output-dir]
 ```
 
 - Writes parent issue payloads plus per-subtask payloads.
-- Defaults output to `tmp/acli-dumps/<ISSUE-KEY>/`.
+- Defaults output to `tmp/twg-dumps/<ISSUE-KEY>/`.
 
 ### Tests
 

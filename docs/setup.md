@@ -11,7 +11,7 @@ The supported platform expects these tools locally:
 - `tmux`
 - `jq`
 - `glab`
-- `acli`
+- `twg`
 - Python environment for the backend and factory tooling
 - at least one supported live runner host:
   - Claude Code
@@ -32,6 +32,7 @@ Optional but commonly useful:
 ```bash
 JIRA_BASE_URL=https://your-org.atlassian.net/browse/
 SDD_JIRA_TEAM_FIELD_ID=12345
+SDD_JIRA_TEAM_CUSTOM_FIELD_ID=customfield_10625
 SDD_JIRA_STORY_POINTS_VALUE=1
 SDD_GITLAB_IOS_PROJECT_PATH=group%2Fmobile%2Fios-app
 SDD_GITLAB_ANDROID_PROJECT_PATH=group%2Fmobile%2Fandroid-app
@@ -40,7 +41,7 @@ SDD_IOS_WORKSPACE_NAME=App-Tuist.xcworkspace
 SDD_IOS_DEFAULT_SCHEME=App
 ```
 
-Install and authenticate Atlassian Teamwork Graph CLI (`twg`) when Story tasks should move from `To Do` to `In Progress` automatically during `snapshot.sh`. The script uses TWG metadata to fill empty `Dev finish date` with today's date and empty `Story Points` before transition.
+Install and authenticate Atlassian Teamwork Graph CLI (`twg`) for Jira reads, writes, and transitions. During `snapshot.sh`, Stories and Bugs moving from `To Do` to `In Progress` use TWG metadata to fill empty `Dev finish date` with today's date and empty `Story Points` before transition.
 
 `SDD_IOS_WORKSPACE_NAME` is passed to iOS `xcodebuild -workspace`.
 When it is not set, the verification scripts auto-detect a single `.xcworkspace` at the iOS repo root.

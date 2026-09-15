@@ -14,6 +14,10 @@ IOS_PATH="$SDD_GITLAB_IOS_PROJECT_PATH"
 ANDROID_PATH="$SDD_GITLAB_ANDROID_PROJECT_PATH"
 
 TMP=$(mktemp -d)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# shellcheck source=./twg-utils.sh
+source "$SCRIPT_DIR/twg-utils.sh"
 
 # Review MRs — filter out already approved
 fetch_unapproved_review() {
@@ -105,7 +109,15 @@ fetch_my_mrs "$ANDROID_DIR" "$ANDROID_PATH" "$TMP/andr_mine.txt"
 fetch_unapproved_review "$ANDROID_DIR" "$ANDROID_PATH" "$TMP/andr_review.txt"
 
 # Jira can run independently (different tool, no keychain conflict)
-acli jira workitem search --filter 10494 --fields key,summary,status,priority 2>&1 > "$TMP/jira.txt"
+if run_twg_json "$TMP/jira.json" jira workitem query --jql "filter = 10494"; then
+    jq -r '
+      (.data.issues // .data.items // .data // [])
+      | .[]
+      | "\(.key)  \(.summary // "")  [\(.status.name // "")]  \(.priority.name // "")"
+    ' "$TMP/jira.json" > "$TMP/jira.txt"
+else
+    echo "ERROR: failed to fetch Jira backlog with twg" > "$TMP/jira.txt"
+fi
 
 echo "=== iOS MRs (mine) ==="
 cat "$TMP/ios_mine.txt"

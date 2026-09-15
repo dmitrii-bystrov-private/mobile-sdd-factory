@@ -5,18 +5,25 @@
 # Determines the project directory from the task worktree or platform env vars.
 #
 # Required env: SDD_WORKDIR, and IOS_DIR or ANDROID_DIR
-# Required CLI: acli, glab, jq, git
+# Required CLI: twg, glab, jq, git
 set -euo pipefail
 
 KEY="${1:?Usage: create-mr.sh <TASK-KEY>}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-command -v acli >/dev/null 2>&1 || { echo "Missing required command: acli" >&2; exit 1; }
+command -v twg >/dev/null 2>&1 || { echo "Missing required command: twg" >&2; exit 1; }
 command -v glab >/dev/null 2>&1 || { echo "Missing required command: glab" >&2; exit 1; }
 command -v jq   >/dev/null 2>&1 || { echo "Missing required command: jq"   >&2; exit 1; }
 [[ -n "${SDD_WORKDIR:-}" ]] || { echo "SDD_WORKDIR is not set" >&2; exit 1; }
 
+source "$SCRIPT_DIR/twg-utils.sh"
+
 # Resolve story key (parent for subtasks, self otherwise)
-json="$(acli jira workitem view "$KEY" --fields 'summary,issuetype,parent' --json)"
+tmp_json="$(mktemp)"
+trap 'rm -f "$tmp_json"' EXIT
+
+twg_get_issue_legacy_json "$tmp_json" "$KEY" "summary,issuetype,parent"
+json="$(cat "$tmp_json")"
 title="$(printf '%s' "$json"      | jq -r '.fields.summary')"
 is_subtask="$(printf '%s' "$json" | jq -r '.fields.issuetype.subtask')"
 

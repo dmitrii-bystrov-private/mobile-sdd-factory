@@ -15,6 +15,7 @@ set -euo pipefail
 
 JIRA_BASE_URL="${JIRA_BASE_URL:-}"
 TEAM_FIELD_ID="${SDD_JIRA_TEAM_FIELD_ID:-}"
+TEAM_CUSTOM_FIELD_ID="${SDD_JIRA_TEAM_CUSTOM_FIELD_ID:-customfield_10625}"
 DEFAULT_ASSIGNEE="${DEFAULT_JIRA_ASSIGNEE:-}"
 DEFAULT_PRIORITY="Medium"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,16 +26,15 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { err "Missing required command: $1"; exit 1; }
 }
 
-need_cmd acli
+need_cmd twg
 need_cmd jq
-need_cmd python3
 
 [[ -z "$TEAM_FIELD_ID" ]] && { err "SDD_JIRA_TEAM_FIELD_ID is not set"; exit 1; }
 [[ -z "$JIRA_BASE_URL" ]] && { err "JIRA_BASE_URL is not set"; exit 1; }
 JIRA_BASE_URL="${JIRA_BASE_URL%/}"
 
-# shellcheck source=./md-to-adf.sh
-source "$SCRIPT_DIR/md-to-adf.sh"
+# shellcheck source=./twg-utils.sh
+source "$SCRIPT_DIR/twg-utils.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -71,53 +71,46 @@ if [[ -n "$DESCRIPTION_FILE" ]] && [[ ! -f "$DESCRIPTION_FILE" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Build JSON payload
+# Build create arguments
 # ---------------------------------------------------------------------------
 
 TMPFILE="$(mktemp /tmp/create-issue-XXXXXX.json)"
-TMPFILE_DESC="$(mktemp /tmp/create-issue-desc-XXXXXX.md)"
-trap 'rm -f "$TMPFILE" "$TMPFILE_DESC"' EXIT
+trap 'rm -f "$TMPFILE"' EXIT
 
-# Build description ADF
+DESCRIPTION_TEXT=""
 if [[ -n "$DESCRIPTION_FILE" ]]; then
-  DESC_JSON="$(render_markdown_to_adf "$DESCRIPTION_FILE")"
+  DESCRIPTION_TEXT="$(cat "$DESCRIPTION_FILE")"
 elif [[ -n "$DESCRIPTION" ]]; then
-  printf '%s' "$DESCRIPTION" > "$TMPFILE_DESC"
-  DESC_JSON="$(render_markdown_to_adf "$TMPFILE_DESC")"
-else
-  DESC_JSON="null"
+  DESCRIPTION_TEXT="$DESCRIPTION"
 fi
 
-jq -n \
-  --arg summary  "$SUMMARY" \
-  --arg project  "$PROJECT" \
-  --arg type     "$TYPE" \
-  --arg assignee "$ASSIGNEE" \
-  --arg priority "$PRIORITY" \
-  --arg teamId   "$TEAM_FIELD_ID" \
-  --argjson desc "$DESC_JSON" \
-  '{
-    additionalAttributes: {
-      priority: {name: $priority},
-      customfield_10625: {id: $teamId}
-    },
-    assignee:    (if $assignee != "" then $assignee else null end),
-    summary:     $summary,
-    description: $desc,
-    projectKey:  $project,
-    type:        $type
-  }' > "$TMPFILE"
+TWG_ARGS=(
+  jira workitem create
+  --space "$PROJECT"
+  --type "$TYPE"
+  --summary "$SUMMARY"
+  --priority "$PRIORITY"
+  --field "$TEAM_CUSTOM_FIELD_ID={\"id\":\"$TEAM_FIELD_ID\"}"
+)
+
+if [[ -n "$DESCRIPTION_TEXT" ]]; then
+  TWG_ARGS+=(--description "$DESCRIPTION_TEXT" --description-format markdown)
+fi
+
+if [[ -n "$ASSIGNEE" ]]; then
+  TWG_ARGS+=(--assignee "$ASSIGNEE")
+fi
 
 # ---------------------------------------------------------------------------
 # Create issue
 # ---------------------------------------------------------------------------
 
-OUTPUT="$(acli jira workitem create --from-json "$TMPFILE" --json)"
-KEY="$(printf '%s' "$OUTPUT" | jq -r '.key')"
+run_twg_json "$TMPFILE" "${TWG_ARGS[@]}"
+KEY="$(jq -r '.data.key // .key // .data[0].key // empty' "$TMPFILE")"
 
 if [[ -z "$KEY" ]] || [[ "$KEY" == "null" ]]; then
-  err "Failed to extract issue key from acli output."
-  printf '%s\n' "$OUTPUT" >&2
+  err "Failed to extract issue key from twg output."
+  cat "$TMPFILE" >&2
   exit 1
 fi
 

@@ -4,19 +4,19 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/acli-dump-issue.sh <ISSUE_KEY> [OUT_DIR]
+  bash scripts/twg-dump-issue.sh <ISSUE_KEY> [OUT_DIR]
 
-Writes deterministic Jira JSON dumps via acli for:
+Writes deterministic Jira JSON dumps via twg for:
   - parent core fields (key/type/summary/status/description)
   - parent comments (with id/author/created/updated/self)
   - subtask list (via JQL parent = KEY)
   - each subtask core fields + comments
 
 Defaults:
-  OUT_DIR = tmp/acli-dumps/<ISSUE_KEY>
+  OUT_DIR = tmp/twg-dumps/<ISSUE_KEY>
 
 Requires:
-  - acli (authenticated)
+  - twg (authenticated)
   - jq
 EOF
 }
@@ -27,43 +27,53 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || "${1:-}" == "" ]]; then
 fi
 
 ISSUE_KEY="$1"
-OUT_DIR="${2:-tmp/acli-dumps/$ISSUE_KEY}"
+OUT_DIR="${2:-tmp/twg-dumps/$ISSUE_KEY}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
 }
-need_cmd acli
+need_cmd twg
 need_cmd jq
+
+# shellcheck source=./twg-utils.sh
+source "$SCRIPT_DIR/twg-utils.sh"
 
 mkdir -p "$OUT_DIR"
 
 dump_parent() {
-  acli jira workitem view "$ISSUE_KEY" \
-    --fields key,issuetype,summary,status,description \
-    --json > "$OUT_DIR/parent.core.json"
+  twg_get_issue_legacy_json \
+    "$OUT_DIR/parent.core.json" \
+    "$ISSUE_KEY" \
+    "key,issuetype,summary,status,description"
 
-  acli jira workitem view "$ISSUE_KEY" \
-    --fields key,comment \
-    --json > "$OUT_DIR/parent.comments.json"
+  twg_get_issue_legacy_json \
+    "$OUT_DIR/parent.comments.json" \
+    "$ISSUE_KEY" \
+    "key,comment" \
+    --comments
 }
 
 dump_subtasks_list() {
-  acli jira workitem search \
-    --jql "parent = $ISSUE_KEY ORDER BY key ASC" \
-    --fields key,issuetype,summary,status \
-    --json --paginate > "$OUT_DIR/subtasks.list.json"
+  twg_query_issues_legacy_json \
+    "$OUT_DIR/subtasks.list.json" \
+    "parent = $ISSUE_KEY ORDER BY key ASC" \
+    "key,issuetype,summary,status"
 }
 
 dump_one_subtask() {
   local key="$1"
 
-  acli jira workitem view "$key" \
-    --fields key,issuetype,summary,status,description \
-    --json > "$OUT_DIR/subtask.${key}.core.json"
+  twg_get_issue_legacy_json \
+    "$OUT_DIR/subtask.${key}.core.json" \
+    "$key" \
+    "key,issuetype,summary,status,description"
 
-  acli jira workitem view "$key" \
-    --fields key,comment \
-    --json > "$OUT_DIR/subtask.${key}.comments.json"
+  twg_get_issue_legacy_json \
+    "$OUT_DIR/subtask.${key}.comments.json" \
+    "$key" \
+    "key,comment" \
+    --comments
 }
 
 warn_if_comments_truncated() {
@@ -77,7 +87,7 @@ warn_if_comments_truncated() {
   if [[ -n "${total:-}" && -n "${max:-}" ]]; then
     if [[ "$total" != "null" && "$max" != "null" ]]; then
       if (( total > max )); then
-        echo "WARN: $label comments truncated: total=$total maxResults=$max (acli workitem view does not paginate comments)" >&2
+        echo "WARN: $label comments truncated: total=$total maxResults=$max" >&2
       fi
     fi
   fi

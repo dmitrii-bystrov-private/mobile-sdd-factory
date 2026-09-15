@@ -31,8 +31,15 @@ check_brew_tool() {
 }
 
 check_brew_tool glab
-check_brew_tool acli
 check_brew_tool codex true
+
+section "TWG CLI"
+if command -v twg >/dev/null 2>&1; then
+    twg --version 2>/dev/null || true
+else
+    echo -e "${YELLOW}twg${RESET}: not installed"
+    echo "  Install: https://developer.atlassian.com/cloud/twg-cli/getting-started/installation/"
+fi
 
 # ── Claude Code ──────────────────────────────────────────────────────────────
 section "Claude Code CLI"

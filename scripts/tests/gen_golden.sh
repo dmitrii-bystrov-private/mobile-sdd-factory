@@ -11,7 +11,7 @@ FIXTURES="$SCRIPT_DIR/fixtures"
 GOLDEN="$SCRIPT_DIR/golden"
 mkdir -p "$GOLDEN"
 
-# Helper: transform raw acli comments JSON into [{id, created, body_md}] array
+# Helper: transform raw Jira comments JSON into [{id, created, body_md}] array
 _render_comments() {
   local raw_json="$1"
   local encoded_items

@@ -100,7 +100,7 @@ assert_no_such_file() {
 # Mock setup helpers
 # ---------------------------------------------------------------------------
 
-# Create a temp workspace and populate mock_bin with fake git and acli.
+# Create a temp workspace and populate mock_bin with fake git and twg.
 # Sets globals: TMP_ROOT, MOCK_WORKDIR, MOCK_IOS_DIR, MOCK_BIN, MOCK_FIXTURES.
 setup_workspace() {
   TMP_ROOT="$(mktemp -d)"
@@ -111,7 +111,7 @@ setup_workspace() {
   mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR" "$MOCK_BIN" "$MOCK_FIXTURES"
   trap 'rm -rf "$TMP_ROOT"' RETURN
 
-  # Populate mock fixtures (key-named copies for mock acli lookup)
+  # Populate mock fixtures (key-named copies for mock twg lookup)
   cp "$FIXTURES/parent_core.json"            "$MOCK_FIXTURES/IOS-100_core.json"
   cp "$FIXTURES/parent_comments.json"        "$MOCK_FIXTURES/IOS-100_comments.json"
   cp "$FIXTURES/subtasks_list.json"          "$MOCK_FIXTURES/subtasks_list.json"
@@ -168,17 +168,24 @@ EOF
   chmod +x "$MOCK_BIN/git"
 }
 
-# Write a mock acli. Modes:
+# Write a mock twg. Modes:
 #   fail_parent          — exit 1 immediately (before any output)
 #   fail_subtask_IOS-102 — succeed for parent/IOS-101, fail for IOS-102
 #   fail_transition      — fail only the optional transition to In Progress
 #   succeed              — route all calls to fixture files
-write_mock_acli() {
+write_mock_twg() {
   local mode="${1:-succeed}" fixtures="${MOCK_FIXTURES}"
-  cat > "$MOCK_BIN/acli" << EOF
+  local log_path="${2:-}"
+  cat > "$MOCK_BIN/twg" << EOF
 #!/usr/bin/env bash
+set -euo pipefail
 _MODE="${mode}"
 _FIXTURES="${fixtures}"
+_LOG_PATH="${log_path}"
+
+if [[ -n "\$_LOG_PATH" ]]; then
+  printf '%s\n' "\$*" >>"\$_LOG_PATH"
+fi
 
 # Extract the first argument matching a Jira key pattern
 _KEY=""
@@ -188,75 +195,56 @@ done
 
 case "\$_MODE" in
   fail_parent)
-    echo "mock acli: parent retrieval failed" >&2
+    echo "mock twg: parent retrieval failed" >&2
     exit 1
     ;;
   fail_transition)
     if echo "\$*" | grep -q "workitem transition"; then
-      echo "mock acli: transition failed" >&2
+      echo "mock twg: transition failed" >&2
       exit 1
     fi
     ;;
   fail_subtask_IOS-102)
     if [[ "\$_KEY" == "IOS-102" ]]; then
-      echo "mock acli: subtask IOS-102 retrieval failed" >&2
+      echo "mock twg: subtask IOS-102 retrieval failed" >&2
       exit 1
     fi
     ;;
 esac
 
 # Route to fixture files
-if echo "\$*" | grep -q "workitem view"; then
+if echo "\$*" | grep -q "workitem field update-metadata"; then
+  cat <<'JSON'
+{"data":{"fields":[{"id":"customfield_10107","name":"Dev finish date","required":false,"schema":{"type":"date"},"operations":["set"]},{"id":"customfield_10023","name":"Story Points","required":false,"schema":{"type":"number"},"operations":["set"]}]}}
+JSON
+elif echo "\$*" | grep -q -- "--field customfield_10107"; then
+  cat <<'JSON'
+{"data":[{"key":"IOS-100","customfield_10107":null,"customfield_10023":null,"status":{"name":"To Do"}}]}
+JSON
+elif echo "\$*" | grep -q "workitem update"; then
+  cat <<'JSON'
+{"data":{"key":"IOS-100"}}
+JSON
+elif echo "\$*" | grep -q "workitem transition --id .*--transition-id"; then
+  cat <<'JSON'
+{"data":{"key":"IOS-100","status":{"name":"In Progress"}}}
+JSON
+elif echo "\$*" | grep -q "workitem transition"; then
+  cat <<'JSON'
+{"data":{"transitions":[{"id":"461","name":"In Progress","toName":"In Progress","requirements":[],"fields":[]}]}}
+JSON
+elif echo "\$*" | grep -q "workitem get"; then
   if echo "\$*" | grep -q "comment"; then
     cat "\$_FIXTURES/\${_KEY}_comments.json"
   else
     cat "\$_FIXTURES/\${_KEY}_core.json"
   fi
-elif echo "\$*" | grep -q "workitem search"; then
+elif echo "\$*" | grep -q "workitem query"; then
   cat "\$_FIXTURES/subtasks_list.json"
+else
+  echo "unexpected twg command: \$*" >&2
+  exit 1
 fi
-EOF
-  chmod +x "$MOCK_BIN/acli"
-}
-
-write_mock_twg_story_transition() {
-  local log_path="$1"
-  cat > "$MOCK_BIN/twg" << EOF
-#!/usr/bin/env bash
-set -euo pipefail
-printf '%s\n' "\$*" >>"$log_path"
-
-case "\$*" in
-  'jira workitem field update-metadata --id IOS-100 -o json')
-    cat <<'JSON'
-{"data":{"fields":[{"id":"customfield_10107","name":"Dev finish date","required":false,"schema":{"type":"date"},"operations":["set"]},{"id":"customfield_10023","name":"Story Points","required":false,"schema":{"type":"number"},"operations":["set"]}]}}
-JSON
-    ;;
-  'jira workitem get IOS-100 --field customfield_10107 --field customfield_10023 --fields status,issuetype,summary -o json')
-    cat <<'JSON'
-{"data":[{"key":"IOS-100","customfield_10107":null,"customfield_10023":null,"status":{"name":"To Do"}}]}
-JSON
-    ;;
-  'jira workitem update --id IOS-100 --field customfield_10107=2026-09-03 --field customfield_10023=1 -o json')
-    cat <<'JSON'
-{"data":{"key":"IOS-100"}}
-JSON
-    ;;
-  'jira workitem transition --id IOS-100 -o json')
-    cat <<'JSON'
-{"data":{"transitions":[{"id":"461","name":"In Progress","toName":"In Progress","requirements":[],"fields":[]}]}}
-JSON
-    ;;
-  'jira workitem transition --id IOS-100 --transition-id 461 -o json')
-    cat <<'JSON'
-{"data":{"key":"IOS-100","status":{"name":"In Progress"}}}
-JSON
-    ;;
-  *)
-    echo "unexpected twg command: \$*" >&2
-    exit 1
-    ;;
-esac
 EOF
   chmod +x "$MOCK_BIN/twg"
 }
@@ -354,7 +342,7 @@ mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR" "$MOCK_BIN" "$MOCK_FIXTURES"
 
 cp "$FIXTURES/subtasks_list.json" "$MOCK_FIXTURES/"
 write_mock_git
-write_mock_acli "fail_parent"
+write_mock_twg "fail_parent"
 
 STDERR="$(mktemp)"
 if PATH="$MOCK_BIN:$PATH" SDD_WORKDIR="$MOCK_WORKDIR" IOS_DIR="$MOCK_IOS_DIR" \
@@ -392,7 +380,7 @@ cp "$FIXTURES/subtask_IOS-102_core.json"   "$MOCK_FIXTURES/IOS-102_core.json"
 cp "$FIXTURES/subtask_IOS-102_comments.json" "$MOCK_FIXTURES/IOS-102_comments.json"
 
 write_mock_git
-write_mock_acli "fail_transition"
+write_mock_twg "fail_transition"
 
 STDERR="$(mktemp)"
 ACTUAL_EXIT=0
@@ -407,7 +395,7 @@ else
   (( FAIL++ )) || true
 fi
 assert_stderr_contains "transition failure: warning logged" "could not transition IOS-100" "$STDERR"
-assert_stderr_contains "transition failure: acli output logged" "mock acli: transition failed" "$STDERR"
+assert_stderr_contains "transition failure: twg output logged" "mock twg: transition failed" "$STDERR"
 
 WDIR="$MOCK_WORKDIR/IOS-100"
 assert_file_exists "transition failure: parent description.md written" "$WDIR/description.md"
@@ -441,8 +429,7 @@ cp "$FIXTURES/subtask_IOS-102_comments.json" "$MOCK_FIXTURES/IOS-102_comments.js
 
 TWG_LOG="$TMP_ROOT/twg.log"
 write_mock_git
-write_mock_acli "succeed"
-write_mock_twg_story_transition "$TWG_LOG"
+write_mock_twg "succeed" "$TWG_LOG"
 write_mock_date_today "2026-09-03"
 
 STDERR="$(mktemp)"
@@ -470,6 +457,56 @@ rm -f "$STDERR"
 rm -rf "$TMP_ROOT"
 
 # ---------------------------------------------------------------------------
+# Bug transition: fill required fields and move to In Progress with twg
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- bug transition via twg ---"
+
+TMP_ROOT="$(mktemp -d)"
+MOCK_WORKDIR="$TMP_ROOT/workdir"
+MOCK_IOS_DIR="$TMP_ROOT/ios"
+MOCK_BIN="$TMP_ROOT/bin"
+MOCK_FIXTURES="$TMP_ROOT/fixtures"
+mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR" "$MOCK_BIN" "$MOCK_FIXTURES"
+
+jq '.fields.status.name = "To Do" | .fields.issuetype.name = "Bug"' "$FIXTURES/parent_core.json" > "$MOCK_FIXTURES/IOS-100_core.json"
+cp "$FIXTURES/parent_comments.json"        "$MOCK_FIXTURES/IOS-100_comments.json"
+cp "$FIXTURES/subtasks_list.json"          "$MOCK_FIXTURES/subtasks_list.json"
+cp "$FIXTURES/subtask_IOS-101_core.json"   "$MOCK_FIXTURES/IOS-101_core.json"
+cp "$FIXTURES/subtask_IOS-101_comments.json" "$MOCK_FIXTURES/IOS-101_comments.json"
+cp "$FIXTURES/subtask_IOS-102_core.json"   "$MOCK_FIXTURES/IOS-102_core.json"
+cp "$FIXTURES/subtask_IOS-102_comments.json" "$MOCK_FIXTURES/IOS-102_comments.json"
+
+TWG_LOG="$TMP_ROOT/twg.log"
+write_mock_git
+write_mock_twg "succeed" "$TWG_LOG"
+write_mock_date_today "2026-09-04"
+
+STDERR="$(mktemp)"
+ACTUAL_EXIT=0
+PATH="$MOCK_BIN:$PATH" \
+  SDD_WORKDIR="$MOCK_WORKDIR" \
+  IOS_DIR="$MOCK_IOS_DIR" \
+  SDD_JIRA_STORY_POINTS_VALUE="2" \
+  bash "$SNAPSHOT" IOS-100 > /dev/null 2>"$STDERR" || ACTUAL_EXIT=$?
+if [[ "$ACTUAL_EXIT" -eq 0 ]]; then
+  echo "  PASS  bug transition via twg: snapshot succeeds"
+  (( PASS++ )) || true
+else
+  echo "  FAIL  bug transition via twg: expected exit 0, got $ACTUAL_EXIT"
+  echo "        stderr: $(cat "$STDERR" 2>/dev/null || echo '(empty)')"
+  (( FAIL++ )) || true
+fi
+assert_file_contains "bug transition via twg: metadata read" "jira workitem field update-metadata --id IOS-100 -o json" "$TWG_LOG"
+assert_file_contains "bug transition via twg: current values read" "jira workitem get IOS-100 --field customfield_10107 --field customfield_10023" "$TWG_LOG"
+assert_file_contains "bug transition via twg: missing fields updated" "jira workitem update --id IOS-100 --field customfield_10107=2026-09-04 --field customfield_10023=2 -o json" "$TWG_LOG"
+assert_file_contains "bug transition via twg: transitions discovered" "jira workitem transition --id IOS-100 -o json" "$TWG_LOG"
+assert_file_contains "bug transition via twg: transition executed" "jira workitem transition --id IOS-100 --transition-id 461 -o json" "$TWG_LOG"
+
+rm -f "$STDERR"
+rm -rf "$TMP_ROOT"
+
+# ---------------------------------------------------------------------------
 # Subtask retrieval failure: partial success
 # ---------------------------------------------------------------------------
 echo ""
@@ -489,7 +526,7 @@ cp "$FIXTURES/subtask_IOS-101_core.json"   "$MOCK_FIXTURES/IOS-101_core.json"
 cp "$FIXTURES/subtask_IOS-101_comments.json" "$MOCK_FIXTURES/IOS-101_comments.json"
 
 write_mock_git
-write_mock_acli "fail_subtask_IOS-102"
+write_mock_twg "fail_subtask_IOS-102"
 
 STDERR="$(mktemp)"
 ACTUAL_EXIT=0
@@ -548,7 +585,7 @@ chmod +x "$MOCK_IOS_DIR/bin/mise"
 
 GIT_LOG="$TMP_ROOT/git.log"
 write_mock_git_new_worktree "$GIT_LOG"
-write_mock_acli "succeed"
+write_mock_twg "succeed"
 
 STDERR="$(mktemp)"
 ACTUAL_EXIT=0

@@ -20,14 +20,12 @@ need_cmd() {
 # Validate required tools
 # ---------------------------------------------------------------------------
 
-need_cmd acli
+need_cmd twg
 need_cmd jq
 need_cmd git
-need_cmd python3
 
-# Load markdown → ADF converter
-# shellcheck source=./md-to-adf.sh
-source "$SCRIPT_DIR/md-to-adf.sh"
+# shellcheck source=./twg-utils.sh
+source "$SCRIPT_DIR/twg-utils.sh"
 
 # ---------------------------------------------------------------------------
 # Parse arguments
@@ -92,48 +90,37 @@ PROJECT="${PARENT%%-*}"
 # Fetch parent assignee
 # ---------------------------------------------------------------------------
 
-ASSIGNEE_EMAIL="$(acli jira workitem view "$PARENT" --json | jq -r '.fields.assignee.emailAddress')"
+PARENT_JSON="$(mktemp)"
+CREATE_JSON="$(mktemp)"
+trap 'rm -f "$PARENT_JSON" "$CREATE_JSON"' EXIT
 
-if [[ -z "$ASSIGNEE_EMAIL" ]] || [[ "$ASSIGNEE_EMAIL" == "null" ]]; then
-  err "Parent issue $PARENT has no assignee or assignee email is missing."
+twg_get_issue_legacy_json "$PARENT_JSON" "$PARENT" "assignee"
+ASSIGNEE_ACCOUNT_ID="$(jq -r '.fields.assignee.accountId // empty' "$PARENT_JSON")"
+
+if [[ -z "$ASSIGNEE_ACCOUNT_ID" ]] || [[ "$ASSIGNEE_ACCOUNT_ID" == "null" ]]; then
+  err "Parent issue $PARENT has no assignee or assignee account id is missing."
   exit 1
 fi
-
-# ---------------------------------------------------------------------------
-# Convert description to ADF and build request payload
-# ---------------------------------------------------------------------------
-
-DESCRIPTION_ADF="$(render_markdown_to_adf "$DESCRIPTION")"
-
-TMP_JSON="$(mktemp /tmp/create-subtask-XXXXXX.json)"
-trap 'rm -f "$TMP_JSON"' EXIT
-
-jq -n \
-  --arg project   "$PROJECT" \
-  --arg parent    "$PARENT" \
-  --arg summary   "$TITLE" \
-  --arg assignee  "$ASSIGNEE_EMAIL" \
-  --argjson desc  "$DESCRIPTION_ADF" \
-  '{
-    type: "Sub-task",
-    projectKey: $project,
-    additionalAttributes: { parent: { key: $parent } },
-    summary: $summary,
-    description: $desc,
-    assignee: $assignee
-  }' > "$TMP_JSON"
 
 # ---------------------------------------------------------------------------
 # Create the subtask
 # ---------------------------------------------------------------------------
 
-CREATE_OUTPUT="$(acli jira workitem create --from-json "$TMP_JSON" --json)"
+run_twg_json "$CREATE_JSON" \
+  jira workitem create \
+  --space "$PROJECT" \
+  --type "Sub-task" \
+  --parent "$PARENT" \
+  --summary "$TITLE" \
+  --description "$(cat "$DESCRIPTION")" \
+  --description-format markdown \
+  --assignee "$ASSIGNEE_ACCOUNT_ID"
 
-SUBTASK_KEY="$(printf '%s' "$CREATE_OUTPUT" | jq -r '.key')"
+SUBTASK_KEY="$(jq -r '.data.key // .key // .data[0].key // empty' "$CREATE_JSON")"
 
 if [[ -z "$SUBTASK_KEY" ]] || [[ "$SUBTASK_KEY" == "null" ]]; then
-  err "Failed to extract subtask key from acli output."
-  printf '%s\n' "$CREATE_OUTPUT" >&2
+  err "Failed to extract subtask key from twg output."
+  cat "$CREATE_JSON" >&2
   exit 1
 fi
 

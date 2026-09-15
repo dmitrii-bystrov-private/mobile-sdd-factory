@@ -20,9 +20,12 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { err "Missing required command: $1"; exit 1; }
 }
 
-need_cmd acli
+need_cmd twg
 need_cmd jq
 need_cmd git
+
+# shellcheck source=./twg-utils.sh
+source "$SCRIPT_DIR/twg-utils.sh"
 
 PARENT=""
 PLAN_DIR=""
@@ -139,12 +142,13 @@ else
 fi
 
 echo "Fetching existing subtasks for $PARENT from Jira..."
-EXISTING_TITLES_JSON="$(acli jira workitem search \
-  --jql "parent = $PARENT ORDER BY key ASC" \
-  --fields key,summary \
-  --json --paginate 2>/dev/null)" || EXISTING_TITLES_JSON="[]"
+EXISTING_TITLES_JSON_FILE="$(mktemp)"
+trap 'rm -f "$EXISTING_TITLES_JSON_FILE"' EXIT
+twg_query_issues_legacy_json "$EXISTING_TITLES_JSON_FILE" \
+  "parent = $PARENT ORDER BY key ASC" \
+  "key,summary" 2>/dev/null || printf '[]' >"$EXISTING_TITLES_JSON_FILE"
 
-EXISTING_TITLES="$(echo "$EXISTING_TITLES_JSON" | jq -r '.[].fields.summary' 2>/dev/null | tr '[:upper:]' '[:lower:]')" || EXISTING_TITLES=""
+EXISTING_TITLES="$(jq -r '.[].fields.summary' "$EXISTING_TITLES_JSON_FILE" 2>/dev/null | tr '[:upper:]' '[:lower:]')" || EXISTING_TITLES=""
 
 declare -a CREATED_KEYS
 declare -a CREATED_TITLES

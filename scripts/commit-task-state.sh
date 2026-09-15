@@ -6,18 +6,25 @@
 # passes so progress is preserved incrementally before later quality gates.
 #
 # Required env: SDD_WORKDIR, and IOS_DIR or ANDROID_DIR
-# Required CLI: acli, jq, git
+# Required CLI: twg, jq, git
 set -euo pipefail
 
 KEY="${1:?Usage: commit-task-state.sh <TASK-KEY> [CONTEXT]}"
 CONTEXT="${2:-}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-command -v acli >/dev/null 2>&1 || { echo "Missing required command: acli" >&2; exit 1; }
+command -v twg >/dev/null 2>&1 || { echo "Missing required command: twg" >&2; exit 1; }
 command -v jq   >/dev/null 2>&1 || { echo "Missing required command: jq" >&2; exit 1; }
 command -v git  >/dev/null 2>&1 || { echo "Missing required command: git" >&2; exit 1; }
 [[ -n "${SDD_WORKDIR:-}" ]] || { echo "SDD_WORKDIR is not set" >&2; exit 1; }
 
-json="$(acli jira workitem view "$KEY" --fields 'summary,issuetype,parent' --json)"
+source "$SCRIPT_DIR/twg-utils.sh"
+
+tmp_json="$(mktemp)"
+trap 'rm -f "$tmp_json"' EXIT
+
+twg_get_issue_legacy_json "$tmp_json" "$KEY" "summary,issuetype,parent"
+json="$(cat "$tmp_json")"
 title="$(printf '%s' "$json" | jq -r '.fields.summary')"
 is_subtask="$(printf '%s' "$json" | jq -r '.fields.issuetype.subtask')"
 

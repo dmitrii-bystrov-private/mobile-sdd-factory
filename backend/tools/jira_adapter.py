@@ -19,19 +19,7 @@ class JiraAdapter:
         return self.runner.run(["bash", "scripts/get-issue-type.sh", task_key], cwd=self.repo_root)
 
     def get_issue_status(self, task_key: str) -> CommandResult:
-        return self.runner.run(
-            [
-                "acli",
-                "jira",
-                "workitem",
-                "view",
-                task_key,
-                "--fields",
-                "status",
-                "--json",
-            ],
-            cwd=self.repo_root,
-        )
+        return self.runner.run(["bash", "scripts/get-issue-status.sh", task_key], cwd=self.repo_root)
 
     def create_subtasks(self, task_key: str, plan_dir: Path) -> CommandResult:
         return self.runner.run(

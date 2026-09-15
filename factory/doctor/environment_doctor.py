@@ -401,8 +401,8 @@ def build_report(
             which_func=which_func,
         ),
         _command_presence_check(
-            command_name="acli",
-            label="Atlassian CLI",
+            command_name="twg",
+            label="Atlassian Teamwork Graph CLI",
             required=True,
             which_func=which_func,
         ),
@@ -490,16 +490,16 @@ def build_report(
     checks.extend(
         [
             _auth_check(
-                check_id="auth.acli_jira",
-                label="Atlassian CLI Jira auth",
+                check_id="auth.twg",
+                label="Atlassian Teamwork Graph auth",
                 required=True,
-                command_name="acli",
-                command=["acli", "jira", "auth", "status"],
+                command_name="twg",
+                command=["twg", "whoami"],
                 which_func=which_func,
                 command_runner=command_runner,
-                success_predicate=lambda output: "authenticated" in output.lower(),
+                success_predicate=lambda output: bool(output.strip()) and "error" not in output.lower(),
                 success_formatter=None,
-                hint="Run `acli jira auth login`.",
+                hint="Run `twg login`.",
             ),
             _auth_check(
                 check_id="auth.glab",
