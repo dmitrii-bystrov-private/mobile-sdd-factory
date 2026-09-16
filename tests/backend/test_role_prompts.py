@@ -175,6 +175,7 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("## Terminal Result Contract", agents)
         self.assertIn("--output-type completed", agents)
         self.assertIn("--subtask-key <subtask_key>", agents)
+        self.assertIn("Use the subtask completion command only for routed subtask implementation work", agents)
         self.assertIn("--output-type failed", agents)
         self.assertIn("--needs-operator-input", agents)
         self.assertIn("do not use `SDD_ERROR` as routed work delivery", agents)
@@ -183,6 +184,25 @@ class RolePromptTests(unittest.TestCase):
         self.assertIn("--preferred-direction \"<recommended direction>\"", agents)
         self.assertIn("--requested-decision \"<decision needed>\"", agents)
         self.assertNotIn("also include `conflict_point`", agents)
+
+    def test_non_implementer_agents_do_not_mention_subtask_key(self) -> None:
+        for role_name in (
+            "convention-reviewer",
+            "requirements-reviewer",
+            "documentation-reviewer",
+            "verification-coordinator",
+            "doc-harvest-worker",
+            "proposal-context-worker",
+            "requirements-clarifier-worker",
+            "acceptance-criteria-worker",
+            "constraints-worker",
+            "spec-verifier-worker",
+            "task-decomposer-worker",
+        ):
+            with self.subTest(role_name=role_name):
+                agents = self._agents(role_name)
+                self.assertNotIn("subtask_key", agents)
+                self.assertNotIn("<subtask_key>", agents)
 
     def test_agents_require_successful_helper_exit_before_claiming_submission(self) -> None:
         agents = self._agents("implementer")

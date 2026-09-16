@@ -445,7 +445,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
 def _terminal_result_contract(role_name: str) -> list[str]:
     helper = 'bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh"'
     common = [
-        "- Replace `<work_item_id>` and `<subtask_key>` with the exact values from `HYDRATION.json` when present.",
+        "- Replace `<work_item_id>` with the exact value from `HYDRATION.json` when present.",
         "- Keep summaries short and operator-readable.",
     ]
     if role_name in {"convention-reviewer", "requirements-reviewer"}:
@@ -484,6 +484,7 @@ def _terminal_result_contract(role_name: str) -> list[str]:
             f"  `{helper} --work-item-id <work_item_id> --output-type completed --summary \"Implementation completed\"`",
             "- Subtask implementation completed:",
             f"  `{helper} --work-item-id <work_item_id> --output-type completed --subtask-key <subtask_key> --summary \"Subtask completed\"`",
+            "- Use the subtask completion command only for routed subtask implementation work; replace `<subtask_key>` with the exact value from `HYDRATION.json`.",
             "- Implementation could not complete:",
             f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Implementation blocked\" --details \"<what prevented completion>\"`",
             "- Operator decision required before this implementation/correction can continue:",
@@ -604,7 +605,7 @@ def build_role_agents_md(
             "- When passing a generated file to the helper, use the literal path printed by the file-creation command or assign and use the shell variable inside one same command; do not rely on shell variables from earlier tool calls.",
             "- Do not call `scripts/write-result.py` directly, do not choose terminal output paths yourself, and do not try to recreate fallback files manually.",
             "- Do not override `SDD_FACTORY_BACKEND_URL`, `SDD_FACTORY_BACKEND_HOST`, or `SDD_FACTORY_BACKEND_PORT`, and do not debug transport or fallback behavior from inside the role.",
-            "- When the routed hydration payload includes `work_item_id`, pass that same `work_item_id` into the helper unchanged. When it also includes `subtask_key`, pass that same `subtask_key` unchanged too.",
+            "- When the routed hydration payload includes `work_item_id`, pass that same `work_item_id` into the helper unchanged.",
             "- After the helper exits successfully, stop immediately and do not submit the same work item again.",
             "- If the helper exits non-zero or the routed stage has already moved on, stop and wait for fresh routed work; do not retry through alternate scripts, alternate environment variables, or manual files.",
             "",
