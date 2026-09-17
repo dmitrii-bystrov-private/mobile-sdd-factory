@@ -1060,6 +1060,7 @@ class CoordinatorService:
             producer_type="coordinator",
             producer_id=None,
             session_status=SessionStatus.ACTIVE,
+            advance_session=False,
         )
         self._refresh_post_harvest_diff_artifacts(session.task_key)
         if event is None:
@@ -6469,6 +6470,7 @@ class CoordinatorService:
             producer_id=DOC_HARVEST_ROLE,
             emit_event=False,
             session_status=SessionStatus.ACTIVE,
+            advance_session=False,
         )
         session, _commit_event = self._commit_task_state(session, "doc harvest")
         self._refresh_post_harvest_diff_artifacts(session.task_key)
@@ -6482,6 +6484,7 @@ class CoordinatorService:
         producer_id: str | None,
         emit_event: bool = True,
         session_status: SessionStatus = SessionStatus.COMPLETED,
+        advance_session: bool = True,
     ) -> tuple[Session, Event | None]:
         if self.artifacts_root is None:
             raise IntakeError("Coordinator is missing artifact root")
@@ -6500,12 +6503,13 @@ class CoordinatorService:
             path=str(artifact_path),
             metadata={"summary_length": len(summary)},
         )
-        session = self.session_repository.update_stage_and_owner(
-            session.id,
-            current_stage="doc_harvest_completed",
-            current_owner=None,
-        )
-        session = self.session_repository.update_status(session.id, session_status)
+        if advance_session:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="doc_harvest_completed",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, session_status)
         if not emit_event:
             return session, None
         event = self._append_event(

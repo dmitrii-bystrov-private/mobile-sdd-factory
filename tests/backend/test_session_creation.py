@@ -9785,6 +9785,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("documentation_review_requested", updated_session.current_stage)
         self.assertEqual("doc_harvest_completed", event.event_type)
         self.assertEqual("active", event.payload.get("status"))
+        self.assertEqual("doc_harvest_requested", event.payload.get("current_stage"))
         self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts))
         outcome_path = Path(self.temp_dir.name) / "IOS-30021F" / "spec" / "doc-harvest-outcome.json"
         self.assertTrue(outcome_path.exists())
@@ -9932,7 +9933,15 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("documentation_review_requested", followup_event.event_type)
         self.assertEqual("active", updated_session.status.value)
         self.assertEqual("documentation_review_requested", updated_session.current_stage)
+        self.assertEqual(DOCUMENTATION_REVIEWER_ROLE, updated_session.current_owner)
         self.assertTrue(any(item.event_type == "git_commit_completed" for item in events))
+        self.assertFalse(
+            any(
+                item.event_type == "git_commit_completed"
+                and item.payload.get("current_stage") == "doc_harvest_completed"
+                for item in events
+            )
+        )
         self.assertFalse(any(item.event_type == "mr_handoff_completed" for item in events))
 
     def test_doc_harvest_completion_parks_when_delivery_gate_is_blocked(self) -> None:
