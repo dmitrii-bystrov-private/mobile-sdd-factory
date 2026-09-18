@@ -17,6 +17,7 @@ from typing import Callable
 CheckStatus = str
 WhichFunc = Callable[[str], str | None]
 CommandRunner = Callable[[list[str]], tuple[int, str]]
+COMMAND_TIMEOUT_SECONDS = 10
 
 
 @dataclass(frozen=True)
@@ -66,13 +67,21 @@ def _load_enabled_mcp_servers(repo_root: Path) -> tuple[set[str], list[str]]:
 
 
 def _run_command(command: list[str]) -> tuple[int, str]:
-    completed = subprocess.run(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            check=False,
+            timeout=COMMAND_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = (exc.stdout or "").strip()
+        details = f"Timed out after {COMMAND_TIMEOUT_SECONDS}s"
+        if output:
+            details = f"{details}: {output}"
+        return 124, details
     return completed.returncode, completed.stdout.strip()
 
 

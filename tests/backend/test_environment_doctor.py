@@ -2,10 +2,25 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from factory.doctor import environment_doctor
 from factory.doctor.environment_doctor import build_report, format_human_report
 
 
 class EnvironmentDoctorTests(unittest.TestCase):
+    def test_run_command_times_out_hung_auth_checks(self) -> None:
+        original_timeout = environment_doctor.COMMAND_TIMEOUT_SECONDS
+        try:
+            environment_doctor.COMMAND_TIMEOUT_SECONDS = 1
+
+            returncode, output = environment_doctor._run_command(
+                ["python3", "-c", "import time; time.sleep(30)"]
+            )
+        finally:
+            environment_doctor.COMMAND_TIMEOUT_SECONDS = original_timeout
+
+        self.assertEqual(124, returncode)
+        self.assertIn("Timed out after 1s", output)
+
     def test_build_report_reads_env_values_from_dotenv_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             repo_root = Path(temp_dir)
