@@ -26,6 +26,11 @@ current_status="$(printf '%s' "$json" | jq -r '.fields.status.name')"
 
 target_status="Ready for test"
 
+if [[ "$current_status" == "$target_status" ]]; then
+  echo "Already done: $KEY is already $target_status"
+  exit 0
+fi
+
 echo "Transitioning $KEY ($current_status) → $target_status..."
 if [[ "$current_status" == "To Do" ]]; then
   run_twg_json "$transition_json" jira workitem update --id "$KEY" --status "In Progress"

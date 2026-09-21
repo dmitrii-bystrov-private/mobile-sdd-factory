@@ -243,6 +243,7 @@ bash scripts/send-to-test.sh <TASK-KEY>
 
 - Workflow checkpoint commits should already exist before this step; this script only performs the Jira transition.
 - Non-bug tasks transition to **Ready for test**.
+- If the task is already **Ready for test**, the script exits successfully without changing Jira.
 - If the task is in **To Do**, transitions through **In Progress** first.
 
 Requires `twg` and `jq`.
