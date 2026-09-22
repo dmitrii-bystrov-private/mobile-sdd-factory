@@ -45,16 +45,21 @@ fi
 
 rm -rf "$RESULT_BUNDLE"
 echo "⏳ Building for testing with task-local Xcode context..."
-if xcodebuild \
-  -workspace "$WORKSPACE" \
-  -scheme "$SCHEME" \
-  -destination "platform=iOS Simulator,id=$TESTING_DEVICE_ID" \
-  -derivedDataPath "$SDD_IOS_DERIVED_DATA_PATH" \
-  -clonedSourcePackagesDirPath "$SDD_IOS_CLONED_SOURCE_PACKAGES_PATH" \
-  -resultBundlePath "$RESULT_BUNDLE" \
-  build-for-testing \
-  CODE_SIGN_IDENTITY="" \
-  CODE_SIGNING_REQUIRED=NO >"$BUILD_LOG" 2>&1; then
+run_build_for_testing() {
+  verification_prune_ios_derived_data_if_needed "$KEY"
+  xcodebuild \
+    -workspace "$WORKSPACE" \
+    -scheme "$SCHEME" \
+    -destination "platform=iOS Simulator,id=$TESTING_DEVICE_ID" \
+    -derivedDataPath "$SDD_IOS_DERIVED_DATA_PATH" \
+    -clonedSourcePackagesDirPath "$SDD_IOS_CLONED_SOURCE_PACKAGES_PATH" \
+    -resultBundlePath "$RESULT_BUNDLE" \
+    build-for-testing \
+    CODE_SIGN_IDENTITY="" \
+    CODE_SIGNING_REQUIRED=NO >"$BUILD_LOG" 2>&1
+}
+
+if verification_run_with_ios_task_lock "$KEY" run_build_for_testing; then
   cat >"$BUILD_MARKER" <<EOF
 {"head":"$CURRENT_HEAD","policy":"$BUILD_PRODUCTS_POLICY"}
 EOF

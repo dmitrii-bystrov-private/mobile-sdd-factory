@@ -35,16 +35,21 @@ SIMCTL_LOG="$SDD_IOS_LAUNCH_LOGS_PATH/simctl.log"
 PRODUCTS_DIR="$SDD_IOS_LAUNCH_DERIVED_DATA_PATH/Build/Products/Debug-iphonesimulator"
 
 echo "⏳ Building $SCHEME for iOS Simulator $DEVICE_ID..."
-if ! xcodebuild \
-  -workspace "$WORKSPACE" \
-  -scheme "$SCHEME" \
-  -configuration Debug \
-  -destination "platform=iOS Simulator,id=$DEVICE_ID" \
-  -derivedDataPath "$SDD_IOS_LAUNCH_DERIVED_DATA_PATH" \
-  -clonedSourcePackagesDirPath "$SDD_IOS_CLONED_SOURCE_PACKAGES_PATH" \
-  build \
-  CODE_SIGN_IDENTITY="" \
-  CODE_SIGNING_REQUIRED=NO >"$BUILD_LOG" 2>&1; then
+build_for_launch() {
+  verification_prune_ios_derived_data_if_needed "$KEY"
+  xcodebuild \
+    -workspace "$WORKSPACE" \
+    -scheme "$SCHEME" \
+    -configuration Debug \
+    -destination "platform=iOS Simulator,id=$DEVICE_ID" \
+    -derivedDataPath "$SDD_IOS_LAUNCH_DERIVED_DATA_PATH" \
+    -clonedSourcePackagesDirPath "$SDD_IOS_CLONED_SOURCE_PACKAGES_PATH" \
+    build \
+    CODE_SIGN_IDENTITY="" \
+    CODE_SIGNING_REQUIRED=NO >"$BUILD_LOG" 2>&1
+}
+
+if ! verification_run_with_ios_task_lock "$KEY" build_for_launch; then
   echo "❌ IOS APP BUILD FAILED"
   verification_print_failure_matches "$BUILD_LOG" "error:|fatal error:|Testing failed:|encountered an error"
   exit 1

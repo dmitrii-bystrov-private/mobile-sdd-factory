@@ -177,6 +177,7 @@ DEFAULT_JIRA_ASSIGNEE=you@example.com
 SDD_IOS_WORKSPACE_NAME=App-Tuist.xcworkspace
 SDD_IOS_DEFAULT_SCHEME=App
 IOS_RUN_DEVICE_ID=ios-simulator-uuid-for-manual-launches
+IOS_MIN_FREE_DISK_GB=50
 ```
 
 `snapshot.sh` uses `twg` for Jira reads and transitions. Before moving `To Do` Stories or Bugs to `In Progress`, it fills empty `Dev finish date` with today's date and empty `Story Points` with the configured default.
@@ -228,6 +229,8 @@ bash scripts/run-lint.sh <KEY>
 ```
 
 For manual iOS inspection, the operator UI can launch a completed task build on a simulator. Set `IOS_RUN_DEVICE_ID` to the simulator used for this manual launch path. If it is not set, the launch helper falls back to `TESTING_DEVICE_ID`. The launch helper reuses the task-local iOS verification DerivedData so a completed task can usually install from the existing build cache instead of rebuilding from scratch.
+
+Before iOS build, test, and manual launch operations, the scripts check free disk space on `$SDD_WORKDIR`. When free space is below `IOS_MIN_FREE_DISK_GB` (default: `50`), they remove task-local iOS DerivedData caches from older sibling tasks, skipping the current task and tasks with active iOS locks. Set `IOS_DERIVED_DATA_PRUNE_ENABLED=0` to disable this automatic pruning.
 
 When verification passes, the backend completes the task, creates the MR, and moves the Jira task to testing automatically. Manual MR/send-to-test actions are recovery tools for failed delivery, not the normal path.
 

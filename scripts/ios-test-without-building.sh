@@ -49,7 +49,12 @@ run_tests_without_building() {
   "${XCODEBUILD_CMD[@]}" >"$TEST_LOG" 2>&1
 }
 
-if verification_run_with_ios_simulator_lock "$TESTING_DEVICE_ID" run_tests_without_building; then
+run_locked_tests_without_building() {
+  verification_prune_ios_derived_data_if_needed "$KEY"
+  verification_run_with_ios_simulator_lock "$TESTING_DEVICE_ID" run_tests_without_building
+}
+
+if verification_run_with_ios_task_lock "$KEY" run_locked_tests_without_building; then
     echo "✅ TEST SUCCEEDED"
     exit 0
 fi

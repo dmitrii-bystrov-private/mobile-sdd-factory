@@ -40,6 +40,7 @@ DEFAULT_JIRA_ASSIGNEE=you@example.com
 SDD_IOS_WORKSPACE_NAME=App-Tuist.xcworkspace
 SDD_IOS_DEFAULT_SCHEME=App
 IOS_RUN_DEVICE_ID=ios-simulator-uuid-for-manual-launches
+IOS_MIN_FREE_DISK_GB=50
 ```
 
 Install and authenticate Atlassian Teamwork Graph CLI (`twg`) for Jira reads, writes, and transitions. During `snapshot.sh`, Stories and Bugs moving from `To Do` to `In Progress` use TWG metadata to fill empty `Dev finish date` with today's date and empty `Story Points` before transition.
@@ -48,6 +49,8 @@ Install and authenticate Atlassian Teamwork Graph CLI (`twg`) for Jira reads, wr
 When it is not set, the verification scripts auto-detect a single `.xcworkspace` at the iOS repo root.
 `SDD_IOS_DEFAULT_SCHEME` is used when the generated verification strategy does not provide a preferred scheme.
 `IOS_RUN_DEVICE_ID` is used by the operator UI manual iOS launch action. It is separate from the verification simulator so manual app inspection does not have to share the test runner destination. If unset, the launch helper falls back to `TESTING_DEVICE_ID`. Manual launches reuse the task-local iOS verification DerivedData cache and keep it until the task is cleaned up.
+
+`IOS_MIN_FREE_DISK_GB` controls automatic task-local iOS DerivedData pruning before build, test, and manual launch operations. The default is `50`. When free space on `$SDD_WORKDIR` drops below the threshold, older sibling task caches are removed while the current task and active iOS task locks are preserved. Set `IOS_DERIVED_DATA_PRUNE_ENABLED=0` to disable pruning.
 
 ## tmux
 

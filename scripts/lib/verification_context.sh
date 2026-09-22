@@ -119,6 +119,162 @@ verification_run_with_ios_simulator_lock() (
   "$@"
 )
 
+verification_safe_lock_name() {
+  printf '%s' "$1" | sed 's/[^A-Za-z0-9_.-]/_/g'
+}
+
+verification_ios_task_lock_dir() {
+  local key="$1"
+  local safe_key
+  safe_key="$(verification_safe_lock_name "$key")"
+  local lock_root="${SDD_IOS_TASK_LOCK_ROOT:-${SDD_WORKDIR}/.locks}"
+  printf '%s\n' "$lock_root/ios-task-${safe_key}.lock"
+}
+
+verification_ios_task_lock_is_active() {
+  local key="$1"
+  local lock_dir
+  lock_dir="$(verification_ios_task_lock_dir "$key")"
+  local pid_file="$lock_dir/owner.pid"
+
+  if [[ ! -d "$lock_dir" ]]; then
+    return 1
+  fi
+
+  local owner_pid=""
+  if [[ -f "$pid_file" ]]; then
+    owner_pid="$(cat "$pid_file" 2>/dev/null || true)"
+  fi
+  if [[ -n "$owner_pid" ]] && kill -0 "$owner_pid" 2>/dev/null; then
+    return 0
+  fi
+
+  rm -rf "$lock_dir"
+  return 1
+}
+
+verification_run_with_ios_task_lock() (
+  local key="$1"
+  shift
+
+  local lock_dir
+  lock_dir="$(verification_ios_task_lock_dir "$key")"
+  local lock_root
+  lock_root="$(dirname "$lock_dir")"
+  local pid_file="$lock_dir/owner.pid"
+  local owner_file="$lock_dir/owner.txt"
+  local wait_logged=0
+
+  mkdir -p "$lock_root"
+  while ! mkdir "$lock_dir" 2>/dev/null; do
+    if ! verification_ios_task_lock_is_active "$key"; then
+      continue
+    fi
+    if [[ "$wait_logged" -eq 0 ]]; then
+      echo "⏳ Waiting for iOS task lock: $key"
+      wait_logged=1
+    fi
+    sleep 2
+  done
+
+  printf '%s\n' "${BASHPID-$$}" >"$pid_file"
+  printf 'task=%s started_at=%s\n' "$key" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$owner_file"
+  trap 'rm -rf "$lock_dir"' EXIT INT TERM
+
+  "$@"
+)
+
+verification_ios_derived_data_task_key() {
+  local path="$1"
+  basename "$(dirname "$(dirname "$(dirname "$(dirname "$path")")")")"
+}
+
+verification_path_mtime() {
+  local path="$1"
+  stat -f '%m' "$path" 2>/dev/null || stat -c '%Y' "$path" 2>/dev/null || printf '0\n'
+}
+
+verification_available_disk_kb() {
+  local path="$1"
+  df -Pk "$path" | awk 'NR == 2 {print $4}'
+}
+
+verification_prune_ios_derived_data_if_needed() {
+  local current_key="$1"
+
+  if [[ "${IOS_DERIVED_DATA_PRUNE_ENABLED:-1}" == "0" ]]; then
+    return 0
+  fi
+
+  local min_free_gb="${IOS_MIN_FREE_DISK_GB:-50}"
+  if [[ ! "$min_free_gb" =~ ^[0-9]+$ ]]; then
+    echo "⚠️  IOS_MIN_FREE_DISK_GB must be an integer number of gigabytes; got: $min_free_gb" >&2
+    return 1
+  fi
+
+  local min_free_kb=$((min_free_gb * 1024 * 1024))
+  local available_kb
+  available_kb="$(verification_available_disk_kb "$SDD_WORKDIR")"
+  if [[ -z "$available_kb" || ! "$available_kb" =~ ^[0-9]+$ ]]; then
+    echo "⚠️  Unable to determine free disk space for $SDD_WORKDIR" >&2
+    return 1
+  fi
+
+  if (( available_kb >= min_free_kb )); then
+    return 0
+  fi
+
+  echo "⚠️  Low disk space before iOS operation: $((available_kb / 1024 / 1024))GB free, target is ${min_free_gb}GB."
+  echo "🧹 Pruning task-local iOS DerivedData caches from older sibling tasks..."
+
+  local current_path="${SDD_WORKDIR}/${current_key}/tmp/verification/ios/derived-data"
+  local candidates=()
+  local derived_data_path
+  while IFS= read -r derived_data_path; do
+    [[ -d "$derived_data_path" ]] || continue
+    [[ "$derived_data_path" != "$current_path" ]] || continue
+    local task_key
+    task_key="$(verification_ios_derived_data_task_key "$derived_data_path")"
+    [[ -n "$task_key" ]] || continue
+    if verification_ios_task_lock_is_active "$task_key"; then
+      echo "  Skipping active iOS task cache: $task_key"
+      continue
+    fi
+    candidates+=("$(verification_path_mtime "$derived_data_path") $derived_data_path")
+  done < <(find "$SDD_WORKDIR" -path "*/tmp/verification/ios/derived-data" -type d -print 2>/dev/null)
+
+  if [[ "${#candidates[@]}" -eq 0 ]]; then
+    echo "⚠️  No removable sibling iOS DerivedData caches found."
+    return 0
+  fi
+
+  local removed_any=0
+  local sorted_candidate
+  while IFS= read -r sorted_candidate; do
+    [[ -n "$sorted_candidate" ]] || continue
+    derived_data_path="${sorted_candidate#* }"
+    [[ -d "$derived_data_path" ]] || continue
+    local task_key
+    task_key="$(verification_ios_derived_data_task_key "$derived_data_path")"
+    rm -rf "$derived_data_path"
+    removed_any=1
+    echo "  Removed iOS DerivedData cache for $task_key"
+
+    available_kb="$(verification_available_disk_kb "$SDD_WORKDIR")"
+    if [[ "$available_kb" =~ ^[0-9]+$ ]] && (( available_kb >= min_free_kb )); then
+      echo "✅ Disk space target reached: $((available_kb / 1024 / 1024))GB free."
+      return 0
+    fi
+  done < <(printf '%s\n' "${candidates[@]}" | sort -n)
+
+  available_kb="$(verification_available_disk_kb "$SDD_WORKDIR")"
+  if [[ "$available_kb" =~ ^[0-9]+$ ]]; then
+    if (( removed_any == 1 )); then
+      echo "⚠️  Disk space after pruning is $((available_kb / 1024 / 1024))GB, still below target ${min_free_gb}GB."
+    fi
+  fi
+}
+
 verification_print_failure_matches() {
   local log_path="$1"
   local pattern="$2"

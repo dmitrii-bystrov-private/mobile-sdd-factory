@@ -30,17 +30,22 @@ RESULT_BUNDLE="$SDD_IOS_XCRESULT_ROOT/build.xcresult"
 
 rm -rf "$RESULT_BUNDLE"
 echo "⏳ Building with task-local Xcode context..."
-if xcodebuild \
-  -workspace "$WORKSPACE" \
-  -scheme "$SCHEME" \
-  -configuration Debug \
-  -destination "platform=iOS Simulator,id=$TESTING_DEVICE_ID" \
-  -derivedDataPath "$SDD_IOS_DERIVED_DATA_PATH" \
-  -clonedSourcePackagesDirPath "$SDD_IOS_CLONED_SOURCE_PACKAGES_PATH" \
-  -resultBundlePath "$RESULT_BUNDLE" \
-  build \
-  CODE_SIGN_IDENTITY="" \
-  CODE_SIGNING_REQUIRED=NO >"$BUILD_LOG" 2>&1; then
+run_build() {
+  verification_prune_ios_derived_data_if_needed "$KEY"
+  xcodebuild \
+    -workspace "$WORKSPACE" \
+    -scheme "$SCHEME" \
+    -configuration Debug \
+    -destination "platform=iOS Simulator,id=$TESTING_DEVICE_ID" \
+    -derivedDataPath "$SDD_IOS_DERIVED_DATA_PATH" \
+    -clonedSourcePackagesDirPath "$SDD_IOS_CLONED_SOURCE_PACKAGES_PATH" \
+    -resultBundlePath "$RESULT_BUNDLE" \
+    build \
+    CODE_SIGN_IDENTITY="" \
+    CODE_SIGNING_REQUIRED=NO >"$BUILD_LOG" 2>&1
+}
+
+if verification_run_with_ios_task_lock "$KEY" run_build; then
   echo "✅ BUILD SUCCEEDED"
   exit 0
 fi
