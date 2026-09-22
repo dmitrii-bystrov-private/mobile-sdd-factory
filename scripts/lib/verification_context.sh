@@ -32,6 +32,19 @@ verification_prepare_ios_context() {
     "$SDD_IOS_VERIFICATION_LOGS_PATH"
 }
 
+verification_prepare_ios_launch_context() {
+  local key="$1"
+  verification_prepare_ios_context "$key"
+
+  local context_root="${SDD_WORKDIR}/${key}/tmp/launch/ios"
+  export SDD_IOS_LAUNCH_CONTEXT_ROOT="$context_root"
+  export SDD_IOS_LAUNCH_DERIVED_DATA_PATH="$SDD_IOS_DERIVED_DATA_PATH"
+  export SDD_IOS_LAUNCH_LOGS_PATH="$context_root/logs"
+
+  mkdir -p \
+    "$SDD_IOS_LAUNCH_LOGS_PATH"
+}
+
 verification_prepare_android_context() {
   local key="$1"
   local context_root="${SDD_WORKDIR}/${key}/tmp/verification/android"

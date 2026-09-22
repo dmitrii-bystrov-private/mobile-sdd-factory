@@ -193,6 +193,16 @@ Output is already filtered by the underlying scripts â€” on success a single `âœ
 
 Requires `SDD_WORKDIR` to be set.
 
+#### `ios-launch.sh`
+
+Builds, installs, and launches an iOS task worktree on a simulator, then exits. This is intended for operator-driven manual inspection; it does not attach a debugger and does not keep a long-running process alive.
+
+```bash
+bash scripts/ios-launch.sh <KEY>
+```
+
+Uses `IOS_RUN_DEVICE_ID` as the simulator destination, falling back to `TESTING_DEVICE_ID`. The helper reuses `$SDD_WORKDIR/<KEY>/tmp/verification/ios/derived-data` and the matching cloned source packages path so completed tasks can launch from the verification build cache when possible. Launch logs are written under `$SDD_WORKDIR/<KEY>/tmp/launch/ios/logs/`.
+
 #### `generate-diff.sh`
 
 Generates a structured git diff artifact for a task worktree:

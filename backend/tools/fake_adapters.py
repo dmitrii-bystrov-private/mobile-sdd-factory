@@ -224,3 +224,16 @@ class FakeGitLabAdapter:
             ),
             stderr="",
         )
+
+
+class FakeIOSAppLauncher:
+    def __init__(self, repo_root: Path) -> None:
+        self.repo_root = repo_root
+
+    def launch(self, task_key: str) -> CommandResult:
+        return CommandResult(
+            command=["fake_ios_launch", task_key],
+            returncode=0,
+            stdout=f"Launched iOS app for {task_key}\n",
+            stderr="",
+        )

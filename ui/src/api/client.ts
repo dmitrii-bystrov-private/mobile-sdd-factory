@@ -72,6 +72,8 @@ const STREAM_EVENT_TYPES = [
   "mr_handoff_failed",
   "send_to_test_completed",
   "send_to_test_failed",
+  "ios_app_launch_completed",
+  "ios_app_launch_failed",
   "qa_reopened",
   "qa_reopen_requested",
   "role_input_dispatched",
@@ -519,6 +521,21 @@ export const apiClient = {
     session: Session;
   }> {
     return request("/operator/send-to-test", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+      }),
+    });
+  },
+
+  launchIosApp(
+    sessionId: number,
+  ): Promise<{
+    launched: boolean;
+    event_type: string;
+    session: Session;
+  }> {
+    return request("/operator/launch-ios-app", {
       method: "POST",
       body: JSON.stringify({
         session_id: sessionId,

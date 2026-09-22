@@ -23,8 +23,9 @@ from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.command_runner import CommandRunner
-from backend.tools.fake_adapters import FakeGitLabAdapter, FakeJiraAdapter, FakeSnapshotAdapter
+from backend.tools.fake_adapters import FakeGitLabAdapter, FakeIOSAppLauncher, FakeJiraAdapter, FakeSnapshotAdapter
 from backend.tools.gitlab_adapter import GitLabAdapter
+from backend.tools.ios_app_launcher import IOSAppLauncher
 from backend.tools.jira_adapter import JiraAdapter
 from backend.tools.snapshot_adapter import SnapshotAdapter
 
@@ -80,11 +81,13 @@ def build_dependencies() -> AppDependencies:
         jira_adapter = FakeJiraAdapter(config.repo_root)
         snapshot_adapter = FakeSnapshotAdapter(config.repo_root, config.workdir_root)
         gitlab_adapter = FakeGitLabAdapter(config.repo_root)
+        ios_app_launcher = FakeIOSAppLauncher(config.repo_root)
     else:
         runner = CommandRunner()
         jira_adapter = JiraAdapter(runner, config.repo_root)
         snapshot_adapter = SnapshotAdapter(runner, config.repo_root)
         gitlab_adapter = GitLabAdapter(runner, config.repo_root)
+        ios_app_launcher = IOSAppLauncher(runner, config.repo_root)
     event_bus = SessionEventBus()
     coordinator_service = CoordinatorService(
         session_repository=session_repository,
@@ -98,6 +101,7 @@ def build_dependencies() -> AppDependencies:
         jira_adapter=jira_adapter,
         snapshot_adapter=snapshot_adapter,
         gitlab_adapter=gitlab_adapter,
+        ios_app_launcher=ios_app_launcher,
         artifacts_root=config.workdir_root / "factory-artifacts",
         workdir_root=config.workdir_root,
         event_bus=event_bus,

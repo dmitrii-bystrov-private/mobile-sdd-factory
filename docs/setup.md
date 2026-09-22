@@ -39,6 +39,7 @@ SDD_GITLAB_ANDROID_PROJECT_PATH=group%2Fmobile%2Fandroid-app
 DEFAULT_JIRA_ASSIGNEE=you@example.com
 SDD_IOS_WORKSPACE_NAME=App-Tuist.xcworkspace
 SDD_IOS_DEFAULT_SCHEME=App
+IOS_RUN_DEVICE_ID=ios-simulator-uuid-for-manual-launches
 ```
 
 Install and authenticate Atlassian Teamwork Graph CLI (`twg`) for Jira reads, writes, and transitions. During `snapshot.sh`, Stories and Bugs moving from `To Do` to `In Progress` use TWG metadata to fill empty `Dev finish date` with today's date and empty `Story Points` before transition.
@@ -46,6 +47,7 @@ Install and authenticate Atlassian Teamwork Graph CLI (`twg`) for Jira reads, wr
 `SDD_IOS_WORKSPACE_NAME` is passed to iOS `xcodebuild -workspace`.
 When it is not set, the verification scripts auto-detect a single `.xcworkspace` at the iOS repo root.
 `SDD_IOS_DEFAULT_SCHEME` is used when the generated verification strategy does not provide a preferred scheme.
+`IOS_RUN_DEVICE_ID` is used by the operator UI manual iOS launch action. It is separate from the verification simulator so manual app inspection does not have to share the test runner destination. If unset, the launch helper falls back to `TESTING_DEVICE_ID`. Manual launches reuse the task-local iOS verification DerivedData cache and keep it until the task is cleaned up.
 
 ## tmux
 

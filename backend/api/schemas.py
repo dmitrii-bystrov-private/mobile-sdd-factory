@@ -553,6 +553,16 @@ class SendToTestResponse(BaseModel):
     event_type: str
 
 
+class LaunchIOSAppRequest(BaseModel):
+    session_id: int
+
+
+class LaunchIOSAppResponse(BaseModel):
+    launched: bool
+    session: SessionResponse
+    event_type: str
+
+
 class StartSubtaskGraphRequest(BaseModel):
     session_id: int
 

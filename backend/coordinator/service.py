@@ -58,6 +58,7 @@ from backend.state.role_repository import RoleRepository
 from backend.state.session_repository import SessionRepository
 from backend.state.work_item_repository import WorkItemRepository
 from backend.tools.gitlab_adapter import GitLabAdapter
+from backend.tools.ios_app_launcher import IOSAppLauncher
 from backend.tools.jira_adapter import JiraAdapter
 from backend.tools.snapshot_adapter import SnapshotAdapter
 from backend.tools.command_runner import CommandResult
@@ -171,6 +172,7 @@ class CoordinatorService:
     jira_adapter: JiraAdapter | None = None
     snapshot_adapter: SnapshotAdapter | None = None
     gitlab_adapter: GitLabAdapter | None = None
+    ios_app_launcher: IOSAppLauncher | None = None
     artifacts_root: Path | None = None
     workdir_root: Path | None = None
     event_bus: SessionEventBus | None = None
@@ -996,7 +998,6 @@ class CoordinatorService:
             current_owner=None,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
-        self._remove_task_verification_residue(session.task_key)
         event = self._append_event(
             session_id=session.id,
             event_type="mr_handoff_completed",
@@ -1154,7 +1155,6 @@ class CoordinatorService:
             current_owner=None,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
-        self._remove_task_verification_residue(session.task_key)
         event = self._append_event(
             session_id=session.id,
             event_type="send_to_test_completed",
@@ -1164,6 +1164,70 @@ class CoordinatorService:
                 "returncode": result.returncode,
                 "current_stage": session.current_stage,
                 "status": session.status.value,
+            },
+        )
+        return session, event
+
+    def launch_ios_app(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event]:
+        if self.ios_app_launcher is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing iOS app launcher or artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        if not session.task_key.startswith("IOS-"):
+            raise IntakeError(f"Session {session_id} is not an iOS task")
+
+        result = self.ios_app_launcher.launch(session.task_key)
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "ios-launch",
+            "ios-launch.stdout.log",
+            result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "ios-launch",
+            "ios-launch.stderr.log",
+            result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="ios-launch",
+            artifact_type="ios_launch_stdout",
+            path=str(stdout_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="ios-launch",
+            artifact_type="ios_launch_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="ios_app_launch_completed" if result.ok else "ios_app_launch_failed",
+            producer_type="operator",
+            payload={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+                "stdout_artifact_path": str(stdout_path),
+                "stderr_artifact_path": str(stderr_path),
             },
         )
         return session, event
@@ -5781,7 +5845,6 @@ class CoordinatorService:
             current_owner=None,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
-        self._remove_task_verification_residue(session.task_key)
         completed_event = self._append_event(
             session_id=session.id,
             event_type="task_completed",

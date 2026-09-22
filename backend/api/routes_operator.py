@@ -50,6 +50,8 @@ from backend.api.schemas import (
     PollSessionOutputResponse,
     RetrySessionRequest,
     RetrySessionResponse,
+    LaunchIOSAppRequest,
+    LaunchIOSAppResponse,
     SendOperatorRuntimeInputRequest,
     SendOperatorRuntimeInputResponse,
     SendToTestRequest,
@@ -483,6 +485,25 @@ def send_to_test(
 
     return SendToTestResponse(
         handed_off=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+    )
+
+
+@router.post("/launch-ios-app", response_model=LaunchIOSAppResponse)
+def launch_ios_app(
+    payload: LaunchIOSAppRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> LaunchIOSAppResponse:
+    try:
+        session, event = dependencies.coordinator_service.launch_ios_app(
+            session_id=payload.session_id,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return LaunchIOSAppResponse(
+        launched=event.event_type == "ios_app_launch_completed",
         session=to_session_response(session),
         event_type=event.event_type,
     )

@@ -50,6 +50,7 @@ try:
     from backend.api.routes_operator import get_environment_doctor
     from backend.api.routes_operator import get_runtime_capabilities
     from backend.api.routes_operator import get_runtime_defaults
+    from backend.api.routes_operator import launch_ios_app
     from backend.api.routes_operator import refresh_snapshot
     from backend.api.routes_operator import refresh_subtask_state
     from backend.api.routes_operator import restart_runtime_role
@@ -66,6 +67,7 @@ try:
         CleanupTaskRequest,
         CreateMrRequest,
         CreateSubtasksFromPlanRequest,
+        LaunchIOSAppRequest,
         PollSessionOutputRequest,
         PauseSessionRequest,
         RefreshSnapshotRequest,
@@ -241,6 +243,20 @@ class FakeGitLabAdapter:
             "",
         )
 
+
+class FakeIOSAppLauncher:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def launch(self, task_key: str) -> "CommandResult":
+        self.calls.append(task_key)
+        return CommandResult(
+            ["ios_launch", task_key],
+            0,
+            f"Launched iOS app for {task_key}\n",
+            "",
+        )
+
 @unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi is not installed in the local environment")
 class SessionApiTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -263,6 +279,7 @@ class SessionApiTests(unittest.TestCase):
         event_bus = SessionEventBus()
         self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
         self.jira_adapter = FakeJiraAdapter()
+        self.ios_app_launcher = FakeIOSAppLauncher()
         coordinator = CoordinatorService(
             session_repository=session_repository,
             role_repository=role_repository,
@@ -275,6 +292,7 @@ class SessionApiTests(unittest.TestCase):
             jira_adapter=self.jira_adapter,
             snapshot_adapter=self.snapshot_adapter,
             gitlab_adapter=FakeGitLabAdapter(),
+            ios_app_launcher=self.ios_app_launcher,
             artifacts_root=Path(self.temp_dir.name) / "artifacts",
             workdir_root=Path(self.temp_dir.name),
             event_bus=event_bus,
@@ -3157,6 +3175,37 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("send_to_test_completed", response.session.current_stage)
         self.assertEqual("completed", response.session.status)
         self.assertTrue(any(item.artifact_type == "send_to_test_stdout" for item in artifacts_response.items))
+
+    def test_launch_ios_app_route_runs_manual_launcher_without_changing_stage(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014LAUNCH"),
+            dependencies=self.dependencies,
+        )
+        self.dependencies.session_repository.update_stage_and_owner(
+            prepare_response.session.id,
+            current_stage="send_to_test_completed",
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(
+            prepare_response.session.id,
+            SessionStatus.COMPLETED,
+        )
+
+        response = launch_ios_app(
+            LaunchIOSAppRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.launched)
+        self.assertEqual("ios_app_launch_completed", response.event_type)
+        self.assertEqual("send_to_test_completed", response.session.current_stage)
+        self.assertEqual("completed", response.session.status)
+        self.assertEqual(["IOS-40014LAUNCH"], self.ios_app_launcher.calls)
+        self.assertTrue(any(item.artifact_type == "ios_launch_stdout" for item in artifacts_response.items))
 
     def test_verification_passed_routes_to_doc_harvest_when_policy_required(self) -> None:
         create_response = create_session(

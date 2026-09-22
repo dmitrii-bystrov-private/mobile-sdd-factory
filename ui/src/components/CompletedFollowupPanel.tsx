@@ -121,6 +121,16 @@ export function CompletedFollowupPanel({
     }, "Refreshing snapshot and resuming subtasks…");
   }
 
+  async function handleLaunchIosApp(): Promise<void> {
+    await run(async () => {
+      const response = await apiClient.launchIosApp(session.id);
+      if (!response.launched) {
+        throw new Error(`iOS app launch failed: ${response.event_type}`);
+      }
+      showToast("iOS app launched");
+    }, "Launching iOS app on simulator…");
+  }
+
   if (session.status !== "completed") {
     return null;
   }
@@ -171,6 +181,16 @@ export function CompletedFollowupPanel({
           >
             Refresh snapshot and resume subtasks
           </button>
+          {session.task_key.startsWith("IOS-") ? (
+            <button
+              className="action-button"
+              disabled={busy}
+              onClick={() => void handleLaunchIosApp()}
+              type="button"
+            >
+              Launch on iOS simulator
+            </button>
+          ) : null}
         </div>
       </div>
 
