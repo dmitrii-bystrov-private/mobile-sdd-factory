@@ -188,6 +188,7 @@ def _store_review_message_preview(
             "platform": platform,
             "mr_id": mr_id,
             "cached": True,
+            "preview_text": text.strip(),
         },
     )
 

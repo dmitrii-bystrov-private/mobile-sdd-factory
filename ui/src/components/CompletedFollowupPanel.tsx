@@ -11,6 +11,12 @@ type CompletedFollowupPanelProps = {
   onRefresh: () => Promise<void>;
 };
 
+const reviewMessagePreviewCache = new Map<string, string>();
+
+function previewCacheKey(sessionId: number, mrId: string): string {
+  return `${sessionId}:${mrId}`;
+}
+
 function latestMrUrl(artifacts: Artifact[], events: EventItem[]): string | null {
   for (const artifact of [...artifacts].reverse()) {
     const value = artifact.metadata?.mr_url;
@@ -33,6 +39,27 @@ function mrIdFromUrl(mrUrl: string | null): string {
   }
   const match = mrUrl.match(/merge_requests\/(\d+)/);
   return match?.[1] ?? "";
+}
+
+function latestCachedReviewMessagePreview(
+  artifacts: Artifact[],
+  platform: string,
+  mrId: string,
+): string | null {
+  for (const artifact of [...artifacts].reverse()) {
+    if (artifact.artifact_type !== "review_message_preview") {
+      continue;
+    }
+    const metadata = artifact.metadata ?? {};
+    if (metadata.platform !== platform || metadata.mr_id !== mrId) {
+      continue;
+    }
+    const value = metadata.preview_text;
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function latestDeliveryEventCreatedAt(events: EventItem[]): string | null {
@@ -68,6 +95,11 @@ export function CompletedFollowupPanel({
   const { showToast, showActivity, clearActivity } = useToast();
   const mrUrl = useMemo(() => latestMrUrl(artifacts, events), [artifacts, events]);
   const inferredMrId = useMemo(() => mrIdFromUrl(mrUrl), [mrUrl]);
+  const platform = session.task_key.startsWith("ANDR-") ? "android" : "ios";
+  const cachedArtifactPreview = useMemo(
+    () => latestCachedReviewMessagePreview(artifacts, platform, inferredMrId),
+    [artifacts, inferredMrId, platform],
+  );
   const latestDeliveryCreatedAt = useMemo(() => latestDeliveryEventCreatedAt(events), [events]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,16 +109,28 @@ export function CompletedFollowupPanel({
   useEffect(() => {
     if (inferredMrId.length === 0) {
       setPreviewText(null);
+      setPreviewLoading(false);
       return undefined;
+    }
+
+    const cacheKey = previewCacheKey(session.id, inferredMrId);
+    const cachedPreview = reviewMessagePreviewCache.get(cacheKey) ?? cachedArtifactPreview;
+    if (cachedPreview) {
+      reviewMessagePreviewCache.set(cacheKey, cachedPreview);
+      setPreviewText(cachedPreview);
+      setPreviewLoading(false);
+    } else {
+      setPreviewText(null);
+      setPreviewLoading(true);
     }
 
     let cancelled = false;
     const timeoutId = window.setTimeout(() => {
       void (async () => {
-        setPreviewLoading(true);
         try {
           const response = await apiClient.getReviewMessagePreview(session.id, inferredMrId);
           if (!cancelled) {
+            reviewMessagePreviewCache.set(cacheKey, response.text);
             setPreviewText(response.text);
             setPreviewLoading(false);
           }
@@ -96,6 +140,7 @@ export function CompletedFollowupPanel({
             try {
               const refreshed = await apiClient.refreshReviewMessagePreview(session.id, inferredMrId);
               if (!cancelled) {
+                reviewMessagePreviewCache.set(cacheKey, refreshed.text);
                 setPreviewText(refreshed.text);
               }
             } catch {
@@ -118,7 +163,7 @@ export function CompletedFollowupPanel({
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [inferredMrId, latestDeliveryCreatedAt, session.id]);
+  }, [cachedArtifactPreview, inferredMrId, latestDeliveryCreatedAt, session.id]);
 
   async function run(action: () => Promise<void>, activityLabel?: string): Promise<void> {
     setBusy(true);

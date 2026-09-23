@@ -3453,6 +3453,7 @@ class SessionApiTests(unittest.TestCase):
         ]
         self.assertEqual(2, len(preview_artifacts))
         self.assertEqual("2942", preview_artifacts[-1].metadata["mr_id"])
+        self.assertIn("8 files +130 −20", preview_artifacts[-1].metadata["preview_text"])
 
     def test_followup_completion_after_qa_reopen_returns_to_verification(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
