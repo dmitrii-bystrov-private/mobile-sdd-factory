@@ -25,14 +25,14 @@ current_status="$(printf '%s' "$json" | jq -r '.fields.status.name')"
 
 target_status="Ready for test"
 
-if [[ "$current_status" == "$target_status" ]]; then
-  echo "Already done: $KEY is already $target_status"
+if twg_jira_status_is_testing_or_later "$current_status"; then
+  echo "Already done: $KEY is already in testing-or-later status: $current_status"
   exit 0
 fi
 
 echo "Transitioning $KEY ($current_status) → $target_status..."
 if [[ "$current_status" == "To Do" ]]; then
-  run_twg_json "$transition_json" jira workitem update --id "$KEY" --status "In Progress"
+  twg_jira_transition_to_first_available_status "$transition_json" "$KEY" "In Progress" >/dev/null
 fi
-run_twg_json "$transition_json" jira workitem update --id "$KEY" --status "$target_status"
-echo "Done: $KEY → $target_status"
+actual_target="$(twg_jira_transition_to_first_available_status "$transition_json" "$KEY" "$target_status" "In Testing")"
+echo "Done: $KEY → $actual_target"
