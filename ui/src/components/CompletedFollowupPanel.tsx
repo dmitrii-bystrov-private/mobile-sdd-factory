@@ -35,6 +35,30 @@ function mrIdFromUrl(mrUrl: string | null): string {
   return match?.[1] ?? "";
 }
 
+function latestDeliveryEventCreatedAt(events: EventItem[]): string | null {
+  for (const event of [...events].reverse()) {
+    if (
+      event.event_type === "mr_handoff_completed" ||
+      event.event_type === "send_to_test_completed"
+    ) {
+      return event.created_at;
+    }
+  }
+  return null;
+}
+
+function isAfter(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (!left || !right) {
+    return false;
+  }
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
+    return false;
+  }
+  return leftTime > rightTime;
+}
+
 export function CompletedFollowupPanel({
   session,
   artifacts,
@@ -44,6 +68,7 @@ export function CompletedFollowupPanel({
   const { showToast, showActivity, clearActivity } = useToast();
   const mrUrl = useMemo(() => latestMrUrl(artifacts, events), [artifacts, events]);
   const inferredMrId = useMemo(() => mrIdFromUrl(mrUrl), [mrUrl]);
+  const latestDeliveryCreatedAt = useMemo(() => latestDeliveryEventCreatedAt(events), [events]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -63,6 +88,19 @@ export function CompletedFollowupPanel({
           const response = await apiClient.getReviewMessagePreview(session.id, inferredMrId);
           if (!cancelled) {
             setPreviewText(response.text);
+            setPreviewLoading(false);
+          }
+          const shouldRefresh =
+            response.stale || isAfter(latestDeliveryCreatedAt, response.refreshed_at);
+          if (shouldRefresh) {
+            try {
+              const refreshed = await apiClient.refreshReviewMessagePreview(session.id, inferredMrId);
+              if (!cancelled) {
+                setPreviewText(refreshed.text);
+              }
+            } catch {
+              // Keep the cached preview visible when the background refresh fails.
+            }
           }
         } catch {
           if (!cancelled) {
@@ -80,7 +118,7 @@ export function CompletedFollowupPanel({
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [inferredMrId, session.id]);
+  }, [inferredMrId, latestDeliveryCreatedAt, session.id]);
 
   async function run(action: () => Promise<void>, activityLabel?: string): Promise<void> {
     setBusy(true);

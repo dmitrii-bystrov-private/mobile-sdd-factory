@@ -52,6 +52,7 @@ try:
     from backend.api.routes_operator import get_runtime_defaults
     from backend.api.routes_operator import launch_ios_app
     from backend.api.routes_operator import refresh_snapshot
+    from backend.api.routes_operator import refresh_review_message_preview
     from backend.api.routes_operator import refresh_subtask_state
     from backend.api.routes_operator import restart_runtime_role
     from backend.api.routes_operator import restart_runtime_session
@@ -3369,16 +3370,28 @@ class SessionApiTests(unittest.TestCase):
             dependencies=self.dependencies,
         )
         with patch("backend.api.routes_operator.CommandRunner.run") as mocked_run:
-            mocked_run.return_value = CommandResult(
-                command=["bash", "scripts/request-review-message.sh", "ios", "2942"],
-                returncode=0,
-                stdout=(
-                    "IOS-40014REVIEW: Improve runtime recovery flow\n"
-                    "https://gitlab.example.com/project/-/merge_requests/2942/diffs\n"
-                    "7 files +120 −18\n"
+            mocked_run.side_effect = [
+                CommandResult(
+                    command=["bash", "scripts/request-review-message.sh", "ios", "2942"],
+                    returncode=0,
+                    stdout=(
+                        "IOS-40014REVIEW: Improve runtime recovery flow\n"
+                        "https://gitlab.example.com/project/-/merge_requests/2942/diffs\n"
+                        "7 files +120 −18\n"
+                    ),
+                    stderr="",
                 ),
-                stderr="",
-            )
+                CommandResult(
+                    command=["bash", "scripts/request-review-message.sh", "ios", "2942"],
+                    returncode=0,
+                    stdout=(
+                        "IOS-40014REVIEW: Improve runtime recovery flow\n"
+                        "https://gitlab.example.com/project/-/merge_requests/2942/diffs\n"
+                        "8 files +130 −20\n"
+                    ),
+                    stderr="",
+                ),
+            ]
 
             response = review_message_preview(
                 ReviewMessagePreviewRequest(
@@ -3387,11 +3400,59 @@ class SessionApiTests(unittest.TestCase):
                 ),
                 dependencies=self.dependencies,
             )
+            cached_response = review_message_preview(
+                ReviewMessagePreviewRequest(
+                    session_id=prepare_response.session.id,
+                    mr_id="2942",
+                ),
+                dependencies=self.dependencies,
+            )
+            refreshed_response = refresh_review_message_preview(
+                ReviewMessagePreviewRequest(
+                    session_id=prepare_response.session.id,
+                    mr_id="2942",
+                ),
+                dependencies=self.dependencies,
+            )
+            latest_preview = [
+                artifact
+                for artifact in self.dependencies.artifact_repository.list_for_session(
+                    prepare_response.session.id
+                )
+                if artifact.artifact_type == "review_message_preview"
+            ][-1]
+            with self.database.connect() as connection:
+                connection.execute(
+                    "UPDATE artifacts SET created_at = ? WHERE id = ?",
+                    ("2020-01-01 00:00:00", latest_preview.id),
+                )
+            with patch.dict(os.environ, {"REVIEW_MESSAGE_CACHE_TTL_SECONDS": "1"}, clear=False):
+                stale_response = review_message_preview(
+                    ReviewMessagePreviewRequest(
+                        session_id=prepare_response.session.id,
+                        mr_id="2942",
+                    ),
+                    dependencies=self.dependencies,
+                )
 
         self.assertTrue(response.available)
         self.assertEqual("ios", response.platform)
         self.assertEqual("2942", response.mr_id)
         self.assertIn("IOS-40014REVIEW: Improve runtime recovery flow", response.text)
+        self.assertFalse(response.cached)
+        self.assertFalse(response.stale)
+        self.assertEqual(response.text, cached_response.text)
+        self.assertTrue(cached_response.cached)
+        self.assertIn("8 files +130 −20", refreshed_response.text)
+        self.assertTrue(stale_response.cached)
+        self.assertTrue(stale_response.stale)
+        self.assertEqual(2, mocked_run.call_count)
+        artifacts = self.dependencies.artifact_repository.list_for_session(prepare_response.session.id)
+        preview_artifacts = [
+            artifact for artifact in artifacts if artifact.artifact_type == "review_message_preview"
+        ]
+        self.assertEqual(2, len(preview_artifacts))
+        self.assertEqual("2942", preview_artifacts[-1].metadata["mr_id"])
 
     def test_followup_completion_after_qa_reopen_returns_to_verification(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(

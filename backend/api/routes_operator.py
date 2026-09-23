@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import os
 from pathlib import Path
 
@@ -62,6 +63,7 @@ from backend.api.schemas import (
     ResumeSessionResponse,
     RunLoopOnceResponse,
 )
+from backend.coordinator.artifacts import write_text_artifact
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
 from backend.tools.command_runner import CommandRunner
@@ -71,6 +73,8 @@ from factory.doctor.environment_doctor import build_report
 from factory.doctor.runtime_capabilities import build_runtime_capabilities
 
 router = APIRouter(prefix="/operator", tags=["operator"])
+
+DEFAULT_REVIEW_MESSAGE_CACHE_TTL_SECONDS = 600
 
 
 def get_dependencies(request: Request) -> AppDependencies:
@@ -86,6 +90,174 @@ def _repo_root_from_dependencies(dependencies: AppDependencies) -> Path:
     if coordinator.role_workspace_manager is not None:
         return coordinator.role_workspace_manager.repo_root
     return Path(__file__).resolve().parents[2]
+
+
+def _artifacts_root_from_dependencies(dependencies: AppDependencies) -> Path:
+    if dependencies.config is not None:
+        return dependencies.config.workdir_root / "factory-artifacts"
+    coordinator = dependencies.coordinator_service
+    if coordinator.artifacts_root is not None:
+        return coordinator.artifacts_root
+    if coordinator.workdir_root is not None:
+        return coordinator.workdir_root / "factory-artifacts"
+    return _repo_root_from_dependencies(dependencies) / "workdir" / "factory-artifacts"
+
+
+def _review_message_cache_ttl_seconds() -> int:
+    raw_value = os.environ.get("REVIEW_MESSAGE_CACHE_TTL_SECONDS", "").strip()
+    if not raw_value:
+        return DEFAULT_REVIEW_MESSAGE_CACHE_TTL_SECONDS
+    try:
+        ttl_seconds = int(raw_value)
+    except ValueError:
+        return DEFAULT_REVIEW_MESSAGE_CACHE_TTL_SECONDS
+    return max(0, ttl_seconds)
+
+
+def _artifact_created_at_utc(created_at: object) -> datetime | None:
+    if created_at is None:
+        return None
+    if isinstance(created_at, datetime):
+        value = created_at
+    elif isinstance(created_at, str):
+        try:
+            value = datetime.fromisoformat(created_at)
+        except ValueError:
+            return None
+    else:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _cached_review_message_preview(
+    dependencies: AppDependencies,
+    *,
+    session_id: int,
+    platform: str,
+    mr_id: str,
+) -> tuple[str, bool, str | None] | None:
+    ttl_seconds = _review_message_cache_ttl_seconds()
+    for artifact in reversed(dependencies.artifact_repository.list_for_session(session_id)):
+        if artifact.artifact_type != "review_message_preview":
+            continue
+        metadata = artifact.metadata or {}
+        if metadata.get("platform") != platform or metadata.get("mr_id") != mr_id:
+            continue
+        artifact_path = Path(artifact.path)
+        if not artifact_path.exists() or not artifact_path.is_file():
+            continue
+        try:
+            text = artifact_path.read_text().strip()
+        except OSError:
+            continue
+        created_at = _artifact_created_at_utc(artifact.created_at)
+        stale = False
+        refreshed_at = None
+        if created_at is not None:
+            refreshed_at = created_at.isoformat()
+            stale = ttl_seconds > 0 and (datetime.now(UTC) - created_at).total_seconds() >= ttl_seconds
+        return text, stale, refreshed_at
+    return None
+
+
+def _store_review_message_preview(
+    dependencies: AppDependencies,
+    *,
+    session_id: int,
+    task_key: str,
+    platform: str,
+    mr_id: str,
+    text: str,
+) -> None:
+    artifact_path = write_text_artifact(
+        _artifacts_root_from_dependencies(dependencies),
+        task_key,
+        "review-message-preview",
+        f"mr-{mr_id}.txt",
+        text.strip() + "\n",
+    )
+    dependencies.artifact_repository.create(
+        session_id=session_id,
+        stage_name="review-message-preview",
+        artifact_type="review_message_preview",
+        path=str(artifact_path),
+        metadata={
+            "task_key": task_key,
+            "platform": platform,
+            "mr_id": mr_id,
+            "cached": True,
+        },
+    )
+
+
+def _build_review_message_preview(
+    *,
+    dependencies: AppDependencies,
+    session_id: int,
+    mr_id: str,
+    force_refresh: bool,
+) -> ReviewMessagePreviewResponse:
+    session = dependencies.session_repository.get_by_id(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    normalized_mr_id = mr_id.strip()
+    if not normalized_mr_id:
+        raise HTTPException(status_code=400, detail="MR id is required")
+
+    repo_root = _repo_root_from_dependencies(dependencies)
+    platform = _platform_for_task_key(session.task_key)
+    ttl_seconds = _review_message_cache_ttl_seconds()
+    if not force_refresh:
+        cached = _cached_review_message_preview(
+            dependencies,
+            session_id=session.id,
+            platform=platform,
+            mr_id=normalized_mr_id,
+        )
+        if cached is not None:
+            cached_text, stale, refreshed_at = cached
+            return ReviewMessagePreviewResponse(
+                available=True,
+                platform=platform,
+                mr_id=normalized_mr_id,
+                text=cached_text,
+                cached=True,
+                stale=stale,
+                refreshed_at=refreshed_at,
+                ttl_seconds=ttl_seconds,
+            )
+
+    result = CommandRunner().run(
+        ["bash", "scripts/request-review-message.sh", platform, normalized_mr_id],
+        cwd=repo_root,
+    )
+    if not result.ok:
+        detail = result.stderr.strip() or result.stdout.strip() or "Failed to build review message preview"
+        raise HTTPException(status_code=400, detail=detail)
+
+    text = result.stdout.strip()
+    _store_review_message_preview(
+        dependencies,
+        session_id=session.id,
+        task_key=session.task_key,
+        platform=platform,
+        mr_id=normalized_mr_id,
+        text=text,
+    )
+
+    return ReviewMessagePreviewResponse(
+        available=True,
+        platform=platform,
+        mr_id=normalized_mr_id,
+        text=text,
+        cached=False,
+        stale=False,
+        refreshed_at=datetime.now(UTC).isoformat(),
+        ttl_seconds=ttl_seconds,
+    )
 
 
 def _platform_for_task_key(task_key: str) -> str:
@@ -178,29 +350,24 @@ def review_message_preview(
     payload: ReviewMessagePreviewRequest,
     dependencies: AppDependencies = Depends(get_dependencies),
 ) -> ReviewMessagePreviewResponse:
-    session = dependencies.session_repository.get_by_id(payload.session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail=f"Session {payload.session_id} not found")
-
-    normalized_mr_id = payload.mr_id.strip()
-    if not normalized_mr_id:
-        raise HTTPException(status_code=400, detail="MR id is required")
-
-    repo_root = _repo_root_from_dependencies(dependencies)
-    platform = _platform_for_task_key(session.task_key)
-    result = CommandRunner().run(
-        ["bash", "scripts/request-review-message.sh", platform, normalized_mr_id],
-        cwd=repo_root,
+    return _build_review_message_preview(
+        dependencies=dependencies,
+        session_id=payload.session_id,
+        mr_id=payload.mr_id,
+        force_refresh=False,
     )
-    if not result.ok:
-        detail = result.stderr.strip() or result.stdout.strip() or "Failed to build review message preview"
-        raise HTTPException(status_code=400, detail=detail)
 
-    return ReviewMessagePreviewResponse(
-        available=True,
-        platform=platform,
-        mr_id=normalized_mr_id,
-        text=result.stdout.strip(),
+
+@router.post("/review-message-preview/refresh", response_model=ReviewMessagePreviewResponse)
+def refresh_review_message_preview(
+    payload: ReviewMessagePreviewRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> ReviewMessagePreviewResponse:
+    return _build_review_message_preview(
+        dependencies=dependencies,
+        session_id=payload.session_id,
+        mr_id=payload.mr_id,
+        force_refresh=True,
     )
 
 

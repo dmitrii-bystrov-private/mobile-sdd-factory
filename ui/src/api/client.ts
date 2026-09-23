@@ -469,8 +469,34 @@ export const apiClient = {
     platform: string;
     mr_id: string;
     text: string;
+    cached: boolean;
+    stale: boolean;
+    refreshed_at?: string | null;
+    ttl_seconds?: number | null;
   }> {
     return request("/operator/review-message-preview", {
+      method: "POST",
+      body: JSON.stringify({
+        session_id: sessionId,
+        mr_id: mrId,
+      }),
+    });
+  },
+
+  refreshReviewMessagePreview(
+    sessionId: number,
+    mrId: string,
+  ): Promise<{
+    available: boolean;
+    platform: string;
+    mr_id: string;
+    text: string;
+    cached: boolean;
+    stale: boolean;
+    refreshed_at?: string | null;
+    ttl_seconds?: number | null;
+  }> {
+    return request("/operator/review-message-preview/refresh", {
       method: "POST",
       body: JSON.stringify({
         session_id: sessionId,

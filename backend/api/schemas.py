@@ -529,6 +529,10 @@ class ReviewMessagePreviewResponse(BaseModel):
     platform: str
     mr_id: str
     text: str
+    cached: bool = False
+    stale: bool = False
+    refreshed_at: str | None = None
+    ttl_seconds: int | None = None
 
 
 class CreateMrRequest(BaseModel):
