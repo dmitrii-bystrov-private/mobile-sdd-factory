@@ -580,6 +580,28 @@ class TmuxSessionBackend(SessionBackend):
         )
         return self.tmux_role_ready.get(role.role_id, False)
 
+    def launcher_dispatch_token_visible(self, role: RuntimeRoleHandle, dispatch_token: str) -> bool:
+        if self._effective_mode != "tmux" or not dispatch_token:
+            return False
+        self._restore_tmux_role_metadata_if_needed(role)
+        if not self.tmux_interactive_driver_enabled.get(role.role_id, False):
+            return False
+        socket_path = self._socket_path(role.session_id)
+        current = self._tmux(
+            socket_path,
+            "capture-pane",
+            "-p",
+            "-S",
+            f"-{self._SNAPSHOT_SCROLLBACK_LINES}",
+            "-t",
+            role.role_id,
+        )
+        if current.returncode != 0:
+            return False
+        normalized_pane = re.sub(r"\s+", "", self._normalize_terminal_text(current.stdout))
+        normalized_token = re.sub(r"\s+", "", dispatch_token.strip().lower())
+        return normalized_token in normalized_pane
+
     def maybe_poke_stalled_role(
         self,
         role: RuntimeRoleHandle,

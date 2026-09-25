@@ -7956,6 +7956,12 @@ class CoordinatorService:
             return False
         if active_dispatch.error_text not in self._launcher_dispatch_delivery_errors().values():
             return False
+        if self._launcher_dispatch_token_visible(
+            session=session,
+            role=role,
+            dispatch_token=active_dispatch.dispatch_token,
+        ):
+            return False
         if not self._launcher_role_ready_for_buffered_repair(session=session, role=role):
             return False
         return True
@@ -7979,6 +7985,17 @@ class CoordinatorService:
             backend_name=role.runtime_backend,
         )
         return bool(readiness_probe(runtime_role))
+
+    def _launcher_dispatch_token_visible(self, *, session: Session, role: Role, dispatch_token: str) -> bool:
+        token_probe = getattr(self.session_backend, "launcher_dispatch_token_visible", None)
+        if token_probe is None or role.runtime_handle is None:
+            return False
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        return bool(token_probe(runtime_role, dispatch_token))
 
     def _role_recently_dispatched(self, role: Role, *, window_seconds: int = 5) -> bool:
         if role.last_hydration_version <= 0:

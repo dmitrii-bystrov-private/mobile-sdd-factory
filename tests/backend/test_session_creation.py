@@ -273,6 +273,7 @@ class DispatchTraceRecordingBackend(RecordingSessionBackend):
         self.fail_send = fail_send
         self.delivery_state = delivery_state
         self.tmux_submit_traces: dict[str, list[dict[str, str]]] = {}
+        self.visible_dispatch_tokens: set[str] = set()
 
     def send_input(self, role: RuntimeRoleHandle, text: str) -> None:
         if self.fail_send:
@@ -291,6 +292,9 @@ class DispatchTraceRecordingBackend(RecordingSessionBackend):
 
     def get_tmux_submit_traces(self, role_id: str) -> list[dict[str, str]]:
         return list(self.tmux_submit_traces.get(role_id, []))
+
+    def launcher_dispatch_token_visible(self, role: RuntimeRoleHandle, dispatch_token: str) -> bool:
+        return dispatch_token in self.visible_dispatch_tokens
 
 
 class SessionCreationTests(unittest.TestCase):
@@ -7351,6 +7355,39 @@ class SessionCreationTests(unittest.TestCase):
             any(
                 item.event_type == "role_input_dispatch_repair_requested"
                 and item.payload.get("reason") == "launcher_dispatch_delivery_unconfirmed"
+                for item in events
+            )
+        )
+
+    def test_reconcile_session_dispatch_does_not_repair_visible_unconfirmed_launcher_delivery(self) -> None:
+        backend = DispatchTraceRecordingBackend(delivery_state="submitted_unconfirmed")
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004UNCONFIRMEDVISIBLE")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        self.assertIsNotNone(verifier_role)
+        dispatches = self.dispatch_repository.list_for_session(session.id)
+        backend.visible_dispatch_tokens.add(dispatches[-1].dispatch_token)
+        sent_before = list(self.session_backend.get_sent_inputs(verifier_role.runtime_handle))
+        refreshed_session = self.session_repository.get_by_id(session.id)
+        assert refreshed_session is not None
+
+        reconciled = self.coordinator._reconcile_session_dispatch(refreshed_session)
+
+        sent_after = self.session_backend.get_sent_inputs(verifier_role.runtime_handle)
+        events = self.event_repository.list_for_session(session.id)
+
+        self.assertFalse(reconciled)
+        self.assertEqual(sent_before, sent_after)
+        self.assertFalse(
+            any(
+                item.event_type == "role_input_dispatch_repair_requested"
+                and item.payload.get("role_name") == VERIFICATION_COORDINATOR_ROLE
                 for item in events
             )
         )

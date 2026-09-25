@@ -557,6 +557,36 @@ class TmuxBackendTests(unittest.TestCase):
 
         self.assertFalse(backend.launcher_role_ready(role))
 
+    def test_tmux_launcher_dispatch_token_visible_ignores_line_wrap(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(
+                        ["tmux", *args],
+                        0,
+                        (
+                            "› Read ROUTED_WORK.md in the current directory. Dispatch token: hv12-\n"
+                            "  wi4443.\n"
+                        ),
+                        "",
+                    )
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50014:verification-coordinator",
+            session_id="sdd-IOS-50014",
+            backend_name="tmux",
+        )
+        backend.tmux_interactive_driver_enabled[role.role_id] = True
+
+        self.assertTrue(backend.launcher_dispatch_token_visible(role, "hv12-wi4443"))
+
     def test_tmux_launcher_materialized_trigger_includes_dispatch_token_from_hydration(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self, runtime_root: Path) -> None:
