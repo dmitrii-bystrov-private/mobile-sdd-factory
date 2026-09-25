@@ -7843,7 +7843,7 @@ class CoordinatorService:
                             "reason": "delivered_launcher_dispatch_missing_routed_work",
                         },
                     )
-                elif self._stalled_launcher_dispatch_buffered_pre_ready(
+                elif self._stalled_launcher_dispatch_repairable(
                     session=session,
                     role=role,
                     active_dispatch=active_dispatch,
@@ -7858,7 +7858,7 @@ class CoordinatorService:
                             "work_item_id": work_item.id,
                             "stage_name": session.current_stage,
                             "dispatch_token": active_dispatch.dispatch_token,
-                            "reason": "launcher_dispatch_buffered_pre_ready",
+                            "reason": "launcher_dispatch_delivery_unconfirmed",
                         },
                     )
                 else:
@@ -7945,7 +7945,7 @@ class CoordinatorService:
         workspace = self.role_workspace_manager.role_directory(session.task_key, role.role_name)
         return not (workspace / "ROUTED_WORK.md").is_file()
 
-    def _stalled_launcher_dispatch_buffered_pre_ready(
+    def _stalled_launcher_dispatch_repairable(
         self,
         *,
         session: Session,
@@ -7954,13 +7954,18 @@ class CoordinatorService:
     ) -> bool:
         if active_dispatch.status != DispatchStatus.STALLED:
             return False
-        if active_dispatch.error_text != (
-            "launcher-backed role was not ready; routed input is buffered but not yet visible"
-        ):
+        if active_dispatch.error_text not in self._launcher_dispatch_delivery_errors().values():
             return False
         if not self._launcher_role_ready_for_buffered_repair(session=session, role=role):
             return False
         return True
+
+    @staticmethod
+    def _launcher_dispatch_delivery_errors() -> dict[str, str]:
+        return {
+            "buffered_pre_ready": "launcher-backed role was not ready; routed input is buffered but not yet visible",
+            "submitted_unconfirmed": "launcher-backed role input was submitted but not confirmed visible",
+        }
 
     def _launcher_role_ready_for_buffered_repair(self, *, session: Session, role: Role) -> bool:
         readiness_probe = getattr(self.session_backend, "launcher_role_ready", None)
@@ -11443,19 +11448,16 @@ class CoordinatorService:
             raise
         latest_submit_trace = self._latest_runtime_submit_trace(runtime_role.role_id)
         delivery_state = latest_submit_trace.get("delivery_state") if latest_submit_trace else None
+        delivery_error = self._launcher_dispatch_delivery_errors().get(str(delivery_state or ""))
         if self.dispatch_repository is not None:
             self.dispatch_repository.update_status(
                 dispatch_token,
                 status=(
                     DispatchStatus.STALLED
-                    if delivery_state == "buffered_pre_ready"
+                    if delivery_error is not None
                     else DispatchStatus.DELIVERED
                 ),
-                error_text=(
-                    "launcher-backed role was not ready; routed input is buffered but not yet visible"
-                    if delivery_state == "buffered_pre_ready"
-                    else None
-                ),
+                error_text=delivery_error,
             )
         self._record_role_input_delivery_event(
             session=session,
@@ -11516,9 +11518,12 @@ class CoordinatorService:
                     "delivery_state": latest.get("delivery_state"),
                 }
             )
-            if latest.get("delivery_state") == "buffered_pre_ready":
+            delivery_error = self._launcher_dispatch_delivery_errors().get(
+                str(latest.get("delivery_state") or "")
+            )
+            if delivery_error is not None:
                 event_type = "role_input_delivery_stalled"
-                payload["error"] = "launcher-backed role was not ready; routed input is buffered but not yet visible"
+                payload["error"] = delivery_error
             elif payload["retry_count"] > 0:
                 event_type = "role_input_delivery_retried"
         self._append_event(

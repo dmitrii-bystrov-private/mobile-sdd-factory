@@ -546,9 +546,32 @@ class TmuxSessionBackend(SessionBackend):
         self._restore_tmux_role_metadata_if_needed(role)
         if not self.tmux_interactive_driver_enabled.get(role.role_id, False):
             return True
-        if self.tmux_role_ready.get(role.role_id, False):
-            return True
         socket_path = self._socket_path(role.session_id)
+        current = self._tmux(
+            socket_path,
+            "capture-pane",
+            "-p",
+            "-S",
+            f"-{self._SNAPSHOT_SCROLLBACK_LINES}",
+            "-t",
+            role.role_id,
+        )
+        if current.returncode == 0:
+            normalized = self._normalize_terminal_text(current.stdout)
+            prompt_tail = self._latest_interactive_prompt_tail(normalized) or normalized
+            if (
+                self._contains_runner_status_signal(normalized)
+                or self._contains_runner_working_signal(normalized)
+                or "messages to be submitted after next tool call" in normalized
+                or self._contains_generic_selection_blocker(prompt_tail)
+                or self._contains_generic_confirmation_blocker(prompt_tail)
+                or self._contains_model_capacity_blocker(prompt_tail)
+                or self._contains_workspace_trust_prompt(prompt_tail)
+                or self._contains_update_prompt(prompt_tail)
+            ):
+                return False
+            if self.tmux_role_ready.get(role.role_id, False) and self._contains_interactive_input_prompt(normalized):
+                return True
         self._refresh_launcher_ready_from_pane(
             role_id=role.role_id,
             socket_path=socket_path,
@@ -1184,7 +1207,7 @@ class TmuxSessionBackend(SessionBackend):
         )
         submit_trace = self.tmux_submit_traces[role_id][-1]
         if submit_style == "plain-enter-two-call":
-            result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, payload_text, "")
+            result = self._tmux(socket_path, "send-keys", "-t", runtime_handle, "-l", payload_text)
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to send tmux launcher input")
             time.sleep(0.25)

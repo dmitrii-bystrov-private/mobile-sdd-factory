@@ -7183,6 +7183,27 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("stalled", latest_dispatch.status.value)
         self.assertIn("not ready", latest_dispatch.error_text or "")
 
+    def test_dispatch_records_unconfirmed_launcher_input_as_stalled_delivery(self) -> None:
+        backend = DispatchTraceRecordingBackend(delivery_state="submitted_unconfirmed")
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004UNCONFIRMEDDISPATCH")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+
+        events = self.event_repository.list_for_session(session.id)
+        stalled_event = [item for item in events if item.event_type == "role_input_delivery_stalled"][-1]
+        dispatches = self.dispatch_repository.list_for_session(session.id)
+        latest_dispatch = dispatches[-1]
+
+        self.assertEqual("verification-coordinator", stalled_event.payload["role_name"])
+        self.assertEqual("submitted_unconfirmed", stalled_event.payload["delivery_state"])
+        self.assertEqual("stalled", latest_dispatch.status.value)
+        self.assertIn("not confirmed visible", latest_dispatch.error_text or "")
+
     def test_dispatch_records_transport_stall_event_on_send_failure(self) -> None:
         backend = DispatchTraceRecordingBackend()
         self.session_backend = backend
@@ -7294,7 +7315,42 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(
             any(
                 item.event_type == "role_input_dispatch_repair_requested"
-                and item.payload.get("reason") == "launcher_dispatch_buffered_pre_ready"
+                and item.payload.get("reason") == "launcher_dispatch_delivery_unconfirmed"
+                for item in events
+            )
+        )
+
+    def test_reconcile_session_dispatch_repairs_unconfirmed_launcher_delivery(self) -> None:
+        backend = DispatchTraceRecordingBackend(delivery_state="submitted_unconfirmed")
+        self.session_backend = backend
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004UNCONFIRMEDREPAIR")
+        self.coordinator.handle_operator_event(
+            session_id=session.id,
+            event_type="implementation_completed",
+            payload={"summary": "implementation done"},
+        )
+        verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        self.assertIsNotNone(verifier_role)
+        sent_before = list(self.session_backend.get_sent_inputs(verifier_role.runtime_handle))
+        backend.delivery_state = "direct"
+        refreshed_session = self.session_repository.get_by_id(session.id)
+        assert refreshed_session is not None
+
+        reconciled = self.coordinator._reconcile_session_dispatch(refreshed_session)
+
+        dispatches = self.dispatch_repository.list_for_session(session.id)
+        events = self.event_repository.list_for_session(session.id)
+        sent_after = self.session_backend.get_sent_inputs(verifier_role.runtime_handle)
+
+        self.assertTrue(reconciled)
+        self.assertEqual("superseded", dispatches[-2].status.value)
+        self.assertEqual("delivered", dispatches[-1].status.value)
+        self.assertGreater(len(sent_after), len(sent_before))
+        self.assertTrue(
+            any(
+                item.event_type == "role_input_dispatch_repair_requested"
+                and item.payload.get("reason") == "launcher_dispatch_delivery_unconfirmed"
                 for item in events
             )
         )
