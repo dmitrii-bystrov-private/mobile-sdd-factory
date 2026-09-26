@@ -5262,6 +5262,50 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(any(item.event_type == "verification_requested" for item in events))
         self.assertTrue(any(item.event_type == "session_outcome_reconciled" for item in events))
 
+    def test_verification_enqueue_reuses_existing_request_for_same_source_event(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30004RECONVERIDEMP",
+            workflow_profile="oneshot",
+        )
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        correction_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification_correction",
+            title="Verification corrections for IOS-30004RECONVERIDEMP",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.COMPLETED,
+        )
+        source_event = self.event_repository.append(
+            session_id=session.id,
+            event_type="implementation_completed",
+            producer_type="role_output",
+            producer_id=IMPLEMENTER_ROLE,
+            payload={"work_item_id": correction_item.id, "summary": "fixes applied"},
+        )
+
+        first_session, first_event = self.coordinator._enqueue_verification(
+            session=session,
+            source_event=source_event,
+        )
+        second_session, second_event = self.coordinator._enqueue_verification(
+            session=first_session,
+            source_event=source_event,
+        )
+
+        verification_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "verification" and item.source_event_id == source_event.id
+        ]
+        dispatches = self.dispatch_repository.list_for_session(session.id)
+
+        self.assertEqual(1, len(verification_items))
+        self.assertEqual(first_event.id, second_event.id)
+        self.assertEqual("verification_requested", second_session.current_stage)
+        self.assertEqual(VERIFICATION_COORDINATOR_ROLE, second_session.current_owner)
+        self.assertEqual(1, len(dispatches))
+
     def test_verification_failed_moves_session_back_to_implementer(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004")
         self.coordinator.handle_operator_event(

@@ -6211,6 +6211,26 @@ class CoordinatorService:
         if verification_role is None:
             raise IntakeError("Verification coordinator role is missing for the session")
 
+        existing_item = self._find_work_item_by_source_event(
+            session_id=session.id,
+            work_type="verification",
+            source_event_id=source_event.id,
+        )
+        if existing_item is not None:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="verification_requested",
+                current_owner=VERIFICATION_COORDINATOR_ROLE,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            existing_event = self._find_stage_event_for_work_item(
+                session_id=session.id,
+                event_type="verification_requested",
+                work_item_id=existing_item.id,
+            )
+            if existing_event is not None:
+                return session, existing_event
+
         verification_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="verification",
@@ -6326,6 +6346,36 @@ class CoordinatorService:
             },
         )
         return session, event
+
+    def _find_work_item_by_source_event(
+        self,
+        *,
+        session_id: int,
+        work_type: str,
+        source_event_id: int | None,
+    ) -> WorkItem | None:
+        if source_event_id is None:
+            return None
+        for item in reversed(self.work_item_repository.list_for_session(session_id)):
+            if item.work_type == work_type and item.source_event_id == source_event_id:
+                return item
+        return None
+
+    def _find_stage_event_for_work_item(
+        self,
+        *,
+        session_id: int,
+        event_type: str,
+        work_item_id: int | None,
+    ) -> Event | None:
+        if work_item_id is None:
+            return None
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.event_type != event_type:
+                continue
+            if event.payload.get("work_item_id") == work_item_id:
+                return event
+        return None
 
     def _enqueue_documentation_review(
         self,

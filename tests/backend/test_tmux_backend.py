@@ -587,6 +587,37 @@ class TmuxBackendTests(unittest.TestCase):
 
         self.assertTrue(backend.launcher_dispatch_token_visible(role, "hv12-wi4443"))
 
+    def test_tmux_launcher_confirms_clipped_dispatch_token_tail(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(
+                        ["tmux", *args],
+                        0,
+                        "› -wi4457.\n",
+                        "",
+                    )
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+
+        visible = backend._confirm_tmux_launcher_input_visible(
+            Path("/tmp/factory.sock"),
+            "sdd-IOS-50015:convention-reviewer",
+            (
+                "Read ROUTED_WORK.md in the current directory, read HYDRATION.json too if it exists, "
+                "follow the routed instructions exactly, and reply only through the SDD_* protocol "
+                "described in AGENTS.md. Dispatch token: hv3-wi4457."
+            ),
+        )
+
+        self.assertTrue(visible)
+
     def test_tmux_launcher_materialized_trigger_includes_dispatch_token_from_hydration(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self, runtime_root: Path) -> None:

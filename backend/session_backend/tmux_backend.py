@@ -600,7 +600,17 @@ class TmuxSessionBackend(SessionBackend):
             return False
         normalized_pane = re.sub(r"\s+", "", self._normalize_terminal_text(current.stdout))
         normalized_token = re.sub(r"\s+", "", dispatch_token.strip().lower())
-        return normalized_token in normalized_pane
+        if normalized_token in normalized_pane:
+            return True
+        suffix_match = re.search(r"(wi\d+)", normalized_token)
+        if suffix_match is None:
+            return False
+        normalized_tail = re.sub(
+            r"\s+",
+            "",
+            self._latest_interactive_prompt_tail(self._normalize_terminal_text(current.stdout)),
+        )
+        return suffix_match.group(1) in normalized_tail
 
     def maybe_poke_stalled_role(
         self,
@@ -1169,10 +1179,19 @@ class TmuxSessionBackend(SessionBackend):
         for _ in range(self._LAUNCHER_INPUT_VISIBILITY_RETRIES):
             pane_text = self._capture_tmux_pane_text(socket_path, runtime_handle)
             normalized_pane = self._normalize_terminal_text(pane_text)
-            if expected in normalized_pane:
+            if self._launcher_payload_visible_in_pane(expected, normalized_pane):
                 return True
             time.sleep(self._LAUNCHER_INPUT_VISIBILITY_DELAY_SECONDS)
         return False
+
+    def _launcher_payload_visible_in_pane(self, expected: str, normalized_pane: str) -> bool:
+        if expected in normalized_pane:
+            return True
+        token_match = re.search(r"(?:^|\b)(?:hv\d+-)?(wi\d+)(?:\b|[.])", expected)
+        if token_match is None:
+            return False
+        prompt_tail = self._latest_interactive_prompt_tail(normalized_pane) or normalized_pane
+        return token_match.group(1) in prompt_tail
 
     def _tmux_launcher_submit_needs_retry(
         self,
