@@ -6383,6 +6383,25 @@ class CoordinatorService:
         source_event: Event,
     ) -> tuple[Session, Event]:
         review_role = self._ensure_on_demand_role(session, DOCUMENTATION_REVIEWER_ROLE)
+        existing_item = self._find_work_item_by_source_event(
+            session_id=session.id,
+            work_type="documentation_review",
+            source_event_id=source_event.id,
+        )
+        if existing_item is not None:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="documentation_review_requested",
+                current_owner=DOCUMENTATION_REVIEWER_ROLE,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            existing_event = self._find_stage_event_for_work_item(
+                session_id=session.id,
+                event_type="documentation_review_requested",
+                work_item_id=existing_item.id,
+            )
+            if existing_event is not None:
+                return session, existing_event
         review_item = self.work_item_repository.create(
             session_id=session.id,
             work_type="documentation_review",

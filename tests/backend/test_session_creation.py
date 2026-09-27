@@ -10038,6 +10038,42 @@ class SessionCreationTests(unittest.TestCase):
         assert doc_role is not None
         self.assertEqual(RoleStatus.RUNNING, doc_role.status)
 
+    def test_documentation_review_enqueue_reuses_existing_request_for_same_source_event(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30021FHDOCIDEMP",
+            workflow_profile="oneshot",
+            policy={"doc_harvest_policy": "required"},
+        )
+        source_event = self.event_repository.append(
+            session_id=session.id,
+            event_type="doc_harvest_completed",
+            producer_type="role",
+            producer_id=DOC_HARVEST_ROLE,
+            payload={"summary": "No documentation update needed"},
+        )
+
+        first_session, first_event = self.coordinator._enqueue_documentation_review(
+            session=session,
+            source_event=source_event,
+        )
+        second_session, second_event = self.coordinator._enqueue_documentation_review(
+            session=first_session,
+            source_event=source_event,
+        )
+
+        documentation_review_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "documentation_review" and item.source_event_id == source_event.id
+        ]
+        dispatches = self.dispatch_repository.list_for_session(session.id)
+
+        self.assertEqual(1, len(documentation_review_items))
+        self.assertEqual(first_event.id, second_event.id)
+        self.assertEqual("documentation_review_requested", second_session.current_stage)
+        self.assertEqual(DOCUMENTATION_REVIEWER_ROLE, second_session.current_owner)
+        self.assertEqual(1, len(dispatches))
+
     def test_doc_harvest_completion_continues_delivery_after_commit(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30021FHCOMMIT",
