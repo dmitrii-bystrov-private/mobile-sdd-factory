@@ -118,8 +118,8 @@ class TmuxSessionBackend(SessionBackend):
     _TMUX_STARTUP_DELAY_SECONDS = 0.1
     _LAUNCHER_INPUT_VISIBILITY_RETRIES = 4
     _LAUNCHER_INPUT_VISIBILITY_DELAY_SECONDS = 0.12
-    _LAUNCHER_SUBMIT_PROGRESS_RETRIES = 4
-    _LAUNCHER_SUBMIT_PROGRESS_DELAY_SECONDS = 0.12
+    _LAUNCHER_SUBMIT_PROGRESS_RETRIES = 8
+    _LAUNCHER_SUBMIT_PROGRESS_DELAY_SECONDS = 0.25
 
     def _sanitize(self, value: str) -> str:
         return re.sub(r"[^A-Za-z0-9_-]+", "-", value)

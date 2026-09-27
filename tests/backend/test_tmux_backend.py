@@ -11,6 +11,14 @@ from backend.session_backend.tmux_backend import TmuxSessionBackend
 
 
 class TmuxBackendTests(unittest.TestCase):
+    def test_tmux_launcher_submit_progress_waits_before_retry(self) -> None:
+        wait_seconds = (
+            TmuxSessionBackend._LAUNCHER_SUBMIT_PROGRESS_RETRIES
+            * TmuxSessionBackend._LAUNCHER_SUBMIT_PROGRESS_DELAY_SECONDS
+        )
+
+        self.assertGreaterEqual(wait_seconds, 2.0)
+
     def _wait_for_output(
         self,
         backend: TmuxSessionBackend,
@@ -939,7 +947,7 @@ class TmuxBackendTests(unittest.TestCase):
             self.assertEqual("claude", submit_trace["runner"])
             self.assertTrue((workspace / "ROUTED_WORK.md").is_file())
             self.assertIn(
-                ("send-keys", "-t", role.role_id, submit_trace["payload_text"], ""),
+                ("send-keys", "-t", role.role_id, "-l", submit_trace["payload_text"]),
                 backend.calls,
             )
         self.assertIn(
@@ -964,6 +972,9 @@ class TmuxBackendTests(unittest.TestCase):
                 self.calls.append(args)
                 if args[:3] == ("capture-pane", "-p", "-S"):
                     return subprocess.CompletedProcess(["tmux", *args], 0, self.pane_text, "")
+                if args[:4] == ("send-keys", "-t", role.role_id, "-l") and len(args) >= 5:
+                    self.pane_text += f"\n{args[4]}\n"
+                    return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
                 if args[:3] == ("send-keys", "-t", role.role_id) and len(args) >= 4:
                     sent = args[3]
                     if sent == "Down":
@@ -1005,7 +1016,7 @@ class TmuxBackendTests(unittest.TestCase):
             submit_trace = backend.get_tmux_submit_traces(role.role_id)[-1]
             self.assertEqual("claude", submit_trace["runner"])
             self.assertIn(
-                ("send-keys", "-t", role.role_id, submit_trace["payload_text"], ""),
+                ("send-keys", "-t", role.role_id, "-l", submit_trace["payload_text"]),
                 backend.calls,
             )
 
