@@ -246,9 +246,7 @@ export function OperatorActions({
             <div className="operator-action-group">
               <div className="operator-action-inline-heading">
                 <strong>Runtime Session</strong>
-                <p className="form-help">
-                  Use these only when you need to stop every live runtime or start them again after a stop.
-                </p>
+                <p className="form-help">Stop live runtimes, or start them again after a stop.</p>
               </div>
               <div className="operator-actions-toolbar">
                 {runtimeSessionActions.map((action) => (
