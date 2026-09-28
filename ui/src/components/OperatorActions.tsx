@@ -216,9 +216,7 @@ export function OperatorActions({
         <div className="operator-action-group">
           <div className="operator-action-inline-heading">
             <strong>Run Controls</strong>
-            <p className="form-help">
-              Use these actions to refresh task state, pause the session, or recover a blocked run.
-            </p>
+            <p className="form-help">Refresh task state, pause, or recover a blocked run.</p>
           </div>
           <div className="operator-actions-toolbar">
             {runControlActions.map((action) => (
