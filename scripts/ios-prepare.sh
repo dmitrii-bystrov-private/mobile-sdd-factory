@@ -15,14 +15,15 @@ MISE_CMD="$(verification_resolve_mise_cmd "$REPO_DIR")"
 
 TUIST_INSTALL_LOG="$SDD_IOS_VERIFICATION_LOGS_PATH/tuist-install.log"
 TUIST_LOG="$SDD_IOS_VERIFICATION_LOGS_PATH/tuist-generate.log"
-PREPARE_MARKER="$SDD_IOS_VERIFICATION_CONTEXT_ROOT/prepare.marker.json"
+PREPARE_MARKER="$(verification_ios_prepare_marker_path "$KEY")"
 PREPARE_POLICY="required"
+CURRENT_HEAD="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 
 if policy_value="$(verification_strategy_json_value "$KEY" '.prepare.policy // "required"' 2>/dev/null)"; then
   PREPARE_POLICY="$policy_value"
 fi
 
-if [[ "$PREPARE_POLICY" == "reuse_if_available" && -f "$PREPARE_MARKER" ]]; then
+if [[ "$PREPARE_POLICY" == "reuse_if_available" ]] && verification_ios_prepare_marker_matches_head "$KEY" "$CURRENT_HEAD"; then
   echo "✅ IOS PREPARE REUSED"
   exit 0
 fi
@@ -57,7 +58,7 @@ if ! "$MISE_CMD" exec -- tuist generate --no-open >"$TUIST_LOG" 2>&1; then
 fi
 
 cat >"$PREPARE_MARKER" <<EOF
-{"policy":"$PREPARE_POLICY","head":"$(git rev-parse HEAD 2>/dev/null || echo unknown)"}
+{"policy":"$PREPARE_POLICY","head":"$CURRENT_HEAD"}
 EOF
 
 echo "✅ IOS PREPARE SUCCEEDED"

@@ -127,6 +127,9 @@ cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
   "impact_mapping": {
     "preferred_scheme": "StrategyApp"
   },
+  "prepare": {
+    "policy": "reuse_if_available"
+  },
   "test_selection": {
     "mode": "broad",
     "selectors": []
@@ -151,6 +154,26 @@ grep -q 'keychain credential lookup; retrying once' "$WORKDIR/prepare.stdout"
 grep -q 'IOS PREPARE SUCCEEDED' "$WORKDIR/prepare.stdout"
 if [[ -e "$TASK_ROOT/tmp/verification/ios/logs/pod-install.log" ]]; then
   echo "pod install log should not be created for SPM-only iOS prepare" >&2
+  exit 1
+fi
+
+mise_line_count="$(wc -l <"$MISE_LOG" | tr -d ' ')"
+bash "$REPO_ROOT/scripts/ios-prepare.sh" "$KEY" >"$WORKDIR/prepare-reuse.stdout"
+grep -q 'IOS PREPARE REUSED' "$WORKDIR/prepare-reuse.stdout"
+if [[ "$(wc -l <"$MISE_LOG" | tr -d ' ')" != "$mise_line_count" ]]; then
+  echo "prepare should reuse task-local Tuist project only when the marker matches HEAD" >&2
+  cat "$MISE_LOG" >&2
+  exit 1
+fi
+
+cat >"$TASK_ROOT/tmp/verification/ios/prepare.marker.json" <<'EOF'
+{"policy":"reuse_if_available","head":"old-head-before-merge"}
+EOF
+bash "$REPO_ROOT/scripts/ios-prepare.sh" "$KEY" >"$WORKDIR/prepare-stale-head.stdout"
+grep -q 'IOS PREPARE SUCCEEDED' "$WORKDIR/prepare-stale-head.stdout"
+if [[ "$(wc -l <"$MISE_LOG" | tr -d ' ')" -le "$mise_line_count" ]]; then
+  echo "prepare should regenerate Tuist project when the prepare marker was written for an older HEAD" >&2
+  cat "$MISE_LOG" >&2
   exit 1
 fi
 
@@ -230,7 +253,13 @@ cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
 EOF
 
 : >"$XCODEBUILD_LOG"
+: >"$MISE_LOG"
+cat >"$TASK_ROOT/tmp/verification/ios/prepare.marker.json" <<'EOF'
+{"policy":"reuse_if_available","head":"old-head-before-merge"}
+EOF
 bash "$REPO_ROOT/scripts/ios-build-for-testing.sh" "$KEY" >"$WORKDIR/env-default-scheme.stdout"
+grep -q 'IOS PREPARE SUCCEEDED' "$WORKDIR/env-default-scheme.stdout"
+grep -q 'exec -- tuist generate --no-open|LOADED_TUIST_ENV=1' "$MISE_LOG"
 grep -q -- '-workspace CustomApp-Tuist.xcworkspace' "$XCODEBUILD_LOG"
 grep -q -- '-scheme CustomApp' "$XCODEBUILD_LOG"
 

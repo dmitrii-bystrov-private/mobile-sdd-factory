@@ -308,6 +308,24 @@ verification_strategy_json_lines() {
   jq -r "$jq_expr" "$strategy_path"
 }
 
+verification_ios_prepare_marker_path() {
+  local key="$1"
+  printf '%s\n' "${SDD_WORKDIR}/${key}/tmp/verification/ios/prepare.marker.json"
+}
+
+verification_ios_prepare_marker_matches_head() {
+  local key="$1"
+  local current_head="$2"
+  local marker_path
+  marker_path="$(verification_ios_prepare_marker_path "$key")"
+
+  [[ -f "$marker_path" ]] || return 1
+
+  local marker_head
+  marker_head="$(jq -r '.head // ""' "$marker_path" 2>/dev/null || echo "")"
+  [[ -n "$marker_head" && "$marker_head" == "$current_head" ]]
+}
+
 verification_ios_scheme() {
   local key="$1"
   local scheme="${SDD_IOS_DEFAULT_SCHEME:-}"

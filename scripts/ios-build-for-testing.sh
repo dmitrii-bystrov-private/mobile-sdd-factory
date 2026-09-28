@@ -31,6 +31,10 @@ BUILD_MARKER="$SDD_IOS_VERIFICATION_CONTEXT_ROOT/build-for-testing.marker.json"
 CURRENT_HEAD="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 BUILD_PRODUCTS_POLICY="rebuild"
 
+if ! verification_ios_prepare_marker_matches_head "$KEY" "$CURRENT_HEAD"; then
+  bash "$SCRIPT_DIR/ios-prepare.sh" "$KEY"
+fi
+
 if policy_value="$(verification_strategy_json_value "$KEY" '.build_products_policy // "rebuild"' 2>/dev/null)"; then
   BUILD_PRODUCTS_POLICY="$policy_value"
 fi
