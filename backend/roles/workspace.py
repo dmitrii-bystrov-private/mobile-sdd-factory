@@ -485,6 +485,7 @@ def _terminal_result_contract(role_name: str) -> list[str]:
             "- Subtask implementation completed:",
             f"  `{helper} --work-item-id <work_item_id> --output-type completed --subtask-key <subtask_key> --summary \"Subtask completed\"`",
             "- Use the subtask completion command only for routed subtask implementation work; replace `<subtask_key>` with the exact value from `HYDRATION.json`.",
+            "- If a correction request is satisfied by confirming that no source change is needed, or by explaining that the verifier/reviewer should rerun after external regeneration, submit `completed`; do not use `--needs-operator-input` just to hand work back to a downstream gate.",
             "- Implementation could not complete:",
             f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Implementation blocked\" --details \"<what prevented completion>\"`",
             "- Operator decision required before this implementation/correction can continue:",

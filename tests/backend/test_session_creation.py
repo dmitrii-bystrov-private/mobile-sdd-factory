@@ -5366,6 +5366,8 @@ class SessionCreationTests(unittest.TestCase):
         verification_report = Path(self.temp_dir.name) / "IOS-30004" / "spec" / "final-verification.md"
         self.assertEqual(2, len(sent_inputs))
         self.assertIn("Apply verification corrections for IOS-30004.", sent_inputs[-1])
+        self.assertIn("submit this correction as completed", sent_inputs[-1])
+        self.assertIn("do not block for operator input", sent_inputs[-1])
         self.assertIn("Continue from your existing role context.", sent_inputs[-1])
         self.assertNotIn("fix the real root cause cleanly and avoid regressions", sent_inputs[-1])
         self.assertNotIn("Read AGENTS.md/CLAUDE.md in the current directory once now", sent_inputs[-1])

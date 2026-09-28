@@ -9150,7 +9150,11 @@ class CoordinatorService:
                 "or blocked_verification_cycle when the same verification loop is no longer converging and needs operator intervention."
             )
         if stage_name == "verification_correction_requested":
-            return f"Apply verification corrections for {task_key}."
+            return (
+                f"Apply verification corrections for {task_key}. "
+                "If no source change is needed and the correct outcome is to rerun verification after regenerated files, environment changes, or refreshed artifacts, "
+                "submit this correction as completed with that summary; do not block for operator input merely to hand the task back to verification."
+            )
         if stage_name == "documentation_review_requested":
             return (
                 f"Review documentation quality for {task_key}. "
@@ -9173,12 +9177,14 @@ class CoordinatorService:
         if stage_name == "convention_review_correction_requested":
             return (
                 f"Apply convention review corrections for {task_key}. "
-                "Stay aligned to the routed convention findings; fix the local consistency issue cleanly without broadening into unrelated cleanup."
+                "Stay aligned to the routed convention findings; fix the local consistency issue cleanly without broadening into unrelated cleanup. "
+                "If the grounded correction is that no source change is needed, submit completed with the evidence instead of blocking for operator input."
             )
         if stage_name == "requirements_review_correction_requested":
             return (
                 f"Apply requirements review corrections for {task_key}. "
-                "Stay aligned to the routed requirement or regression findings; fix behavior and focused tests without broadening into unrelated cleanup."
+                "Stay aligned to the routed requirement or regression findings; fix behavior and focused tests without broadening into unrelated cleanup. "
+                "If the requested evidence belongs to a later verification gate and no source change is needed in this correction, submit completed with that handoff summary instead of blocking for operator input."
             )
         if stage_name == "documentation_review_correction_requested":
             return (
