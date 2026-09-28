@@ -144,6 +144,9 @@ if [[ "\${1:-}" == "-C" ]]; then
 fi
 case "\${1:-}" in
   rev-parse)
+    if [[ "\${2:-}" == "--verify" && "\${3:-}" == "origin/master" ]]; then
+      exit 0
+    fi
     exit 1
     ;;
   fetch|checkout|pull)
@@ -604,6 +607,14 @@ grep -q '^trust$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: mise trust ran" &&
 grep -q '^install$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: mise install ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: mise install missing"; (( FAIL++ )) || true; }
 grep -q '^exec -- tuist install$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: tuist install ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: tuist install missing"; (( FAIL++ )) || true; }
 grep -q '^exec -- tuist generate --no-open$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: tuist generate ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: tuist generate missing"; (( FAIL++ )) || true; }
+if grep -q "worktree add $MOCK_WORKDIR/IOS-100/repo -b feature/IOS-100 origin/master" "$GIT_LOG"; then
+  echo "  PASS  iOS bootstrap: new branch starts from origin/master"
+  (( PASS++ )) || true
+else
+  echo "  FAIL  iOS bootstrap: expected new branch to start from origin/master"
+  echo "        git log: $(cat "$GIT_LOG")"
+  (( FAIL++ )) || true
+fi
 if grep -q 'pod install' "$TMP_ROOT/snapshot.stdout" "$STDERR" "$MISE_LOG" 2>/dev/null; then
   echo "  FAIL  iOS bootstrap: pod install should not run"
   (( FAIL++ )) || true

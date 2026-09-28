@@ -431,10 +431,9 @@ else
     echo "Branch $BRANCH_NAME found on origin — checking out with tracking."
     git -C "$PLATFORM_DIR" worktree add "$WORKTREE_PATH" --track -b "$BRANCH_NAME" "origin/$BRANCH_NAME" 2>"$TMPDIR_JIRA/worktree.err" || _worktree_add_failed=true
   else
-    echo "Branch $BRANCH_NAME does not exist — creating from master."
-    git -C "$PLATFORM_DIR" checkout master
-    git -C "$PLATFORM_DIR" pull origin master
-    git -C "$PLATFORM_DIR" worktree add "$WORKTREE_PATH" -b "$BRANCH_NAME" 2>"$TMPDIR_JIRA/worktree.err" || _worktree_add_failed=true
+    echo "Branch $BRANCH_NAME does not exist — creating from origin/master."
+    git -C "$PLATFORM_DIR" rev-parse --verify "origin/master" >/dev/null
+    git -C "$PLATFORM_DIR" worktree add "$WORKTREE_PATH" -b "$BRANCH_NAME" "origin/master" 2>"$TMPDIR_JIRA/worktree.err" || _worktree_add_failed=true
   fi
 
   if $_worktree_add_failed; then
