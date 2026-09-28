@@ -108,8 +108,8 @@ export function OperatorActions({
       onClick: () => run(() => apiClient.stopRuntimeSession(session.id)),
     });
     runtimeSessionActions.push({
-      label: "Restart all runtimes",
-      description: "Start the stopped runtime session again and relaunch its lane runtimes.",
+      label: "Start stopped runtimes",
+      description: "Start the runtime session again after all live runtimes were stopped.",
       disabled: busy || visibleRuntimeRoles.some((role) => role.status !== "stopped"),
       onClick: () => run(() => apiClient.restartRuntimeSession(session.id)),
     });
@@ -246,7 +246,9 @@ export function OperatorActions({
             <div className="operator-action-group">
               <div className="operator-action-inline-heading">
                 <strong>Runtime Session</strong>
-                <p className="form-help">Use these only when you need to stop or relaunch every live runtime at once.</p>
+                <p className="form-help">
+                  Use these only when you need to stop every live runtime or start them again after a stop.
+                </p>
               </div>
               <div className="operator-actions-toolbar">
                 {runtimeSessionActions.map((action) => (
