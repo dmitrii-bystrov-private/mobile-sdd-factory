@@ -3661,6 +3661,16 @@ class CoordinatorService:
             raise IntakeError(f"Owner role {work_item.owner_role_id} is missing for session {session.id}")
         if role.runtime_handle is None:
             raise IntakeError(f"Role {role.role_name} has no runtime handle for session {session.id}")
+        if self._operator_reply_repeats_waiting_card(
+            session_id=session.id,
+            work_item_id=work_item.id,
+            role_name=role.role_name,
+            text=text,
+        ):
+            raise IntakeError(
+                "Operator reply appears to repeat the waiting-for-operator card. "
+                "Send the actual decision or answer instead."
+            )
         runtime_role = RuntimeRoleHandle(
             role_id=role.runtime_handle,
             session_id=self._runtime_session_id_for_role(role, session),
@@ -3759,6 +3769,72 @@ class CoordinatorService:
                     force_redispatch=True,
                 )
         return session, event
+
+    def _operator_reply_repeats_waiting_card(
+        self,
+        *,
+        session_id: int,
+        work_item_id: int,
+        role_name: str,
+        text: str,
+    ) -> bool:
+        normalized_text = self._normalize_operator_reply_text(text)
+        if not normalized_text:
+            return False
+
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.event_type != "session_escalated_to_operator":
+                continue
+            if event.payload.get("work_item_id") != work_item_id:
+                continue
+            if event.payload.get("role_name") != role_name:
+                continue
+            if not event.payload.get("needs_operator_input"):
+                continue
+
+            summary = str(event.payload.get("summary") or "").strip()
+            details = str(event.payload.get("details") or "").strip()
+            title = f"{self._operator_role_display_name(role_name)} needs a reply"
+            candidates = [
+                "\n".join(part for part in [title, summary, "", details] if part != ""),
+                "\n".join(part for part in [summary, "", details] if part != ""),
+            ]
+            return any(
+                normalized_text == self._normalize_operator_reply_text(candidate)
+                for candidate in candidates
+            )
+        return False
+
+    def _normalize_operator_reply_text(self, text: str) -> str:
+        return " ".join(str(text).split()).strip()
+
+    def _operator_role_display_name(self, role_name: str) -> str:
+        role_labels = {
+            "implementer": "Implementer",
+            "verification-coordinator": "Build Verifier",
+            "convention-reviewer": "Convention Reviewer",
+            "requirements-reviewer": "Requirements Reviewer",
+            "final-verifier": "Final Verifier",
+            "doc-harvest-worker": "Documentation Writer",
+            "doc-harvest": "Documentation Writer",
+            "documentation-reviewer": "Documentation Reviewer",
+            "proposal-context-worker": "Context Builder",
+            "context-collector": "Context Collector",
+            "requirements-clarifier-worker": "Requirements Clarifier",
+            "requirements-clarifier": "Requirements Clarifier",
+            "acceptance-criteria-worker": "Acceptance Criteria",
+            "acceptance-criteria-writer": "Acceptance Criteria",
+            "constraints-worker": "Design Constraints",
+            "constraints-definer": "Design Constraints",
+            "spec-verifier-worker": "Spec Verifier",
+            "spec-verifier": "Spec Verifier",
+            "task-decomposer-worker": "Task Decomposer",
+            "task-decomposer": "Task Decomposer",
+        }
+        known = role_labels.get(role_name)
+        if known:
+            return known
+        return " ".join(part[:1].upper() + part[1:] for part in re.split("[-_]+", role_name) if part)
 
     def _operator_reply_requires_routed_continuation(self, work_item: WorkItem) -> bool:
         return work_item.work_type in {

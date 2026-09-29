@@ -1032,6 +1032,65 @@ class SessionCreationTests(unittest.TestCase):
             event.payload.get("operator_reply"),
         )
 
+    def test_operator_reply_rejects_waiting_card_echo(self) -> None:
+        session, _, _ = self.coordinator.create_task_session(
+            "IOS-30002CARDECHO",
+            workflow_profile="oneshot",
+            policy={
+                "review_policy": "enabled",
+                "doc_harvest_policy": "disabled",
+            },
+        )
+        self.coordinator.prepare_task_session("IOS-30002CARDECHO")
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        assert implementer_role is not None
+        assert implementer_role.runtime_handle is not None
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="convention_review_correction",
+            title="Convention review corrections for IOS-30002CARDECHO",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="convention_review_correction_requested",
+            current_owner=None,
+        )
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        self.coordinator._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "implementation_blocked",
+                "role_name": IMPLEMENTER_ROLE,
+                "work_item_id": work_item.id,
+                "summary": "Operator decision needed",
+                "details": "Choose one: (a) keep protocol docs; (b) duplicate implementation docs.",
+                "needs_operator_input": True,
+                "current_stage": "convention_review_correction_requested",
+            },
+        )
+        card_text = (
+            "Implementer needs a reply\n"
+            "Operator decision needed\n\n"
+            "Choose one: (a) keep protocol docs; (b) duplicate implementation docs."
+        )
+        sent_before = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)
+
+        with self.assertRaisesRegex(IntakeError, "waiting-for-operator card"):
+            self.coordinator.send_operator_runtime_input(
+                session_id=session.id,
+                text=card_text,
+            )
+
+        refreshed_session = self.session_repository.get_by_id(session.id)
+        refreshed_item = self.work_item_repository.get_by_id(work_item.id)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, refreshed_session.status)
+        self.assertEqual(WorkItemStatus.WAITING_FOR_OPERATOR, refreshed_item.status)
+        self.assertEqual(sent_before, self.session_backend.get_sent_inputs(implementer_role.runtime_handle))
+
     def test_operator_reply_to_review_cycle_uses_fresh_routed_work_item(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30002REVIEWCYCLE",
