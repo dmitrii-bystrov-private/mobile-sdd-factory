@@ -538,11 +538,12 @@ elif [[ "$PLATFORM" == "android" ]] && ! $WORKTREE_CREATED; then
 fi
 
 # ---------------------------------------------------------------------------
-# Stage 4: Transition to In Progress (when status is To Do)
+# Stage 4: Transition to In Progress (when status is not yet active development)
 # ---------------------------------------------------------------------------
 
 _parent_status_now="$(jq -r '.fields.status.name' "$PARENT_CORE_JSON")"
-if [[ "$_parent_status_now" == "To Do" && ( "$PARENT_ISSUE_TYPE" == "Story" || "$PARENT_ISSUE_TYPE" == "Bug" ) ]]; then
+_parent_status_token="$(twg_jira_status_token "$_parent_status_now")"
+if [[ ( "$_parent_status_token" == "todo" || "$_parent_status_token" == "reopened" ) && ( "$PARENT_ISSUE_TYPE" == "Story" || "$PARENT_ISSUE_TYPE" == "Bug" ) ]]; then
   _fill_transition_fields_with_twg "$PARENT_KEY" "$PARENT_ISSUE_TYPE" || true
   set +e
   _transition_output="$(_transition_to_in_progress_with_twg "$PARENT_KEY" "$PARENT_ISSUE_TYPE" 2>&1)"

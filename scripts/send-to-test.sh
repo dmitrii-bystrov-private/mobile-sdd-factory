@@ -25,6 +25,8 @@ json="$(cat "$tmp_json")"
 current_status="$(printf '%s' "$json" | jq -r '.fields.status.name')"
 
 target_status="Code review"
+fallback_status="Resolved"
+fallback_resolution="Done"
 
 if twg_jira_status_is_code_review_or_later "$current_status"; then
   echo "Already done: $KEY is already in code-review-or-later status: $current_status"
@@ -35,5 +37,14 @@ echo "Transitioning $KEY ($current_status) → $target_status..."
 if [[ "$current_status" == "To Do" ]]; then
   twg_jira_transition_to_first_available_status "$transition_json" "$KEY" "In Progress" >/dev/null
 fi
-actual_target="$(twg_jira_transition_to_first_available_status "$transition_json" "$KEY" "$target_status")"
+if actual_target="$(twg_jira_transition_to_first_available_status "$transition_json" "$KEY" "$target_status" 2>/dev/null)"; then
+  echo "Done: $KEY → $actual_target"
+  exit 0
+fi
+
+transition_fields="$(
+  jq -nc --arg resolution "$fallback_resolution" \
+    '{resolution: {name: $resolution}}'
+)"
+actual_target="$(twg_jira_transition_to_first_available_status_with_fields_json "$transition_json" "$KEY" "$transition_fields" "$fallback_status")"
 echo "Done: $KEY → $actual_target"

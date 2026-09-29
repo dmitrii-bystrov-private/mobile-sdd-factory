@@ -30,6 +30,9 @@ if [[ "\$1 \$2 \$3" == "jira workitem get" ]]; then
     IOS-INPROGRESS)
       status="In Progress"
       ;;
+    IOS-REOPENED)
+      status="Reopened"
+      ;;
     *)
       status="To Do"
       ;;
@@ -49,6 +52,31 @@ JSON
   exit 0
 fi
 if [[ "\$1 \$2 \$3" == "jira workitem transition" && "\$*" != *"--transition-id"* ]]; then
+  transition_key=""
+  previous_arg=""
+  for arg in "\$@"; do
+    if [[ "\$previous_arg" == "--id" ]]; then
+      transition_key="\$arg"
+      break
+    fi
+    previous_arg="\$arg"
+  done
+  if [[ "\$transition_key" == "IOS-REOPENED" ]]; then
+    cat <<'JSON'
+{
+  "data": {
+    "transitions": [
+      {
+        "id": "121",
+        "name": "Resolved",
+        "toName": "Resolved"
+      }
+    ]
+  }
+}
+JSON
+    exit 0
+  fi
   cat <<'JSON'
 {
   "data": {
@@ -96,8 +124,13 @@ JSON
   exit 0
 fi
 if [[ "\$1 \$2 \$3" == "jira workitem transition" && "\$*" == *"--transition-id 121"* ]]; then
-  if [[ "\$*" != *"--fields-json"* || "\$*" != *"Stories improvements"* || "\$*" != *'"resolution":{"name":"Done"}'* ]]; then
-    echo "resolved subtask transition must set resolution and Stories improvements fix version" >&2
+  if [[ "\$*" != *"--fields-json"* || "\$*" != *'"resolution":{"name":"Done"}'* ]]; then
+    echo "resolved transition must set resolution" >&2
+    printf '%s\n' "\$*" >&2
+    exit 1
+  fi
+  if [[ "\$*" != *"IOS-REOPENED"* && "\$*" != *"Stories improvements"* ]]; then
+    echo "resolved subtask transition must set Stories improvements fix version" >&2
     printf '%s\n' "\$*" >&2
     exit 1
   fi
@@ -136,6 +169,9 @@ grep -q "Already done: IOS-TESTDONE is already in code-review-or-later status: T
 PATH="$WORKDIR:$PATH" bash "$REPO_ROOT/scripts/send-to-test.sh" IOS-INPROGRESS >"$WORKDIR/inprogress.stdout"
 grep -q "Done: IOS-INPROGRESS → Code review" "$WORKDIR/inprogress.stdout"
 
+PATH="$WORKDIR:$PATH" bash "$REPO_ROOT/scripts/send-to-test.sh" IOS-REOPENED >"$WORKDIR/reopened.stdout"
+grep -q "Done: IOS-REOPENED → Resolved" "$WORKDIR/reopened.stdout"
+
 PATH="$WORKDIR:$PATH" bash "$REPO_ROOT/scripts/complete-subtask.sh" IOS-RESOLVED >"$WORKDIR/subtask-resolved.stdout"
 grep -q "Already done: IOS-RESOLVED is already in resolved-or-later status: Resolved" "$WORKDIR/subtask-resolved.stdout"
 
@@ -148,8 +184,10 @@ grep -q "Done: IOS-TODO → Resolved" "$WORKDIR/subtask-todo.stdout"
 grep -q "jira workitem get IOS-READY --fields status -o json" "$TWG_LOG"
 grep -q "jira workitem get IOS-CODEREVIEW --fields status -o json" "$TWG_LOG"
 grep -q "jira workitem get IOS-TESTDONE --fields status -o json" "$TWG_LOG"
+grep -q "jira workitem get IOS-REOPENED --fields status -o json" "$TWG_LOG"
 grep -q "jira workitem transition --id IOS-INPROGRESS -o json" "$TWG_LOG"
 grep -q "jira workitem transition --id IOS-INPROGRESS --transition-id 271 -o json" "$TWG_LOG"
+grep -q "jira workitem transition --id IOS-REOPENED --transition-id 121 --fields-json" "$TWG_LOG"
 grep -q "jira workitem get IOS-RESOLVED --fields status -o json" "$TWG_LOG"
 grep -q "jira workitem transition --id IOS-READY --transition-id 121 --fields-json" "$TWG_LOG"
 grep -q "jira workitem transition --id IOS-TODO --transition-id 221 -o json" "$TWG_LOG"
