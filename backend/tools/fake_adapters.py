@@ -54,11 +54,11 @@ class FakeJiraAdapter:
 
     def complete_subtask(self, task_key: str) -> CommandResult:
         self.completed_subtasks.append(task_key)
-        self.status_by_task[task_key] = "Ready for test"
+        self.status_by_task[task_key] = "Resolved"
         return CommandResult(
             command=["fake_complete_subtask", task_key],
             returncode=0,
-            stdout=f"Done: {task_key} -> Ready for test\n",
+            stdout=f"Done: {task_key} -> Resolved\n",
             stderr="",
         )
 
@@ -83,7 +83,7 @@ class FakeJiraAdapter:
         return CommandResult(
             command=["fake_send_to_test", task_key],
             returncode=0,
-            stdout=f"Done: {task_key} -> Ready for test\n",
+            stdout=f"Done: {task_key} -> Code review\n",
             stderr="",
         )
 

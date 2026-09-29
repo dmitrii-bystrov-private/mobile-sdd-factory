@@ -108,6 +108,32 @@ twg_jira_status_is_testing_or_later() {
   esac
 }
 
+twg_jira_status_is_code_review_or_later() {
+  local status_token
+  status_token="$(twg_jira_status_token "$1")"
+  case "$status_token" in
+    codereview|readyfortest|readyfortesting|intesting|testing|testdone|readytoprod|designreview|businesstest|resolved|done|closed)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+twg_jira_status_is_resolved_or_later() {
+  local status_token
+  status_token="$(twg_jira_status_token "$1")"
+  case "$status_token" in
+    resolved|released|done|closed)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 twg_jira_transition_to_first_available_status() {
   local output_path="$1"
   local key="$2"
@@ -135,6 +161,50 @@ twg_jira_transition_to_first_available_status() {
     )"
     if [[ -n "$transition_id" ]]; then
       if run_twg_json "$output_path" jira workitem transition --id "$key" --transition-id "$transition_id"; then
+        rm -f "$transitions_json"
+        printf '%s\n' "$target_name"
+        return 0
+      fi
+      rm -f "$transitions_json"
+      return 1
+    fi
+  done
+
+  echo "ERROR: none of the requested transitions is available for $key: $*" >&2
+  echo "Available transitions:" >&2
+  jq -r '.data.transitions[]? | "  - \(.name // "") -> \(.toName // "") [\(.id // "")]"' "$transitions_json" >&2
+  rm -f "$transitions_json"
+  return 2
+}
+
+twg_jira_transition_to_first_available_status_with_fields_json() {
+  local output_path="$1"
+  local key="$2"
+  local fields_json="$3"
+  shift 3
+
+  local transitions_json
+  transitions_json="$(mktemp)"
+  if ! run_twg_json "$transitions_json" jira workitem transition --id "$key"; then
+    rm -f "$transitions_json"
+    return 1
+  fi
+
+  local target_name transition_id desired_status
+  for desired_status in "$@"; do
+    target_name="$desired_status"
+    transition_id="$(
+      jq -r --arg target "$desired_status" '
+        def norm: ascii_downcase | gsub("[^a-z0-9]"; "");
+        first(
+          .data.transitions[]
+          | select(((.toName // "") | norm) == ($target | norm) or ((.name // "") | norm) == ($target | norm))
+          | .id
+        ) // ""
+      ' "$transitions_json"
+    )"
+    if [[ -n "$transition_id" ]]; then
+      if run_twg_json "$output_path" jira workitem transition --id "$key" --transition-id "$transition_id" --fields-json "$fields_json"; then
         rm -f "$transitions_json"
         printf '%s\n' "$target_name"
         return 0

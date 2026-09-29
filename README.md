@@ -235,7 +235,7 @@ Before iOS build, test, and manual launch operations, the scripts check free dis
 
 Review message previews are cached per session and MR id. The operator UI shows cached text immediately and refreshes it in the background when the cache is stale. `REVIEW_MESSAGE_CACHE_TTL_SECONDS` controls the stale threshold; the default is `600`.
 
-When verification passes, the backend completes the task, creates the MR, and moves the Jira task to testing automatically. Manual MR/send-to-test actions are recovery tools for failed delivery, not the normal path.
+When verification passes, the backend completes the task, creates the MR, and moves the Jira task to code review automatically. Manual MR/send-to-test actions are recovery tools for failed delivery, not the normal path.
 
 ## Useful Commands
 

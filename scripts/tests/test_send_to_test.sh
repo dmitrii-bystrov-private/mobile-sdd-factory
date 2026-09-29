@@ -18,6 +18,12 @@ if [[ "\$1 \$2 \$3" == "jira workitem get" ]]; then
     IOS-READY)
       status="Ready for test"
       ;;
+    IOS-CODEREVIEW)
+      status="Code review"
+      ;;
+    IOS-RESOLVED)
+      status="Resolved"
+      ;;
     IOS-TESTDONE)
       status="TestDone"
       ;;
@@ -51,6 +57,21 @@ if [[ "\$1 \$2 \$3" == "jira workitem transition" && "\$*" != *"--transition-id"
         "id": "241",
         "name": "Ready for test",
         "toName": "Ready for test"
+      },
+      {
+        "id": "271",
+        "name": "Code review",
+        "toName": "Code review"
+      },
+      {
+        "id": "121",
+        "name": "Resolved",
+        "toName": "Resolved"
+      },
+      {
+        "id": "221",
+        "name": "In Progress",
+        "toName": "In Progress"
       }
     ]
   }
@@ -59,6 +80,35 @@ JSON
   exit 0
 fi
 if [[ "\$1 \$2 \$3" == "jira workitem transition" && "\$*" == *"--transition-id 241"* ]]; then
+  cat <<'JSON'
+{
+  "ok": true
+}
+JSON
+  exit 0
+fi
+if [[ "\$1 \$2 \$3" == "jira workitem transition" && "\$*" == *"--transition-id 271"* ]]; then
+  cat <<'JSON'
+{
+  "ok": true
+}
+JSON
+  exit 0
+fi
+if [[ "\$1 \$2 \$3" == "jira workitem transition" && "\$*" == *"--transition-id 121"* ]]; then
+  if [[ "\$*" != *"--fields-json"* || "\$*" != *"Stories improvements"* || "\$*" != *'"resolution":{"name":"Done"}'* ]]; then
+    echo "resolved subtask transition must set resolution and Stories improvements fix version" >&2
+    printf '%s\n' "\$*" >&2
+    exit 1
+  fi
+  cat <<'JSON'
+{
+  "ok": true
+}
+JSON
+  exit 0
+fi
+if [[ "\$1 \$2 \$3" == "jira workitem transition" && "\$*" == *"--transition-id 221"* ]]; then
   cat <<'JSON'
 {
   "ok": true
@@ -75,18 +125,35 @@ EOF
 chmod +x "$WORKDIR/twg"
 
 PATH="$WORKDIR:$PATH" bash "$REPO_ROOT/scripts/send-to-test.sh" IOS-READY >"$WORKDIR/ready.stdout"
-grep -q "Already done: IOS-READY is already in testing-or-later status: Ready for test" "$WORKDIR/ready.stdout"
+grep -q "Already done: IOS-READY is already in code-review-or-later status: Ready for test" "$WORKDIR/ready.stdout"
+
+PATH="$WORKDIR:$PATH" bash "$REPO_ROOT/scripts/send-to-test.sh" IOS-CODEREVIEW >"$WORKDIR/code-review.stdout"
+grep -q "Already done: IOS-CODEREVIEW is already in code-review-or-later status: Code review" "$WORKDIR/code-review.stdout"
 
 PATH="$WORKDIR:$PATH" bash "$REPO_ROOT/scripts/send-to-test.sh" IOS-TESTDONE >"$WORKDIR/testdone.stdout"
-grep -q "Already done: IOS-TESTDONE is already in testing-or-later status: TestDone" "$WORKDIR/testdone.stdout"
+grep -q "Already done: IOS-TESTDONE is already in code-review-or-later status: TestDone" "$WORKDIR/testdone.stdout"
 
 PATH="$WORKDIR:$PATH" bash "$REPO_ROOT/scripts/send-to-test.sh" IOS-INPROGRESS >"$WORKDIR/inprogress.stdout"
-grep -q "Done: IOS-INPROGRESS → Ready for test" "$WORKDIR/inprogress.stdout"
+grep -q "Done: IOS-INPROGRESS → Code review" "$WORKDIR/inprogress.stdout"
+
+PATH="$WORKDIR:$PATH" bash "$REPO_ROOT/scripts/complete-subtask.sh" IOS-RESOLVED >"$WORKDIR/subtask-resolved.stdout"
+grep -q "Already done: IOS-RESOLVED is already in resolved-or-later status: Resolved" "$WORKDIR/subtask-resolved.stdout"
+
+PATH="$WORKDIR:$PATH" bash "$REPO_ROOT/scripts/complete-subtask.sh" IOS-READY >"$WORKDIR/subtask-ready.stdout"
+grep -q "Done: IOS-READY → Resolved" "$WORKDIR/subtask-ready.stdout"
+
+PATH="$WORKDIR:$PATH" bash "$REPO_ROOT/scripts/complete-subtask.sh" IOS-TODO >"$WORKDIR/subtask-todo.stdout"
+grep -q "Done: IOS-TODO → Resolved" "$WORKDIR/subtask-todo.stdout"
 
 grep -q "jira workitem get IOS-READY --fields status -o json" "$TWG_LOG"
+grep -q "jira workitem get IOS-CODEREVIEW --fields status -o json" "$TWG_LOG"
 grep -q "jira workitem get IOS-TESTDONE --fields status -o json" "$TWG_LOG"
 grep -q "jira workitem transition --id IOS-INPROGRESS -o json" "$TWG_LOG"
-grep -q "jira workitem transition --id IOS-INPROGRESS --transition-id 241 -o json" "$TWG_LOG"
+grep -q "jira workitem transition --id IOS-INPROGRESS --transition-id 271 -o json" "$TWG_LOG"
+grep -q "jira workitem get IOS-RESOLVED --fields status -o json" "$TWG_LOG"
+grep -q "jira workitem transition --id IOS-READY --transition-id 121 --fields-json" "$TWG_LOG"
+grep -q "jira workitem transition --id IOS-TODO --transition-id 221 -o json" "$TWG_LOG"
+grep -q "jira workitem transition --id IOS-TODO --transition-id 121 --fields-json" "$TWG_LOG"
 if grep -q "jira workitem update" "$TWG_LOG"; then
   echo "send-to-test.sh called update --status" >&2
   cat "$TWG_LOG" >&2

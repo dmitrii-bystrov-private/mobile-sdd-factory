@@ -247,15 +247,15 @@ Requires `SDD_WORKDIR`, plus `IOS_DIR` or `ANDROID_DIR` when no worktree exists.
 
 #### `send-to-test.sh`
 
-Transitions the task to the appropriate testing-ready Jira status without creating a git commit:
+Transitions the task to the Jira code-review handoff status without creating a git commit:
 
 ```bash
 bash scripts/send-to-test.sh <TASK-KEY>
 ```
 
 - Workflow checkpoint commits should already exist before this step; this script only performs the Jira transition.
-- Non-bug tasks transition to **Ready for test**.
-- If the task is already **Ready for test**, the script exits successfully without changing Jira.
+- Tasks transition to **Code review**.
+- If the task is already **Code review** or later, the script exits successfully without changing Jira.
 - If the task is in **To Do**, transitions through **In Progress** first.
 
 Requires `twg` and `jq`.
