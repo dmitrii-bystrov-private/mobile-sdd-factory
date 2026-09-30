@@ -67,6 +67,7 @@ class TmuxSessionBackend(SessionBackend):
         self.tmux_activity_signatures: dict[str, str] = {}
         self.tmux_activity_updated_at: dict[str, float] = {}
         self.tmux_last_stall_poke_at: dict[str, float] = {}
+        self.tmux_last_stall_poke_signature: dict[str, str] = {}
         self.tmux_stall_poke_threshold_seconds = self._read_tmux_stall_poke_threshold()
         self._available = shutil.which("tmux") is not None
         self._effective_mode = self._resolve_mode(mode)
@@ -612,6 +613,23 @@ class TmuxSessionBackend(SessionBackend):
         )
         return suffix_match.group(1) in normalized_tail
 
+    def submit_visible_launcher_input(self, role: RuntimeRoleHandle, dispatch_token: str) -> dict[str, str] | None:
+        if self._effective_mode != "tmux" or not dispatch_token:
+            return None
+        self._restore_tmux_role_metadata_if_needed(role)
+        if not self.tmux_interactive_driver_enabled.get(role.role_id, False):
+            return None
+        if not self.launcher_dispatch_token_visible(role, dispatch_token):
+            return None
+        socket_path = self._socket_path(role.session_id)
+        result = self._tmux(socket_path, "send-keys", "-t", role.role_id, "Enter")
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr or result.stdout or "Failed to submit visible launcher input")
+        return {
+            "submit_key": "Enter",
+            "delivery_state": "visible_input_submitted",
+        }
+
     def maybe_poke_stalled_role(
         self,
         role: RuntimeRoleHandle,
@@ -635,19 +653,24 @@ class TmuxSessionBackend(SessionBackend):
 
         now = time.monotonic()
         previous_signature = self.tmux_activity_signatures.get(role.role_id)
+        model_capacity_blocked = self._contains_model_capacity_blocker(signature)
         if previous_signature != signature:
             self.tmux_activity_signatures[role.role_id] = signature
             self.tmux_activity_updated_at[role.role_id] = now
-            return None
+            if not model_capacity_blocked:
+                return None
 
         updated_at = self.tmux_activity_updated_at.setdefault(role.role_id, now)
         stalled_seconds = now - updated_at
-        if stalled_seconds < self.tmux_stall_poke_threshold_seconds:
+        if not model_capacity_blocked and stalled_seconds < self.tmux_stall_poke_threshold_seconds:
             return None
 
         last_poke_at = self.tmux_last_stall_poke_at.get(role.role_id, 0.0)
-        if now - last_poke_at < self.tmux_stall_poke_threshold_seconds:
+        if model_capacity_blocked and last_poke_at > 0 and now - last_poke_at < self.tmux_stall_poke_threshold_seconds:
             return None
+        if not model_capacity_blocked:
+            if now - last_poke_at < self.tmux_stall_poke_threshold_seconds:
+                return None
 
         socket_path = self._socket_path(role.session_id)
         if self.tmux_interactive_driver_enabled.get(role.role_id, False):
@@ -664,6 +687,7 @@ class TmuxSessionBackend(SessionBackend):
                 raise RuntimeError(result.stderr or result.stdout or "Failed to poke stalled tmux role")
 
         self.tmux_last_stall_poke_at[role.role_id] = now
+        self.tmux_last_stall_poke_signature[role.role_id] = signature
         return {
             "role_id": role.role_id,
             "stalled_seconds": round(stalled_seconds, 3),

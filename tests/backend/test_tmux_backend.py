@@ -595,6 +595,39 @@ class TmuxBackendTests(unittest.TestCase):
 
         self.assertTrue(backend.launcher_dispatch_token_visible(role, "hv12-wi4443"))
 
+    def test_tmux_submit_visible_launcher_input_presses_enter_for_visible_token(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:3] == ("capture-pane", "-p", "-S"):
+                    return subprocess.CompletedProcess(
+                        ["tmux", *args],
+                        0,
+                        (
+                            "› Read ROUTED_WORK.md in the current directory, read HYDRATION.json too if it exists. "
+                            "Dispatch token: hv3-wi4986.\n"
+                        ),
+                        "",
+                    )
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50015:verification-coordinator",
+            session_id="sdd-IOS-50015",
+            backend_name="tmux",
+        )
+        backend.tmux_interactive_driver_enabled[role.role_id] = True
+
+        result = backend.submit_visible_launcher_input(role, "hv3-wi4986")
+
+        self.assertEqual({"submit_key": "Enter", "delivery_state": "visible_input_submitted"}, result)
+        self.assertIn(("send-keys", "-t", role.role_id, "Enter"), backend.calls)
+
     def test_tmux_launcher_confirms_clipped_dispatch_token_tail(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self) -> None:
@@ -1655,7 +1688,7 @@ class TmuxBackendTests(unittest.TestCase):
             )
         )
 
-    def test_tmux_mode_pokes_model_capacity_tail_after_threshold(self) -> None:
+    def test_tmux_mode_pokes_model_capacity_tail_immediately(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
             def __init__(self) -> None:
                 super().__init__(mode="tmux")
@@ -1684,14 +1717,71 @@ class TmuxBackendTests(unittest.TestCase):
             "  gpt-5.4 medium · ~/repo · Context 76% used · weekly 88% left\n"
         )
 
-        self.assertIsNone(backend.maybe_poke_stalled_role(role, snapshot=snapshot))
-        backend.tmux_activity_updated_at[role.role_id] = time.monotonic() - 31.0
         result = backend.maybe_poke_stalled_role(role, snapshot=snapshot)
 
         self.assertIsNotNone(result)
         assert result is not None
         self.assertEqual(".", result["poke_text"])
         self.assertIn(("send-keys", "-t", role.role_id, ".", "Enter"), backend.calls)
+
+    def test_tmux_mode_pokes_model_capacity_tail_immediately_once(self) -> None:
+        class FakeTmuxBackend(TmuxSessionBackend):
+            def __init__(self) -> None:
+                super().__init__(mode="tmux")
+                self.calls: list[tuple[str, ...]] = []
+
+            def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+                self.calls.append(args)
+                if args[:2] == ("list-panes", "-t"):
+                    return subprocess.CompletedProcess(["tmux", *args], 0, "0: [220x60]\n", "")
+                return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
+
+        backend = FakeTmuxBackend()
+        backend.tmux_stall_poke_threshold_seconds = 180.0
+        role = RuntimeRoleHandle(
+            role_id="sdd-IOS-50013:requirements-reviewer",
+            session_id="sdd-IOS-50013",
+            backend_name="tmux",
+        )
+        snapshot = (
+            "› Read ROUTED_WORK.md in the current directory\n"
+            "\n"
+            "■ Selected model is at capacity. Please try a different model.\n"
+            "\n"
+            "› Ask Codex to do anything\n"
+            "\n"
+            "  GPT-5.6-Sol high · ~/repo · Context 48% used · weekly 35% left\n"
+        )
+
+        result = backend.maybe_poke_stalled_role(role, snapshot=snapshot)
+        repeated = backend.maybe_poke_stalled_role(role, snapshot=snapshot)
+        changed_capacity_snapshot = (
+            "› .\n"
+            "\n"
+            "■ Selected model is at capacity. Please try a different model.\n"
+            "\n"
+            "› Ask Codex to do anything\n"
+            "\n"
+            "  GPT-5.6-Sol high · ~/repo · Context 48% used · weekly 35% left\n"
+        )
+        cooldown_repeated = backend.maybe_poke_stalled_role(role, snapshot=changed_capacity_snapshot)
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(".", result["poke_text"])
+        self.assertIsNone(repeated)
+        self.assertIsNone(cooldown_repeated)
+        backend.tmux_last_stall_poke_at[role.role_id] = time.monotonic() - 181.0
+        after_cooldown = backend.maybe_poke_stalled_role(role, snapshot=snapshot)
+        self.assertIsNotNone(after_cooldown)
+        send_key_calls = [call for call in backend.calls if call[:2] == ("send-keys", "-t")]
+        self.assertEqual(
+            [
+                ("send-keys", "-t", role.role_id, ".", "Enter"),
+                ("send-keys", "-t", role.role_id, ".", "Enter"),
+            ],
+            send_key_calls,
+        )
 
     def test_interactive_driver_does_not_escalate_model_capacity_blocker(self) -> None:
         backend = TmuxSessionBackend(mode="recording")

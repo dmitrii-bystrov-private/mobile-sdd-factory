@@ -274,6 +274,7 @@ class DispatchTraceRecordingBackend(RecordingSessionBackend):
         self.delivery_state = delivery_state
         self.tmux_submit_traces: dict[str, list[dict[str, str]]] = {}
         self.visible_dispatch_tokens: set[str] = set()
+        self.visible_submit_repairs: list[tuple[str, str]] = []
 
     def send_input(self, role: RuntimeRoleHandle, text: str) -> None:
         if self.fail_send:
@@ -295,6 +296,15 @@ class DispatchTraceRecordingBackend(RecordingSessionBackend):
 
     def launcher_dispatch_token_visible(self, role: RuntimeRoleHandle, dispatch_token: str) -> bool:
         return dispatch_token in self.visible_dispatch_tokens
+
+    def submit_visible_launcher_input(self, role: RuntimeRoleHandle, dispatch_token: str) -> dict[str, str] | None:
+        if dispatch_token not in self.visible_dispatch_tokens:
+            return None
+        self.visible_submit_repairs.append((role.role_id, dispatch_token))
+        return {
+            "submit_key": "Enter",
+            "delivery_state": "visible_input_submitted",
+        }
 
 
 class SessionCreationTests(unittest.TestCase):
@@ -7464,7 +7474,7 @@ class SessionCreationTests(unittest.TestCase):
             )
         )
 
-    def test_reconcile_session_dispatch_does_not_repair_visible_unconfirmed_launcher_delivery(self) -> None:
+    def test_reconcile_session_dispatch_submits_visible_unconfirmed_launcher_delivery(self) -> None:
         backend = DispatchTraceRecordingBackend(delivery_state="submitted_unconfirmed")
         self.session_backend = backend
         self.coordinator.session_backend = backend
@@ -7487,12 +7497,15 @@ class SessionCreationTests(unittest.TestCase):
         sent_after = self.session_backend.get_sent_inputs(verifier_role.runtime_handle)
         events = self.event_repository.list_for_session(session.id)
 
-        self.assertFalse(reconciled)
+        self.assertTrue(reconciled)
         self.assertEqual(sent_before, sent_after)
-        self.assertFalse(
+        self.assertEqual([(verifier_role.runtime_handle, dispatches[-1].dispatch_token)], backend.visible_submit_repairs)
+        self.assertEqual("delivered", self.dispatch_repository.get_by_token(dispatches[-1].dispatch_token).status.value)
+        self.assertTrue(
             any(
-                item.event_type == "role_input_dispatch_repair_requested"
+                item.event_type == "role_input_visible_submit_repaired"
                 and item.payload.get("role_name") == VERIFICATION_COORDINATOR_ROLE
+                and item.payload.get("dispatch_token") == dispatches[-1].dispatch_token
                 for item in events
             )
         )

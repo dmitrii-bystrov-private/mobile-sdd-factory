@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+VERIFICATION_CONTEXT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/twg-utils.sh
+source "$VERIFICATION_CONTEXT_LIB_DIR/../twg-utils.sh"
+
 verification_resolve_repo_dir() {
   local key="$1"
   local repo_dir="${SDD_WORKDIR}/${key}/repo"
@@ -199,6 +203,82 @@ verification_available_disk_kb() {
   df -Pk "$path" | awk 'NR == 2 {print $4}'
 }
 
+verification_jira_status_for_task() {
+  local key="$1"
+
+  if ! command -v twg >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local issue_json status
+  issue_json="$(mktemp)"
+  if ! twg_get_issue_legacy_json "$issue_json" "$key" "status" >/dev/null 2>&1; then
+    rm -f "$issue_json"
+    return 1
+  fi
+
+  status="$(jq -r '.fields.status.name // empty' "$issue_json" 2>/dev/null || echo "")"
+  rm -f "$issue_json"
+  [[ -n "$status" ]] || return 1
+  printf '%s\n' "$status"
+}
+
+verification_snapshot_status_for_task() {
+  local key="$1"
+  local statuses_path="${SDD_WORKDIR}/${key}/statuses.md"
+
+  [[ -f "$statuses_path" ]] || return 1
+  awk -F'|' -v key="$key" '
+    function trim(value) {
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      return value
+    }
+    trim($2) == key {
+      print trim($5)
+      found = 1
+      exit
+    }
+    END {
+      if (!found) {
+        exit 1
+      }
+    }
+  ' "$statuses_path"
+}
+
+verification_status_protects_ios_derived_data() {
+  local status="$1"
+  local status_token
+  status_token="$(twg_jira_status_token "$status")"
+  case "$status_token" in
+    techanalysis|inprogress|pausedev|intesting|testing|pausetest|businesstest)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+verification_ios_derived_data_protected_by_status() {
+  local key="$1"
+  local status=""
+
+  if status="$(verification_snapshot_status_for_task "$key" 2>/dev/null)" && verification_status_protects_ios_derived_data "$status"; then
+    echo "  Skipping active-work iOS task cache: $key ($status)"
+    return 0
+  fi
+
+  if status="$(verification_jira_status_for_task "$key" 2>/dev/null)"; then
+    if verification_status_protects_ios_derived_data "$status"; then
+      echo "  Skipping active-work iOS task cache: $key ($status)"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 verification_prune_ios_derived_data_if_needed() {
   local current_key="$1"
 
@@ -238,6 +318,9 @@ verification_prune_ios_derived_data_if_needed() {
     [[ -n "$task_key" ]] || continue
     if verification_ios_task_lock_is_active "$task_key"; then
       echo "  Skipping active iOS task cache: $task_key"
+      continue
+    fi
+    if verification_ios_derived_data_protected_by_status "$task_key"; then
       continue
     fi
     candidates+=("$(verification_path_mtime "$derived_data_path") $derived_data_path")

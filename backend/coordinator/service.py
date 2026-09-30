@@ -7988,6 +7988,12 @@ class CoordinatorService:
                             "reason": "delivered_launcher_dispatch_missing_routed_work",
                         },
                     )
+                elif self._submit_visible_unconfirmed_launcher_dispatch(
+                    session=session,
+                    role=role,
+                    active_dispatch=active_dispatch,
+                ):
+                    return True
                 elif self._stalled_launcher_dispatch_repairable(
                     session=session,
                     role=role,
@@ -8089,6 +8095,69 @@ class CoordinatorService:
             return False
         workspace = self.role_workspace_manager.role_directory(session.task_key, role.role_name)
         return not (workspace / "ROUTED_WORK.md").is_file()
+
+    def _submit_visible_unconfirmed_launcher_dispatch(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_dispatch: Dispatch,
+    ) -> bool:
+        if active_dispatch.status != DispatchStatus.STALLED:
+            return False
+        if active_dispatch.error_text != self._launcher_dispatch_delivery_errors().get("submitted_unconfirmed"):
+            return False
+        if not self._launcher_dispatch_token_visible(
+            session=session,
+            role=role,
+            dispatch_token=active_dispatch.dispatch_token,
+        ):
+            return False
+        submit_probe = getattr(self.session_backend, "submit_visible_launcher_input", None)
+        if submit_probe is None or role.runtime_handle is None:
+            return False
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        try:
+            submit_result = submit_probe(runtime_role, active_dispatch.dispatch_token)
+        except Exception as exc:
+            self._append_event(
+                session_id=session.id,
+                event_type="role_input_visible_submit_repair_failed",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "work_item_id": active_dispatch.work_item_id,
+                    "stage_name": active_dispatch.stage_name,
+                    "dispatch_token": active_dispatch.dispatch_token,
+                    "error": str(exc),
+                },
+            )
+            return False
+        if not submit_result:
+            return False
+        if self.dispatch_repository is not None:
+            self.dispatch_repository.update_status(
+                active_dispatch.dispatch_token,
+                status=DispatchStatus.DELIVERED,
+                error_text=None,
+            )
+        self._append_event(
+            session_id=session.id,
+            event_type="role_input_visible_submit_repaired",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": active_dispatch.work_item_id,
+                "stage_name": active_dispatch.stage_name,
+                "dispatch_token": active_dispatch.dispatch_token,
+                **submit_result,
+            },
+        )
+        return True
 
     def _stalled_launcher_dispatch_repairable(
         self,

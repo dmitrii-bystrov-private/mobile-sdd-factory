@@ -203,7 +203,7 @@ bash scripts/ios-launch.sh <KEY>
 
 Uses `IOS_RUN_DEVICE_ID` as the simulator destination, falling back to `TESTING_DEVICE_ID`. The helper reuses `$SDD_WORKDIR/<KEY>/tmp/verification/ios/derived-data` and the matching cloned source packages path so completed tasks can launch from the verification build cache when possible. Launch logs are written under `$SDD_WORKDIR/<KEY>/tmp/launch/ios/logs/`.
 
-Before iOS build, test, and launch scripts call `xcodebuild`, they check free disk space on `$SDD_WORKDIR`. If free space is below `IOS_MIN_FREE_DISK_GB` (default: `50`), older sibling task caches at `$SDD_WORKDIR/<KEY>/tmp/verification/ios/derived-data` are removed until the threshold is reached. The current task and active iOS task locks are skipped. Set `IOS_DERIVED_DATA_PRUNE_ENABLED=0` to disable this behavior.
+Before iOS build, test, and launch scripts call `xcodebuild`, they check free disk space on `$SDD_WORKDIR`. If free space is below `IOS_MIN_FREE_DISK_GB` (default: `50`), older sibling task caches at `$SDD_WORKDIR/<KEY>/tmp/verification/ios/derived-data` are removed until the threshold is reached. The current task, active iOS task locks, and tasks that Jira reports in active work phases such as `Tech analysis`, `In Progress`, `Pause Dev`, `In Testing`, `Pause test`, or `Business test` are skipped. Tasks waiting in queue-like statuses such as `Code review` or `Ready for test` can be pruned. Set `IOS_DERIVED_DATA_PRUNE_ENABLED=0` to disable this behavior.
 
 #### `generate-diff.sh`
 
