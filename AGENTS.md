@@ -81,8 +81,8 @@ General:
 
 - prefer ASCII unless the file already uses Unicode
 - keep generated artifacts deterministic
-- documentation review/harvest must respect explicit task scope and content-preservation requirements;
-  generic documentation preferences do not authorize rewriting a move-only task
+- conflicts between task requirements and fundamental rules require an explicit operator decision;
+  report both sides and their sources, then follow the recorded decision
 - implementer may report failed with needs_operator_input=true during any coding correction stage,
   including documentation review correction; preserve the reasoned disagreement for the operator
 

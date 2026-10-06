@@ -10556,37 +10556,67 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("documentation_review_requested", updated_session.current_stage)
 
     def test_documentation_correction_can_request_operator_input_through_terminal_ingress(self) -> None:
-        output_type = "failed"
-        session, _, _ = self.coordinator.create_task_session(
-            "IOS-30021DOCBLOCK" + output_type.upper(), workflow_profile="oneshot",
-            policy={"doc_harvest_policy": "required"})
-        self.coordinator.prepare_task_session(session.task_key)
-        for event in ("implementation_completed", "verification_passed"):
-            self.coordinator.handle_operator_event(session_id=session.id, event_type=event, payload={"summary":"done"})
-        self.coordinator.handle_role_output(session_id=session.id,role_name=DOC_HARVEST_ROLE,
-            output_type="completed",payload={"summary":"Documentation moved."})
-        self.coordinator.handle_role_output(session_id=session.id,role_name=DOCUMENTATION_REVIEWER_ROLE,
-            output_type="failed",payload={"summary":"Docs need cleanup.","issues_markdown":"Remove historical references."})
-        item = next(item for item in self.work_item_repository.list_for_session(session.id)
-                    if item.work_type == "documentation_review_correction" and item.status == WorkItemStatus.ASSIGNED)
-        updated, event, mapped, followup, ignored = self.coordinator.submit_role_result_document(document={
-            "output_type": output_type, "payload": {"work_item_id":item.id,"needs_operator_input":True,
-            "summary":"Task scope conflict", "conflict_point":"Review asks to delete required content.",
-            "reviewer_premise":"Moved content must be rewritten.","preferred_direction":"Preserve the required statements.",
-            "requested_decision":"Confirm whether task scope may change.","supporting_evidence":"Task acceptance criteria require preserving content."}})
-        self.assertFalse(ignored)
-        self.assertEqual("implementation_blocked", mapped)
-        self.assertEqual("waiting_for_operator", updated.status.value)
-        self.assertEqual("documentation_review_correction_requested", updated.current_stage)
-        self.assertEqual(IMPLEMENTER_ROLE, updated.current_owner)
-        self.assertEqual("session_escalated_to_operator", followup)
-        self.assertEqual(WorkItemStatus.WAITING_FOR_OPERATOR, self.work_item_repository.get_by_id(item.id).status)
-        interactive = self.coordinator.get_interactive_state_summary(session.id)
-        self.assertEqual("implementation_blocked", interactive["source_reason"])
-        self.assertTrue(interactive["needs_operator_input"])
-        self.assertIn("Task scope conflict", interactive["summary"])
-        self.assertFalse(any(e.event_type == "role_result_protocol_violation_reported"
-            for e in self.event_repository.list_for_session(session.id)))
+        for index, preferred_direction in enumerate(("Follow the fundamental rule.", "Follow the task requirement.")):
+            with self.subTest(preferred_direction=preferred_direction):
+                session, _, _ = self.coordinator.create_task_session(
+                    f"IOS-30021DOCBLOCK{index}",
+                    workflow_profile="oneshot",
+                    policy={"doc_harvest_policy": "required"},
+                )
+                self.coordinator.prepare_task_session(session.task_key)
+                for event_type in ("implementation_completed", "verification_passed"):
+                    self.coordinator.handle_operator_event(
+                        session_id=session.id, event_type=event_type, payload={"summary": "done"}
+                    )
+                self.coordinator.handle_role_output(
+                    session_id=session.id,
+                    role_name=DOC_HARVEST_ROLE,
+                    output_type="completed",
+                    payload={"summary": "Documentation updated."},
+                )
+                self.coordinator.handle_role_output(
+                    session_id=session.id,
+                    role_name=DOCUMENTATION_REVIEWER_ROLE,
+                    output_type="failed",
+                    payload={"summary": "Rule conflict.", "issues_markdown": "Resolve the conflict with the documented rule."},
+                )
+                item = next(
+                    item for item in self.work_item_repository.list_for_session(session.id)
+                    if item.work_type == "documentation_review_correction" and item.status == WorkItemStatus.ASSIGNED
+                )
+                payload = {
+                    "work_item_id": item.id,
+                    "needs_operator_input": True,
+                    "summary": "Requirement and rule conflict",
+                    "conflict_point": "The task requirement conflicts with a fundamental repository rule.",
+                    "reviewer_premise": "Apply the documented rule.",
+                    "preferred_direction": preferred_direction,
+                    "requested_decision": "Decide which instruction takes priority.",
+                    "supporting_evidence": "Task requirement: task description. Fundamental rule: repository guidance.",
+                }
+                updated, _, mapped, followup, ignored = self.coordinator.submit_role_result_document(
+                    document={"output_type": "failed", "payload": payload}
+                )
+                self.assertFalse(ignored)
+                self.assertEqual("implementation_blocked", mapped)
+                self.assertEqual("waiting_for_operator", updated.status.value)
+                self.assertEqual("documentation_review_correction_requested", updated.current_stage)
+                self.assertEqual(IMPLEMENTER_ROLE, updated.current_owner)
+                self.assertEqual("session_escalated_to_operator", followup)
+                self.assertEqual(WorkItemStatus.WAITING_FOR_OPERATOR, self.work_item_repository.get_by_id(item.id).status)
+                interactive = self.coordinator.get_interactive_state_summary(session.id)
+                self.assertEqual("implementation_blocked", interactive["source_reason"])
+                self.assertTrue(interactive["needs_operator_input"])
+                self.assertIn("Requirement and rule conflict", interactive["summary"])
+                events = self.event_repository.list_for_session(session.id)
+                escalation = next(event for event in reversed(events) if event.event_type == "session_escalated_to_operator")
+                for field in ("conflict_point", "preferred_direction", "requested_decision", "supporting_evidence"):
+                    self.assertEqual(payload[field], escalation.payload[field])
+                    self.assertIn(payload[field], interactive["details"])
+                self.assertFalse(any(
+                    event.event_type == "role_result_protocol_violation_reported"
+                    for event in events
+                ))
 
     def test_followup_implementation_completed_reenters_verification_loop(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022")

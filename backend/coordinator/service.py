@@ -9648,9 +9648,8 @@ class CoordinatorService:
                 f"Apply documentation review corrections for {task_key}. "
                 "Edit only production documentation and comments needed to resolve the routed documentation review findings. "
                 "Do not change product behavior or broaden into code cleanup. "
-                "Respect explicit Jira/operator scope and content-preservation requirements. "
-                "If findings require out-of-scope changes that contradict those requirements, submit completed with grounded disagreement evidence for a fresh documentation review instead of silently changing scope. "
-                "Use failed with needs_operator_input=true only for an unresolved decision that genuinely requires operator input."
+                "If task requirements conflict with fundamental rules, submit failed with needs_operator_input=true, explain both sides and their sources, and wait for an explicit operator decision about their priority. "
+                "Continue according to the recorded decision; do not submit completed to bypass an unresolved conflict."
             )
         if stage_name == "doc_harvest_requested":
             policy_mode = self._optional_lane_policy_mode(session_policy, "doc_harvest_policy")

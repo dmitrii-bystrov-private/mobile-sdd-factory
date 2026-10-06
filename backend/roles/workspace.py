@@ -362,7 +362,7 @@ def _role_operating_rules(role_name: str) -> list[str]:
     if role_name == "doc-harvest-worker":
         return [
             "- Treat each routed work item as one bounded documentation pass: generate or refresh `spec/full-diff.md`, update grounded feature-level README targets, write one terminal result, and stop.",
-            "- Read the task description/comments and explicit operator guidance first. Preserve task scope and content-preservation requirements; generic documentation preferences do not authorize rewriting or deleting content that the task explicitly requires retaining.",
+            "- When task requirements conflict with fundamental rules, report the requirement, the rule, their sources and the decision needed. Wait for an explicit operator decision about their priority and apply the recorded decision when continuing.",
             "- Use `spec/full-diff.md` as the primary source of truth for branch changes and prefer changed README/doc anchors over broad repo scanning.",
             "- Use repository guidance entry points (`AGENTS.md`/`CLAUDE.md`, `README.md`) and their linked documentation guides/templates when present; otherwise write durable behavior and contract documentation without preserving task/review history.",
             "- Read selectively and skip ambiguous multi-feature diffs instead of inventing a single arbitrary documentation target.",
@@ -371,12 +371,12 @@ def _role_operating_rules(role_name: str) -> list[str]:
     if role_name == "documentation-reviewer":
         return [
             "- Treat each routed work item as one bounded documentation review pass: inspect the current documentation changes, write one terminal result, and stop.",
-            "- Read the task description/comments and explicit operator guidance first. Task scope and content-preservation requirements take precedence over generic documentation preferences. Do not demand removal of required references or historical content explicitly preserved by a move-only task.",
+            "- Report conflicts between task requirements and fundamental rules with evidence for both sides. Only an explicit, recorded operator decision resolves their priority; a reviewer must not resolve the conflict on the operator's behalf.",
             "- Start from `spec/documentation-precheck.md`, `spec/doc-diff.md`, `spec/full-diff.md`, repository guidance entry points (`AGENTS.md`/`CLAUDE.md`, `README.md`), and linked documentation guides/templates when present; otherwise apply the stable documentation rules from this prompt.",
             "- For each routed work item, perform a fresh review of the current documentation files. Do not reuse prior findings files or prior review conclusions after a documentation correction.",
             "- Review production README files, docs, public/doc comments, and ordinary inline source comments changed by the branch for stable-contract documentation quality.",
             "- For inline source comments, require a short local invariant/lifecycle/call-order explanation; flag verbose blocks, task mechanics, retry history, and comments that copy removed README/docs content into production code.",
-            "- Within the authorized task scope, flag newly introduced Jira/review history, file inventories in module READMEs, duplicated explanations, stale implementation narration, and documentation that preserves how the task was implemented instead of the durable behavior. Moving existing content does not authorize a separate cleanup or loss of required statements.",
+            "- Flag Jira/review history, file inventories in module READMEs, duplicated explanations, stale implementation narration, and documentation that preserves how the task was implemented instead of the durable behavior.",
             "- Do not edit files; keep findings scoped to documentation/comment changes.",
             "- If findings exist, write the actionable findings to a markdown file and submit it with `--issues-markdown-file <path>`; a local notes file is not delivered unless it is passed to the helper.",
             "- Emit `skipped_not_needed` only when there are no documentation/comment changes to review.",

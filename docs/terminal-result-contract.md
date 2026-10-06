@@ -345,8 +345,9 @@ Minimal example:
 
 During documentation_review_correction_requested, implementer may submit failed with
 needs_operator_input=true and the reasoned-disagreement fields to request an actual operator decision.
-This is a valid implementation_blocked result, not an invalid terminal document. A completed no-change
-correction with grounded evidence returns to fresh documentation review; it does not waive that review.
+This is a valid implementation_blocked result. For conflicts between task requirements and fundamental
+rules, report both sides and their sources and wait for the operator to decide their priority. Continue
+according to the recorded decision; completed must not bypass an unresolved conflict.
 
 Applies to:
 - `implementer`

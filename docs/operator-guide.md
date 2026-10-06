@@ -153,8 +153,8 @@ Per-session overrides in the session creation form only affect the session being
 
 Use recovery actions only when the workflow is blocked, paused, or failed at a specific operational seam.
 An implementer asking for a decision during documentation correction is a normal operator-input
-blocker. Read the preserved disagreement before changing scope. Required references or content in a
-move-only task take precedence over generic cleanup preferences; genuine schema errors remain recovery.
+blocker. The card preserves both sides of a conflict between task requirements and fundamental rules.
+The operator decides their priority; workers continue according to that recorded decision.
 
 Recovery actions include:
 

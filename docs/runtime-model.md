@@ -125,8 +125,8 @@ This applies to optional quality/documentation lanes such as:
 - doc harvest
 
 When documentation harvest runs, `documentation-reviewer` checks the resulting documentation and source comments before the workflow proceeds to verification.
-Explicit task/operator scope and preservation requirements govern this review; generic documentation
-preferences cannot turn a move-only task into a cleanup. Documentation correction accepts implementer
+Conflicts between task requirements and fundamental rules require an explicit operator decision;
+the workers preserve both sides and their sources. Documentation correction accepts implementer
 failed + needs_operator_input=true as implementation_blocked, preserves the current owner/stage and
 reasoned disagreement, and waits for a real operator decision rather than protocol recovery.
 
