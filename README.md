@@ -134,6 +134,8 @@ failure and offers retry, corrections, and explicit operator acceptance of selec
 Accepted failures remain visible in reports and MR descriptions; remaining checks still run on the accepted build. After a transient environment failure, "Retry continuation" preserves that gate and decision; "Retry verification" starts a fresh gate. See [QA e2e workflow](docs/e2e-workflow.md).
 The shared Appium server uses the scoped Chromedriver autodownload permission for Android WebView;
 doctor and verification check its version and launch flags before reuse.
+Configure a dedicated iOS simulator pool in ~/.zshrc. Concurrent gates lease different devices,
+wait within the gate timeout when the pool is full, and shut down their simulator before releasing it.
 The verifier prepares project-specific commands and environment in the common verification strategy.
 Factory code consumes generic collection/JUnit/outcome evidence and binds task-local integration helpers
 by digest; it does not prescribe project directories, configuration imports, smoke files or app IDs.

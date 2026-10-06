@@ -21,16 +21,31 @@ Machine paths, device identifiers and local ports live in ENV, configured in the
 | E2E_PYTHON | Required verification Python executable; configure its local path in ~/.zshrc |
 | E2E_BUILD_ROOT | App artifact store; platform/artifacts/master-SHA.app or .apk and JSON sidecars |
 | E2E_IOS_SIMULATOR_UDID | Reserved Appium simulator, separate from TESTING_DEVICE_ID and IOS_RUN_DEVICE_ID |
+| SDD_E2E_IOS_SIMULATOR_UDIDS | Dedicated factory pool, comma-separated UUIDs; takes precedence over the shared workspace simulator |
+| SDD_E2E_IOS_WDA_PORT_BASE | First WDA port reserved for the pool; slot ports are base plus index |
+| SDD_E2E_IOS_MJPEG_PORT_BASE | First MJPEG port reserved for the pool; use a separate non-overlapping range |
+| SDD_E2E_IOS_WDA_ROOT | Local WDA cache root; each simulator gets its own subdirectory |
 | E2E_ANDROID_AVD | Reserved Appium AVD name |
 | E2E_ANDROID_SERIAL | Reserved adb serial; default emulator-5584 |
 | ANDROID_HOME | Installed Android SDK path |
 | E2E_APPIUM_BIN | Installed Appium executable; otherwise resolved from PATH |
-| E2E_APPIUM_PORT | Local Appium port; default 4743; WDA/MJPEG ports are derived by the suite |
+| E2E_APPIUM_PORT | Shared local Appium port; default 4743; iOS pool WDA/MJPEG ports are assigned separately |
 | E2E_DEVICE_LOCK_ROOT | Shared Appium device lock directory; default SDD_WORKDIR/.locks/e2e |
 | SDD_GITLAB_E2E_PROJECT_PATH | URL-encoded GitLab project path for MR review previews |
 
 Use the same device lock directory as any other local Appium runner using these reserved devices.
-An occupied device blocks verification without modifying test code. Unit-test and manual inspection
+Create the dedicated factory simulators on the same installed iOS runtime. SDK versions remain in
+dependency manifests; simulator runtime versions are discovered. The pool does not use the shared
+workspace simulator. Each slot has its own ios-UUID.lock, WDA/MJPEG ports and derived-data cache.
+Concurrent gates select free slots; a full pool waits within the complete gate time limit, rather
+than immediately asking the operator to retry. Legacy single-device mode retains its existing lock.
+QA launch scripts bind the backend's current pool ENV explicitly and clear removed values, avoiding
+stale settings inherited from a reused tmux server. Source ~/.zshrc and restart the backend and idle
+QA verifier runtimes after changing machine configuration; never interrupt a running gate to apply it.
+Only the leased pool simulator is shut down before unlocking it, after retries and baseline comparisons,
+including test failures, timeouts, partial boots and SIGINT/SIGTERM. Collection-only checks do not
+boot or stop a simulator. Cleanup outcomes are recorded in ios_simulator_cleanup and the report;
+errors preserve evidence and remain in cleanup_warnings. Unit-test and manual inspection
 devices are not used. The Android emulator runtime and iOS runtime version are discovered locally.
 After an Android runtime gate, the reserved emulator is shut down before releasing its device lock,
 including failed runs, timeouts and partially failed boots. Retries and baseline comparisons finish
@@ -120,6 +135,12 @@ device/port values come from configured ENV; runtime-discovered versions come fr
 Map these values to the project's own device/server inputs. Confirm that its client uses the supplied
 Appium endpoint instead of a framework default. The generic runtime also publishes
 FACTORY_E2E_APPIUM_PORT, FACTORY_E2E_APPIUM_URL and FACTORY_E2E_PLATFORM_VERSION to task adapters.
+For dedicated iOS pool sessions, FACTORY_E2E_APPIUM_CAPABILITIES contains a JSON capability object
+with the assigned UDID, WDA/MJPEG ports and derived-data path; shutdownOtherSimulators is disabled.
+The optional pytest_evidence plugin applies these generic Appium capabilities before creating the
+session, overriding stale device/port defaults without importing project configuration. Other adapters
+must apply this object explicitly. Execution tokens {wda_local_port}, {mjpeg_server_port} and
+{derived_data_path} are also available for recipes. Never stop another simulator or share a WDA port.
 
 Collection commands write a JSON array of collected identifiers to `{collected}`. Run commands write
 JUnit XML to `{junit}` and JSON outcome objects (`nodeid`, `outcome`, optional `stage`/`details`) to

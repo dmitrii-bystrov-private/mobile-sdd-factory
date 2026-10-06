@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import shutil
+from uuid import UUID
 
 
 class E2EError(RuntimeError):
@@ -47,6 +48,10 @@ class Machine:
     android_sdk: Path
     appium: str
     appium_port: int
+    ios_pool: tuple[str, ...] = ()
+    ios_wda_port_base: int = 8110
+    ios_mjpeg_port_base: int = 9110
+    ios_wda_root: Path | None = None
 
     @classmethod
     def from_env(cls):
@@ -55,6 +60,27 @@ class Machine:
             raise E2EError("Set E2E_DIR to the e2e project checkout")
         if not os.environ.get("E2E_PYTHON"):
             raise E2EError("Set E2E_PYTHON to the verification Python executable in ~/.zshrc")
+        pool = ()
+        if "SDD_E2E_IOS_SIMULATOR_UDIDS" in os.environ:
+            try:
+                pool = tuple(str(UUID(value.strip())).upper() for value in
+                             os.environ["SDD_E2E_IOS_SIMULATOR_UDIDS"].split(","))
+            except ValueError as exc:
+                raise E2EError("SDD_E2E_IOS_SIMULATOR_UDIDS must contain comma-separated simulator UUIDs") from exc
+            if len(set(pool)) != len(pool):
+                raise E2EError("SDD_E2E_IOS_SIMULATOR_UDIDS contains duplicate devices")
+            for name in ("SDD_E2E_IOS_WDA_PORT_BASE", "SDD_E2E_IOS_MJPEG_PORT_BASE", "SDD_E2E_IOS_WDA_ROOT"):
+                if not os.environ.get(name):
+                    raise E2EError(f"Set {name} in ~/.zshrc for the dedicated iOS pool")
+        try:
+            wda = int(os.environ.get("SDD_E2E_IOS_WDA_PORT_BASE", "8110"))
+            mjpeg = int(os.environ.get("SDD_E2E_IOS_MJPEG_PORT_BASE", "9110"))
+            appium_port = int(os.environ.get("E2E_APPIUM_PORT", "4743"))
+        except ValueError as exc:
+            raise E2EError("Appium and iOS pool ports must be integers") from exc
+        ports = list(range(wda, wda + len(pool))) + list(range(mjpeg, mjpeg + len(pool))) + [appium_port]
+        if len(set(ports)) != len(ports) or any(port < 1 or port > 65535 for port in ports):
+            raise E2EError("Appium and iOS pool port ranges must be valid and non-overlapping")
         return cls(
             repo=repo,
             python=Path(os.environ["E2E_PYTHON"]).expanduser(),
@@ -64,5 +90,10 @@ class Machine:
             android_serial=os.environ.get("E2E_ANDROID_SERIAL", "emulator-5584"),
             android_sdk=Path(os.environ.get("ANDROID_HOME", "~/Library/Android/sdk")).expanduser(),
             appium=os.environ.get("E2E_APPIUM_BIN") or shutil.which("appium") or "appium",
-            appium_port=int(os.environ.get("E2E_APPIUM_PORT", "4743")),
+            appium_port=appium_port,
+            ios_pool=pool,
+            ios_wda_port_base=wda,
+            ios_mjpeg_port_base=mjpeg,
+            ios_wda_root=Path(os.environ["SDD_E2E_IOS_WDA_ROOT"]).expanduser()
+                if os.environ.get("SDD_E2E_IOS_WDA_ROOT") else None,
         )

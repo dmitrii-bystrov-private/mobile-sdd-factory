@@ -45,8 +45,14 @@ def main():
             listed = execute([str(machine.android_sdk / "platform-tools/adb"), "devices"])
             if any(line.split()[0] == machine.android_serial for line in listed.splitlines() if line.split()):
                 raise RuntimeError("Reserved Android emulator is still running")
+        for cleanup in verdict.get("ios_simulator_cleanup", []):
+            devices = json.loads(execute(["xcrun", "simctl", "list", "devices", "-j"]))["devices"]
+            device = next(item for entries in devices.values() for item in entries if item["udid"] == cleanup["udid"])
+            if not cleanup["stopped"] or device["state"] != "Shutdown":
+                raise RuntimeError("Dedicated iOS simulator is still running")
         print(json.dumps({"result": verdict["result"], "report": verdict["report_path"],
                           "android_emulator_stopped": verdict.get("android_emulator_stopped"),
+                          "ios_simulator_cleanup": verdict.get("ios_simulator_cleanup", []),
                           "phases": [{"platform": r["platform"], "phase": r["phase"], "ok": r["ok"],
                                       "passed": len((r["results"] or {}).get("passed", []))}
                                      for r in verdict["receipts"]]}, indent=2))

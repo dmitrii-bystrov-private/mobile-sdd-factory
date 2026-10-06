@@ -151,6 +151,12 @@ QA tasks reuse the coordinator lifecycle with the `e2e_gate` strategy and factor
 Shared Appium launch/reuse requires the scoped uiautomator2:chromedriver_autodownload permission.
 Doctor and ensure_server check launch flags with lsof/ps; do not replace an incompatible shared server
 automatically.
+The iOS pool is machine configuration: SDD_E2E_IOS_SIMULATOR_UDIDS and its WDA/MJPEG port bases and
+cache root belong in ~/.zshrc. Per-device leases allow concurrent gates on the shared Appium server.
+Exhausted pools wait within the gate's total time budget. Shutdown runs before the lease is released;
+SIGINT/SIGTERM terminate the owned test process before device cleanup. Never stop workspace devices.
+Publish generic assigned Appium capabilities; pytest_evidence applies them without project imports,
+and other task execution adapters must consume them explicitly.
 See [e2e-workflow.md](docs/e2e-workflow.md) for settings/ENV/toolchain ownership, test selection, receipts,
 same-app baseline comparisons and QA Jira/MR delivery. External workspace files are research sources,
 not runtime dependencies. Preserve native verdict validation for all QA terminal outcomes, including

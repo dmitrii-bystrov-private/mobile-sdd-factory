@@ -106,6 +106,9 @@ verification-strategy.json. Do not add project imports, fixed test paths or proj
 factory code or role defaults. Use generic evidence protocols and digest-bound task-local integration.
 Map factory device/server context to the project inputs in task data. Setup/teardown failures are not
 acceptance candidates. Serialize operator continuations with collection and preserve the verifier owner.
+Dedicated iOS simulator pools use factory-specific ENV, per-device locks and separate WDA ports/caches.
+Wait for a free pool slot within the gate time limit. Stop only the leased simulator before releasing
+its lock, including failure, partial boot, timeout and graceful interruption. Preserve workspace devices.
 
 When behavior changes:
 

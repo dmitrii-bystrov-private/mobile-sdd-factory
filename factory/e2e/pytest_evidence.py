@@ -3,10 +3,35 @@
 import os
 import json
 import subprocess
+from functools import wraps
 
 import pytest
 
 _reports = []
+
+
+def pytest_configure(config):
+    """Apply only generic Appium resources assigned by the factory's device lease."""
+    raw = os.environ.get("FACTORY_E2E_APPIUM_CAPABILITIES")
+    if not raw:
+        return
+    try:
+        assigned = json.loads(raw)
+        from appium.webdriver.webdriver import WebDriver
+    except (ValueError, ImportError) as exc:
+        raise pytest.UsageError(f"Cannot apply assigned Appium device capabilities: {exc}") from exc
+    if not isinstance(assigned, dict):
+        raise pytest.UsageError("Assigned Appium device capabilities must be an object")
+    original = WebDriver.start_session
+
+    @wraps(original)
+    def start_session(self, capabilities, *args, **kwargs):
+        current = capabilities if isinstance(capabilities, dict) else capabilities.to_capabilities()
+        # A test recipe cannot redirect a leased session to another user's device.
+        return original(self, {**current, **assigned}, *args, **kwargs)
+
+    WebDriver.start_session = start_session
+    config.add_cleanup(lambda: setattr(WebDriver, "start_session", original))
 
 
 def pytest_runtest_logreport(report):

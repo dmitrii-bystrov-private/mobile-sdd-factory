@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import argparse
 import ast
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -17,6 +18,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import time
 import urllib.request
 import uuid
@@ -68,6 +70,13 @@ def doctor(machine):
     drivers = json.loads(execute([machine.appium, "driver", "list", "--installed", "--json"]))
     versions = {name: value.get("version") for name, value in drivers.items()}
     mismatches = []
+    if machine.ios_pool:
+        try:
+            runtimes = {ios_simulator(udid)["version"] for udid in machine.ios_pool}
+            if len(runtimes) != 1:
+                mismatches.append("Dedicated iOS pool simulators must use the same runtime")
+        except (E2EError, OSError, subprocess.SubprocessError) as exc:
+            mismatches.append(str(exc))
     if not python.startswith(expected["python"] + "."):
         mismatches.append(f"Python {expected['python']} required, found {python}")
     if appium != expected["appium"]:
@@ -140,23 +149,61 @@ def pin_app(task_root, machine, platform, app):
     return pinned
 
 
+def ios_simulator(udid):
+    if not udid:
+        raise E2EError("Configure the dedicated iOS pool or E2E_IOS_SIMULATOR_UDID")
+    inventory = json.loads(execute(["xcrun", "simctl", "list", "devices", "-j"]))
+    for runtime, devices in inventory["devices"].items():
+        found = next((entry for entry in devices if entry["udid"] == udid), None)
+        if found:
+            version = re.search(r"iOS-(\d+(?:-\d+)+)$", runtime)
+            if not version or not found.get("isAvailable", True):
+                raise E2EError(f"Configured iOS simulator is unavailable: {udid}")
+            return dict(found, version=version[1].replace("-", "."))
+    raise E2EError(f"Configured iOS simulator does not exist: {udid}")
+
+
+@contextmanager
+def reserve_ios(machine, lock_root, deadline):
+    """Lease one dedicated simulator; never acquire the workspace's shared device."""
+    announced = False
+    while True:
+        for udid in machine.ios_pool:
+            with (lock_root / f"ios-{udid}.lock").open("a") as lock:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    continue
+                try:
+                    yield replace(machine, ios_udid=udid)
+                finally:
+                    fcntl.flock(lock, fcntl.LOCK_UN)
+                return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise E2EError("Dedicated iOS pool remained busy until the verification time limit")
+        if not announced:
+            print("Waiting for a free dedicated iOS simulator", file=sys.stderr, flush=True)
+            announced = True
+        time.sleep(min(0.25, remaining))
+
+
 def device(machine, platform, *, boot=False):
     if platform == "ios":
-        if not machine.ios_udid:
-            raise E2EError("Set E2E_IOS_SIMULATOR_UDID to the reserved Appium simulator")
-        inventory = json.loads(execute(["xcrun", "simctl", "list", "devices", "-j"]))
-        for runtime, devices in inventory["devices"].items():
-            found = next((entry for entry in devices if entry["udid"] == machine.ios_udid), None)
-            if found:
-                version = re.search(r"iOS-(\d+(?:-\d+)+)$", runtime)
-                if not version:
-                    raise E2EError("E2E device is not an iOS simulator")
-                if boot and found["state"] != "Booted":
-                    execute(["xcrun", "simctl", "boot", machine.ios_udid])
-                if boot:
-                    execute(["xcrun", "simctl", "bootstatus", machine.ios_udid, "-b"], timeout=300)
-                return {"udid": machine.ios_udid, "version": version[1].replace("-", ".")}
-        raise E2EError("Configured Appium simulator does not exist")
+        if machine.ios_pool and machine.ios_udid not in machine.ios_pool:
+            raise E2EError("Acquire a dedicated iOS pool lease before accessing a simulator")
+        found = ios_simulator(machine.ios_udid)
+        if boot and found["state"] != "Booted":
+            execute(["xcrun", "simctl", "boot", machine.ios_udid])
+        if boot:
+            execute(["xcrun", "simctl", "bootstatus", machine.ios_udid, "-b"], timeout=300)
+        target = {"udid": machine.ios_udid, "version": found["version"]}
+        if machine.ios_pool:
+            slot = machine.ios_pool.index(machine.ios_udid)
+            target.update(wda_local_port=machine.ios_wda_port_base + slot,
+                          mjpeg_server_port=machine.ios_mjpeg_port_base + slot,
+                          derived_data_path=str(machine.ios_wda_root / machine.ios_udid))
+        return target
     adb = machine.android_sdk / "platform-tools/adb"
     listed = execute([str(adb), "devices"])
     if boot and f"{machine.android_serial}\tdevice" not in listed:
@@ -206,6 +253,27 @@ def finish_android(machine, verdict):
     except (E2EError, OSError, subprocess.SubprocessError) as exc:
         verdict["android_emulator_stopped"] = False
         verdict.setdefault("cleanup_warnings", []).append(f"Android emulator shutdown failed: {exc}")
+
+
+def shutdown_ios(machine):
+    if ios_simulator(machine.ios_udid)["state"] == "Shutdown":
+        return
+    execute(["xcrun", "simctl", "shutdown", machine.ios_udid])
+    deadline = time.monotonic() + 20
+    while ios_simulator(machine.ios_udid)["state"] != "Shutdown":
+        if time.monotonic() >= deadline:
+            raise E2EError("Dedicated iOS simulator did not shut down")
+        time.sleep(0.25)
+
+
+def finish_ios(machine, verdict):
+    record = {"udid": machine.ios_udid, "stopped": False}
+    try:
+        shutdown_ios(machine)
+        record["stopped"] = True
+    except (E2EError, OSError, subprocess.SubprocessError) as exc:
+        verdict.setdefault("cleanup_warnings", []).append(f"iOS simulator shutdown failed: {exc}")
+    verdict.setdefault("ios_simulator_cleanup", []).append(record)
 
 
 def appium_server_status(machine):
@@ -280,6 +348,12 @@ def execution_environment(machine, repo, platform, target, config, context, app=
                 "FACTORY_E2E_FRESH_INSTALL": "1" if fresh else "0", "FACTORY_E2E_APP_ID": context["application_id"],
                 "FACTORY_E2E_ADB": context["adb"], "FACTORY_E2E_APP": context["app_path"],
                 "FACTORY_E2E_RESULTS": context["results"], "FACTORY_E2E_COLLECTION": context["collected"]})
+    env.pop("FACTORY_E2E_APPIUM_CAPABILITIES", None)
+    if platform == "ios" and machine.ios_pool:
+        env["FACTORY_E2E_APPIUM_CAPABILITIES"] = json.dumps({
+            "appium:udid": target["udid"], "appium:wdaLocalPort": target["wda_local_port"],
+            "appium:mjpegServerPort": target["mjpeg_server_port"],
+            "appium:derivedDataPath": target["derived_data_path"], "appium:shutdownOtherSimulators": False})
     return env
 
 
@@ -310,6 +384,8 @@ def phase(machine, repo, platform, target, app, policy, folder, name, selectors,
                "factory_plugin_dir": str(Path(__file__).parent), "junit": str(junit),
                "results": str(outcomes_path), "collected": str(collection_path),
                "test_timeout_seconds": str(policy["test_timeout_seconds"])}
+    context.update({name: str(target.get(name, "")) for name in
+                    ("wda_local_port", "mjpeg_server_port", "derived_data_path")})
     argv = command(config, "collect" if collect else "run", selectors, context)
     started = time.monotonic()
     timeout = min(policy["run_timeout_seconds"], policy.get("_deadline", started + policy["run_timeout_seconds"]) - started)
@@ -332,14 +408,16 @@ def phase(machine, repo, platform, target, app, policy, folder, name, selectors,
                                    stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
         try:
             code = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
+        except BaseException as exc:
             os.killpg(process.pid, signal.SIGTERM)
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
-            raise E2EError(f"{platform} {name} timed out; see {log}")
+            if isinstance(exc, subprocess.TimeoutExpired):
+                raise E2EError(f"{platform} {name} timed out; see {log}") from exc
+            raise
     results = junit_results(junit) if junit.exists() and not collect else None
     selected = read_json(collection_path) if collect and collection_path.exists() else []
     if not isinstance(selected, list) or any(not isinstance(node, str) or not node for node in selected):
@@ -500,18 +578,22 @@ def verify(task_key, task_root, strategy, machine):
                 continue
             config = platform_configs[platform]
             with ExitStack() as device_scope:
-                lock = device_scope.enter_context((lock_root / f"{platform}-device.lock").open("w"))
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    raise E2EError(f"Reserved {platform} device is busy; retry verification when it is free")
-                target = device(machine, platform)
-                collected = phase(machine, repo, platform, target, None, policy, folder, "collection", config["collection"], collect=True)
+                selected_machine = machine
+                if platform == "ios" and machine.ios_pool:
+                    selected_machine = device_scope.enter_context(reserve_ios(machine, lock_root, policy["_deadline"]))
+                else:
+                    lock = device_scope.enter_context((lock_root / f"{platform}-device.lock").open("w"))
+                    try:
+                        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        raise E2EError(f"Reserved {platform} device is busy; retry verification when it is free")
+                target = device(selected_machine, platform)
+                collected = phase(selected_machine, repo, platform, target, None, policy, folder, "collection", config["collection"], collect=True)
                 verdict["receipts"].append(collected)
                 if not collected["ok"]:
                     if not baseline.exists():
                         git(repo, "worktree", "add", "--detach", str(baseline), strategy["e2e"]["baseline_sha"])
-                    reference = phase(machine, baseline, platform, target, None, policy, folder, "baseline-collection", config["collection"], collect=True)
+                    reference = phase(selected_machine, baseline, platform, target, None, policy, folder, "baseline-collection", config["collection"], collect=True)
                     verdict["receipts"].append(reference)
                     verdict["result"] = "failed" if reference["ok"] else "blocked"
                     verdict["details"] = f"{platform} collection failed; see {collected['log']} and {reference['log']}"
@@ -529,10 +611,10 @@ def verify(task_key, task_root, strategy, machine):
                                  if receipt["path"] == item["evidence"]]
                 # A continuation keeps the build the operator reviewed, even if
                 # a newer master artifact has appeared in the shared build store.
-                app = pin_app(task_root, machine, platform,
-                    resolve_app(machine, platform, accepted_apps[0] if accepted_apps else config.get("app")))
+                app = pin_app(task_root, selected_machine, platform,
+                    resolve_app(selected_machine, platform, accepted_apps[0] if accepted_apps else config.get("app")))
                 selectors = selection(config, platform, policy, repo)
-                picked = phase(machine, repo, platform, target, app, policy, folder, "selection", selectors, collect=True)
+                picked = phase(selected_machine, repo, platform, target, app, policy, folder, "selection", selectors, collect=True)
                 verdict["receipts"].append(picked)
                 if not picked["ok"] or len(picked["collected"]) > policy["max_tests"]:
                     raise E2EPlanError("Selected test count is zero, invalid, or exceeds the configured limit")
@@ -551,33 +633,35 @@ def verify(task_key, task_root, strategy, machine):
                     # Register before boot so partially failed starts are also cleaned up.
                     # ExitStack runs this before releasing the device lock.
                     device_scope.callback(finish_android, machine, verdict)
-                target = device(machine, platform, boot=True)
-                install(machine, platform, app, target)
+                elif machine.ios_pool:
+                    device_scope.callback(finish_ios, selected_machine, verdict)
+                target = device(selected_machine, platform, boot=True)
+                install(selected_machine, platform, app, target)
                 policy["_appium_log"] = str(lock_root / f"appium-{machine.appium_port}.log")
                 with (lock_root / f"appium-{machine.appium_port}.lock").open("w") as server_lock:
                     fcntl.flock(server_lock, fcntl.LOCK_EX)
                     ensure_server(machine, Path(policy["_appium_log"]))
-                run = phase(machine, repo, platform, target, app, policy, folder, "run", selectors, fresh=policy["fresh_install"])
+                run = phase(selected_machine, repo, platform, target, app, policy, folder, "run", selectors, fresh=policy["fresh_install"])
                 verdict["receipts"].append(run)
                 latest = run
                 failed_nodes = [item["nodeid"] for item in run["outcomes"] if item["outcome"] == "failed"]
                 if not run["ok"] and run["exit_code"] == 1:
                     for attempt in range(policy["failure_reruns"]):
-                        latest = phase(machine, repo, platform, target, app, policy, folder, f"rerun-{attempt + 1}", failed_nodes or selectors, fresh=True)
+                        latest = phase(selected_machine, repo, platform, target, app, policy, folder, f"rerun-{attempt + 1}", failed_nodes or selectors, fresh=True)
                         verdict["receipts"].append(latest)
                         if latest["ok"]:
                             break
                 if latest["ok"]:
                     if not run["ok"]:
                         verdict["classifications"].append({"platform": platform, "kind": "flaky", "evidence": latest["path"]})
-                    repeat = phase(machine, repo, platform, target, app, policy, folder, "fresh-run", selectors, fresh=True)
+                    repeat = phase(selected_machine, repo, platform, target, app, policy, folder, "fresh-run", selectors, fresh=True)
                     verdict["receipts"].append(repeat)
                     if not repeat["ok"]:
                         latest = repeat
                         failed_nodes = [item["nodeid"] for item in repeat["outcomes"] if item["outcome"] == "failed"]
                         if repeat["exit_code"] == 1:
                             for attempt in range(policy["failure_reruns"]):
-                                latest = phase(machine, repo, platform, target, app, policy, folder,
+                                latest = phase(selected_machine, repo, platform, target, app, policy, folder,
                                                f"fresh-run-rerun-{attempt + 1}", selectors, fresh=True)
                                 verdict["receipts"].append(latest)
                                 if latest["ok"]:
@@ -595,7 +679,7 @@ def verify(task_key, task_root, strategy, machine):
                 regressions = False
                 remaining = [item["nodeid"] for item in latest["outcomes"] if item["outcome"] == "failed"]
                 for index, node in enumerate(list(dict.fromkeys(remaining)) or failed_nodes or selectors):
-                    reference = phase(machine, baseline, platform, target, app, policy, folder,
+                    reference = phase(selected_machine, baseline, platform, target, app, policy, folder,
                                       f"baseline-{index + 1}", [node], fresh=True)
                     verdict["receipts"].append(reference)
                     kind = "test_regression" if reference["ok"] else (
@@ -627,6 +711,8 @@ def verify(task_key, task_root, strategy, machine):
             report += ["", "## Cleanup warnings", ""] + [f"- {warning}" for warning in verdict["cleanup_warnings"]]
         if "android_emulator_stopped" in verdict:
             report += ["", f"Android emulator stopped: {verdict['android_emulator_stopped']}"]
+        for cleanup in verdict.get("ios_simulator_cleanup", []):
+            report += ["", f"iOS simulator {cleanup['udid']} stopped: {cleanup['stopped']}"]
         if verdict["classifications"]:
             report += ["", "## Failure analysis", ""]
             for finding in verdict["classifications"]:
@@ -822,7 +908,14 @@ def main(argv=None):
             print(json.dumps({"result": "passed", "python_files": len(files)}))
             return 0
         strategy = read_json(task_root / "spec/verification-strategy.json")
-        result = verify(args.task_key, task_root, strategy, machine)
+        def interrupted(signum, frame):
+            raise E2EError(f"E2E verification interrupted by signal {signum}")
+        handlers = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
+        try:
+            result = verify(args.task_key, task_root, strategy, machine)
+        finally:
+            for sig, handler in handlers.items():
+                signal.signal(sig, handler)
         print(json.dumps(result, indent=2))
         return {"passed": 0, "accepted_with_warnings": 0, "failed": 1, "blocked": 2}[result["result"]]
     except (E2EError, OSError, ValueError, KeyError, SyntaxError) as exc:

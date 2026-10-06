@@ -153,6 +153,12 @@ Manual delivery actions remain as recovery tools only when automatic delivery fa
 ## Recovery Model
 
 QA mobile e2e tasks use the same roles and lifecycle, with a factory-owned `e2e_gate` strategy. The runner
+leases a free configured iOS pool device through a per-UDID lock, independent of workspace devices.
+The same lease covers collection, tests, fresh-install repeats and baseline comparisons. Pool slots
+have distinct WDA/MJPEG ports and derived-data caches. A full pool waits within the gate's existing
+time budget. Only a booted/partially booted leased device is shut down before unlocking it, including
+failed or gracefully interrupted runs. Collection-only checks do not boot or shut down devices.
+The runner
 checks the shared Appium version and scoped Chromedriver autodownload launch permission before reuse;
 a mismatch is an environment blocker and does not stop the shared server. New servers launch with
 that permission. Verification

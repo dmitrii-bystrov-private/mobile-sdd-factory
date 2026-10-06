@@ -105,6 +105,10 @@ decision. Retry Current Stage starts a new gate after recovery.
 QA native verdicts govern this routing even when a worker submits a blocked-cycle outcome. A legacy
 "Verification cycle resolution" item can also be retried after recovery; retry replaces it with a fresh
 verification work item and strategy.
+With a configured dedicated iOS pool, verification uses a free factory simulator independently of
+workspace runs. When every pool slot is occupied, the gate waits while it remains active; the total
+verification time limit still applies. The selected simulator is shut down after tests, retries and
+baseline comparisons. Its cleanup outcome and any errors remain in the native verification report.
 The recovery card says "E2E verification is blocked" and includes a "Retry verification" button directly
 below its explanation. The separated footer describes when to retry. Infrastructure or baseline failures
 do not require a text reply to the verifier. Baseline failures identify the scenario and retain the task

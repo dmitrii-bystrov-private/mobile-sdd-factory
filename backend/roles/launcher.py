@@ -117,6 +117,14 @@ class RoleLauncherManager:
         effort = (role_config or {}).get("effort", "")
         claude_settings = str((claude_runtime_files or {}).get("settings", ""))
         claude_mcp_config = str((claude_runtime_files or {}).get("mcp_config", ""))
+        pool_environment = []
+        if task_key.startswith("QA-"):
+            # tmux keeps the environment of its original server process. Bind the
+            # current backend configuration explicitly when starting a QA role.
+            for name in ("SDD_E2E_IOS_SIMULATOR_UDIDS", "SDD_E2E_IOS_WDA_PORT_BASE",
+                         "SDD_E2E_IOS_MJPEG_PORT_BASE", "SDD_E2E_IOS_WDA_ROOT"):
+                pool_environment.append(f"export {name}={_shell_escape(os.environ[name])}"
+                                        if name in os.environ else f"unset {name}")
         return "\n".join(
             [
                 "#!/usr/bin/env bash",
@@ -137,6 +145,7 @@ class RoleLauncherManager:
                 f'export SDD_FACTORY_ROLE_RESUME_MODE={_shell_escape(resume_mode or "")}',
                 f'export SDD_FACTORY_CLAUDE_SETTINGS={_shell_escape(claude_settings)}',
                 f'export SDD_FACTORY_CLAUDE_MCP_CONFIG={_shell_escape(claude_mcp_config)}',
+                *pool_environment,
                 f"cd {_shell_escape(str(workspace.directory))}",
                 'printf "SDD_FACTORY_ROLE_LAUNCHER_READY role=%s task=%s lifecycle=%s\\n" "$SDD_FACTORY_ROLE_NAME" "$SDD_FACTORY_TASK_KEY" "$SDD_FACTORY_ROLE_LIFECYCLE"',
                 f"exec {launcher_exec}",

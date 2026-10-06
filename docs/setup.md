@@ -25,6 +25,17 @@ The supported platform expects these tools locally:
 For mobile QA tasks, also configure the machine ENV variables described in
 [e2e-workflow.md](e2e-workflow.md) in ~/.zshrc and run the factory e2e doctor. Run policy is managed in
 Runtime Defaults; dependency versions are declared in factory/e2e/toolchain.json.
+For a dedicated factory iOS pool, create separate simulators on the same installed runtime and set
+SDD_E2E_IOS_SIMULATOR_UDIDS (comma-separated UUIDs), SDD_E2E_IOS_WDA_PORT_BASE,
+SDD_E2E_IOS_MJPEG_PORT_BASE and SDD_E2E_IOS_WDA_ROOT in ~/.zshrc. Reserve a different WDA and MJPEG
+port for each slot (base plus slot index), separate from workspace ports. Keep the shared
+E2E_IOS_SIMULATOR_UDID for workspace tests; the factory pool takes precedence for native gates.
+Source ~/.zshrc and restart the existing local stack to load the new ENV into its workers.
+QA launch scripts explicitly export the current pool ENV (or unset removed values), so an existing
+tmux server cannot substitute its older configuration. Restart idle QA verifier runtimes when applying
+changes to a session that was already started.
+The factory boots only its leased simulator and shuts it down after execution; full pools wait
+within the verification time limit. The existing shared Appium server remains in use.
 E2E_PYTHON is required in ~/.zshrc; the factory does not assume a project virtualenv location.
 Project-specific execution is supplied through the task verification strategy and digest-bound
 task-local helpers. Configure repository/layout conventions in the project, not in factory defaults.

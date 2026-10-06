@@ -2,6 +2,8 @@ import json
 import os
 from pathlib import Path
 import sys
+import signal
+from types import ModuleType, SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -117,6 +119,82 @@ sys.exit(0 if result.wasSuccessful() else 1)
         strategy["e2e"]["platforms"]["ios"]["commands"]["run"] = ["echo", "done"]
         with self.assertRaisesRegex(E2EPlanError, "one.*selectors"):
             configurations(strategy)
+
+    def test_assigned_appium_capabilities_override_only_the_leased_resources(self):
+        from factory.e2e import pytest_evidence
+        class Driver:
+            def start_session(self, capabilities, browser_profile=None):
+                return capabilities
+        module = ModuleType("appium.webdriver.webdriver")
+        module.WebDriver = Driver
+        cleanups = []
+        assigned = {"appium:udid": "dedicated", "appium:wdaLocalPort": 8111,
+                    "appium:derivedDataPath": "/isolated-wda", "appium:shutdownOtherSimulators": False}
+        original = Driver.start_session
+        with patch.dict(sys.modules, {"appium.webdriver.webdriver": module}), patch.dict(os.environ,
+                {"FACTORY_E2E_APPIUM_CAPABILITIES": json.dumps(assigned)}):
+            pytest_evidence.pytest_configure(SimpleNamespace(add_cleanup=cleanups.append))
+            try:
+                caps = {"appium:udid": "workspace", "appium:wdaLocalPort": 8100,
+                        "appium:shutdownOtherSimulators": True, "appium:app": "task.app"}
+                for supplied in (caps, SimpleNamespace(to_capabilities=lambda: caps)):
+                    result = Driver().start_session(supplied)
+                    self.assertEqual("dedicated", result["appium:udid"])
+                    self.assertEqual(8111, result["appium:wdaLocalPort"])
+                    self.assertFalse(result["appium:shutdownOtherSimulators"])
+                    self.assertEqual("task.app", result["appium:app"])
+                self.assertEqual("workspace", caps["appium:udid"])
+            finally:
+                for cleanup in cleanups: cleanup()
+        self.assertIs(original, Driver.start_session)
+
+    def test_interrupted_phase_terminates_its_child_before_device_cleanup(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            machine = Machine(root, Path(sys.executable), root, "device", "", "", root, "appium", 4743)
+            policy = {"run_timeout_seconds": 10, "test_timeout_seconds": 10, "_task_root": root,
+                      "_configurations": configurations(self.recipe())}
+            child = Mock(pid=123456)
+            child.wait.side_effect = [runner.E2EError("interrupted by signal"), -15]
+            with patch.object(runner.subprocess, "Popen", return_value=child), patch.object(runner.os, "killpg") as kill:
+                with self.assertRaisesRegex(runner.E2EError, "interrupted by signal"):
+                    runner.phase(machine, root, "ios", {"udid": "device"}, None, policy, root, "run", ["opaque-check"])
+            kill.assert_called_once_with(child.pid, signal.SIGTERM)
+
+    def test_cli_interrupt_handler_is_restored_after_a_blocked_gate(self):
+        import io
+        from contextlib import redirect_stdout
+        handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
+        def verify(*args):
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+        with patch.object(runner.Machine, "from_env"), patch.object(runner, "read_json", return_value={}), \
+                patch.object(runner, "verify", side_effect=verify), patch.dict(os.environ, {"SDD_WORKDIR": "/tasks"}), \
+                redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(2, runner.main(["verify", "QA-100"]))
+        self.assertIn("interrupted", output.getvalue())
+        self.assertEqual(handlers, {sig: signal.getsignal(sig) for sig in handlers})
+
+    def test_qa_launcher_replaces_stale_tmux_pool_environment_and_clears_removed_values(self):
+        import subprocess
+        from backend.roles.launcher import RoleLauncherManager
+        from backend.roles.workspace import RoleWorkspace
+        name = "SDD_E2E_IOS_SIMULATOR_UDIDS"
+        cache = "SDD_E2E_IOS_WDA_ROOT"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workspace = RoleWorkspace("verification-coordinator", root, root / "AGENTS.md", root / "CLAUDE.md")
+            code = 'import json,os; print(json.dumps({k:os.environ.get(k) for k in '+repr([name, cache])+ '}))'
+            launcher = RoleLauncherManager(root, launcher_command=[sys.executable, "-c", code])
+            script = root / "launch.sh"
+            for configured in (True, False):
+                with self.subTest(configured=configured), patch.dict(os.environ,
+                        {name: "new-device", cache: "/new cache"} if configured else {}, clear=True):
+                    script.write_text(launcher._build_launcher_script(task_key="QA-100", role_name=workspace.role_name, workspace=workspace))
+                result = subprocess.run(["bash", str(script)],env=dict(os.environ, **{name:"stale-device",cache:"/stale"}),
+                                        capture_output=True,text=True,check=True)
+                env = json.loads(result.stdout.splitlines()[-1])
+                self.assertEqual({name:"new-device",cache:"/new cache"} if configured else {name:None,cache:None}, env)
 
 
 if __name__ == "__main__":

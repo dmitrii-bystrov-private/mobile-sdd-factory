@@ -1,4 +1,5 @@
 from contextlib import ExitStack
+from dataclasses import replace
 import io
 import json
 import os
@@ -887,6 +888,188 @@ class E2EWorkflowTests(unittest.TestCase):
         self.assertIn("adb unavailable", verdict["cleanup_warnings"][0])
         self.assertIn("adb unavailable", Path(verdict["report_path"]).read_text())
         runner.validate_verdict(self.task, 123)
+
+    def ios_pool(self):
+        self.machine = replace(self.machine, ios_pool=("sim-a", "sim-b", "sim-c"), ios_wda_root=self.root / "wda")
+        self.stack.enter_context(patch.object(runner, "device", side_effect=lambda machine, platform, **kw:
+            {"udid": machine.ios_udid, "version": "26.2"}))
+
+    def test_ios_pool_bypasses_workspace_lock_and_shuts_down_only_its_leased_device(self):
+        import fcntl
+        self.ios_pool()
+        locks = self.root / "locks"
+        locks.mkdir()
+        def shutdown(machine):
+            self.assertEqual("sim-b", machine.ios_udid)
+            with (locks / "ios-sim-b.lock").open("a") as lock:
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with ExitStack() as stack:
+            for name in ("ios-device.lock", "ios-sim-a.lock"):
+                lock = stack.enter_context((locks / name).open("a"))
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            stop = stack.enter_context(patch.object(runner, "shutdown_ios", side_effect=shutdown))
+            verdict = self.run_gate()
+        self.assertEqual("passed", verdict["result"])
+        stop.assert_called_once()
+        self.assertEqual([{"udid": "sim-b", "stopped": True}], verdict["ios_simulator_cleanup"])
+        self.assertTrue(all(item["device"]["udid"] == "sim-b" for item in verdict["receipts"]))
+        runner.validate_verdict(self.task, 123)
+
+    def test_ios_pool_shutdown_covers_failures_timeouts_partial_boot_and_interruptions(self):
+        self.ios_pool()
+        for failure in ("failed", "timeout", "boot", "interrupt"):
+            with self.subTest(failure=failure), ExitStack() as stack:
+                stop = stack.enter_context(patch.object(runner, "shutdown_ios"))
+                self.behavior = {"run": False, "rerun-1": False, "baseline-1": False} if failure == "failed" else {}
+                if failure == "boot":
+                    def boot(machine, platform, *, boot=False):
+                        if boot: raise E2EError("simulator boot timed out")
+                        return {"udid": machine.ios_udid, "version": "26.2"}
+                    stack.enter_context(patch.object(runner, "device", side_effect=boot))
+                elif failure in {"timeout", "interrupt"}:
+                    def phase(*args, **kwargs):
+                        if args[7] == "run":
+                            if failure == "interrupt": raise KeyboardInterrupt()
+                            raise E2EError("pytest timed out")
+                        return self.fake_phase(*args, **kwargs)
+                    stack.enter_context(patch.object(runner, "phase", side_effect=phase))
+                if failure == "interrupt":
+                    with self.assertRaises(KeyboardInterrupt): self.run_gate()
+                else:
+                    self.assertEqual("blocked", self.run_gate()["result"])
+                stop.assert_called_once()
+                self.assertEqual("sim-a", stop.call_args.args[0].ios_udid)
+
+    def test_exhausted_ios_pool_does_not_stop_other_runs(self):
+        import fcntl
+        self.ios_pool()
+        self.strategy["e2e"]["policy"]["run_timeout_seconds"] = 0
+        locks = self.root / "locks"
+        locks.mkdir()
+        with ExitStack() as stack:
+            for udid in self.machine.ios_pool:
+                lock = stack.enter_context((locks / f"ios-{udid}.lock").open("a"))
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            stop = stack.enter_context(patch.object(runner, "shutdown_ios"))
+            verdict = self.run_gate()
+        self.assertEqual("blocked", verdict["result"])
+        self.assertIn("pool remained busy", verdict["details"])
+        self.assertEqual([], self.calls)
+        stop.assert_not_called()
+
+    def test_ios_pool_cleanup_failure_preserves_evidence_and_report(self):
+        self.ios_pool()
+        with patch.object(runner, "shutdown_ios", side_effect=E2EError("simctl unavailable")):
+            verdict = self.run_gate()
+        self.assertEqual("passed", verdict["result"])
+        self.assertFalse(verdict["ios_simulator_cleanup"][0]["stopped"])
+        self.assertIn("simctl unavailable", Path(verdict["report_path"]).read_text())
+        runner.validate_verdict(self.task, 123)
+
+    def test_ios_pool_collection_only_checks_do_not_stop_a_device(self):
+        self.ios_pool()
+        self.write_recipe({"platforms": {"ios": {"collection_only": True}, "android": {"tests": [self.node]}}})
+        with patch.object(runner, "shutdown_ios") as stop, patch.object(runner, "shutdown_android"):
+            self.assertEqual("passed", self.run_gate()["result"])
+        stop.assert_not_called()
+
+
+class IOSPoolTests(unittest.TestCase):
+    def machine(self, root):
+        return Machine(root, Path("python"), root, "workspace-device", "", "", root, "appium", 4743,
+                       ios_pool=("sim-a", "sim-b", "sim-c"), ios_wda_root=root / "wda")
+
+    def test_three_parallel_leases_are_distinct_and_a_fourth_waits_for_release(self):
+        import threading
+        import time
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            root = Path(directory)
+            machine = self.machine(root)
+            leases = [runner.reserve_ios(machine, root, time.monotonic() + 5) for _ in range(3)]
+            selected = [stack.enter_context(lease).ios_udid for lease in leases]
+            self.assertEqual(list(machine.ios_pool), selected)
+            waiting, acquired = threading.Event(), threading.Event()
+            values, errors = [], []
+            original_sleep = time.sleep
+            def sleep(seconds):
+                waiting.set()
+                original_sleep(seconds)
+            def fourth():
+                try:
+                    with runner.reserve_ios(machine, root, time.monotonic() + 5) as chosen:
+                        values.append(chosen.ios_udid)
+                        acquired.set()
+                except BaseException as exc: errors.append(exc)
+            with patch.object(runner.time, "sleep", side_effect=sleep):
+                thread = threading.Thread(target=fourth)
+                thread.start()
+                try:
+                    self.assertTrue(waiting.wait(2))
+                    self.assertFalse(acquired.is_set())
+                    leases[1].__exit__(None, None, None)
+                    self.assertTrue(acquired.wait(2))
+                finally:
+                    thread.join(6)
+            self.assertEqual([], errors)
+            self.assertEqual(["sim-b"], values)
+
+    def test_each_slot_has_its_own_ports_cache_and_assigned_capabilities(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            machine = self.machine(root)
+            wda_ports, mjpeg_ports, paths = set(), set(), set()
+            for udid in machine.ios_pool:
+                selected = replace(machine, ios_udid=udid)
+                with patch.object(runner, "ios_simulator", return_value={"state": "Shutdown", "version": "26.2"}):
+                    target = runner.device(selected, "ios")
+                context = {"device_id": udid, "platform_version": "26.2", "appium_port": "4743",
+                           "application_id": "example.app", "adb": "", "app_path": "app.app", "results": "r", "collected": "c"}
+                env = runner.execution_environment(selected, root, "ios", target, {}, context)
+                assigned = json.loads(env["FACTORY_E2E_APPIUM_CAPABILITIES"])
+                self.assertEqual(udid, assigned["appium:udid"])
+                self.assertFalse(assigned["appium:shutdownOtherSimulators"])
+                wda_ports.add(assigned["appium:wdaLocalPort"])
+                mjpeg_ports.add(assigned["appium:mjpegServerPort"])
+                paths.add(assigned["appium:derivedDataPath"])
+            self.assertEqual({8110, 8111, 8112}, wda_ports)
+            self.assertEqual({9110, 9111, 9112}, mjpeg_ports)
+            self.assertEqual(3, len(paths))
+
+    def test_shutdown_targets_only_the_selected_simulator_and_waits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine = replace(self.machine(Path(directory)), ios_udid="sim-b")
+            with patch.object(runner, "ios_simulator", side_effect=[{"state": "Booted"}, {"state": "Shutting Down"}, {"state": "Shutdown"}]), \
+                    patch.object(runner, "execute") as execute, patch.object(runner.time, "sleep"):
+                runner.shutdown_ios(machine)
+            execute.assert_called_once_with(["xcrun", "simctl", "shutdown", "sim-b"])
+            with patch.object(runner, "ios_simulator", return_value={"state": "Shutdown"}), patch.object(runner, "execute") as execute:
+                runner.shutdown_ios(machine)
+            execute.assert_not_called()
+
+    def test_pool_env_is_separate_from_workspace_and_rejects_invalid_resources(self):
+        env = {"E2E_DIR": "/tests", "E2E_PYTHON": "/python", "E2E_IOS_SIMULATOR_UDID": "workspace-device",
+               "SDD_E2E_IOS_SIMULATOR_UDIDS": "00000000-0000-0000-0000-000000000001,00000000-0000-0000-0000-000000000002",
+               "SDD_E2E_IOS_WDA_PORT_BASE": "8110", "SDD_E2E_IOS_MJPEG_PORT_BASE": "9110", "SDD_E2E_IOS_WDA_ROOT": "/wda"}
+        with patch.dict(os.environ, env, clear=True):
+            machine = Machine.from_env()
+        self.assertEqual("workspace-device", machine.ios_udid)
+        self.assertEqual(2, len(machine.ios_pool))
+        for invalid in ({"SDD_E2E_IOS_SIMULATOR_UDIDS": "../outside"},
+                        {"SDD_E2E_IOS_SIMULATOR_UDIDS": ",".join(["00000000-0000-0000-0000-000000000001"] * 2)},
+                        {"SDD_E2E_IOS_WDA_PORT_BASE": "9110"}, {"SDD_E2E_IOS_MJPEG_PORT_BASE": "65535"},
+                        {"SDD_E2E_IOS_WDA_ROOT": ""}):
+            with self.subTest(invalid=invalid), patch.dict(os.environ, dict(env, **invalid), clear=True), self.assertRaises(E2EError):
+                Machine.from_env()
+
+    def test_shared_device_cannot_be_accessed_in_pool_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            machine = self.machine(Path(directory))
+            with patch.object(runner, "ios_simulator") as discover, patch.object(runner, "execute") as execute:
+                with self.assertRaisesRegex(E2EError, "Acquire a dedicated iOS pool lease"):
+                    runner.device(machine, "ios", boot=True)
+            discover.assert_not_called()
+            execute.assert_not_called()
 
 
 class AppiumServerTests(unittest.TestCase):
