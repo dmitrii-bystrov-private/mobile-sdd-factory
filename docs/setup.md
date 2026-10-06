@@ -210,6 +210,10 @@ These are the supported way to verify that:
 
 ## Starting the Local Platform
 
+Documentation review respects explicit task scope and content-preservation requirements. A valid
+implementer request for operator input during documentation correction does not require environment
+recovery. After updating coordinator contracts, restart the existing backend to load the new code.
+
 The normal supported workflow is:
 
 1. Start the backend/UI stack:

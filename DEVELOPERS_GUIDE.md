@@ -147,6 +147,12 @@ Live tests should run in isolated task-like environments, not against dirty stat
 
 ## Behavioral Rules Worth Preserving
 
+Documentation reviewer/harvest instructions must give explicit task/operator requirements precedence
+over generic writing preferences. Preserve required statements/references in move-only tasks.
+Implementer failed + needs_operator_input=true is a valid blocked result during documentation review
+correction, just as in other coding lanes. Unsupported cleanup findings can return grounded no-change
+evidence for a fresh review; genuine unresolved decisions retain their evidence for the operator.
+
 QA tasks reuse the coordinator lifecycle with the `e2e_gate` strategy and factory-owned Appium adapter.
 Shared Appium launch/reuse requires the scoped uiautomator2:chromedriver_autodownload permission.
 Doctor and ensure_server check launch flags with lsof/ps; do not replace an incompatible shared server

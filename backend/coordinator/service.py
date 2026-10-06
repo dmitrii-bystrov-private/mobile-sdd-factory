@@ -7068,6 +7068,7 @@ class CoordinatorService:
                 "convention_review_correction_requested",
                 "requirements_review_correction_requested",
                 "verification_correction_requested",
+                "documentation_review_correction_requested",
                 "qa_reopen_requested",
             }
         ):
@@ -9646,7 +9647,10 @@ class CoordinatorService:
             return (
                 f"Apply documentation review corrections for {task_key}. "
                 "Edit only production documentation and comments needed to resolve the routed documentation review findings. "
-                "Do not change product behavior or broaden into code cleanup."
+                "Do not change product behavior or broaden into code cleanup. "
+                "Respect explicit Jira/operator scope and content-preservation requirements. "
+                "If findings require out-of-scope changes that contradict those requirements, submit completed with grounded disagreement evidence for a fresh documentation review instead of silently changing scope. "
+                "Use failed with needs_operator_input=true only for an unresolved decision that genuinely requires operator input."
             )
         if stage_name == "doc_harvest_requested":
             policy_mode = self._optional_lane_policy_mode(session_policy, "doc_harvest_policy")

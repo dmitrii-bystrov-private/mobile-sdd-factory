@@ -107,6 +107,9 @@ send-to-test
 | `verification-coordinator` | Runs workflow-level verification and routes concrete correction work when verification fails. |
 
 Long-running implementation, review, and verification roles keep their runtime context across correction rounds. Planning and documentation roles are started only when the workflow needs them.
+Documentation lanes preserve explicit task scope and required content. A move-only task does not
+authorize a broader documentation cleanup. Genuine implementation decisions, including documentation
+corrections, use a supported operator-input result instead of a terminal-schema recovery error.
 
 ## Operator UI
 

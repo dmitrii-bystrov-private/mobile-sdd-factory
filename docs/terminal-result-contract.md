@@ -343,6 +343,11 @@ Minimal example:
 
 ### Coding And Follow-Up Roles
 
+During documentation_review_correction_requested, implementer may submit failed with
+needs_operator_input=true and the reasoned-disagreement fields to request an actual operator decision.
+This is a valid implementation_blocked result, not an invalid terminal document. A completed no-change
+correction with grounded evidence returns to fresh documentation review; it does not waive that review.
+
 Applies to:
 - `implementer`
 

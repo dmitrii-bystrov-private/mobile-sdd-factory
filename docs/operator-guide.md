@@ -152,6 +152,9 @@ Per-session overrides in the session creation form only affect the session being
 ## Recovery Actions
 
 Use recovery actions only when the workflow is blocked, paused, or failed at a specific operational seam.
+An implementer asking for a decision during documentation correction is a normal operator-input
+blocker. Read the preserved disagreement before changing scope. Required references or content in a
+move-only task take precedence over generic cleanup preferences; genuine schema errors remain recovery.
 
 Recovery actions include:
 
