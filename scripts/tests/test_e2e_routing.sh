@@ -70,10 +70,11 @@ fi
 
 git -C "$E2E_DIR" init -q -b feature/QA-100
 git -C "$E2E_DIR" -c user.name=Acceptance -c user.email=acceptance@example.invalid commit -q --allow-empty -m baseline
-if bash "$REPO_ROOT/scripts/create-mr.sh" QA-100 > "$TEST_ROOT/output" 2>&1; then
+if bash "$REPO_ROOT/scripts/create-mr.sh" QA-100 > "$TEST_ROOT/output" 2> "$TEST_ROOT/error"; then
   echo 'QA MR accepted absent verification receipts' >&2
   exit 1
 fi
+rg -q 'Cannot prepare QA merge request:.*e2e-verdict.json' "$TEST_ROOT/error"
 if rg -q '(^| )push( |$)' "$TEST_ROOT/git.log"; then
   echo 'QA branch was pushed before evidence validation' >&2
   exit 1

@@ -343,6 +343,10 @@ Minimal example:
 
 ### Coding And Follow-Up Roles
 
+QA MR handoff may retain the native verification result after committed regular documentation-only
+changes, recording both verified and delivery SHAs. This does not relax exact-source checks for
+verification terminal submissions or baseline decisions, rewrite receipts or remove accepted warnings.
+
 During documentation_review_correction_requested, implementer may submit failed with
 needs_operator_input=true and the reasoned-disagreement fields to request an actual operator decision.
 This is a valid implementation_blocked result. For conflicts between task requirements and fundamental

@@ -124,7 +124,7 @@ This applies to optional quality/documentation lanes such as:
 - review gate
 - doc harvest
 
-When documentation harvest runs, `documentation-reviewer` checks the resulting documentation and source comments before the workflow proceeds to verification.
+When documentation harvest runs after verification, `documentation-reviewer` checks the resulting documentation and source comments before delivery.
 Conflicts between task requirements and fundamental rules require an explicit operator decision;
 the workers preserve both sides and their sources. Documentation correction accepts implementer
 failed + needs_operator_input=true as implementation_blocked, preserves the current owner/stage and
@@ -144,6 +144,10 @@ These can materialize new follow-up subtasks and re-enter execution through the 
 ## Delivery Model
 
 Delivery is part of the workflow, not a separate manual phase.
+For QA MR handoff, committed documentation-only changes after verification preserve the original
+native evidence when Git proves a clean worktree, verified ancestry and regular documentation files.
+Changes to code/configuration, bound strategy/support files or execution evidence require a fresh gate.
+The MR records both revisions; verifier submissions and baseline decisions remain exactly source-bound.
 
 The normal supported path is:
 

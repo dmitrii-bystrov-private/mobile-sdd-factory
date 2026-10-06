@@ -147,6 +147,11 @@ Live tests should run in isolated task-like environments, not against dirty stat
 
 ## Behavioral Rules Worth Preserving
 
+QA MR delivery may reuse native evidence after committed documentation-only corrections. Validate the
+Git ancestry, clean worktree and regular documentation files; keep strategy/support and receipt/app
+bindings, the original verified SHA and any accepted warnings. Exact-source checks still govern
+verification submissions and baseline decisions. MR-description errors must reach captured stderr.
+
 Workers must report conflicts between task requirements and fundamental rules with evidence for both
 sides and wait for the operator to decide their priority. Continue according to the recorded decision.
 Implementer failed + needs_operator_input=true is a valid blocked result during documentation review

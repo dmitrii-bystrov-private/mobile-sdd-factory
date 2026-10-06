@@ -65,7 +65,16 @@ fi
 # Materialize a reviewable QA description from verified receipts before publishing.
 description=""
 if [[ "$KEY" == QA-* ]]; then
-  description="$(cd "$SCRIPT_DIR/.." && ./.venv/bin/python -m factory.e2e.runner mr-description "$story_key")"
+  if description="$(cd "$SCRIPT_DIR/.." && ./.venv/bin/python -m factory.e2e.runner mr-description "$story_key")"; then
+    :
+  else
+    description_status=$?
+    echo "ERROR: QA merge request description could not be prepared." >&2
+    if [[ -n "$description" ]]; then
+      printf '%s\n' "$description" >&2
+    fi
+    exit "$description_status"
+  fi
 fi
 
 # Push

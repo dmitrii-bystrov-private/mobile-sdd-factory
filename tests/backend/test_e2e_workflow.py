@@ -604,6 +604,131 @@ class E2EWorkflowTests(unittest.TestCase):
             runner.validate_verdict(self.task, 123)
         self.assertEqual("blocked", self.run_gate()["result"])
 
+    def test_mr_retains_verification_after_committed_documentation_changes(self):
+        (self.repo / "README.md").write_text("Before review\n")
+        (self.repo / "old.md").write_text("Old documentation\n")
+        runner.git(self.repo, "add", ".")
+        runner.git(self.repo, "commit", "-m", "Document behavior")
+        verdict = self.run_gate()
+        original = (self.task / "spec/e2e-verdict.json").read_bytes()
+        calls = len(self.calls)
+        (self.repo / "README.md").write_text("Reviewed documentation\n")
+        (self.repo / "old.md").unlink()
+        (self.repo / "new.rst").write_text("New documentation\n")
+        runner.git(self.repo, "add", ".")
+        runner.git(self.repo, "commit", "-m", "Documentation review corrections")
+
+        description = runner.mr_description(self.key, self.task)
+
+        self.assertIn(f"Verified test source: `{verdict['source']['sha']}`", description)
+        self.assertIn(f"Delivery source: `{runner.git(self.repo, 'rev-parse', 'HEAD')}`", description)
+        for name in ("README.md", "old.md", "new.rst"):
+            self.assertIn(f"`{name}`", description)
+        self.assertEqual(original, (self.task / "spec/e2e-verdict.json").read_bytes())
+        self.assertEqual(calls, len(self.calls))
+        with self.assertRaisesRegex(E2EError, "stale"):
+            runner.validate_verdict(self.task, 123)
+
+    def test_mr_rejects_post_verification_code_and_configuration_changes(self):
+        verdict = self.run_gate()
+        for name in ("tests/ios/test_example.py", "requirements.txt", "pytest.ini", "config.yml", "docs/setup.py"):
+            with self.subTest(path=name):
+                runner.git(self.repo, "reset", "--hard", verdict["source"]["sha"])
+                path = self.repo / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("changed\n")
+                runner.git(self.repo, "add", ".")
+                runner.git(self.repo, "commit", "-m", "Change execution inputs")
+                with self.assertRaisesRegex(E2EError, "fresh gate is required"):
+                    runner.mr_description(self.key, self.task)
+
+    def test_mr_rejects_executable_or_symlink_documentation_and_code_renames(self):
+        verdict = self.run_gate()
+        for kind in ("executable", "symlink", "renamed code"):
+            with self.subTest(kind=kind):
+                runner.git(self.repo, "reset", "--hard", verdict["source"]["sha"])
+                path = self.repo / "README.md"
+                if kind == "symlink":
+                    path.symlink_to("tests/ios/test_example.py")
+                elif kind == "renamed code":
+                    (self.repo / "tests/ios/test_example.py").rename(path)
+                else:
+                    path.write_text("#!/bin/sh\nexit 1\n")
+                    path.chmod(0o755)
+                runner.git(self.repo, "add", ".")
+                runner.git(self.repo, "commit", "-m", "Change execution inputs with documentation names")
+                with self.assertRaisesRegex(E2EError, "fresh gate is required"):
+                    runner.mr_description(self.key, self.task)
+
+    def test_mr_rejects_uncommitted_docs_and_unrelated_history(self):
+        self.run_gate()
+        (self.repo / "README.md").write_text("Uncommitted documentation\n")
+        with self.assertRaisesRegex(E2EError, "stale"):
+            runner.mr_description(self.key, self.task)
+        runner.git(self.repo, "switch", "--detach", self.baseline)
+        runner.git(self.repo, "add", ".")
+        runner.git(self.repo, "commit", "-m", "Documentation on another revision")
+        with self.assertRaisesRegex(E2EError, "not an ancestor"):
+            runner.mr_description(self.key, self.task)
+
+    def test_mr_documentation_changes_do_not_relax_strategy_and_support_bindings(self):
+        path = self.repo / "input.md"
+        path.write_text("Bound execution input\n")
+        runner.git(self.repo, "add", ".")
+        runner.git(self.repo, "commit", "-m", "Add bound input")
+        self.strategy["e2e"]["support_files"] = ["repo/input.md"]
+        runner.write_json(self.task / "spec/verification-strategy.json", self.strategy)
+        verdict = self.run_gate()
+        path.write_text("Changed bound execution input\n")
+        runner.git(self.repo, "commit", "-am", "Change bound input")
+        with self.assertRaisesRegex(E2EError, "support files changed"):
+            runner.mr_description(self.key, self.task)
+        runner.git(self.repo, "reset", "--hard", verdict["source"]["sha"])
+        (self.repo / "README.md").write_text("Documentation correction\n")
+        runner.git(self.repo, "add", ".")
+        runner.git(self.repo, "commit", "-m", "Documentation correction")
+        self.strategy["reason"] = "Changed execution plan"
+        runner.write_json(self.task / "spec/verification-strategy.json", self.strategy)
+        with self.assertRaisesRegex(E2EError, "execution strategy changed"):
+            runner.mr_description(self.key, self.task)
+
+    def test_mr_keeps_accepted_baseline_failures_after_documentation_correction(self):
+        service, session, _, context = self.block_baseline()
+        self.decide(service, session, context)
+        verdict = self.run_gate()
+        decisions = (self.task / "spec/e2e-operator-decisions.json").read_bytes()
+        (self.repo / "README.md").write_text("Documentation correction\n")
+        runner.git(self.repo, "add", ".")
+        runner.git(self.repo, "commit", "-m", "Documentation correction")
+
+        description = runner.mr_description(self.key, self.task)
+
+        self.assertIn("Verification result: accepted_with_warnings", description)
+        self.assertIn("these tests did not pass", description)
+        self.assertIn(verdict["source"]["sha"], description)
+        self.assertEqual(decisions, (self.task / "spec/e2e-operator-decisions.json").read_bytes())
+        with self.assertRaisesRegex(E2EError, "stale"):
+            runner.accepted_baseline_findings(self.task, self.strategy["work_item_id"], self.strategy)
+
+    def test_mr_cli_reports_failure_on_stderr_without_loading_device_configuration(self):
+        self.run_gate()
+        with patch.dict(os.environ, {"SDD_WORKDIR": str(self.root)}), patch.object(
+            Machine, "from_env", side_effect=AssertionError("MR description does not need devices")
+        ):
+            stdout, stderr = io.StringIO(), io.StringIO()
+            from contextlib import redirect_stdout, redirect_stderr
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                self.assertEqual(0, runner.main(["mr-description", self.key]))
+            self.assertIn("Verified test source", stdout.getvalue())
+            self.assertEqual("", stderr.getvalue())
+            (self.repo / "tests/ios/test_example.py").write_text("changed\n")
+            runner.git(self.repo, "commit", "-am", "Change scenario after verification")
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                self.assertEqual(2, runner.main(["mr-description", self.key]))
+            self.assertEqual("", stdout.getvalue())
+            self.assertIn("fresh gate is required", stderr.getvalue())
+
     def test_edited_plan_and_empty_green_receipt_are_rejected(self):
         verdict = self.run_gate()
         receipt = verdict["receipts"][-1]

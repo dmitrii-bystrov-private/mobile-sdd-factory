@@ -145,6 +145,9 @@ Factory code consumes generic collection/JUnit/outcome evidence and binds task-l
 by digest; it does not prescribe project directories, configuration imports, smoke files or app IDs.
 Baseline acceptance applies to executed checks; setup/cleanup failures require environment recovery.
 Operator continuation and runtime collection are serialized so historical worker errors do not reopen accepted gates.
+QA MR handoff retains successful E2E evidence after committed documentation-only corrections, recording
+both verified and delivery revisions. Code, execution configuration or bound support changes require
+fresh verification. See [QA e2e workflow](docs/e2e-workflow.md) for the documented file checks.
 
 Launcher confirmation menus are accepted automatically by choosing the affirmative option, including Claude dynamic workflow consent. Requirements questions and menus without an affirmative option still use operator input.
 

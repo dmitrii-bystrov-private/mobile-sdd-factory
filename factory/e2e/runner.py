@@ -63,6 +63,34 @@ def source(repo):
     return {"sha": git(repo, "rev-parse", "HEAD"), "dirty": bool(git(repo, "status", "--porcelain"))}
 
 
+def validate_source(repo, recorded, *, allow_documentation_changes=False):
+    """Keep exact source binding except for committed regular documentation at delivery."""
+    current = source(repo)
+    if recorded == current:
+        return []
+    stale = "E2E evidence is stale or belongs to another work item"
+    if (not allow_documentation_changes or not isinstance(recorded, dict)
+            or recorded.get("dirty") is not False or current["dirty"]):
+        raise E2EError(stale)
+    verified_sha = recorded.get("sha", "")
+    if not isinstance(verified_sha, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", verified_sha):
+        raise E2EError(stale)
+    try:
+        git(repo, "merge-base", "--is-ancestor", verified_sha, current["sha"])
+    except E2EError as exc:
+        raise E2EError("E2E evidence is stale: the verified commit is not an ancestor of the delivery commit") from exc
+    entries = git(repo, "diff", "--raw", "--no-abbrev", "--no-renames", "-z", verified_sha, current["sha"], "--").split("\0")
+    changed = []
+    for index in range(0, len(entries) - 1, 2):
+        header, name = entries[index:index + 2]
+        old_mode, new_mode = header.lstrip(":").split()[:2]
+        if (Path(name).suffix.lower() not in {".md", ".markdown", ".rst", ".adoc"}
+                or old_mode not in {"000000", "100644"} or new_mode not in {"000000", "100644"}):
+            raise E2EError(f"E2E evidence is stale: {name} changed after verification; a fresh gate is required")
+        changed.append(name)
+    return changed
+
+
 def doctor(machine):
     expected = read_json(Path(__file__).with_name("toolchain.json"))
     python = execute([str(machine.python), "-c", "import platform; print(platform.python_version())"])
@@ -509,9 +537,10 @@ def baseline_findings(verdict, strategy):
     return eligible
 
 
-def validate_binding(task_root, verdict, work_item_id):
-    if verdict.get("work_item_id") != work_item_id or verdict.get("source") != source(task_root / "repo"):
+def validate_binding(task_root, verdict, work_item_id, *, allow_documentation_changes=False):
+    if verdict.get("work_item_id") != work_item_id:
         raise E2EError("E2E evidence is stale or belongs to another work item")
+    validate_source(task_root / "repo", verdict.get("source"), allow_documentation_changes=allow_documentation_changes)
     if verdict.get("contract_version") != CONTRACT_VERSION:
         raise E2EError("Legacy e2e evidence requires a fresh verification strategy and gate")
     if verdict.get("strategy_digest") != digest(task_root / "spec/verification-strategy.json"):
@@ -520,7 +549,7 @@ def validate_binding(task_root, verdict, work_item_id):
         raise E2EError("E2E execution support files changed after verification")
 
 
-def accepted_baseline_findings(task_root, work_item_id, strategy):
+def accepted_baseline_findings(task_root, work_item_id, strategy, *, allow_documentation_changes=False):
     path = task_root / "spec/e2e-operator-decisions.json"
     if not path.exists():
         return [], []
@@ -533,7 +562,7 @@ def accepted_baseline_findings(task_root, work_item_id, strategy):
         if digest(evidence) != decision["verdict_digest"]:
             raise E2EError("Accepted baseline evidence changed after the operator decision")
         verdict = read_json(evidence)
-        validate_binding(task_root, verdict, work_item_id)
+        validate_binding(task_root, verdict, work_item_id, allow_documentation_changes=allow_documentation_changes)
         validate_receipts(verdict)
         eligible = {finding_id(item): item for item in baseline_findings(verdict, strategy)}
         if not decision.get("finding_ids") or set(decision["finding_ids"]) - eligible.keys():
@@ -780,15 +809,17 @@ def describe_verdict(verdict):
     return {"summary": summary, "details": "\n\n".join(paragraphs) or verdict.get("details") or "See the verification report for individual test results."}
 
 
-def validate_verdict(task_root, work_item_id):
+def validate_verdict(task_root, work_item_id, *, allow_documentation_changes=False):
     verdict = read_json(task_root / "spec/e2e-verdict.json")
-    if verdict.get("work_item_id") != work_item_id or verdict.get("source") != source(task_root / "repo"):
+    if verdict.get("work_item_id") != work_item_id:
         raise E2EError("E2E evidence is stale or belongs to another work item")
+    validate_source(task_root / "repo", verdict.get("source"), allow_documentation_changes=allow_documentation_changes)
     if verdict.get("result") not in {"passed", "accepted_with_warnings"}:
         return verdict
-    validate_binding(task_root, verdict, work_item_id)
+    validate_binding(task_root, verdict, work_item_id, allow_documentation_changes=allow_documentation_changes)
     strategy = read_json(task_root / "spec/verification-strategy.json")
-    decisions, accepted = accepted_baseline_findings(task_root, work_item_id, strategy)
+    decisions, accepted = accepted_baseline_findings(
+        task_root, work_item_id, strategy, allow_documentation_changes=allow_documentation_changes)
     if verdict.get("result") == "accepted_with_warnings":
         if not accepted or verdict.get("operator_decisions") != decisions or verdict.get("accepted_findings") != accepted:
             raise E2EError("Accepted verification requires matching operator decisions")
@@ -860,15 +891,21 @@ def validate_verdict(task_root, work_item_id):
 
 def mr_description(task_key, task_root):
     recorded = read_json(task_root / "spec/e2e-verdict.json")
-    verdict = validate_verdict(task_root, recorded.get("work_item_id"))
+    verdict = validate_verdict(task_root, recorded.get("work_item_id"), allow_documentation_changes=True)
     if verdict["result"] not in {"passed", "accepted_with_warnings"}:
         raise E2EError("An e2e MR requires passing or explicitly accepted verification")
     jira_base = os.environ.get("JIRA_BASE_URL", "").rstrip("/")
     changes = git(task_root / "repo", "log", "--format=%s", "origin/master..HEAD")
     lines = [f"Jira: {jira_base + '/' + task_key if jira_base else task_key}", "", changes, "",
-             f"Verified test source: `{verdict['source']['sha']}`", "",
-             f"Verification result: {verdict['result']}", "",
-             "| Platform | Check | App SHA | Passed / Failed / Skipped |", "|---|---|---|---|"]
+             f"Verified test source: `{verdict['source']['sha']}`", ""]
+    delivery_sha = git(task_root / "repo", "rev-parse", "HEAD")
+    if verdict["source"]["sha"] != delivery_sha:
+        documentation = validate_source(task_root / "repo", verdict["source"], allow_documentation_changes=True)
+        lines += [f"Delivery source: `{delivery_sha}`",
+                  "Post-verification changes: " + (", ".join(f"`{name}`" for name in documentation) or "no file changes") + ".",
+                  "Original verification evidence retained; no additional test run was performed.", ""]
+    lines += [f"Verification result: {verdict['result']}", "",
+              "| Platform | Check | App SHA | Passed / Failed / Skipped |", "|---|---|---|---|"]
     for receipt in verdict["receipts"]:
         if receipt["results"] is not None:
             counts = receipt["results"]
@@ -888,8 +925,8 @@ def main(argv=None):
     parser.add_argument("task_key", nargs="?")
     args = parser.parse_args(argv)
     try:
-        machine = Machine.from_env()
         if args.command == "doctor":
+            machine = Machine.from_env()
             result = doctor(machine)
             print(json.dumps(result, indent=2))
             return 0 if result["ok"] else 1
@@ -907,6 +944,7 @@ def main(argv=None):
                     ast.parse(path.read_text(), filename=name)
             print(json.dumps({"result": "passed", "python_files": len(files)}))
             return 0
+        machine = Machine.from_env()
         strategy = read_json(task_root / "spec/verification-strategy.json")
         def interrupted(signum, frame):
             raise E2EError(f"E2E verification interrupted by signal {signum}")
@@ -919,7 +957,10 @@ def main(argv=None):
         print(json.dumps(result, indent=2))
         return {"passed": 0, "accepted_with_warnings": 0, "failed": 1, "blocked": 2}[result["result"]]
     except (E2EError, OSError, ValueError, KeyError, SyntaxError) as exc:
-        print(json.dumps({"result": "blocked", "details": str(exc)}))
+        if args.command == "mr-description":
+            print(f"Cannot prepare QA merge request: {exc}", file=sys.stderr)
+        else:
+            print(json.dumps({"result": "blocked", "details": str(exc)}))
         return 2
 
 

@@ -234,3 +234,15 @@ Use logs for individual failure evidence; do not publish whole logs containing s
 Delivery creates or updates an MR to the configured e2e project master with Jira and a run table generated from the
 receipts. The Jira handoff is IN PROGRESS QA -> CODE REVIEW QA, without the mobile project's resolution
 fallback or fix-version fields.
+
+Committed documentation corrections after verification do not require another E2E run for MR handoff.
+Delivery requires a clean worktree and the verified commit as an ancestor of HEAD. Every changed path
+between those commits must be a regular, non-executable `.md`, `.markdown`, `.rst` or `.adoc` file;
+additions, deletions and moves within those formats are allowed. Other files, executable modes and
+symlinks require fresh verification. This rule uses Git evidence and generic formats, not project paths
+or a worker's description of its changes. Bound strategy/support files and all receipt/app checks still
+apply, including when a support file has a documentation extension. Verification submissions and
+baseline acceptance/continuation keep their exact source binding.
+The MR retains the actual verified SHA, original evidence and accepted_with_warnings, and identifies
+the delivery SHA and subsequent documentation changes. It does not claim another test run occurred.
+MR-description failures are written to stderr so the Recovery card shows their cause before any push.

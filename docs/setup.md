@@ -210,6 +210,10 @@ These are the supported way to verify that:
 
 ## Starting the Local Platform
 
+QA MR-description generation reads stored evidence without requiring device/Appium ENV. Actual E2E
+runs still require the machine configuration above. Documentation-only delivery checks are described
+in [e2e-workflow.md](e2e-workflow.md).
+
 After updating coordinator contracts or worker instructions, restart the existing backend to load the
 new code. A valid implementer request for operator input during documentation correction does not
 require environment recovery; conflicts between requirements and fundamental rules await a decision.

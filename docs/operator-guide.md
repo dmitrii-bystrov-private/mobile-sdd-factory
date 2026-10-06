@@ -152,6 +152,10 @@ Per-session overrides in the session creation form only affect the session being
 ## Recovery Actions
 
 Use recovery actions only when the workflow is blocked, paused, or failed at a specific operational seam.
+QA documentation corrections after successful E2E verification do not require another run when only
+committed regular documentation files changed. MR handoff validates this and keeps the original report.
+If it fails, the Recovery card shows the MR-description error. Changes to execution inputs require
+fresh verification; retrying MR handoff alone cannot replace that gate.
 An implementer asking for a decision during documentation correction is a normal operator-input
 blocker. The card preserves both sides of a conflict between task requirements and fundamental rules.
 The operator decides their priority; workers continue according to that recorded decision.

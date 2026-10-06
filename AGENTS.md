@@ -103,6 +103,9 @@ checks must run, and delivery must retain accepted_with_warnings rather than rep
 Continue on the accepted app artifact even when newer master builds appear. Environment recovery may
 resume the same gate with its decisions; fresh verification retries must not inherit them. Drain prior
 tmux output before continuation and use fresh native verdicts for QA runtime error recovery.
+QA MR handoff may retain verification across committed regular documentation changes only, with a
+clean worktree and verified ancestor. Preserve original evidence; code/configuration and bound support
+changes invalidate delivery. Verification and baseline decisions retain exact source binding.
 Start shared Appium with --allow-insecure uiautomator2:chromedriver_autodownload. Check its version
 and explicit launch flags before reuse; report mismatches without stopping other users' server.
 Project commands, environment, collection scope, smoke checks and application IDs are task data in
