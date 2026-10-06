@@ -67,6 +67,9 @@ run_step "Shell regression: snapshot errors" \
 run_step "Shell regression: QA e2e routing" \
   bash scripts/tests/test_e2e_routing.sh
 
+run_step "Shell regression: iOS verification resource queue" \
+  bash scripts/tests/test_ios_verification_queue.sh
+
 run_step "Operator acceptance: happy path" \
   bash factory/acceptance/run-happy-path-acceptance.sh
 

@@ -157,6 +157,10 @@ cooldown, even when an earlier recovery attempt has not produced a result.
 
 `tmux` is the supported runtime host. Each task gets a runtime session, and each active role gets its own window.
 
+iOS verification queues on shared task/simulator locks. Native execution state keeps the gate active
+while waiting or running; premature worker blockers/results are deferred until command completion.
+Nested shell wrappers do not imply deadlock. Genuine recursive acquisition fails with explicit evidence.
+
 The UI exposes attach and capture commands for direct debugging. The backend also uses tmux state for runtime visibility, restart, continuation, and automatic recovery.
 
 Claude and Codex runners are both supported. Runtime defaults are stored in:

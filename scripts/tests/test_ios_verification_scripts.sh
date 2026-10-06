@@ -89,6 +89,7 @@ chmod +x "$WORKDIR/jq"
 cat >"$WORKDIR/git" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "${1:-}" == "-C" ]]; then shift 2; fi
 if [[ "${1:-}" == "rev-parse" && "${2:-}" == "HEAD" ]]; then
   printf 'abc123\n'
   exit 0
@@ -301,6 +302,9 @@ ln -s "$WORKDIR/ios-build-for-testing.sh" "$WORKDIR/shims/ios-build-for-testing.
 ln -s "$WORKDIR/ios-test-without-building.sh" "$WORKDIR/shims/ios-test-without-building.sh"
 ln -s "$WORKDIR/run-lint.sh" "$WORKDIR/shims/run-lint.sh"
 ln -s "$REPO_ROOT/scripts/lib/verification_context.sh" "$WORKDIR/shims/lib/verification_context.sh"
+ln -s "$REPO_ROOT/scripts/twg-utils.sh" "$WORKDIR/shims/twg-utils.sh"
+ln -s "$REPO_ROOT/.venv" "$WORKDIR/.venv"
+ln -s "$REPO_ROOT/factory" "$WORKDIR/factory"
 
 IOS_VERIFY_SHIM="$WORKDIR/ios-verify.sh"
 sed "s|SCRIPT_DIR=.*|SCRIPT_DIR=\"$WORKDIR/shims\"|" "$REPO_ROOT/scripts/ios-verify.sh" >"$IOS_VERIFY_SHIM"

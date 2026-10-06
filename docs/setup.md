@@ -210,6 +210,10 @@ These are the supported way to verify that:
 
 ## Starting the Local Platform
 
+iOS resource queues need no additional machine settings. Task/simulator lock paths retain their ENV
+configuration. Native execution-state files are task-local runtime artifacts. Restart the existing
+backend after upgrading coordinator code so live-run deferral is active; do not launch a second stack.
+
 QA MR-description generation reads stored evidence without requiring device/Appium ENV. Actual E2E
 runs still require the machine configuration above. Documentation-only delivery checks are described
 in [e2e-workflow.md](e2e-workflow.md).

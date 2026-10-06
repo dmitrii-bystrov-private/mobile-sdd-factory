@@ -32,7 +32,13 @@ if [[ "${#PHASES[@]}" -eq 0 ]]; then
   exit 1
 fi
 
+SDD_IOS_VERIFICATION_RUN_ID="$("$SCRIPT_DIR/../.venv/bin/python" \
+  "$SCRIPT_DIR/../factory/ios_verification_state.py" start "$KEY" --pid "$$")"
+export SDD_IOS_VERIFICATION_RUN_ID
+trap 'verification_ios_run_state finish --exit-code "$?"' EXIT
+
 for phase in "${PHASES[@]}"; do
+  verification_ios_run_state phase --phase "$phase"
   case "$phase" in
     prepare)
       bash "$SCRIPT_DIR/ios-prepare.sh" "$KEY"

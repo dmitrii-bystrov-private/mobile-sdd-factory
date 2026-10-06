@@ -331,6 +331,7 @@ ln -s "$WORKDIR/android-test.sh" "$WORKDIR/shims/android-test.sh"
 ln -s "$WORKDIR/android-lint.sh" "$WORKDIR/shims/android-lint.sh"
 ln -s "$WORKDIR/android-prepare.sh" "$WORKDIR/shims/android-prepare.sh"
 ln -s "$REPO_ROOT/scripts/lib/verification_context.sh" "$WORKDIR/shims/lib/verification_context.sh"
+ln -s "$REPO_ROOT/scripts/twg-utils.sh" "$WORKDIR/shims/twg-utils.sh"
 
 ANDROID_VERIFY_SHIM="$WORKDIR/android-verify.sh"
 sed "s|SCRIPT_DIR=.*|SCRIPT_DIR=\"$WORKDIR/shims\"|" "$REPO_ROOT/scripts/android-verify.sh" >"$ANDROID_VERIFY_SHIM"

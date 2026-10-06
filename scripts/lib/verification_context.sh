@@ -87,6 +87,24 @@ verification_resolve_mise_cmd() {
   return 1
 }
 
+verification_ios_run_state() {
+  local action="$1"
+  shift
+  if [[ -z "${SDD_IOS_VERIFICATION_RUN_ID:-}" ]]; then
+    return 0
+  fi
+  "$VERIFICATION_CONTEXT_LIB_DIR/../../.venv/bin/python" \
+    "$VERIFICATION_CONTEXT_LIB_DIR/../../factory/ios_verification_state.py" \
+    "$action" "$KEY" --run-id "$SDD_IOS_VERIFICATION_RUN_ID" "$@"
+}
+
+verification_lock_owner_is_ancestor() {
+  [[ "$1" =~ ^[0-9]+$ ]] || return 1
+  "$VERIFICATION_CONTEXT_LIB_DIR/../../.venv/bin/python" \
+    "$VERIFICATION_CONTEXT_LIB_DIR/../../factory/ios_verification_state.py" \
+    owner-is-ancestor "${KEY:-unknown}" --pid "$1"
+}
+
 verification_run_with_ios_simulator_lock() (
   local device_id="$1"
   shift
@@ -98,6 +116,8 @@ verification_run_with_ios_simulator_lock() (
   local pid_file="$lock_dir/owner.pid"
   local owner_file="$lock_dir/owner.txt"
   local wait_logged=0
+  local last_owner_pid=""
+  local last_wait_report=0
 
   mkdir -p "$lock_root"
   while ! mkdir "$lock_dir" 2>/dev/null; do
@@ -109,9 +129,19 @@ verification_run_with_ios_simulator_lock() (
       rm -rf "$lock_dir"
       continue
     fi
+    if verification_lock_owner_is_ancestor "$owner_pid"; then
+      echo "Recursive iOS simulator lock acquisition: device=$device_id owner_pid=$owner_pid. The command already owns this resource." >&2
+      return 1
+    fi
     if [[ "$wait_logged" -eq 0 ]]; then
       echo "⏳ Waiting for iOS simulator lock: $device_id"
+      echo "Resource contention is expected. Nested shell lock wrappers are not recursive verification. Do not restart or cancel this command."
+    fi
+    if [[ "$wait_logged" -eq 0 || "$owner_pid" != "$last_owner_pid" || $((SECONDS - last_wait_report)) -ge 30 ]]; then
+      verification_ios_run_state wait --resource "iOS simulator $device_id" --lock-dir "$lock_dir"
       wait_logged=1
+      last_owner_pid="$owner_pid"
+      last_wait_report=$SECONDS
     fi
     sleep 2
   done
@@ -119,6 +149,7 @@ verification_run_with_ios_simulator_lock() (
   printf '%s\n' "${BASHPID-$$}" >"$pid_file"
   printf 'device=%s task=%s started_at=%s\n' "$device_id" "${KEY:-unknown}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$owner_file"
   trap 'rm -rf "$lock_dir"' EXIT INT TERM
+  verification_ios_run_state running
 
   "$@"
 )
@@ -168,15 +199,29 @@ verification_run_with_ios_task_lock() (
   local pid_file="$lock_dir/owner.pid"
   local owner_file="$lock_dir/owner.txt"
   local wait_logged=0
+  local last_owner_pid=""
+  local last_wait_report=0
 
   mkdir -p "$lock_root"
   while ! mkdir "$lock_dir" 2>/dev/null; do
     if ! verification_ios_task_lock_is_active "$key"; then
       continue
     fi
+    local owner_pid
+    owner_pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if verification_lock_owner_is_ancestor "$owner_pid"; then
+      echo "Recursive iOS task lock acquisition: task=$key. The command already owns this resource." >&2
+      return 1
+    fi
     if [[ "$wait_logged" -eq 0 ]]; then
       echo "⏳ Waiting for iOS task lock: $key"
+      echo "Resource contention is expected. Wait for the existing owner to release the lock."
+    fi
+    if [[ "$wait_logged" -eq 0 || "$owner_pid" != "$last_owner_pid" || $((SECONDS - last_wait_report)) -ge 30 ]]; then
+      verification_ios_run_state wait --resource "iOS task $key" --lock-dir "$lock_dir"
       wait_logged=1
+      last_owner_pid="$owner_pid"
+      last_wait_report=$SECONDS
     fi
     sleep 2
   done
@@ -184,6 +229,7 @@ verification_run_with_ios_task_lock() (
   printf '%s\n' "${BASHPID-$$}" >"$pid_file"
   printf 'task=%s started_at=%s\n' "$key" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$owner_file"
   trap 'rm -rf "$lock_dir"' EXIT INT TERM
+  verification_ios_run_state running
 
   "$@"
 )

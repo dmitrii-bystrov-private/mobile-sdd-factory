@@ -147,6 +147,13 @@ Live tests should run in isolated task-like environments, not against dirty stat
 
 ## Behavioral Rules Worth Preserving
 
+iOS verification records `tmp/verification/ios/execution-state.json` with run/work-item/source binding,
+runner PID, phase, resource wait and completion exit code. The coordinator defers premature terminal
+results/errors only for the current live native runner and sends bounded continuation feedback.
+Completed/dead/stale/mismatched records do not suppress actual failures. Shared resources wait normally;
+lock-owner ancestry, rather than nested shell count, detects recursive acquisition.
+Run `bash scripts/tests/test_ios_verification_queue.sh` for isolated queue/recursion regression coverage.
+
 QA MR delivery may reuse native evidence after committed documentation-only corrections. Validate the
 Git ancestry, clean worktree and regular documentation files; keep strategy/support and receipt/app
 bindings, the original verified SHA and any accepted warnings. Exact-source checks still govern

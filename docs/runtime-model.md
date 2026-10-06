@@ -160,6 +160,13 @@ Manual delivery actions remain as recovery tools only when automatic delivery fa
 
 ## Recovery Model
 
+Factory iOS verification records its command lifecycle under the task's `tmp/verification/ios/`.
+Waiting for a shared task/simulator lock is an active gate. The coordinator verifies the current work
+item, dispatch time, source and runner process before deferring a premature error/terminal result.
+The worker continues its existing terminal; feedback is deduplicated per run/state. Completion or a
+dead/stale runner restores normal result/recovery handling. Native scripts reject proven recursive
+lock acquisition by owner ancestry and leave other live owners alone.
+
 QA mobile e2e tasks use the same roles and lifecycle, with a factory-owned `e2e_gate` strategy. The runner
 leases a free configured iOS pool device through a per-UDID lock, independent of workspace devices.
 The same lease covers collection, tests, fresh-install repeats and baseline comparisons. Pool slots

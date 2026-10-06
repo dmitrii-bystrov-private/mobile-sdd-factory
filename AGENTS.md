@@ -106,6 +106,9 @@ tmux output before continuation and use fresh native verdicts for QA runtime err
 QA MR handoff may retain verification across committed regular documentation changes only, with a
 clean worktree and verified ancestor. Preserve original evidence; code/configuration and bound support
 changes invalidate delivery. Verification and baseline decisions retain exact source binding.
+Factory iOS gates record native execution state. Resource waits preserve the active work item and
+terminal; defer premature role results while its bound runner is alive. Nested shell lock wrappers
+are expected; only owner ancestry proves recursive acquisition. Never remove another live owner's lock.
 Start shared Appium with --allow-insecure uiautomator2:chromedriver_autodownload. Check its version
 and explicit launch flags before reuse; report mismatches without stopping other users' server.
 Project commands, environment, collection scope, smoke checks and application IDs are task data in

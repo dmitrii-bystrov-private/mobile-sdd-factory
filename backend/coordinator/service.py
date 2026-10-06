@@ -3006,6 +3006,8 @@ class CoordinatorService:
             )
             self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
             return None
+        if self._defer_running_ios_verification(session, role, output_payload, output_type):
+            return None
         if output_type == "error":
             self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
             self._record_runtime_marker_artifact(
@@ -4258,15 +4260,14 @@ class CoordinatorService:
         )
         if instruction is None:
             raise IntakeError(f"Session {session_id} cannot be retried from stage {session.current_stage}")
-        if retry_item.work_type == "verification" and session.task_key.startswith("QA-"):
+        if retry_item.work_type == "verification" and self.workdir_root is not None:
             strategy, strategy_path = materialize_verification_strategy(
                 task_key=session.task_key, workdir_root=self.workdir_root,
                 repo_root=self._repo_root(), work_item_id=retry_item.id,
             )
-            instruction += (
-                f" Read {strategy_path} and run its e2e gate for the new work item. "
-                "Submit the result from spec/e2e-verdict.json; earlier receipts cannot satisfy this retry."
-            )
+            instruction += f" Read {strategy_path} and execute its commands for the new verification work item. "
+            if session.task_key.startswith("QA-"):
+                instruction += "Submit the result from spec/e2e-verdict.json; earlier receipts cannot satisfy this retry."
         dispatch_event = self._dispatch_role_work(
             session=session,
             role=role,
@@ -7354,6 +7355,8 @@ class CoordinatorService:
                         )
                         self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
                         continue
+                    if self._defer_running_ios_verification(session, role, payload, "error"):
+                        continue
                     self._record_runtime_marker_artifact(
                         session=session,
                         role=role,
@@ -7803,12 +7806,66 @@ class CoordinatorService:
             },
         )
 
+    def _defer_running_ios_verification(
+        self, session: Session, role: Role, payload: dict, output_type: str,
+    ) -> bool:
+        if (session.status != SessionStatus.ACTIVE or session.current_stage != "verification_requested"
+                or role.role_name != VERIFICATION_COORDINATOR_ROLE or session.task_key.startswith("QA-")
+                or self.workdir_root is None):
+            return False
+        item = self._find_active_work_item_for_role(session.id, role.id)
+        if item is None:
+            return False
+        from factory.ios_verification_state import read_active_run
+        run = read_active_run(
+            self.workdir_root / session.task_key, item.id,
+            self._latest_role_dispatch_created_at(session=session, role=role, work_item_id=item.id),
+        )
+        if run is None:
+            return False
+        prior = self._latest_event_by_type(session.id, {"verification_result_deferred"})
+        already_notified = prior is not None and prior.payload.get("run_id") == run["run_id"] and prior.payload.get("state") == run["state"]
+        worker_output = {"output_type": output_type, "payload": dict(payload)}
+        if already_notified and prior.payload.get("worker_output") == worker_output:
+            return True
+        self._append_event(
+            session_id=session.id, event_type="verification_result_deferred", producer_type="coordinator",
+            payload={"role_name": role.role_name, "work_item_id": item.id, "output_type": output_type,
+                     "run_id": run["run_id"], "state": run["state"], "phase": run.get("phase"),
+                     "resource": run.get("resource"), "runner_pid": run["runner_pid"],
+                     "summary": "Verification command is still active; keep waiting for its completion",
+                     "worker_output": worker_output},
+        )
+        if role.runtime_handle is not None and not already_notified:
+            runtime_role = RuntimeRoleHandle(
+                role_id=role.runtime_handle, session_id=self._runtime_session_id_for_role(role, session),
+                backend_name=role.runtime_backend,
+            )
+            try:
+                self.session_backend.send_input(
+                    runtime_role,
+                    f"The native iOS verification command for work item {item.id} is still {run['state']} "
+                    f"(runner PID {run['runner_pid']}, phase {run.get('phase')}). "
+                    "Your terminal result/blocker has been deferred. Continue polling the existing command terminal "
+                    "until it exits, then inspect its actual output and submit the result for this same work item. "
+                    "Resource contention and nested bash lock wrappers are expected. Do not start a duplicate gate, "
+                    "kill its processes, remove a live owner's locks, or request operator recovery for this wait.",
+                )
+            except (RuntimeError, OSError) as exc:
+                self._append_event(
+                    session_id=session.id, event_type="verification_wait_feedback_failed", producer_type="coordinator",
+                    payload={"role_name": role.role_name, "work_item_id": item.id, "error": str(exc)},
+                )
+        return True
+
     def _escalate_runtime_error(
         self,
         session: Session,
         role: Role,
         payload: dict,
     ) -> Session:
+        if self._defer_running_ios_verification(session, role, payload, "error"):
+            return session
         native_outcome = self._native_e2e_runtime_error_outcome(session, role)
         if native_outcome is not None:
             return native_outcome

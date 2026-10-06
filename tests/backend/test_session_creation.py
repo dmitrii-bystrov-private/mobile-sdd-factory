@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import UTC, datetime
 import json
 import os
 import tempfile
@@ -1450,6 +1451,85 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn("Do it the same way as the frontend does", sent[-1])
         refreshed_item = self.work_item_repository.get_by_id(work_item.id)
         self.assertEqual(WorkItemStatus.ASSIGNED, refreshed_item.status)
+
+    def prepare_native_ios_run(self, task_key: str, *, state: str = "waiting_for_resource"):
+        from factory.ios_verification_state import state_path, write_state
+        session, _, _, _ = self.coordinator.prepare_task_session(task_key)
+        session, _ = self.coordinator.handle_operator_event(
+            session_id=session.id, event_type="implementation_completed", payload={"summary": "done"})
+        role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        item = next(item for item in self.work_item_repository.list_for_session(session.id)
+                    if item.work_type == "verification" and item.status == WorkItemStatus.ASSIGNED)
+        path = state_path(Path(self.temp_dir.name) / task_key)
+        write_state(path, {"version": 1, "task_key": task_key, "work_item_id": item.id,
+                          "run_id": "native-run", "runner_pid": 123, "source_sha": "verified-sha",
+                          "started_at": datetime.now(UTC).isoformat(), "state": state,
+                          "phase": "test_without_building", "resource": {"name": "iOS simulator", "owner_pid": "456"}})
+        return session, role, item, path
+
+    def test_native_ios_wait_defers_false_runtime_error_without_repeated_feedback(self) -> None:
+        session, role, item, _ = self.prepare_native_ios_run("IOS-30003NATIVEWAIT")
+        payload = {"summary": "Stale recursive simulator lock", "needs_operator_input": True, "work_item_id": item.id}
+        sent_before = len(self.session_backend.get_sent_inputs(role.runtime_handle))
+        with patch("factory.ios_verification_state.runner_is_alive", return_value=True), patch(
+            "factory.ios_verification_state.source_sha", return_value="verified-sha"
+        ):
+            for _ in range(2):
+                self.session_backend.simulate_output(role.runtime_handle, "SDD_ERROR: " + json.dumps(payload))
+                updated, _, _ = self.coordinator.collect_role_output(session.id, role.role_name)
+                self.assertEqual(SessionStatus.ACTIVE, updated.status)
+                self.assertEqual(VERIFICATION_COORDINATOR_ROLE, updated.current_owner)
+        self.assertEqual(sent_before + 1, len(self.session_backend.get_sent_inputs(role.runtime_handle)))
+        events = self.event_repository.list_for_session(session.id)
+        self.assertEqual(1, sum(event.event_type == "verification_result_deferred" for event in events))
+        self.assertFalse(any(event.event_type in {"session_escalated_to_operator", "role_runtime_error_reported"} for event in events))
+        self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(item.id).status)
+
+    def test_native_ios_running_defers_terminal_ingress_without_completing_dispatch(self) -> None:
+        for index, output_type in enumerate(("blocked_verification_cycle", "failed", "passed")):
+            with self.subTest(output_type=output_type):
+                session, role, item, _ = self.prepare_native_ios_run(f"IOS-30003NATIVERESULT{index}", state="running")
+                with patch("factory.ios_verification_state.runner_is_alive", return_value=True), patch(
+                    "factory.ios_verification_state.source_sha", return_value="verified-sha"
+                ):
+                    updated, _, mapped, _, ignored = self.coordinator.submit_role_result_document(document={
+                        "output_type": output_type, "payload": {"work_item_id": item.id, "summary": "Premature result"}})
+                self.assertTrue(ignored)
+                self.assertIsNone(mapped)
+                self.assertEqual(SessionStatus.ACTIVE, updated.status)
+                self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(item.id).status)
+                self.assertIsNotNone(self.dispatch_repository.get_latest_active_for_target(
+                    session_id=session.id, role_id=role.id, work_item_id=item.id, stage_name="verification_requested"))
+
+    def test_native_ios_finished_or_stale_run_does_not_hide_runtime_failure(self) -> None:
+        for index, state in enumerate(("finished", "waiting_for_resource")):
+            with self.subTest(state=state):
+                session, role, item, path = self.prepare_native_ios_run(f"IOS-30003NATIVEFAIL{index}", state=state)
+                if state != "finished":
+                    record = json.loads(path.read_text())
+                    record["work_item_id"] = item.id + 100
+                    path.write_text(json.dumps(record))
+                with patch("factory.ios_verification_state.runner_is_alive", return_value=True), patch(
+                    "factory.ios_verification_state.source_sha", return_value="verified-sha"
+                ):
+                    self.session_backend.simulate_output(role.runtime_handle, "SDD_ERROR: " + json.dumps({
+                        "summary": "Actual runner failure", "needs_operator_input": True, "work_item_id": item.id}))
+                    updated, _, _ = self.coordinator.collect_role_output(session.id, role.role_name)
+                self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated.status)
+                self.assertEqual("Actual runner failure", self.coordinator.get_interactive_state_summary(session.id)["summary"])
+
+    def test_native_ios_retry_refreshes_strategy_binding(self) -> None:
+        session, role, item, _ = self.prepare_native_ios_run("IOS-30003NATIVERETRY", state="finished")
+        self.session_backend.simulate_output(role.runtime_handle, "SDD_ERROR: " + json.dumps({
+            "summary": "Interrupted command", "needs_operator_input": True, "work_item_id": item.id}))
+        self.coordinator.collect_role_output(session.id, role.role_name)
+        updated, _, _ = self.coordinator.retry_session(session.id)
+        retry_item = next(item for item in self.work_item_repository.list_for_session(session.id)
+                          if item.work_type == "verification" and item.status == WorkItemStatus.ASSIGNED)
+        strategy = json.loads((Path(self.temp_dir.name) / session.task_key / "spec/verification-strategy.json").read_text())
+        self.assertNotEqual(item.id, retry_item.id)
+        self.assertEqual(retry_item.id, strategy["work_item_id"])
+        self.assertEqual(SessionStatus.ACTIVE, updated.status)
 
     def test_get_interactive_state_summary_uses_latest_runtime_error(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

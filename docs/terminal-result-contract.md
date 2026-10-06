@@ -120,6 +120,13 @@ outcome. Busy pools wait within the total gate timeout before becoming environme
 
 Used during `verification_requested`.
 
+For factory iOS commands, an active, bound `tmp/verification/ios/execution-state.json` defers premature
+terminal submissions and runtime error markers. The work item/dispatch stays active and the role
+receives continuation feedback. An ingress submission can return `ignored=true` for this deferral;
+continue the existing terminal until it exits, then submit the actual result. Do not launch a duplicate
+gate or infer deadlock from resource waits/nested shells. Finished, dead or stale runner records do not
+defer recovery. The original deferred report is retained in artifacts/events.
+
 Required:
 - `output_type`
 - `payload.work_item_id`
