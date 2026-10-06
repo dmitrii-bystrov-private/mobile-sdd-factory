@@ -1,0 +1,139 @@
+"""Dependency wiring for API and coordinator services."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from functools import lru_cache
+
+from backend.config import AppConfig, load_config
+from backend.api.sse import SessionEventBus
+from backend.coordinator.loop_runner import CoordinatorLoopRunner
+from backend.coordinator.service import CoordinatorService
+from backend.roles.contracts import DEFAULT_SESSION_ROLES
+from backend.roles.launcher import RoleLauncherManager
+from backend.roles.workspace import RoleWorkspaceManager
+from backend.session_backend.base import SessionBackend
+from backend.session_backend.recording_backend import RecordingSessionBackend
+from backend.session_backend.tmux_backend import TmuxSessionBackend
+from backend.state.artifact_repository import ArtifactRepository
+from backend.state.db import Database
+from backend.state.dispatch_repository import DispatchRepository
+from backend.state.event_repository import EventRepository
+from backend.state.role_repository import RoleRepository
+from backend.state.session_repository import SessionRepository
+from backend.state.work_item_repository import WorkItemRepository
+from backend.tools.command_runner import CommandRunner
+from backend.tools.fake_adapters import FakeGitLabAdapter, FakeIOSAppLauncher, FakeJiraAdapter, FakeSnapshotAdapter
+from backend.tools.gitlab_adapter import GitLabAdapter
+from backend.tools.ios_app_launcher import IOSAppLauncher
+from backend.tools.jira_adapter import JiraAdapter
+from backend.tools.snapshot_adapter import SnapshotAdapter
+
+
+def _project_socket_root(config: AppConfig):
+    return config.repo_root / ".ts" / "runtime"
+
+
+@dataclass
+class AppDependencies:
+    """Shared application dependencies."""
+
+    config: AppConfig
+    database: Database
+    session_repository: SessionRepository
+    role_repository: RoleRepository
+    event_repository: EventRepository
+    artifact_repository: ArtifactRepository
+    work_item_repository: WorkItemRepository
+    dispatch_repository: DispatchRepository
+    session_backend: SessionBackend
+    jira_adapter: JiraAdapter
+    snapshot_adapter: SnapshotAdapter
+    gitlab_adapter: GitLabAdapter
+    event_bus: SessionEventBus
+    loop_runner: CoordinatorLoopRunner
+    coordinator_service: CoordinatorService
+
+
+@lru_cache(maxsize=1)
+def build_dependencies() -> AppDependencies:
+    """Build the root dependency graph for the backend process."""
+
+    config = load_config()
+    database = Database(config.database_path)
+    database.initialize()
+
+    session_repository = SessionRepository(database)
+    role_repository = RoleRepository(database)
+    event_repository = EventRepository(database)
+    artifact_repository = ArtifactRepository(database)
+    work_item_repository = WorkItemRepository(database)
+    dispatch_repository = DispatchRepository(database)
+    if config.runtime_backend == "recording":
+        session_backend = RecordingSessionBackend()
+    else:
+        session_backend = TmuxSessionBackend(
+            mode=config.runtime_backend,
+            runtime_root=config.runtime_root,
+            socket_root=_project_socket_root(config),
+        )
+    if config.use_fake_adapters:
+        jira_adapter = FakeJiraAdapter(config.repo_root)
+        snapshot_adapter = FakeSnapshotAdapter(config.repo_root, config.workdir_root)
+        gitlab_adapter = FakeGitLabAdapter(config.repo_root)
+        ios_app_launcher = FakeIOSAppLauncher(config.repo_root)
+    else:
+        runner = CommandRunner()
+        jira_adapter = JiraAdapter(runner, config.repo_root)
+        snapshot_adapter = SnapshotAdapter(runner, config.repo_root)
+        gitlab_adapter = GitLabAdapter(runner, config.repo_root)
+        ios_app_launcher = IOSAppLauncher(runner, config.repo_root)
+    event_bus = SessionEventBus()
+    coordinator_service = CoordinatorService(
+        session_repository=session_repository,
+        role_repository=role_repository,
+        event_repository=event_repository,
+        artifact_repository=artifact_repository,
+        work_item_repository=work_item_repository,
+        dispatch_repository=dispatch_repository,
+        session_backend=session_backend,
+        default_roles=DEFAULT_SESSION_ROLES,
+        jira_adapter=jira_adapter,
+        snapshot_adapter=snapshot_adapter,
+        gitlab_adapter=gitlab_adapter,
+        ios_app_launcher=ios_app_launcher,
+        artifacts_root=config.workdir_root / "factory-artifacts",
+        workdir_root=config.workdir_root,
+        event_bus=event_bus,
+        role_workspace_manager=RoleWorkspaceManager(
+            runtime_root=config.runtime_root,
+            repo_root=config.repo_root,
+            workdir_root=config.workdir_root,
+        ),
+        role_launcher_manager=RoleLauncherManager(
+            repo_root=config.repo_root,
+            workdir_root=config.workdir_root,
+            launcher_command=list(config.agent_launcher_command),
+        ),
+    )
+    loop_runner = CoordinatorLoopRunner(
+        callback=coordinator_service.run_loop_once,
+        interval_seconds=config.loop_interval_seconds,
+    )
+    return AppDependencies(
+        config=config,
+        database=database,
+        session_repository=session_repository,
+        role_repository=role_repository,
+        event_repository=event_repository,
+        artifact_repository=artifact_repository,
+        work_item_repository=work_item_repository,
+        dispatch_repository=dispatch_repository,
+        session_backend=session_backend,
+        jira_adapter=jira_adapter,
+        snapshot_adapter=snapshot_adapter,
+        gitlab_adapter=gitlab_adapter,
+        event_bus=event_bus,
+        loop_runner=loop_runner,
+        coordinator_service=coordinator_service,
+    )

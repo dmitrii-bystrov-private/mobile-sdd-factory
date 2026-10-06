@@ -1,0 +1,601 @@
+import { useEffect, useMemo, useState } from "react";
+
+import { apiClient } from "../api/client";
+import { roleDisplayName } from "../roleDisplay";
+import { workflowProfileDisplayName } from "../sessionDisplay";
+import { useToast } from "./ToastProvider";
+import type {
+  RequirementsClarificationMode,
+  E2EDefaults,
+  RuntimeCapabilitiesSummary,
+  RuntimeDefaultsSummary,
+  SessionPolicyValue,
+  WorkflowProfile,
+} from "../types";
+
+type RuntimeDefaultsPanelProps = {
+  runtimeCapabilities: RuntimeCapabilitiesSummary | null;
+  runtimeDefaults: RuntimeDefaultsSummary | null;
+  onSaved: (summary: RuntimeDefaultsSummary) => void;
+};
+
+type DraftRoleDefault = {
+  runner: string;
+  model: string;
+  effort: string;
+};
+
+type DraftPolicyDefaults = {
+  review_policy: SessionPolicyValue;
+  doc_harvest_policy: SessionPolicyValue;
+  requirements_clarification_mode: RequirementsClarificationMode;
+};
+
+const POLICY_OPTIONS: SessionPolicyValue[] = ["disabled", "enabled", "required"];
+const REQUIREMENTS_CLARIFICATION_OPTIONS: RequirementsClarificationMode[] = [
+  "ask-a-lot",
+  "ask-selectively",
+  "autonomous",
+];
+const POLICY_OPTION_LABELS: Record<SessionPolicyValue, string> = {
+  disabled: "Disabled",
+  enabled: "Agent decides",
+  required: "Required",
+};
+const REQUIREMENTS_CLARIFICATION_LABELS: Record<RequirementsClarificationMode, string> = {
+  "ask-a-lot": "Ask often",
+  "ask-selectively": "Ask selectively",
+  autonomous: "Stay autonomous",
+};
+const WORKFLOW_PROFILE_DESCRIPTIONS: Record<WorkflowProfile, string> = {
+  oneshot: "Direct implementation flow for straightforward tasks without the extended planning chain.",
+  story_full: "Story workflow with planning, subtask execution, and clarification controls.",
+};
+
+const POLICY_DEFAULT_DESCRIPTIONS: Record<
+  "review_policy" | "doc_harvest_policy",
+  string
+> = {
+  review_policy:
+    "Choose whether the dual review gate is disabled, auto-started with reviewer skip semantics, or required.",
+  doc_harvest_policy:
+    "Choose whether the Documentation Writer lane is disabled, auto-started with agent skip semantics, or required.",
+};
+
+const CLARIFICATION_MODE_DESCRIPTIONS: Record<RequirementsClarificationMode, string> = {
+  "ask-a-lot": "Bias toward interactive clarification whenever story requirements are incomplete or ambiguous.",
+  "ask-selectively": "Ask only when ambiguity is likely to change implementation or planning decisions.",
+  autonomous: "Carry the story forward without clarification unless the flow hard-blocks.",
+};
+
+function roleFlowOrder(roleName: string, workflowProfile: WorkflowProfile): number {
+  const oneshotOrder = [
+    "implementer",
+    "convention-reviewer",
+    "requirements-reviewer",
+    "verification-coordinator",
+    "doc-harvest-worker",
+  ];
+  const storyFullOrder = [
+    "proposal-context-worker",
+    "requirements-clarifier-worker",
+    "acceptance-criteria-worker",
+    "constraints-worker",
+    "spec-verifier-worker",
+    "task-decomposer-worker",
+    "implementer",
+    "convention-reviewer",
+    "requirements-reviewer",
+    "verification-coordinator",
+    "doc-harvest-worker",
+  ];
+
+  const orderedRoles =
+    workflowProfile === "story_full"
+      ? storyFullOrder
+      : oneshotOrder;
+
+  const index = orderedRoles.indexOf(roleName);
+  return index === -1 ? orderedRoles.length + 1 : index;
+}
+
+function defaultPolicyDefaults(): DraftPolicyDefaults {
+  return {
+    review_policy: "enabled",
+    doc_harvest_policy: "enabled",
+    requirements_clarification_mode: "ask-selectively",
+  };
+}
+
+export function RuntimeDefaultsPanel({
+  runtimeCapabilities,
+  runtimeDefaults,
+  onSaved,
+}: RuntimeDefaultsPanelProps): JSX.Element {
+  const { showToast } = useToast();
+  const [defaultRunner, setDefaultRunner] = useState("");
+  const [e2eDefaults, setE2eDefaults] = useState<E2EDefaults>({
+    include_smoke: true, fresh_install: true, max_tests: 10,
+    run_timeout_seconds: 1800, test_timeout_seconds: 600, failure_reruns: 1,
+  });
+  const [roleDefaults, setRoleDefaults] = useState<Record<string, DraftRoleDefault>>({});
+  const [policyDefaults, setPolicyDefaults] = useState<Record<WorkflowProfile, DraftPolicyDefaults>>({
+    oneshot: defaultPolicyDefaults(),
+    story_full: defaultPolicyDefaults(),
+  });
+  const [policyProfileView, setPolicyProfileView] = useState<WorkflowProfile>("oneshot");
+  const [showRoleDefaults, setShowRoleDefaults] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const runnerIndex = useMemo(
+    () => new Map((runtimeCapabilities?.runners ?? []).map((runner) => [runner.runner, runner])),
+    [runtimeCapabilities],
+  );
+  const roleDefaultsIndex = useMemo(
+    () => new Map((runtimeCapabilities?.roleDefaults ?? []).map((role) => [role.roleName, role])),
+    [runtimeCapabilities],
+  );
+
+  if (runtimeDefaults === null || runtimeCapabilities === null) {
+    return (
+      <section className="panel panel-sidebar">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Settings</p>
+            <h2>Runtime Defaults</h2>
+          </div>
+        </div>
+        <p className="path-label">Runtime defaults are still loading.</p>
+      </section>
+    );
+  }
+
+  const loadedRuntimeDefaults = runtimeDefaults;
+  const loadedRuntimeCapabilities = runtimeCapabilities;
+  const sortedKnownRoles = useMemo(
+    () =>
+      [...loadedRuntimeDefaults.knownRoles].sort((left, right) => {
+        const orderDelta = roleFlowOrder(left, policyProfileView) - roleFlowOrder(right, policyProfileView);
+        if (orderDelta !== 0) {
+          return orderDelta;
+        }
+        return left.localeCompare(right);
+      }),
+    [loadedRuntimeDefaults.knownRoles, policyProfileView],
+  );
+
+  function inheritedRoleDefault(
+    roleName: string,
+    resolvedDefaultRunner: string,
+  ): DraftRoleDefault {
+    const runnerCapability = runnerIndex.get(resolvedDefaultRunner);
+    const roleDefault = roleDefaultsIndex.get(roleName);
+    const models = runnerCapability?.models ?? [];
+    const modelIds = models.map((item) => item.id);
+    const compatibleRoleModel =
+      roleDefault?.model && modelIds.includes(roleDefault.model) ? roleDefault.model : undefined;
+    const model = compatibleRoleModel ?? models[0]?.id ?? "";
+    const modelCapability = models.find((item) => item.id === model);
+    const supportedEfforts = modelCapability?.supportedEfforts ?? [];
+    const compatibleRoleEffort =
+      compatibleRoleModel === model &&
+      roleDefault?.effort &&
+      (supportedEfforts.length === 0 || supportedEfforts.includes(roleDefault.effort))
+        ? roleDefault.effort
+        : undefined;
+    const effort =
+      compatibleRoleEffort ??
+      modelCapability?.defaultEffort ??
+      supportedEfforts[0] ??
+      "";
+    return {
+      runner: resolvedDefaultRunner,
+      model,
+      effort,
+    };
+  }
+
+  useEffect(() => {
+    const resolvedDefaultRunner =
+      loadedRuntimeDefaults.defaultRunner ??
+      loadedRuntimeCapabilities.defaultRunner ??
+      loadedRuntimeCapabilities.availableRunners[0] ??
+      "";
+    const nextRoleDefaults: Record<string, DraftRoleDefault> = {};
+    for (const roleName of loadedRuntimeDefaults.knownRoles) {
+      const stored = loadedRuntimeDefaults.roleDefaults[roleName];
+      if (stored) {
+        const inherited = inheritedRoleDefault(roleName, stored.runner ?? resolvedDefaultRunner);
+        nextRoleDefaults[roleName] = {
+          runner: stored.runner ?? resolvedDefaultRunner,
+          model: stored.model ?? inherited.model,
+          effort: stored.effort ?? inherited.effort,
+        };
+        continue;
+      }
+      nextRoleDefaults[roleName] = inheritedRoleDefault(roleName, resolvedDefaultRunner);
+    }
+    setDefaultRunner(resolvedDefaultRunner);
+    setE2eDefaults(loadedRuntimeDefaults.e2eDefaults);
+    setRoleDefaults(nextRoleDefaults);
+    setPolicyDefaults({
+      oneshot: {
+        ...defaultPolicyDefaults(),
+        ...(loadedRuntimeDefaults.policyDefaults.oneshot ?? {}),
+      },
+      story_full: {
+        ...defaultPolicyDefaults(),
+        ...(loadedRuntimeDefaults.policyDefaults.story_full ?? {}),
+      },
+    });
+  }, [loadedRuntimeCapabilities, loadedRuntimeDefaults, roleDefaultsIndex, runnerIndex]);
+
+  function updateRoleDefault(
+    roleName: string,
+    patch: Partial<DraftRoleDefault>,
+  ): void {
+    setRoleDefaults((current) => {
+      const next = { ...(current[roleName] ?? { runner: defaultRunner, model: "", effort: "" }), ...patch };
+      const runnerCapability = runnerIndex.get(next.runner);
+      const models = runnerCapability?.models ?? [];
+      if (!models.some((item) => item.id === next.model)) {
+        next.model = models[0]?.id ?? "";
+      }
+      const modelCapability = models.find((item) => item.id === next.model);
+      const efforts = modelCapability?.supportedEfforts ?? [];
+      if (!efforts.includes(next.effort)) {
+        next.effort = modelCapability?.defaultEffort ?? efforts[0] ?? "";
+      }
+      return {
+        ...current,
+        [roleName]: next,
+      };
+    });
+  }
+
+  function updatePolicyDefault<K extends keyof DraftPolicyDefaults>(
+    workflowProfile: WorkflowProfile,
+    key: K,
+    value: DraftPolicyDefaults[K],
+  ): void {
+    setPolicyDefaults((current) => ({
+      ...current,
+      [workflowProfile]: {
+        ...current[workflowProfile],
+        [key]: value,
+      },
+    }));
+  }
+
+  async function handleSave(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      const normalizedDefaultRunner = defaultRunner || null;
+      const explicitRoleDefaults = Object.fromEntries(
+        Object.entries(roleDefaults).flatMap(([roleName, value]) => {
+          const inherited = inheritedRoleDefault(roleName, defaultRunner);
+          if (
+            value.runner === inherited.runner &&
+            value.model === inherited.model &&
+            value.effort === inherited.effort
+          ) {
+            return [];
+          }
+          return [[
+            roleName,
+            {
+              runner: value.runner || null,
+              model: value.model || null,
+              effort: value.effort || null,
+            },
+          ]];
+        }),
+      );
+      const saved = await apiClient.updateRuntimeDefaults({
+        defaultRunner: normalizedDefaultRunner,
+        roleDefaults: explicitRoleDefaults,
+        policyDefaults: {
+          oneshot: {
+            review_policy: policyDefaults.oneshot.review_policy,
+            doc_harvest_policy: policyDefaults.oneshot.doc_harvest_policy,
+          },
+          story_full: {
+            review_policy: policyDefaults.story_full.review_policy,
+            doc_harvest_policy: policyDefaults.story_full.doc_harvest_policy,
+            requirements_clarification_mode: policyDefaults.story_full.requirements_clarification_mode,
+          },
+        },
+        knownRoles: loadedRuntimeDefaults.knownRoles,
+        sourcePath: loadedRuntimeDefaults.sourcePath,
+        e2eDefaults,
+      });
+      onSaved({
+        defaultRunner: saved.default_runner,
+        roleDefaults: saved.role_defaults,
+        policyDefaults: saved.policy_defaults,
+        knownRoles: saved.known_roles,
+        sourcePath: saved.source_path,
+        e2eDefaults: saved.e2e_defaults,
+      });
+      showToast("Runtime defaults saved");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save runtime defaults");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel panel-sidebar">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Settings</p>
+          <h2>Runtime Defaults</h2>
+        </div>
+      </div>
+
+      <div className="settings-surface-stack">
+        <div className="runtime-default-card">
+          <strong>QA / E2E verification</strong>
+          <p className="form-help">QA tasks run tests on master app builds unless the task selects another build.</p>
+          {(["include_smoke", "fresh_install"] as const).map((field) => (
+            <label className="form-field form-field-checkbox" key={field}>
+              <input type="checkbox" disabled={busy} checked={e2eDefaults[field]}
+                onChange={(event) => setE2eDefaults((current) => ({...current, [field]: event.target.checked}))} />
+              <span>{field === "include_smoke" ? "Include smoke tests" : "Fresh install for each test"}</span>
+            </label>
+          ))}
+          {([
+            ["max_tests", "Maximum selected tests"],
+            ["run_timeout_seconds", "Verification time limit (seconds)"],
+            ["test_timeout_seconds", "Per-test timeout (seconds)"],
+            ["failure_reruns", "Failure retries"],
+          ] as const).map(([field, label]) => (
+            <label className="form-field" key={field}>
+              <span>{label}</span>
+              <input className="text-input" type="number" disabled={busy}
+                min={field === "failure_reruns" ? 0 : 1} value={e2eDefaults[field]}
+                onChange={(event) => setE2eDefaults((current) => ({...current, [field]: Number(event.target.value)}))} />
+            </label>
+          ))}
+        </div>
+        <div className="runtime-defaults-list">
+          <div className="settings-profile-stack">
+            <div className="inline-pill-row">
+              {(["oneshot", "story_full"] as const).map((profile) => (
+                <button
+                  key={profile}
+                  className={`inline-pill inline-pill-button ${policyProfileView === profile ? "selected" : ""}`}
+                  onClick={() => setPolicyProfileView(profile)}
+                  title={WORKFLOW_PROFILE_DESCRIPTIONS[profile]}
+                  type="button"
+                >
+                  {workflowProfileDisplayName(profile)}
+                </button>
+              ))}
+            </div>
+            <p className="form-help">{WORKFLOW_PROFILE_DESCRIPTIONS[policyProfileView]}</p>
+          </div>
+
+          {policyProfileView === "oneshot" ? (
+              <div className="runtime-default-card">
+                <div className="inline-summary-header">
+                  <strong>{workflowProfileDisplayName("oneshot")}</strong>
+                </div>
+            <div className="followup-form-grid">
+              <label className="form-field">
+                <span>Review Gate</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault("oneshot", "review_policy", event.target.value as SessionPolicyValue)
+                  }
+                  title={POLICY_DEFAULT_DESCRIPTIONS.review_policy}
+                  value={policyDefaults.oneshot.review_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={`oneshot-self-review-${value}`} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <label className="form-field">
+              <span>Documentation Writer</span>
+              <select
+                className="select-input"
+                disabled={busy}
+                onChange={(event) =>
+                  updatePolicyDefault("oneshot", "doc_harvest_policy", event.target.value as SessionPolicyValue)
+                }
+                title={POLICY_DEFAULT_DESCRIPTIONS.doc_harvest_policy}
+                value={policyDefaults.oneshot.doc_harvest_policy}
+              >
+                {POLICY_OPTIONS.map((value) => (
+                  <option key={`oneshot-doc-harvest-${value}`} value={value}>
+                    {POLICY_OPTION_LABELS[value]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            </div>
+          ) : null}
+
+          {policyProfileView === "story_full" ? (
+              <div className="runtime-default-card">
+                <div className="inline-summary-header">
+                  <strong>{workflowProfileDisplayName("story_full")}</strong>
+                </div>
+            <div className="followup-form-grid">
+              <label className="form-field">
+                <span>Review Gate</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault("story_full", "review_policy", event.target.value as SessionPolicyValue)
+                  }
+                  title={POLICY_DEFAULT_DESCRIPTIONS.review_policy}
+                  value={policyDefaults.story_full.review_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={`story-self-review-${value}`} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="followup-form-grid">
+              <label className="form-field">
+                <span>Documentation Writer</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault("story_full", "doc_harvest_policy", event.target.value as SessionPolicyValue)
+                  }
+                  title={POLICY_DEFAULT_DESCRIPTIONS.doc_harvest_policy}
+                  value={policyDefaults.story_full.doc_harvest_policy}
+                >
+                  {POLICY_OPTIONS.map((value) => (
+                    <option key={`story-doc-harvest-${value}`} value={value}>
+                      {POLICY_OPTION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Clarification Mode</span>
+                <select
+                  className="select-input"
+                  disabled={busy}
+                  onChange={(event) =>
+                    updatePolicyDefault(
+                      "story_full",
+                      "requirements_clarification_mode",
+                      event.target.value as RequirementsClarificationMode,
+                    )
+                  }
+                  title={CLARIFICATION_MODE_DESCRIPTIONS[policyDefaults.story_full.requirements_clarification_mode]}
+                  value={policyDefaults.story_full.requirements_clarification_mode}
+                >
+                  {REQUIREMENTS_CLARIFICATION_OPTIONS.map((value) => (
+                    <option key={`story-clarification-${value}`} value={value}>
+                      {REQUIREMENTS_CLARIFICATION_LABELS[value]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="advanced-disclosure">
+          <button
+            className="advanced-disclosure-toggle"
+            onClick={() => setShowRoleDefaults((current) => !current)}
+            aria-expanded={showRoleDefaults}
+            type="button"
+        >
+          <div>
+              <strong>Lane runtime overrides</strong>
+              <p>
+                Override runner, model, or effort for specific lanes when a workflow needs different execution settings than the project baseline.
+              </p>
+            </div>
+            <div className="advanced-disclosure-meta">
+              <small>{runtimeDefaults?.knownRoles.length ?? 0} lane profiles</small>
+              <span className={`chevron${showRoleDefaults ? " expanded" : ""}`} aria-hidden="true" />
+            </div>
+          </button>
+          {showRoleDefaults ? (
+            <div className="advanced-disclosure-body runtime-defaults-list">
+              {sortedKnownRoles.map((roleName) => {
+                const draft = roleDefaults[roleName];
+                const runnerCapability = runnerIndex.get(draft?.runner ?? "");
+                const models = runnerCapability?.models ?? [];
+                const modelCapability = models.find((item) => item.id === draft?.model);
+                const efforts = modelCapability?.supportedEfforts ?? [];
+                return (
+                  <div key={roleName} className="runtime-default-card">
+                    <div className="inline-summary-header">
+                      <strong>{roleDisplayName(roleName)}</strong>
+                      <span>{draft?.runner ?? "runner?"}</span>
+                    </div>
+                    <div className="followup-form-grid">
+                      <label className="form-field">
+                        <span>Runner</span>
+                        <select
+                          className="select-input"
+                          disabled={busy || runtimeCapabilities === null}
+                          onChange={(event) => updateRoleDefault(roleName, { runner: event.target.value })}
+                          value={draft?.runner ?? ""}
+                        >
+                          {(runtimeCapabilities?.availableRunners ?? []).map((runner) => (
+                            <option key={runner} value={runner}>
+                              {runner}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="form-field">
+                        <span>Model</span>
+                        <select
+                          className="select-input"
+                          disabled={busy}
+                          onChange={(event) => updateRoleDefault(roleName, { model: event.target.value })}
+                          value={draft?.model ?? ""}
+                        >
+                          {models.map((model) => (
+                            <option key={model.id} value={model.id}>
+                              {model.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    <label className="form-field">
+                      <span>Effort</span>
+                      <select
+                        className="select-input"
+                        disabled={busy}
+                        onChange={(event) => updateRoleDefault(roleName, { effort: event.target.value })}
+                        value={draft?.effort ?? ""}
+                      >
+                        {efforts.map((effort) => (
+                          <option key={effort} value={effort}>
+                            {effort}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="settings-save-stack">
+          <button
+            className="action-button action-button-strong"
+            disabled={busy || runtimeDefaults === null}
+            onClick={() => void handleSave()}
+            title="Save these runtime and policy defaults for future sessions in this project."
+            type="button"
+          >
+            Save runtime defaults
+          </button>
+
+          {error ? <p className="error-banner">{error}</p> : null}
+        </div>
+      </div>
+    </section>
+  );
+}

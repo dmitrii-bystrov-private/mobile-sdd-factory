@@ -1,0 +1,3698 @@
+from pathlib import Path
+import json
+import os
+import sqlite3
+import tempfile
+import time
+import unittest
+from unittest.mock import patch
+
+try:
+    from fastapi import HTTPException
+
+    from backend.models.enums import SessionStatus
+    from backend.models.work_item import WorkItemStatus
+    from backend import session_policy as session_policy_module
+    from backend.api.sse import SessionEventBus
+    from backend.api.routes_sessions import (
+        create_session,
+        get_active_runtime_output,
+        get_jira_subtasks,
+        get_subtask_graph,
+        get_subtask_progress,
+        list_sessions,
+        prepare_session,
+        get_interactive_state,
+        get_runtime_state,
+    )
+    from backend.api.schemas import CreateSessionRequest, PrepareSessionRequest
+    from backend.api.routes_events import inject_event, list_events
+    from backend.api.routes_work_items import list_work_items
+    from backend.api.schemas import InjectEventRequest
+    from backend.api.routes_roles import submit_role_output, submit_role_result
+    from backend.api.schemas import CollectRoleOutputRequest, RoleOutputRequest, SubmitRoleResultRequest
+    from backend.api.routes_artifacts import get_artifact, list_artifacts
+    from backend.api.routes_roles import collect_role_output
+    from backend.api.routes_roles import list_roles
+    from backend.api.routes_operator import poll_session_output
+    from backend.api.routes_operator import run_loop_once
+    from backend.api.routes_operator import pause_session
+    from backend.api.routes_operator import resume_session
+    from backend.api.routes_operator import send_runtime_input
+    from backend.api.routes_operator import retry_session
+    from backend.api.routes_operator import reopen_from_qa
+    from backend.api.routes_operator import redirect_session
+    from backend.api.routes_operator import complete_doc_harvest
+    from backend.api.routes_operator import create_mr
+    from backend.api.routes_operator import create_subtasks_from_plan
+    from backend.api.routes_operator import cleanup_task
+    from backend.api.routes_operator import get_bootstrap_guidance
+    from backend.api.routes_operator import get_environment_doctor
+    from backend.api.routes_operator import get_runtime_capabilities
+    from backend.api.routes_operator import get_runtime_defaults
+    from backend.api.routes_operator import launch_ios_app
+    from backend.api.routes_operator import refresh_snapshot
+    from backend.api.routes_operator import refresh_review_message_preview
+    from backend.api.routes_operator import refresh_subtask_state
+    from backend.api.routes_operator import restart_runtime_role
+    from backend.api.routes_operator import restart_runtime_session
+    from backend.api.routes_operator import review_message_preview
+    from backend.api.routes_operator import stop_runtime_role
+    from backend.api.routes_operator import stop_runtime_session
+    from backend.api.routes_operator import send_to_test
+    from backend.api.routes_operator import start_subtask_graph
+    from backend.api.routes_operator import loop_status, start_loop, stop_loop
+    from backend.api.routes_operator import update_runtime_defaults
+    from backend.api.schemas import (
+        CompleteDocHarvestRequest,
+        CleanupTaskRequest,
+        CreateMrRequest,
+        CreateSubtasksFromPlanRequest,
+        LaunchIOSAppRequest,
+        PollSessionOutputRequest,
+        PauseSessionRequest,
+        RefreshSnapshotRequest,
+        RefreshSubtaskStateRequest,
+        ReviewMessagePreviewRequest,
+        ReopenFromQaRequest,
+        RedirectSessionRequest,
+        ResumeSessionRequest,
+        RestartRuntimeRoleRequest,
+        RestartRuntimeSessionRequest,
+        RetrySessionRequest,
+        SendOperatorRuntimeInputRequest,
+        SendToTestRequest,
+        StopRuntimeRoleRequest,
+        StopRuntimeSessionRequest,
+        StartSubtaskGraphRequest,
+        UpdateRuntimeDefaultsRequest,
+    )
+    from backend.coordinator.service import CoordinatorService
+    from backend.coordinator.loop_runner import CoordinatorLoopRunner
+    from backend.dependencies import AppDependencies
+    from backend.roles.contracts import (
+        ACCEPTANCE_CRITERIA_WORKER_ROLE,
+        ALLOWED_STAGE_ROLE_TARGETS,
+        CONSTRAINTS_WORKER_ROLE,
+        DEFAULT_SESSION_ROLES,
+        PROPOSAL_CONTEXT_WORKER_ROLE,
+        REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        SPEC_VERIFIER_WORKER_ROLE,
+        TASK_DECOMPOSER_WORKER_ROLE,
+    )
+    from backend.roles.launcher import RoleLauncherManager
+    from backend.roles.workspace import RoleWorkspaceManager
+    from backend.session_backend.recording_backend import RecordingSessionBackend
+    from backend.state.artifact_repository import ArtifactRepository
+    from backend.state.db import Database
+    from backend.state.dispatch_repository import DispatchRepository
+    from backend.state.event_repository import EventRepository
+    from backend.state.role_repository import RoleRepository
+    from backend.state.session_repository import SessionRepository
+    from backend.state.work_item_repository import WorkItemRepository
+    from backend.tools.command_runner import CommandResult
+
+    FASTAPI_AVAILABLE = True
+except ModuleNotFoundError:
+    FASTAPI_AVAILABLE = False
+
+
+def decomposition_payload(summary: str, task_breakdown: str | None = None) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "summary": summary,
+        "plan_index_markdown": (
+            "# Execution Task List\n\n"
+            "| # | Task | Depends on | Status |\n"
+            "|---|------|------------|--------|\n"
+            "| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
+        ),
+        "plan_task_files": [
+            {
+                "filename": "01-build-data-source.md",
+                "content": (
+                    "# Build data source\n\n"
+                    "## What to implement\n"
+                    "Create the feature data source.\n\n"
+                    "## Validation\n"
+                    "The data source exists and is wired into the intended flow.\n"
+                ),
+            }
+        ],
+    }
+    if task_breakdown is not None:
+        payload["task_breakdown"] = task_breakdown
+    return payload
+
+
+class FakeJiraAdapter:
+    def __init__(self) -> None:
+        self.status_by_task: dict[str, str] = {}
+        self.created_issue_counter = 0
+
+    def resolve_parent(self, task_key: str) -> "CommandResult":
+        return CommandResult(["resolve_parent", task_key], 0, f"{task_key}\n", "")
+
+    def get_issue_type(self, task_key: str) -> "CommandResult":
+        issue_type = "Bug" if task_key.endswith("BUG") else "Story"
+        return CommandResult(["get_issue_type", task_key], 0, f"{issue_type}\n", "")
+
+    def get_issue_status(self, task_key: str) -> "CommandResult":
+        status = self.status_by_task.get(task_key, "In Progress")
+        return CommandResult(
+            ["get_issue_status", task_key],
+            0,
+            json.dumps({"fields": {"status": {"name": status}}}),
+            "",
+        )
+
+    def create_subtasks(self, task_key: str, plan_dir: Path) -> "CommandResult":
+        return CommandResult(
+            ["create_subtasks", task_key, str(plan_dir)],
+            0,
+            "Created subtasks:\n01    IOS-90001     Build data source\n",
+            "",
+        )
+
+    def create_issue(
+        self,
+        project: str,
+        issue_type: str,
+        summary: str,
+        description_file: Path,
+    ) -> "CommandResult":
+        del issue_type, description_file
+        self.created_issue_counter += 1
+        issue_key = f"{project}-{92000 + self.created_issue_counter}"
+        return CommandResult(
+            ["create_issue", project, summary],
+            0,
+            f"{issue_key} https://jira.example.com/browse/{issue_key}\n",
+            "",
+        )
+
+    def send_to_test(self, task_key: str) -> "CommandResult":
+        return CommandResult(["send_to_test", task_key], 0, f"Done: {task_key} -> Code review\n", "")
+
+    def complete_subtask(self, subtask_key: str) -> "CommandResult":
+        return CommandResult(
+            ["complete_subtask", subtask_key],
+            0,
+            f"Done: {subtask_key} -> Resolved\n",
+            "",
+        )
+
+
+class FakeSnapshotAdapter:
+    def __init__(self, workdir_root: Path | None = None) -> None:
+        self.workdir_root = workdir_root
+        self.calls: list[str] = []
+        self.statuses_by_task: dict[str, str] = {}
+
+    def set_statuses_output(self, task_key: str, content: str) -> None:
+        self.statuses_by_task[task_key] = content
+
+    def run(self, task_key: str) -> "CommandResult":
+        self.calls.append(task_key)
+        if self.workdir_root is not None and task_key in self.statuses_by_task:
+            task_dir = self.workdir_root / task_key
+            task_dir.mkdir(parents=True, exist_ok=True)
+            (task_dir / "statuses.md").write_text(self.statuses_by_task[task_key])
+        return CommandResult(["snapshot", task_key], 0, "snapshot ok\n", "")
+
+
+class FakeGitLabAdapter:
+    def __init__(self) -> None:
+        self.commit_requests: list[tuple[str, str | None]] = []
+
+    def commit_task_state(self, task_key: str, context: str | None = None) -> "CommandResult":
+        self.commit_requests.append((task_key, context))
+        return CommandResult(
+            ["commit_task_state", task_key, context or ""],
+            0,
+            f"Committed: {task_key}\n",
+            "",
+        )
+
+    def create_mr(self, task_key: str) -> "CommandResult":
+        return CommandResult(
+            ["create_mr", task_key],
+            0,
+            (
+                f"Pushing branch for {task_key}\n"
+                f"https://gitlab.example.com/mobile/{task_key}/-/merge_requests/42\n"
+            ),
+            "",
+        )
+
+
+class FakeIOSAppLauncher:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def launch(self, task_key: str) -> "CommandResult":
+        self.calls.append(task_key)
+        return CommandResult(
+            ["ios_launch", task_key],
+            0,
+            f"Launched iOS app for {task_key}\n",
+            "",
+        )
+
+@unittest.skipUnless(FASTAPI_AVAILABLE, "fastapi is not installed in the local environment")
+class SessionApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self._original_review_default = session_policy_module.COMMON_DEFAULTS["review_policy"]
+        self._original_doc_harvest_default = session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"]
+        session_policy_module.COMMON_DEFAULTS["review_policy"] = "disabled"
+        session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"] = "disabled"
+        self.db_path = Path(self.temp_dir.name) / "factory.sqlite3"
+        self.database = Database(self.db_path)
+        self.database.initialize()
+
+        session_repository = SessionRepository(self.database)
+        role_repository = RoleRepository(self.database)
+        event_repository = EventRepository(self.database)
+        artifact_repository = ArtifactRepository(self.database)
+        work_item_repository = WorkItemRepository(self.database)
+        dispatch_repository = DispatchRepository(self.database)
+        session_backend = RecordingSessionBackend()
+        event_bus = SessionEventBus()
+        self.snapshot_adapter = FakeSnapshotAdapter(Path(self.temp_dir.name))
+        self.jira_adapter = FakeJiraAdapter()
+        self.ios_app_launcher = FakeIOSAppLauncher()
+        coordinator = CoordinatorService(
+            session_repository=session_repository,
+            role_repository=role_repository,
+            event_repository=event_repository,
+            artifact_repository=artifact_repository,
+            work_item_repository=work_item_repository,
+            dispatch_repository=dispatch_repository,
+            session_backend=session_backend,
+            default_roles=DEFAULT_SESSION_ROLES,
+            jira_adapter=self.jira_adapter,
+            snapshot_adapter=self.snapshot_adapter,
+            gitlab_adapter=FakeGitLabAdapter(),
+            ios_app_launcher=self.ios_app_launcher,
+            artifacts_root=Path(self.temp_dir.name) / "artifacts",
+            workdir_root=Path(self.temp_dir.name),
+            event_bus=event_bus,
+            role_workspace_manager=RoleWorkspaceManager(
+                runtime_root=Path(self.temp_dir.name),
+                repo_root=Path(self.temp_dir.name) / "repo-root",
+                workdir_root=Path(self.temp_dir.name),
+            ),
+            role_launcher_manager=RoleLauncherManager(
+                repo_root=Path(self.temp_dir.name) / "repo-root",
+                workdir_root=Path(self.temp_dir.name),
+                launcher_command=["sh"],
+            ),
+            post_create_subtask_snapshot_refresh_delay_seconds=0,
+        )
+        loop_runner = CoordinatorLoopRunner(
+            callback=coordinator.run_loop_once,
+            interval_seconds=0.01,
+        )
+        self.dependencies = AppDependencies(
+            config=None,
+            database=self.database,
+            session_repository=session_repository,
+            role_repository=role_repository,
+            event_repository=event_repository,
+            artifact_repository=artifact_repository,
+            work_item_repository=work_item_repository,
+            dispatch_repository=dispatch_repository,
+            session_backend=session_backend,
+            jira_adapter=self.jira_adapter,
+            snapshot_adapter=self.snapshot_adapter,
+            gitlab_adapter=FakeGitLabAdapter(),
+            event_bus=event_bus,
+            loop_runner=loop_runner,
+            coordinator_service=coordinator,
+        )
+
+    def tearDown(self) -> None:
+        session_policy_module.COMMON_DEFAULTS["review_policy"] = self._original_review_default
+        session_policy_module.COMMON_DEFAULTS["doc_harvest_policy"] = self._original_doc_harvest_default
+        self.dependencies.loop_runner.stop()
+        # stop() requests shutdown but can return while the current tick finishes.
+        # Keep the database alive until that callback has stopped using it.
+        deadline = time.monotonic() + 5
+        while self.dependencies.loop_runner.status().running and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(self.dependencies.loop_runner.status().running)
+        self.temp_dir.cleanup()
+
+    def write_statuses_file(self, task_key: str, content: str) -> None:
+        task_dir = Path(self.temp_dir.name) / task_key
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "statuses.md").write_text(content)
+
+    def write_passed_verification_outcome(self, task_key: str) -> None:
+        spec_dir = Path(self.temp_dir.name) / task_key / "spec"
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / "verification-outcome.json").write_text(
+            json.dumps({"status": "passed", "task_key": task_key}) + "\n"
+        )
+
+    def test_create_session_route_returns_created_session(self) -> None:
+        response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40000",
+                workflow_profile="oneshot",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        self.assertEqual("IOS-40000", response.session.task_key)
+        self.assertEqual("oneshot", response.session.workflow_profile)
+        self.assertEqual("task_started", response.event_type)
+
+    def test_create_session_route_rejects_removed_bug_full_profile(self) -> None:
+        with self.assertRaises(HTTPException) as context:
+            create_session(
+                CreateSessionRequest(
+                    task_key="IOS-40000BUG",
+                    workflow_profile="bug_full",
+                    policy={"test_policy": "required"},
+                ),
+                dependencies=self.dependencies,
+            )
+
+        self.assertEqual(400, context.exception.status_code)
+        self.assertIn("Unsupported workflow profile: bug_full", str(context.exception.detail))
+
+    def test_create_session_route_can_prepare_in_one_call(self) -> None:
+        response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40000P",
+                workflow_profile="oneshot",
+                prepare=True,
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        self.assertEqual("task_prepared", response.event_type)
+        self.assertEqual("IOS-40000P", response.resolved_task_key)
+        self.assertEqual("Story", response.issue_type)
+        self.assertEqual("ready_for_execution", response.readiness)
+        self.assertEqual(0, response.snapshot_exit_code)
+        self.assertEqual("implementation_requested", response.followup_event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
+
+    def test_create_session_prepare_uses_resolved_parent_without_raw_session_leak(self) -> None:
+        with patch.object(
+            self.jira_adapter,
+            "resolve_parent",
+            return_value=CommandResult(["resolve_parent", "IOS-40000SUB"], 0, "IOS-40000PARENT\n", ""),
+        ):
+            response = create_session(
+                CreateSessionRequest(
+                    task_key="IOS-40000SUB",
+                    workflow_profile="oneshot",
+                    prepare=True,
+                ),
+                dependencies=self.dependencies,
+            )
+
+        sessions_response = list_sessions(dependencies=self.dependencies)
+
+        self.assertTrue(response.created)
+        self.assertEqual("IOS-40000PARENT", response.session.task_key)
+        self.assertEqual("IOS-40000PARENT", response.resolved_task_key)
+        self.assertEqual(["IOS-40000PARENT"], [item.task_key for item in sessions_response.items])
+
+    def test_cleanup_task_route_soft_keeps_session_and_removes_runtime_residue(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40100", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        self.jira_adapter.status_by_task["IOS-40100"] = "In Progress"
+        runtime_dir = Path(self.temp_dir.name) / "IOS-40100" / "runtime"
+        tmp_dir = Path(self.temp_dir.name) / "IOS-40100" / "tmp"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        response = cleanup_task(
+            CleanupTaskRequest(session_id=create_response.session.id, cleanup_mode="soft"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.cleaned)
+        self.assertFalse(response.deleted_session)
+        self.assertEqual("soft", response.cleanup_mode)
+        self.assertFalse(runtime_dir.exists())
+        self.assertFalse(tmp_dir.exists())
+        sessions = list_sessions(dependencies=self.dependencies)
+        self.assertEqual(["IOS-40100"], [item.task_key for item in sessions.items])
+
+    def test_cleanup_task_route_full_requires_closed_status_unless_forced(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40101", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        self.jira_adapter.status_by_task["IOS-40101"] = "In Progress"
+
+        with self.assertRaises(Exception):
+            cleanup_task(
+                CleanupTaskRequest(session_id=create_response.session.id, cleanup_mode="full"),
+                dependencies=self.dependencies,
+            )
+
+    def test_cleanup_task_route_smart_uses_soft_for_open_tasks(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40102", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        self.jira_adapter.status_by_task["IOS-40102"] = "In Progress"
+        runtime_dir = Path(self.temp_dir.name) / "IOS-40102" / "runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+
+        response = cleanup_task(
+            CleanupTaskRequest(session_id=create_response.session.id, cleanup_mode="smart"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.cleaned)
+        self.assertFalse(response.deleted_session)
+        self.assertEqual("soft", response.cleanup_mode)
+        self.assertFalse(runtime_dir.exists())
+
+    def test_cleanup_task_route_smart_uses_full_for_closed_tasks(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40103", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        self.jira_adapter.status_by_task["IOS-40103"] = "Resolved"
+        task_root = Path(self.temp_dir.name) / "IOS-40103"
+        task_root.mkdir(parents=True, exist_ok=True)
+
+        response = cleanup_task(
+            CleanupTaskRequest(session_id=create_response.session.id, cleanup_mode="smart"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.cleaned)
+        self.assertTrue(response.deleted_session)
+        self.assertEqual("full", response.cleanup_mode)
+        self.assertFalse(task_root.exists())
+
+    def test_create_session_route_creates_role_workspaces(self) -> None:
+        response = create_session(
+            CreateSessionRequest(task_key="IOS-40000W", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        for role_name in DEFAULT_SESSION_ROLES:
+            role_dir = Path(self.temp_dir.name) / "IOS-40000W" / "runtime" / "role-workspaces" / role_name
+            self.assertTrue(role_dir.is_dir())
+            self.assertTrue((role_dir / "AGENTS.md").is_file())
+            self.assertTrue((role_dir / "CLAUDE.md").is_symlink())
+
+    def test_create_session_route_creates_role_launch_scripts(self) -> None:
+        response = create_session(
+            CreateSessionRequest(task_key="IOS-40000L", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            response.session.id,
+            "implementer",
+        )
+        launch_script = (
+            Path(self.temp_dir.name)
+            / "IOS-40000L"
+            / "runtime"
+            / "role-workspaces"
+            / "implementer"
+            / "launch-role.sh"
+        )
+        self.assertTrue(launch_script.is_file())
+        self.assertEqual(
+            [str(launch_script)],
+            self.dependencies.session_backend.get_spawn_command(implementer_role.runtime_handle),
+        )
+
+    def test_list_sessions_route_returns_created_session(self) -> None:
+        create_session(
+            CreateSessionRequest(task_key="IOS-40001", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+
+        response = list_sessions(dependencies=self.dependencies)
+
+        self.assertEqual(1, len(response.items))
+        self.assertEqual("IOS-40001", response.items[0].task_key)
+
+    def test_list_sessions_route_enriches_task_title_and_jira_url(self) -> None:
+        create_session(
+            CreateSessionRequest(task_key="IOS-40001TITLE", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        task_dir = Path(self.temp_dir.name) / "IOS-40001TITLE"
+        task_dir.mkdir(parents=True, exist_ok=True)
+        (task_dir / "description.md").write_text(
+            "\n".join(
+                [
+                    "# Description",
+                    "ID: IOS-40001TITLE",
+                    "Type: Story",
+                    "Title: Add biometric login",
+                    "Status: In Progress",
+                ]
+            )
+        )
+
+        with patch.dict(os.environ, {"JIRA_BASE_URL": "https://jira.example.com/browse/"}, clear=False):
+            response = list_sessions(dependencies=self.dependencies)
+
+        self.assertEqual("Add biometric login", response.items[0].task_title)
+        self.assertEqual(
+            "https://jira.example.com/browse/IOS-40001TITLE",
+            response.items[0].jira_url,
+        )
+
+    def test_get_subtask_graph_route_returns_snapshot_summary(self) -> None:
+        response = create_session(
+            CreateSessionRequest(task_key="IOS-40001G", workflow_profile="story_full"),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40001G",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40001G | Story | Parent story | In Progress |",
+                    "| IOS-40002 | Sub-task | Wire API | In Progress |",
+                    "| IOS-40003 | Sub-task | Add tests | Ready for test |",
+                ]
+            ),
+        )
+
+        summary = get_subtask_graph(response.session.id, dependencies=self.dependencies)
+
+        self.assertTrue(summary.available)
+        self.assertEqual(2, summary.total_count)
+        self.assertEqual(1, summary.completed_count)
+        self.assertEqual(1, summary.unresolved_count)
+        self.assertEqual(["IOS-40002", "IOS-40003"], [row.key for row in summary.rows])
+
+    def test_get_subtask_progress_route_returns_queue_state(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40001P", workflow_profile="story_full"),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40001P"),
+            dependencies=self.dependencies,
+        )
+        for event_type, summary in [
+            ("proposal_context_completed", "Proposal ready"),
+            ("requirements_completed", "Requirements ready"),
+            ("acceptance_criteria_completed", "Acceptance ready"),
+            ("constraints_completed", "Constraints ready"),
+            ("spec_verification_completed", "Spec verified"),
+            ("story_spec_completed", "Story spec complete"),
+            ("task_decomposition_completed", "Decomposition complete"),
+        ]:
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload=(
+                        decomposition_payload(summary)
+                        if event_type == "task_decomposition_completed"
+                        else {"summary": summary}
+                    ),
+                ),
+                dependencies=self.dependencies,
+            )
+        self.write_statuses_file(
+            "IOS-40001P",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40001P | Story | Parent story | In Progress |",
+                    "| IOS-40120 | Sub-task | Wire API | In Progress |",
+                    "| IOS-40121 | Sub-task | Add tests | To Do |",
+                ]
+            ),
+        )
+        start_subtask_graph(
+            StartSubtaskGraphRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        summary = get_subtask_progress(create_response.session.id, dependencies=self.dependencies)
+
+        self.assertTrue(summary.available)
+        self.assertEqual("IOS-40120", summary.current_subtask_key)
+        self.assertEqual("Wire API", summary.current_subtask_title)
+        self.assertEqual(2, summary.total_count)
+        self.assertEqual(0, summary.completed_count)
+        self.assertEqual(2, summary.remaining_count)
+        self.assertEqual(["assigned", "unassigned"], [item.status for item in summary.items])
+
+    def test_get_jira_subtasks_route_returns_created_subtasks_summary(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005JS", workflow_profile="story_full"),
+            dependencies=self.dependencies,
+        )
+        prepare_response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005JS"),
+            dependencies=self.dependencies,
+        )
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": "prepared"},
+                ),
+                dependencies=self.dependencies,
+            )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload={
+                    "summary": "Decomposition prepared",
+                    "plan_index_markdown": "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n",
+                    "plan_task_files": [
+                        {
+                            "filename": "01-build-data-source.md",
+                            "content": "# Build data source\n\n## What to implement\nCreate the feature data source.\n",
+                        }
+                    ],
+                },
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40005JS",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005JS | Story | Parent story | In Progress |",
+                    "| IOS-90001 | Sub-task | Build data source | To Do |",
+                    "| IOS-90002 | Sub-task | Wire presentation layer | Ready for test |",
+                ]
+            ),
+        )
+        plan_dir = Path(self.temp_dir.name) / "IOS-40005JS" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n"
+            "| # | Task | Depends on | Status |\n"
+            "|---|------|------------|--------|\n"
+            "| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
+        )
+        (plan_dir / "01-build-data-source.md").write_text(
+            "# Build data source\n\n"
+            "## What to implement\n"
+            "Create the feature data source.\n"
+        )
+        create_subtasks_from_plan(
+            CreateSubtasksFromPlanRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        summary = get_jira_subtasks(create_response.session.id, dependencies=self.dependencies)
+
+        self.assertTrue(summary.available)
+        self.assertEqual(1, summary.total_count)
+        self.assertEqual(["IOS-90001"], [item.key for item in summary.items])
+
+    def test_refresh_subtask_state_route_auto_starts_subtask_lane(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005REFRESH", workflow_profile="story_full"),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005REFRESH"),
+            dependencies=self.dependencies,
+        )
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": "prepared"},
+                ),
+                dependencies=self.dependencies,
+            )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload=decomposition_payload("Decomposition prepared"),
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40005REFRESH",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005REFRESH | Story | Parent story | In Progress |",
+                    "| IOS-40130 | Sub-task | Build data source | To Do |",
+                    "| IOS-40131 | Sub-task | Wire presentation | To Do |",
+                ]
+            ),
+        )
+
+        response = refresh_subtask_state(
+            RefreshSubtaskStateRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.refreshed)
+        self.assertEqual("subtask_state_refreshed_by_operator", response.event_type)
+        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+
+    def test_refresh_subtask_state_route_reconciles_queue_during_active_subtask_execution(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005REFRESHQUEUE", workflow_profile="story_full"),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005REFRESHQUEUE"),
+            dependencies=self.dependencies,
+        )
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": "prepared"},
+                ),
+                dependencies=self.dependencies,
+            )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload=decomposition_payload("Decomposition prepared"),
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40005REFRESHQUEUE",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005REFRESHQUEUE | Story | Parent story | In Progress |",
+                    "| IOS-40140 | Sub-task | Build data source | To Do |",
+                    "| IOS-40141 | Sub-task | Wire presentation | To Do |",
+                ]
+            ),
+        )
+        refresh_subtask_state(
+            RefreshSubtaskStateRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-40005REFRESHQUEUE",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005REFRESHQUEUE | Story | Parent story | In Progress |",
+                    "| IOS-40140 | Sub-task | Build data source | To Do |",
+                    "| IOS-40142 | Sub-task | Cover edge cases | To Do |",
+                ]
+            ),
+        )
+
+        response = refresh_subtask_state(
+            RefreshSubtaskStateRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+        work_items = self.dependencies.work_item_repository.list_for_session(create_response.session.id)
+
+        self.assertTrue(response.refreshed)
+        self.assertEqual("subtask_state_refreshed_by_operator", response.event_type)
+        self.assertIsNone(response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+        self.assertTrue(
+            any(
+                item.work_type == "subtask_implementation"
+                and item.status.value == "unassigned"
+                and "IOS-40142" in item.title
+                for item in work_items
+            )
+        )
+        self.assertFalse(
+            any(
+                item.work_type == "subtask_implementation"
+                and item.status.value == "unassigned"
+                and "IOS-40141" in item.title
+                for item in work_items
+            )
+        )
+
+    def test_refresh_snapshot_route_reruns_snapshot_and_ticks_loop(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005SNAP", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005SNAP"),
+            dependencies=self.dependencies,
+        )
+        initial_calls = self.snapshot_adapter.calls.count("IOS-40005SNAP")
+
+        response = refresh_snapshot(
+            RefreshSnapshotRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=create_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.refreshed)
+        self.assertEqual("snapshot_refreshed_by_operator", response.event_type)
+        self.assertEqual("snapshot_continue_processed", response.followup_event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertEqual(initial_calls + 1, self.snapshot_adapter.calls.count("IOS-40005SNAP"))
+        self.assertTrue(
+            any(item.artifact_type == "snapshot_refresh_stdout" for item in artifacts_response.items)
+        )
+        self.assertTrue(
+            any(item.artifact_type == "snapshot_refresh_stderr" for item in artifacts_response.items)
+        )
+
+    def test_refresh_snapshot_route_reopens_completed_story_into_subtask_execution(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005SNAPREOPEN", workflow_profile="story_full"),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005SNAPREOPEN"),
+            dependencies=self.dependencies,
+        )
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": "prepared"},
+                ),
+                dependencies=self.dependencies,
+            )
+        self.write_statuses_file(
+            "IOS-40005SNAPREOPEN",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005SNAPREOPEN | Story | Parent story | In Progress |",
+                    "| IOS-40160 | Sub-task | Add data source | To Do |",
+                ]
+            ),
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload=decomposition_payload("Decomposition prepared"),
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="subtask_completed",
+                payload={"summary": "Implemented IOS-40160"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-40005SNAPREOPEN",
+            "\n".join(
+                [
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005SNAPREOPEN | Story | Parent story | In Progress |",
+                    "| IOS-40161 | Sub-task | Address QA feedback | To Do |",
+                ]
+            ),
+        )
+
+        response = refresh_snapshot(
+            RefreshSnapshotRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.refreshed)
+        self.assertEqual("snapshot_refreshed_by_operator", response.event_type)
+        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
+
+    def test_refresh_snapshot_route_reopens_completed_story_without_decomposition_artifact(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005SNAPNOART", workflow_profile="story_full"),
+            dependencies=self.dependencies,
+        )
+        session_id = create_response.session.id
+        self.dependencies.session_repository.update_stage_and_owner(
+            session_id,
+            current_stage="send_to_test_completed",
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(session_id, SessionStatus.COMPLETED)
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-40005SNAPNOART",
+            "\n".join(
+                [
+                    "# Statuses",
+                    "",
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005SNAPNOART | Story | Parent story | In Progress |",
+                    "| IOS-40162 | Sub-task | Address QA feedback | To Do |",
+                ]
+            ),
+        )
+
+        response = refresh_snapshot(
+            RefreshSnapshotRequest(session_id=session_id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.refreshed)
+        self.assertEqual("snapshot_refreshed_by_operator", response.event_type)
+        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
+
+    def test_refresh_snapshot_route_reopens_completed_oneshot_into_subtask_execution(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(task_key="IOS-40005SNAPONE", workflow_profile="oneshot"),
+            dependencies=self.dependencies,
+        )
+        session_id = create_response.session.id
+        self.dependencies.session_repository.update_stage_and_owner(
+            session_id,
+            current_stage="send_to_test_completed",
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(session_id, SessionStatus.COMPLETED)
+        self.snapshot_adapter.set_statuses_output(
+            "IOS-40005SNAPONE",
+            "\n".join(
+                [
+                    "# Statuses",
+                    "",
+                    "| Key | Type | Title | Status |",
+                    "| --- | --- | --- | --- |",
+                    "| IOS-40005SNAPONE | Story | Parent story | Ready for test |",
+                    "| IOS-40163 | Sub-task | Address review follow-up | To Do |",
+                ]
+            ),
+        )
+
+        response = refresh_snapshot(
+            RefreshSnapshotRequest(session_id=session_id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.refreshed)
+        self.assertEqual("snapshot_refreshed_by_operator", response.event_type)
+        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
+
+    def test_create_session_route_rejects_irrelevant_policy_for_profile(self) -> None:
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException) as context:
+            create_session(
+                CreateSessionRequest(
+                    task_key="IOS-40001A",
+                    workflow_profile="oneshot",
+                    policy={"test_policy": "required"},
+                ),
+                dependencies=self.dependencies,
+            )
+
+        self.assertEqual(400, context.exception.status_code)
+
+    def test_prepare_session_route_returns_intake_details(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40002"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        self.assertEqual("task_prepared", response.event_type)
+        self.assertEqual("IOS-40002", response.resolved_task_key)
+        self.assertEqual("Story", response.issue_type)
+        self.assertEqual(0, response.snapshot_exit_code)
+        self.assertEqual("implementation_requested", response.followup_event_type)
+
+    def test_prepare_session_route_reuses_existing_policy_aware_session(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40002A",
+                workflow_profile="oneshot",
+                policy={"review_policy": "required"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40002A"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertFalse(response.created)
+        self.assertEqual(create_response.session.id, response.session.id)
+        self.assertEqual("oneshot", response.session.workflow_profile)
+        self.assertEqual("required", response.session.policy["review_policy"])
+
+    def test_prepare_session_route_uses_oneshot_for_bug_issue_type(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40002BUG"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        self.assertEqual("Bug", response.issue_type)
+        self.assertEqual("oneshot", response.session.workflow_profile)
+        self.assertEqual("implementation_requested", response.followup_event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertEqual("implementer", response.session.current_owner)
+
+    def test_event_and_work_item_routes_reflect_verification_handoff(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003"),
+            dependencies=self.dependencies,
+        )
+
+        inject_response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        events_response = list_events(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+        work_items_response = list_work_items(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("verification_requested", inject_response.followup_event_type)
+        self.assertEqual("verification_requested", inject_response.session.current_stage)
+        self.assertEqual(10, len(events_response.items))
+        self.assertEqual(2, len(work_items_response.items))
+
+    def test_prepare_session_route_uses_proposal_context_for_story_full(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40002STORY",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = prepare_session(
+            PrepareSessionRequest(task_key="IOS-40002STORY"),
+            dependencies=self.dependencies,
+        )
+
+        self.assertFalse(response.created)
+        self.assertEqual(create_response.session.id, response.session.id)
+        self.assertEqual("story_full", response.session.workflow_profile)
+        self.assertEqual("proposal_context_requested", response.followup_event_type)
+        self.assertEqual("proposal_context_requested", response.session.current_stage)
+
+    def test_create_session_route_accepts_story_clarification_mode(self) -> None:
+        response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40002CLARIFY",
+                workflow_profile="story_full",
+                policy={"requirements_clarification_mode": "ask-a-lot"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("ask-a-lot", response.session.policy["requirements_clarification_mode"])
+
+    def test_proposal_context_completed_event_returns_story_spec_handoff(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003PCTX",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003PCTX"),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("requirements_requested", response.followup_event_type)
+        self.assertEqual("requirements_requested", response.session.current_stage)
+
+    def test_requirements_completed_event_returns_acceptance_criteria_handoff(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003REQ",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003REQ"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="requirements_completed",
+                payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("acceptance_criteria_requested", response.followup_event_type)
+        self.assertEqual("acceptance_criteria_requested", response.session.current_stage)
+
+    def test_acceptance_criteria_completed_event_returns_constraints_handoff(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003ACC",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003ACC"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="requirements_completed",
+                payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="acceptance_criteria_completed",
+                payload={"summary": "Acceptance prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("constraints_requested", response.followup_event_type)
+        self.assertEqual("constraints_requested", response.session.current_stage)
+
+    def test_constraints_completed_event_returns_spec_verification_handoff(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003CONSTR",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003CONSTR"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="requirements_completed",
+                payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="acceptance_criteria_completed",
+                payload={"summary": "Acceptance prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="constraints_completed",
+                payload={"summary": "Constraints prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("spec_verification_requested", response.followup_event_type)
+        self.assertEqual("spec_verification_requested", response.session.current_stage)
+
+    def test_spec_verification_completed_event_returns_story_spec_handoff(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003VERIFY",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003VERIFY"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="requirements_completed",
+                payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="acceptance_criteria_completed",
+                payload={"summary": "Acceptance prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="constraints_completed",
+                payload={"summary": "Constraints prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="spec_verification_completed",
+                payload={"summary": "Planning verified"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("task_decomposition_requested", response.followup_event_type)
+        self.assertEqual("task_decomposition_requested", response.session.current_stage)
+        spec_root = Path(self.temp_dir.name) / "IOS-40003VERIFY" / "spec"
+        self.assertTrue((spec_root / "proposal.md").is_file())
+        self.assertTrue((spec_root / "requirements.md").is_file())
+        self.assertTrue((spec_root / "acceptance_criteria.md").is_file())
+        self.assertTrue((spec_root / "constraints.md").is_file())
+        self.assertTrue((spec_root / "spec_verification.md").is_file())
+
+    def test_spec_verification_failed_output_route_escalates_to_operator(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003VERIFYBLOCK",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003VERIFYBLOCK"),
+            dependencies=self.dependencies,
+        )
+        for event_type, summary in [
+            ("proposal_context_completed", "Context prepared"),
+            ("requirements_completed", "Requirements prepared"),
+            ("acceptance_criteria_completed", "Acceptance prepared"),
+            ("constraints_completed", "Constraints prepared"),
+        ]:
+            inject_event(
+                InjectEventRequest(
+                    session_id=prepare_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": summary},
+                ),
+                dependencies=self.dependencies,
+            )
+
+        response = submit_role_output(
+            RoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name=SPEC_VERIFIER_WORKER_ROLE,
+                output_type="failed",
+                payload={
+                    "summary": "Planning blockers require operator decisions.",
+                    "details": "Two contradictory scope choices remain unresolved.",
+                    "blocker_questions": ["Choose notification model", "Confirm offline persistence scope"],
+                },
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("story_planning_blocked", response.mapped_event_type)
+        self.assertEqual("session_escalated_to_operator", response.followup_event_type)
+        self.assertEqual("spec_verification_requested", response.session.current_stage)
+        self.assertEqual("waiting_for_operator", response.session.status)
+
+    def test_get_interactive_state_route_marks_spec_verification_blockers_as_runtime_input(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003SVINPUT",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003SVINPUT"),
+            dependencies=self.dependencies,
+        )
+        for event_type, summary in [
+            ("proposal_context_completed", "Scope clarified"),
+            ("requirements_completed", "Requirements clarified"),
+            ("acceptance_criteria_completed", "Acceptance prepared"),
+            ("constraints_completed", "Constraints prepared"),
+        ]:
+            inject_event(
+                InjectEventRequest(
+                    session_id=prepare_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": summary},
+                ),
+                dependencies=self.dependencies,
+            )
+
+        submit_role_output(
+            RoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name=SPEC_VERIFIER_WORKER_ROLE,
+                output_type="failed",
+                payload={
+                    "summary": "Planning blockers require operator decisions.",
+                    "details": "Two contradictory scope choices remain unresolved.",
+                    "blocker_questions": ["Choose notification model"],
+                },
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = get_interactive_state(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.available)
+        self.assertEqual("spec_verification_blocked", response.source_reason)
+        self.assertEqual(SPEC_VERIFIER_WORKER_ROLE, response.role_name)
+        self.assertTrue(response.needs_operator_input)
+        self.assertIn("Choose notification model", str(response.details))
+
+    def test_story_spec_completed_event_returns_task_decomposition_handoff(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003STORY",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003STORY"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="requirements_completed",
+                payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="acceptance_criteria_completed",
+                payload={"summary": "Acceptance prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="constraints_completed",
+                payload={"summary": "Constraints prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="spec_verification_completed",
+                payload={"summary": "Planning verified"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="story_spec_completed",
+                payload={"summary": "Define screen structure first"},
+            ),
+            dependencies=self.dependencies,
+        )
+        work_items_response = list_work_items(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertIsNone(response.followup_event_type)
+        self.assertEqual("task_decomposition_requested", response.session.current_stage)
+        self.assertEqual(6, len(work_items_response.items))
+
+    def test_task_decomposition_completed_event_returns_subtask_creation_checkpoint(self) -> None:
+        prepare_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003DECOMP",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003DECOMP"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="requirements_completed",
+                payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="acceptance_criteria_completed",
+                payload={"summary": "Acceptance prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="constraints_completed",
+                payload={"summary": "Constraints prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="spec_verification_completed",
+                payload={"summary": "Planning verified"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="story_spec_completed",
+                payload={"summary": "Define screen structure first"},
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40003DECOMP",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40003DECOMP | Story | Parent story | In Progress |
+| IOS-40030 | Sub-task | Already done one | Ready for test |
+| IOS-40031 | Sub-task | Already done two | Released |
+""",
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="task_decomposition_completed",
+                payload=decomposition_payload("Split into execution chunks"),
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("jira_subtasks_created", response.followup_event_type)
+        self.assertEqual("subtask_creation_requested", response.session.current_stage)
+        self.assertEqual("waiting_for_operator", response.session.status)
+
+    def test_start_subtask_graph_route_converts_story_session(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40003SUBTASK",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40003SUBTASK"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="requirements_completed",
+                payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="acceptance_criteria_completed",
+                payload={"summary": "Acceptance prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="constraints_completed",
+                payload={"summary": "Constraints prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="spec_verification_completed",
+                payload={"summary": "Planning verified"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="story_spec_completed",
+                payload={"summary": "Split work into subtasks"},
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40003SUBTASK",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40003SUBTASK | Story | Parent story | In Progress |
+| IOS-40103 | Sub-task | Already done one | Ready for test |
+| IOS-40104 | Sub-task | Already done two | Released |
+""",
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload=decomposition_payload("Execution chunks prepared"),
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40003SUBTASK",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40003SUBTASK | Story | Parent story | In Progress |
+| IOS-40100 | Sub-task | Build repository | To Do |
+| IOS-40101 | Sub-task | Connect presenter | In Progress |
+| IOS-40102 | Sub-task | Final QA polish | Ready for test |
+""",
+        )
+
+        response = start_subtask_graph(
+            StartSubtaskGraphRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+        work_items_response = list_work_items(
+            session_id=create_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.started)
+        self.assertEqual("subtask_graph_requested", response.event_type)
+        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+        self.assertEqual(8, len(work_items_response.items))
+
+    def test_subtask_completed_event_keeps_story_session_in_subtask_lane(self) -> None:
+        from backend.api.routes_sessions import prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40004SUBTASK",
+                workflow_profile="story_full",
+                policy={"review_policy": "disabled"},
+            ),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40004SUBTASK"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="proposal_context_completed",
+                payload={"summary": "Context prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="requirements_completed",
+                payload={"summary": "Requirements prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="acceptance_criteria_completed",
+                payload={"summary": "Acceptance prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="constraints_completed",
+                payload={"summary": "Constraints prepared"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="spec_verification_completed",
+                payload={"summary": "Planning verified"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="story_spec_completed",
+                payload={"summary": "Split work into subtasks"},
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40004SUBTASK",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40004SUBTASK | Story | Parent story | In Progress |
+| IOS-40112 | Sub-task | Already done one | Ready for test |
+| IOS-40113 | Sub-task | Already done two | Released |
+""",
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload=decomposition_payload("Execution chunks prepared"),
+            ),
+            dependencies=self.dependencies,
+        )
+        self.write_statuses_file(
+            "IOS-40004SUBTASK",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40004SUBTASK | Story | Parent story | In Progress |
+| IOS-40110 | Sub-task | Build data source | To Do |
+| IOS-40111 | Sub-task | Wire screen state | To Do |
+""",
+        )
+        start_subtask_graph(
+            StartSubtaskGraphRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        first_response = inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="subtask_completed",
+                payload={"summary": "First subtask done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        second_response = inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="subtask_completed",
+                payload={"summary": "Second subtask done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("subtask_implementation_requested", first_response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", first_response.session.current_stage)
+        self.assertEqual("verification_requested", second_response.followup_event_type)
+        self.assertEqual("verification_requested", second_response.session.current_stage)
+
+    def test_create_subtasks_from_plan_route_records_batch_run(self) -> None:
+        from backend.api.routes_sessions import create_session, prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40005SUBBATCH",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005SUBBATCH"),
+            dependencies=self.dependencies,
+        )
+        plan_dir = Path(self.temp_dir.name) / "IOS-40005SUBBATCH" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n"
+        )
+        (plan_dir / "01-build-data-source.md").write_text(
+            "# Build data source\n\n## What to implement\nCreate the feature data source.\n"
+        )
+
+        response = create_subtasks_from_plan(
+            CreateSubtasksFromPlanRequest(session_id=create_response.session.id),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=create_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.created)
+        self.assertEqual("jira_subtasks_created", response.event_type)
+        self.assertTrue(any(item.artifact_type == "jira_subtasks_stdout" for item in artifacts_response.items))
+        self.assertTrue(any(item.artifact_type == "jira_subtasks_summary" for item in artifacts_response.items))
+        self.assertTrue(any(item.artifact_type == "subtasks_snapshot_stdout" for item in artifacts_response.items))
+
+    def test_create_subtasks_from_plan_route_can_auto_start_subtask_graph(self) -> None:
+        from backend.api.routes_sessions import create_session, prepare_session
+
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40005SUBAUTO",
+                workflow_profile="story_full",
+                policy={"review_policy": "disabled"},
+            ),
+            dependencies=self.dependencies,
+        )
+        prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005SUBAUTO"),
+            dependencies=self.dependencies,
+        )
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": "prepared"},
+                ),
+                dependencies=self.dependencies,
+            )
+        self.write_statuses_file(
+            "IOS-40005SUBAUTO",
+            """# Statuses
+
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| IOS-40005SUBAUTO | Story | Parent story | In Progress |
+| IOS-40120 | Sub-task | Build data source | To Do |
+| IOS-40121 | Sub-task | Finish docs | Ready for test |
+""",
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload={
+                    "summary": "Decomposition prepared",
+                    "plan_index_markdown": "# Execution Task List\n\n| # | Task | Depends on | Status |\n|---|------|------------|--------|\n| 01 | [Build data source](./01-build-data-source.md) | — | ☐ |\n",
+                    "plan_task_files": [
+                        {
+                            "filename": "01-build-data-source.md",
+                            "content": "# Build data source\n\n## What to implement\nCreate the feature data source.\n",
+                        }
+                    ],
+                },
+            ),
+            dependencies=self.dependencies,
+        )
+        self.assertEqual("subtask_implementation_requested", response.followup_event_type)
+        self.assertEqual("subtask_implementation_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
+
+    def test_verification_failed_event_returns_correction_handoff(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40004"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="verification_failed",
+                payload={"failures": ["tests failed"]},
+            ),
+            dependencies=self.dependencies,
+        )
+        work_items_response = list_work_items(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("verification_correction_requested", response.followup_event_type)
+        self.assertEqual("verification_correction_requested", response.session.current_stage)
+        self.assertEqual("implementer", response.session.current_owner)
+        self.assertEqual(3, len(work_items_response.items))
+        verification_report = Path(self.temp_dir.name) / "IOS-40004" / "spec" / "final-verification.md"
+        self.assertTrue(verification_report.exists())
+        self.assertIn("FAIL", verification_report.read_text())
+
+    def test_verification_passed_event_completes_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40005"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+        events_response = list_events(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("send_to_test_completed", response.followup_event_type)
+        self.assertEqual("send_to_test_completed", response.session.current_stage)
+        self.assertEqual("completed", response.session.status)
+        self.assertEqual(14, len(events_response.items))
+        verification_report = Path(self.temp_dir.name) / "IOS-40005" / "spec" / "final-verification.md"
+        self.assertTrue(verification_report.exists())
+        self.assertIn("PASS", verification_report.read_text())
+
+    def test_role_output_route_maps_to_domain_event(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40006"),
+            dependencies=self.dependencies,
+        )
+
+        response = submit_role_output(
+            RoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+                output_type="completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        events_response = list_events(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("implementation_completed", response.mapped_event_type)
+        self.assertEqual("verification_requested", response.followup_event_type)
+        self.assertEqual("verification_requested", response.session.current_stage)
+        self.assertEqual(10, len(events_response.items))
+
+    def test_artifact_detail_route_returns_content_and_metadata(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40007"),
+            dependencies=self.dependencies,
+        )
+        submit_role_output(
+            RoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+                output_type="completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        artifacts_response = list_artifacts(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+        output_artifact = next(
+            artifact for artifact in artifacts_response.items if artifact.artifact_type == "role_output_json"
+        )
+        detail = get_artifact(
+            artifact_id=output_artifact.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("role_output_json", detail.artifact_type)
+        self.assertEqual("implementer", detail.metadata["role_name"])
+        self.assertIn('"summary": "done"', detail.content)
+
+    def test_collect_role_output_route_returns_chunk_count(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(implementer_role.runtime_handle, "line 1")
+        self.dependencies.session_backend.simulate_output(implementer_role.runtime_handle, "line 2")
+
+        response = collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.collected)
+        self.assertEqual(2, response.chunk_count)
+        self.assertEqual("role_output_collected", response.event_type)
+
+    def test_collect_role_output_route_normalizes_marker(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_OUTPUT: {"output_type":"completed","payload":{"work_item_id":123,"summary":"done"}}',
+        )
+
+        response = collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+        events_response = list_events(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.collected)
+        self.assertEqual(1, response.chunk_count)
+        self.assertEqual("role_output_collected", response.event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertTrue(
+            any(
+                item.event_type in {"runtime_terminal_output_echo_ignored", "stale_role_output_ignored"}
+                for item in events_response.items
+            )
+        )
+        self.assertFalse(any(item.event_type == "implementation_completed" for item in events_response.items))
+
+    def test_collect_role_output_route_consumes_result_json(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008B"),
+            dependencies=self.dependencies,
+        )
+        active_item = next(
+            item
+            for item in self.dependencies.work_item_repository.list_for_session(prepare_response.session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
+        role_workspace = self.dependencies.coordinator_service.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            "IOS-40008B",
+            "implementer",
+        )
+        result_path = role_workspace / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {"work_item_id": active_item.id, "summary": "done from file"},
+                }
+            )
+        )
+
+        response = collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+        self.assertTrue(response.collected)
+        self.assertEqual(1, response.chunk_count)
+        self.assertEqual("role_output_collected", response.event_type)
+        self.assertEqual("verification_requested", response.session.current_stage)
+        self.assertFalse(result_path.exists())
+
+    def test_submit_role_result_route_accepts_ingress_document(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008C"),
+            dependencies=self.dependencies,
+        )
+        active_item = next(
+            item
+            for item in self.dependencies.work_item_repository.list_for_session(prepare_response.session.id)
+            if item.work_type == "implementation" and item.status.value == "assigned"
+        )
+
+        response = submit_role_result(
+            SubmitRoleResultRequest(
+                output_type="completed",
+                payload={"work_item_id": active_item.id, "summary": "done from ingress"},
+            ),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.accepted)
+        self.assertFalse(response.ignored)
+        self.assertEqual("role_output_collected", response.event_type)
+        self.assertEqual("implementation_completed", response.mapped_event_type)
+        self.assertEqual("verification_requested", response.followup_event_type)
+        self.assertEqual("verification_requested", response.session.current_stage)
+        self.assertTrue(any(item.artifact_type == "role_result_json" for item in artifacts_response.items))
+
+    def test_submit_role_result_route_returns_503_for_transient_sqlite_failure(self) -> None:
+        from fastapi import HTTPException
+
+        with patch.object(
+            self.dependencies.coordinator_service,
+            "submit_role_result_document",
+            side_effect=sqlite3.OperationalError("database is locked"),
+        ):
+            with self.assertRaises(HTTPException) as captured:
+                submit_role_result(
+                    SubmitRoleResultRequest(
+                        output_type="completed",
+                        payload={"work_item_id": 999, "summary": "done from ingress"},
+                    ),
+                    dependencies=self.dependencies,
+                )
+
+        self.assertEqual(503, captured.exception.status_code)
+        self.assertIn("Transient backend persistence failure", str(captured.exception.detail))
+
+    def test_poll_session_output_route_collects_all_role_chunks(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        verification_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "verification-coordinator",
+        )
+        self.dependencies.session_backend.simulate_output(implementer_role.runtime_handle, "impl line")
+        self.dependencies.session_backend.simulate_output(verification_role.runtime_handle, "verif line")
+
+        response = poll_session_output(
+            PollSessionOutputRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.polled)
+        self.assertEqual(2, response.role_count)
+        self.assertEqual(2, response.chunk_count)
+        self.assertIsNone(response.event_type)
+        runtime_outputs = [a for a in artifacts_response.items if a.artifact_type == "runtime_output"]
+        self.assertEqual(2, len(runtime_outputs))
+
+    def test_poll_session_output_route_consumes_result_json(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40008C"),
+            dependencies=self.dependencies,
+        )
+        role_workspace = self.dependencies.coordinator_service.role_workspace_manager.role_directory(  # type: ignore[union-attr]
+            "IOS-40008C",
+            "implementer",
+        )
+        result_path = role_workspace / "RESULT.json"
+        result_path.write_text(
+            json.dumps(
+                {
+                    "output_type": "completed",
+                    "payload": {"summary": "done from file"},
+                }
+            )
+        )
+
+        response = poll_session_output(
+            PollSessionOutputRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertFalse(response.polled)
+        self.assertEqual(2, response.role_count)
+        self.assertEqual(0, response.chunk_count)
+        self.assertIsNone(response.event_type)
+        self.assertEqual("implementation_requested", response.session.current_stage)
+        self.assertTrue(result_path.exists())
+
+    def test_event_bus_recent_events_reflect_api_actions(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40009"),
+            dependencies=self.dependencies,
+        )
+        submit_role_output(
+            RoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+                output_type="completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        recent = self.dependencies.event_bus.recent_events(session_id=prepare_response.session.id)
+
+        self.assertTrue(any(event.event_type == "implementation_completed" for event in recent))
+        self.assertTrue(any(event.event_type == "verification_requested" for event in recent))
+
+    def test_run_loop_once_route_polls_active_sessions(self) -> None:
+        prepare_a = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40011"),
+            dependencies=self.dependencies,
+        )
+        prepare_b = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40012"),
+            dependencies=self.dependencies,
+        )
+        implementer_a = self.dependencies.role_repository.get_by_name(prepare_a.session.id, "implementer")
+        implementer_b = self.dependencies.role_repository.get_by_name(prepare_b.session.id, "implementer")
+        self.dependencies.session_backend.simulate_output(implementer_a.runtime_handle, "a line")
+        self.dependencies.session_backend.simulate_output(implementer_b.runtime_handle, "b line")
+
+        response = run_loop_once(dependencies=self.dependencies)
+
+        self.assertTrue(response.ran)
+        self.assertEqual(2, response.session_count)
+        self.assertEqual(2, response.chunk_count)
+        self.assertIsNone(response.event_type)
+
+    def test_loop_runner_routes_control_background_loop(self) -> None:
+        start_response = start_loop(dependencies=self.dependencies)
+        self.assertTrue(start_response.changed)
+        self.assertTrue(start_response.status.running)
+
+        time.sleep(0.03)
+
+        status_response = loop_status(dependencies=self.dependencies)
+        self.assertTrue(status_response.running)
+        self.assertGreaterEqual(status_response.tick_count, 1)
+
+        stop_response = stop_loop(dependencies=self.dependencies)
+        self.assertTrue(stop_response.changed)
+        self.assertFalse(stop_response.status.running)
+
+    def test_resume_session_route_reactivates_escalated_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = resume_session(
+            ResumeSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.resumed)
+        self.assertEqual("session_resumed_by_operator", response.event_type)
+        self.assertEqual("role_input_dispatched", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertEqual("implementer", response.session.current_owner)
+
+    def test_resume_session_route_reactivates_mcp_blocker_without_redispatch(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013MCP"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"required mcp access unavailable","details":"restore vpn","resume_strategy":"reactivate_only"}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = resume_session(
+            ResumeSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.resumed)
+        self.assertEqual("session_resumed_by_operator", response.event_type)
+        self.assertIsNone(response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertEqual("implementer", response.session.current_owner)
+
+    def test_resume_session_route_from_subtask_creation_checkpoint_starts_implementation(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40013EXEC",
+                workflow_profile="story_full",
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013EXEC"),
+            dependencies=self.dependencies,
+        )
+        for event_type in (
+            "proposal_context_completed",
+            "requirements_completed",
+            "acceptance_criteria_completed",
+            "constraints_completed",
+            "spec_verification_completed",
+            "story_spec_completed",
+        ):
+            inject_event(
+                InjectEventRequest(
+                    session_id=create_response.session.id,
+                    event_type=event_type,
+                    payload={"summary": "prepared"},
+                ),
+                dependencies=self.dependencies,
+            )
+        response = inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="task_decomposition_completed",
+                payload=decomposition_payload("Decomposition prepared"),
+            ),
+            dependencies=self.dependencies,
+        )
+        self.assertEqual("task_decomposition_completed", response.event_type)
+        self.assertEqual("jira_subtasks_created", response.followup_event_type)
+        self.assertEqual("subtask_creation_requested", response.session.current_stage)
+        self.assertEqual("waiting_for_operator", response.session.status)
+
+    def test_send_runtime_input_route_continues_waiting_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013A"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        active_item = next(
+            item
+            for item in self.dependencies.work_item_repository.list_for_session(prepare_response.session.id)
+            if item.work_type == "implementation"
+        )
+        self.dependencies.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        self.dependencies.session_repository.update_stage_and_owner(
+            prepare_response.session.id,
+            current_stage="implementation_requested",
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(
+            prepare_response.session.id,
+            SessionStatus.WAITING_FOR_OPERATOR,
+        )
+
+        response = send_runtime_input(
+            SendOperatorRuntimeInputRequest(
+                session_id=prepare_response.session.id,
+                text="1",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.sent)
+        self.assertEqual("operator_runtime_input_sent", response.event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertEqual("implementer", response.session.current_owner)
+        self.assertEqual(
+            ["1"],
+            self.dependencies.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
+        )
+
+    def test_send_runtime_input_route_sends_live_reply_to_alive_one_shot_role(self) -> None:
+        session, _, _ = self.dependencies.coordinator_service.create_task_session(
+            "IOS-40013A-STORY",
+            workflow_profile="story_full",
+            policy={
+                "requirements_clarification_mode": "ask-selectively",
+            },
+        )
+        session = self.dependencies.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_requested",
+            current_owner="requirements-clarifier-worker",
+        )
+        session = self.dependencies.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        role = self.dependencies.role_repository.get_by_name(session.id, "requirements-clarifier-worker")
+        self.dependencies.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements",
+            title="Requirements clarification for IOS-40013A-STORY",
+            owner_role_id=role.id,
+            source_event_id=1,
+            priority=10,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+
+        response = send_runtime_input(
+            SendOperatorRuntimeInputRequest(
+                session_id=session.id,
+                text="Do it the same way as the frontend does",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.sent)
+        self.assertEqual("operator_runtime_input_sent", response.event_type)
+        self.assertEqual("active", response.session.status)
+        sent = self.dependencies.session_backend.get_sent_inputs(role.runtime_handle)
+        self.assertTrue(sent)
+        self.assertIn("Operator answer:", sent[-1])
+        self.assertIn("Do it the same way as the frontend does", sent[-1])
+
+    def test_get_interactive_state_route_returns_runtime_blocker_summary(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013B"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed","needs_operator_input":true}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = get_interactive_state(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.available)
+        self.assertTrue(response.needs_operator_input)
+
+    def test_get_interactive_state_route_clears_after_operator_runtime_input(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013C"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"interactive selection required","details":"operator choice needed","needs_operator_input":true}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+        send_runtime_input(
+            SendOperatorRuntimeInputRequest(
+                session_id=prepare_response.session.id,
+                text="1",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = get_interactive_state(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertFalse(response.available)
+        self.assertFalse(response.needs_operator_input)
+
+    def test_get_interactive_state_route_runtime_error_does_not_require_operator_input(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013CERR"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1","needs_operator_input":false}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = get_interactive_state(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.available)
+        self.assertFalse(response.needs_operator_input)
+
+    def test_get_interactive_state_route_returns_resume_strategy(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013MCP"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"required mcp access unavailable","details":"restore vpn","resume_strategy":"reactivate_only"}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = get_interactive_state(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.available)
+        self.assertEqual("required mcp access unavailable", response.summary)
+        self.assertEqual("reactivate_only", response.resume_strategy)
+        self.assertFalse(response.needs_operator_input)
+
+    def test_get_environment_doctor_route_returns_report(self) -> None:
+        fake_report = {
+            "overall_status": "warn",
+            "repo_root": self.temp_dir.name,
+            "required_ok": 2,
+            "required_total": 3,
+            "optional_warnings": 1,
+            "checks": [
+                {
+                    "id": "env.SDD_WORKDIR",
+                    "category": "environment",
+                    "label": "Task workdir root",
+                    "required": True,
+                    "status": "ok",
+                    "details": "ok",
+                    "value": self.temp_dir.name,
+                    "source": "process env",
+                    "hint": None,
+                }
+            ],
+        }
+
+        with patch("backend.api.routes_operator.build_report", return_value=fake_report):
+            response = get_environment_doctor(dependencies=self.dependencies)
+
+        self.assertEqual("warn", response.overall_status)
+        self.assertEqual(2, response.required_ok)
+        self.assertEqual(3, response.required_total)
+        self.assertEqual(1, len(response.checks))
+        self.assertEqual("env.SDD_WORKDIR", response.checks[0].id)
+
+    def test_get_bootstrap_guidance_route_returns_guidance(self) -> None:
+        fake_report = {
+            "overall_status": "warn",
+            "repo_root": self.temp_dir.name,
+            "required_ok": 2,
+            "required_total": 3,
+            "optional_warnings": 1,
+            "checks": [
+                {
+                    "id": "env.SDD_WORKDIR",
+                    "category": "environment",
+                    "label": "Task workdir root",
+                    "required": True,
+                    "status": "missing",
+                    "details": "SDD_WORKDIR is not set.",
+                    "value": None,
+                    "source": None,
+                    "hint": "Set SDD_WORKDIR.",
+                }
+            ],
+        }
+
+        with patch("backend.api.routes_operator.build_report", return_value=fake_report):
+            response = get_bootstrap_guidance(dependencies=self.dependencies)
+
+        self.assertEqual("warn", response.overall_status)
+        self.assertEqual(1, response.required_action_count)
+        self.assertEqual("Resolve required setup issues first.", response.next_step)
+        self.assertEqual("env.SDD_WORKDIR", response.required_actions[0].id)
+
+    def test_get_runtime_capabilities_route_returns_capability_surface(self) -> None:
+        fake_capabilities = {
+            "available_runners": ["claude", "codex"],
+            "default_runner": "claude",
+            "runners": [
+                {
+                    "runner": "claude",
+                    "available": True,
+                    "source": "local cli probe + curated alias catalog",
+                    "path": "/usr/bin/claude",
+                    "supports_custom_model": True,
+                    "models": [
+                        {
+                            "id": "sonnet",
+                            "label": "Sonnet",
+                            "supported_efforts": ["low", "medium", "high", "xhigh", "max"],
+                            "default_effort": "medium",
+                            "visibility": "list",
+                            "supported_in_api": True,
+                            "source": "anthropic alias catalog",
+                        }
+                    ],
+                }
+            ],
+            "role_defaults": [
+                {
+                    "role_name": "implementer",
+                    "model": "sonnet",
+                    "effort": "medium",
+                    "mcp_servers": ["ios-rag", "android-rag", "frontend-rag"],
+                    "source": "backend.role_baselines",
+                }
+            ],
+        }
+
+        with patch("backend.api.routes_operator.build_runtime_capabilities", return_value=fake_capabilities):
+            response = get_runtime_capabilities(dependencies=self.dependencies)
+
+        self.assertEqual(["claude", "codex"], response.available_runners)
+        self.assertEqual("claude", response.default_runner)
+        self.assertEqual("claude", response.runners[0].runner)
+        self.assertEqual("sonnet", response.runners[0].models[0].id)
+        self.assertEqual("implementer", response.role_defaults[0].role_name)
+
+    def test_get_runtime_state_route_returns_runtime_handles(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013R"),
+            dependencies=self.dependencies,
+        )
+
+        response = get_runtime_state(
+            prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.available)
+        self.assertTrue(response.runtime_session_id)
+        self.assertGreaterEqual(len(response.roles), 1)
+        implementer = next(role for role in response.roles if role.role_name == "implementer")
+        self.assertEqual("owner-active", implementer.live_state)
+        self.assertTrue(implementer.is_current_owner)
+
+    def test_get_runtime_state_route_returns_last_auto_recovery(self) -> None:
+        from tests.backend.test_session_creation import AutoRecoveryRecordingBackend
+
+        backend = AutoRecoveryRecordingBackend()
+        self.dependencies.session_backend = backend
+        self.dependencies.coordinator_service.session_backend = backend
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013RA"),
+            dependencies=self.dependencies,
+        )
+        session_id = prepare_response.session.id
+        implementer_role = self.dependencies.role_repository.get_by_name(session_id, "implementer")
+        assert implementer_role is not None
+        assert implementer_role.runtime_handle is not None
+        backend.mark_dead(implementer_role.runtime_handle)
+        self.dependencies.coordinator_service.run_loop_once()
+
+        response = get_runtime_state(
+            session_id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertIsNotNone(response.last_auto_recovery)
+        assert response.last_auto_recovery is not None
+        self.assertEqual("implementer", response.last_auto_recovery.role_name)
+
+    def test_get_active_runtime_output_route_returns_snapshot_for_active_role(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013RO"),
+            dependencies=self.dependencies,
+        )
+        session_id = prepare_response.session.id
+        implementer_role = self.dependencies.role_repository.get_by_name(session_id, "implementer")
+        assert implementer_role is not None
+        assert implementer_role.runtime_handle is not None
+        self.dependencies.session_backend.queue_output(implementer_role.runtime_handle, "live output line\n")
+
+        response = get_active_runtime_output(
+            session_id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.available)
+        self.assertEqual("implementer", response.role_name)
+        self.assertIn("live output line", response.content)
+
+    def test_get_active_runtime_output_route_hides_output_for_completed_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013RODONE"),
+            dependencies=self.dependencies,
+        )
+        session_id = prepare_response.session.id
+        implementer_role = self.dependencies.role_repository.get_by_name(session_id, "implementer")
+        assert implementer_role is not None
+        assert implementer_role.runtime_handle is not None
+        self.dependencies.session_backend.queue_output(implementer_role.runtime_handle, "stale output line\n")
+        self.dependencies.session_repository.update_status(session_id, SessionStatus.COMPLETED)
+
+        response = get_active_runtime_output(
+            session_id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertFalse(response.available)
+        self.assertIsNone(response.role_name)
+        self.assertEqual("", response.content)
+
+    def test_stop_runtime_role_route_stops_role_and_pauses_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013S"),
+            dependencies=self.dependencies,
+        )
+
+        response = stop_runtime_role(
+            StopRuntimeRoleRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.stopped)
+        self.assertEqual("runtime_role_stopped_by_operator", response.event_type)
+        self.assertEqual("paused", response.session.status)
+
+    def test_stop_runtime_session_route_stops_all_roles_and_pauses_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013T"),
+            dependencies=self.dependencies,
+        )
+
+        response = stop_runtime_session(
+            StopRuntimeSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.stopped)
+        self.assertEqual("runtime_session_stopped_by_operator", response.event_type)
+        self.assertEqual("paused", response.session.status)
+
+    def test_stop_runtime_session_route_keeps_completed_session_completed(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013TCOMPLETE"),
+            dependencies=self.dependencies,
+        )
+        self.dependencies.session_repository.update_status(
+            prepare_response.session.id,
+            SessionStatus.COMPLETED,
+        )
+
+        response = stop_runtime_session(
+            StopRuntimeSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.stopped)
+        self.assertEqual("runtime_session_stopped_by_operator", response.event_type)
+        self.assertEqual("completed", response.session.status)
+
+    def test_stop_runtime_session_route_keeps_waiting_session_waiting(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013TWAITING"),
+            dependencies=self.dependencies,
+        )
+        active_item = next(
+            item
+            for item in self.dependencies.work_item_repository.list_for_session(prepare_response.session.id)
+            if item.work_type == "implementation"
+        )
+        self.dependencies.work_item_repository.update_status(
+            active_item.id,
+            WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        self.dependencies.session_repository.update_stage_and_owner(
+            prepare_response.session.id,
+            current_stage=prepare_response.session.current_stage,
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(
+            prepare_response.session.id,
+            SessionStatus.WAITING_FOR_OPERATOR,
+        )
+
+        response = stop_runtime_session(
+            StopRuntimeSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.stopped)
+        self.assertEqual("runtime_session_stopped_by_operator", response.event_type)
+        self.assertEqual("waiting_for_operator", response.session.status)
+
+    def test_restart_runtime_role_route_restarts_owner_and_redispatches_work(self) -> None:
+        self.dependencies.loop_runner.stop()
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013U"),
+            dependencies=self.dependencies,
+        )
+        stopped = stop_runtime_role(
+            StopRuntimeRoleRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = restart_runtime_role(
+            RestartRuntimeRoleRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(stopped.stopped)
+        self.assertTrue(response.restarted)
+        self.assertEqual("runtime_role_restarted_by_operator", response.event_type)
+        self.assertEqual("role_input_dispatched", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertTrue(self.dependencies.loop_runner.status().running)
+
+    def test_restart_runtime_role_route_can_refresh_runtime_config_for_running_owner(self) -> None:
+        self.dependencies.loop_runner.stop()
+        fake_capabilities = {
+            "available_runners": ["claude", "codex"],
+            "default_runner": "claude",
+            "runners": [
+                {
+                    "runner": "claude",
+                    "models": [
+                        {
+                            "id": "sonnet",
+                            "supported_efforts": ["medium", "high"],
+                            "default_effort": "medium",
+                        }
+                    ],
+                },
+                {
+                    "runner": "codex",
+                    "models": [
+                        {
+                            "id": "gpt-5.5",
+                            "supported_efforts": ["medium", "high"],
+                            "default_effort": "medium",
+                        }
+                    ],
+                },
+            ],
+            "role_defaults": [],
+        }
+
+        with patch("backend.role_runtime_config.build_runtime_capabilities", return_value=fake_capabilities):
+            prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+                PrepareSessionRequest(task_key="IOS-40013UREFRESH"),
+                dependencies=self.dependencies,
+            )
+
+            update_runtime_defaults(
+                UpdateRuntimeDefaultsRequest(
+                    default_runner="claude",
+                    role_defaults={
+                        "implementer": {
+                            "runner": "claude",
+                            "model": "sonnet",
+                            "effort": "high",
+                        }
+                    },
+                    policy_defaults={},
+                ),
+                dependencies=self.dependencies,
+            )
+
+            response = restart_runtime_role(
+                RestartRuntimeRoleRequest(
+                    session_id=prepare_response.session.id,
+                    role_name="implementer",
+                    refresh_runtime_config=True,
+                ),
+                dependencies=self.dependencies,
+            )
+
+        self.assertTrue(response.restarted)
+        self.assertEqual("runtime_role_restarted_by_operator", response.event_type)
+        self.assertEqual("role_input_dispatched", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertEqual("claude", response.session.role_config["implementer"]["runner"])
+        self.assertEqual("sonnet", response.session.role_config["implementer"]["model"])
+        self.assertEqual("high", response.session.role_config["implementer"]["effort"])
+        self.assertTrue(self.dependencies.loop_runner.status().running)
+
+    def test_restart_runtime_session_route_restarts_roles_and_redispatches_owner(self) -> None:
+        self.dependencies.loop_runner.stop()
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40013V"),
+            dependencies=self.dependencies,
+        )
+        stopped = stop_runtime_session(
+            StopRuntimeSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        response = restart_runtime_session(
+            RestartRuntimeSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(stopped.stopped)
+        self.assertTrue(response.restarted)
+        self.assertEqual("runtime_session_restarted_by_operator", response.event_type)
+        self.assertEqual("role_input_dispatched", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertTrue(self.dependencies.loop_runner.status().running)
+
+    def test_pause_session_route_pauses_active_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014"),
+            dependencies=self.dependencies,
+        )
+
+        response = pause_session(
+            PauseSessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.paused)
+        self.assertEqual("session_paused_by_operator", response.event_type)
+        self.assertEqual("paused", response.session.status)
+        self.assertEqual("implementer", response.session.current_owner)
+
+    def test_create_mr_route_marks_completed_session_as_handed_off(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014MR"),
+            dependencies=self.dependencies,
+        )
+        self.dependencies.session_repository.update_stage_and_owner(
+            prepare_response.session.id,
+            current_stage="completed",
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(
+            prepare_response.session.id,
+            SessionStatus.COMPLETED,
+        )
+        self.write_passed_verification_outcome("IOS-40014MR")
+
+        response = create_mr(
+            CreateMrRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.handed_off)
+        self.assertEqual("mr_handoff_completed", response.event_type)
+        self.assertEqual("send_to_test_completed", response.followup_event_type)
+        self.assertEqual("send_to_test_completed", response.session.current_stage)
+        self.assertEqual("completed", response.session.status)
+        self.assertEqual(
+            "https://gitlab.example.com/mobile/IOS-40014MR/-/merge_requests/42",
+            response.mr_url,
+        )
+        self.assertTrue(any(item.artifact_type == "mr_handoff_stdout" for item in artifacts_response.items))
+        self.assertTrue(any(item.artifact_type == "send_to_test_stdout" for item in artifacts_response.items))
+
+    def test_send_to_test_route_marks_mr_handed_off_session_as_ready(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014ST"),
+            dependencies=self.dependencies,
+        )
+        self.dependencies.session_repository.update_stage_and_owner(
+            prepare_response.session.id,
+            current_stage="mr_handoff_completed",
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(
+            prepare_response.session.id,
+            SessionStatus.COMPLETED,
+        )
+        self.write_passed_verification_outcome("IOS-40014ST")
+
+        response = send_to_test(
+            SendToTestRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.handed_off)
+        self.assertEqual("send_to_test_completed", response.event_type)
+        self.assertEqual("send_to_test_completed", response.session.current_stage)
+        self.assertEqual("completed", response.session.status)
+        self.assertTrue(any(item.artifact_type == "send_to_test_stdout" for item in artifacts_response.items))
+
+    def test_launch_ios_app_route_runs_manual_launcher_without_changing_stage(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014LAUNCH"),
+            dependencies=self.dependencies,
+        )
+        self.dependencies.session_repository.update_stage_and_owner(
+            prepare_response.session.id,
+            current_stage="send_to_test_completed",
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(
+            prepare_response.session.id,
+            SessionStatus.COMPLETED,
+        )
+
+        response = launch_ios_app(
+            LaunchIOSAppRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.launched)
+        self.assertEqual("ios_app_launch_completed", response.event_type)
+        self.assertEqual("send_to_test_completed", response.session.current_stage)
+        self.assertEqual("completed", response.session.status)
+        self.assertEqual(["IOS-40014LAUNCH"], self.ios_app_launcher.calls)
+        self.assertTrue(any(item.artifact_type == "ios_launch_stdout" for item in artifacts_response.items))
+
+    def test_verification_passed_routes_to_doc_harvest_when_policy_required(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40014DH",
+                workflow_profile="oneshot",
+                policy={"doc_harvest_policy": "required"},
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014DH"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("doc_harvest_requested", response.followup_event_type)
+        self.assertEqual("doc_harvest_requested", response.session.current_stage)
+        self.assertEqual("doc-harvest-worker", response.session.current_owner)
+        self.assertEqual("active", response.session.status)
+
+    def test_verification_passed_routes_to_doc_harvest_when_policy_enabled(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40014DHE",
+                workflow_profile="oneshot",
+                policy={"doc_harvest_policy": "enabled"},
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014DHE"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("doc_harvest_requested", response.followup_event_type)
+        self.assertEqual("doc_harvest_requested", response.session.current_stage)
+        self.assertEqual("doc-harvest-worker", response.session.current_owner)
+        self.assertEqual("active", response.session.status)
+
+    def test_complete_doc_harvest_route_marks_lane_completed(self) -> None:
+        create_response = create_session(
+            CreateSessionRequest(
+                task_key="IOS-40014DH2",
+                workflow_profile="oneshot",
+                policy={"doc_harvest_policy": "enabled"},
+            ),
+            dependencies=self.dependencies,
+        )
+        __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014DH2"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=create_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = complete_doc_harvest(
+            CompleteDocHarvestRequest(
+                session_id=create_response.session.id,
+                summary="Feature README updated with current behavior.",
+            ),
+            dependencies=self.dependencies,
+        )
+        artifacts_response = list_artifacts(
+            session_id=create_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.completed)
+        self.assertEqual("doc_harvest_completed", response.event_type)
+        self.assertEqual("documentation_review_requested", response.session.current_stage)
+        self.assertEqual("active", response.session.status)
+        self.assertTrue(any(item.artifact_type == "doc_harvest_summary" for item in artifacts_response.items))
+
+    def test_reopen_from_qa_route_reactivates_completed_session(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014B"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = reopen_from_qa(
+            ReopenFromQaRequest(
+                session_id=prepare_response.session.id,
+                comment_text="QA: still failing on edge case",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.reopened)
+        self.assertEqual("qa_reopened", response.event_type)
+        self.assertEqual("qa_reopen_requested", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertEqual("qa_reopen_requested", response.session.current_stage)
+
+    def test_review_message_preview_route_uses_request_review_script(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014REVIEW"),
+            dependencies=self.dependencies,
+        )
+        with patch("backend.api.routes_operator.CommandRunner.run") as mocked_run:
+            mocked_run.side_effect = [
+                CommandResult(
+                    command=["bash", "scripts/request-review-message.sh", "ios", "2942"],
+                    returncode=0,
+                    stdout=(
+                        "IOS-40014REVIEW: Improve runtime recovery flow\n"
+                        "https://gitlab.example.com/project/-/merge_requests/2942/diffs\n"
+                        "7 files +120 −18\n"
+                    ),
+                    stderr="",
+                ),
+                CommandResult(
+                    command=["bash", "scripts/request-review-message.sh", "ios", "2942"],
+                    returncode=0,
+                    stdout=(
+                        "IOS-40014REVIEW: Improve runtime recovery flow\n"
+                        "https://gitlab.example.com/project/-/merge_requests/2942/diffs\n"
+                        "8 files +130 −20\n"
+                    ),
+                    stderr="",
+                ),
+            ]
+
+            response = review_message_preview(
+                ReviewMessagePreviewRequest(
+                    session_id=prepare_response.session.id,
+                    mr_id="2942",
+                ),
+                dependencies=self.dependencies,
+            )
+            cached_response = review_message_preview(
+                ReviewMessagePreviewRequest(
+                    session_id=prepare_response.session.id,
+                    mr_id="2942",
+                ),
+                dependencies=self.dependencies,
+            )
+            refreshed_response = refresh_review_message_preview(
+                ReviewMessagePreviewRequest(
+                    session_id=prepare_response.session.id,
+                    mr_id="2942",
+                ),
+                dependencies=self.dependencies,
+            )
+            latest_preview = [
+                artifact
+                for artifact in self.dependencies.artifact_repository.list_for_session(
+                    prepare_response.session.id
+                )
+                if artifact.artifact_type == "review_message_preview"
+            ][-1]
+            with self.database.connect() as connection:
+                connection.execute(
+                    "UPDATE artifacts SET created_at = ? WHERE id = ?",
+                    ("2020-01-01 00:00:00", latest_preview.id),
+                )
+            with patch.dict(os.environ, {"REVIEW_MESSAGE_CACHE_TTL_SECONDS": "1"}, clear=False):
+                stale_response = review_message_preview(
+                    ReviewMessagePreviewRequest(
+                        session_id=prepare_response.session.id,
+                        mr_id="2942",
+                    ),
+                    dependencies=self.dependencies,
+                )
+
+        self.assertTrue(response.available)
+        self.assertEqual("ios", response.platform)
+        self.assertEqual("2942", response.mr_id)
+        self.assertIn("IOS-40014REVIEW: Improve runtime recovery flow", response.text)
+        self.assertFalse(response.cached)
+        self.assertFalse(response.stale)
+        self.assertEqual(response.text, cached_response.text)
+        self.assertTrue(cached_response.cached)
+        self.assertIn("8 files +130 −20", refreshed_response.text)
+        self.assertTrue(stale_response.cached)
+        self.assertTrue(stale_response.stale)
+        self.assertEqual(2, mocked_run.call_count)
+        artifacts = self.dependencies.artifact_repository.list_for_session(prepare_response.session.id)
+        preview_artifacts = [
+            artifact for artifact in artifacts if artifact.artifact_type == "review_message_preview"
+        ]
+        self.assertEqual(2, len(preview_artifacts))
+        self.assertEqual("2942", preview_artifacts[-1].metadata["mr_id"])
+        self.assertIn("8 files +130 −20", preview_artifacts[-1].metadata["preview_text"])
+
+    def test_followup_completion_after_qa_reopen_returns_to_verification(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40014C"),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "done"},
+            ),
+            dependencies=self.dependencies,
+        )
+        inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="verification_passed",
+                payload={"summary": "all green"},
+            ),
+            dependencies=self.dependencies,
+        )
+        reopen_from_qa(
+            ReopenFromQaRequest(
+                session_id=prepare_response.session.id,
+                comment_text="QA: still failing on edge case",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = inject_event(
+            InjectEventRequest(
+                session_id=prepare_response.session.id,
+                event_type="implementation_completed",
+                payload={"summary": "qa fix done"},
+            ),
+            dependencies=self.dependencies,
+        )
+
+        self.assertEqual("verification_requested", response.followup_event_type)
+        self.assertEqual("verification_requested", response.session.current_stage)
+
+    def test_retry_session_route_creates_new_retry_work_item(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40015"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+
+        response = retry_session(
+            RetrySessionRequest(session_id=prepare_response.session.id),
+            dependencies=self.dependencies,
+        )
+        work_items_response = list_work_items(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.retried)
+        self.assertEqual("session_retried_by_operator", response.event_type)
+        self.assertEqual("role_input_dispatched", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertEqual("implementer", response.session.current_owner)
+        self.assertEqual(2, len(work_items_response.items))
+        self.assertTrue(any(item.title.startswith("Retry: ") for item in work_items_response.items))
+
+    def test_retry_session_route_retries_subtask_creation_checkpoint(self) -> None:
+        session, _, _ = self.dependencies.coordinator_service.create_task_session(
+            "IOS-40015SUBTASK",
+            workflow_profile="story_full",
+            policy=None,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(session.id, "implementer")
+        assert implementer_role is not None
+        plan_dir = Path(self.temp_dir.name) / "IOS-40015SUBTASK" / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        (plan_dir / "index.md").write_text(
+            "# Execution Task List\n\n1. [Build data source](./01-build-data-source.md)\n",
+            encoding="utf-8",
+        )
+        (plan_dir / "01-build-data-source.md").write_text(
+            "# Build data source\n\n## What to implement\nCreate the feature data source.\n",
+            encoding="utf-8",
+        )
+        self.dependencies.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title=f"Initial implementation for {session.task_key}",
+            owner_role_id=implementer_role.id,
+            source_event_id=None,
+            priority=100,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        self.dependencies.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_creation_requested",
+            current_owner=None,
+        )
+        self.dependencies.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+
+        response = retry_session(
+            RetrySessionRequest(session_id=session.id),
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.retried)
+        self.assertEqual("session_retried_by_operator", response.event_type)
+        self.assertIn(response.followup_event_type, {"jira_subtasks_created", "subtask_implementation_requested"})
+
+    def test_redirect_session_route_reroutes_escalated_work_to_allowed_target_role(self) -> None:
+        prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
+            PrepareSessionRequest(task_key="IOS-40016"),
+            dependencies=self.dependencies,
+        )
+        implementer_role = self.dependencies.role_repository.get_by_name(
+            prepare_response.session.id,
+            "implementer",
+        )
+        self.dependencies.role_repository.create(
+            session_id=prepare_response.session.id,
+            role_name="implementer-shadow",
+            runtime_backend="recording",
+            runtime_handle="recording:implementer-shadow",
+        )
+        self.dependencies.session_backend.simulate_output(
+            implementer_role.runtime_handle,
+            'SDD_ERROR: {"summary":"tool failed","details":"command exited 1"}',
+        )
+        collect_role_output(
+            CollectRoleOutputRequest(
+                session_id=prepare_response.session.id,
+                role_name="implementer",
+            ),
+            dependencies=self.dependencies,
+        )
+        ALLOWED_STAGE_ROLE_TARGETS["implementation_requested"].add("implementer-shadow")
+        try:
+            response = redirect_session(
+                RedirectSessionRequest(
+                    session_id=prepare_response.session.id,
+                    target_role_name="implementer-shadow",
+                ),
+                dependencies=self.dependencies,
+            )
+        finally:
+            ALLOWED_STAGE_ROLE_TARGETS["implementation_requested"].remove("implementer-shadow")
+        work_items_response = list_work_items(
+            session_id=prepare_response.session.id,
+            dependencies=self.dependencies,
+        )
+
+        self.assertTrue(response.redirected)
+        self.assertEqual("session_redirected_by_operator", response.event_type)
+        self.assertEqual("role_input_dispatched", response.followup_event_type)
+        self.assertEqual("active", response.session.status)
+        self.assertEqual("implementer-shadow", response.session.current_owner)
+        self.assertEqual(2, len(work_items_response.items))
+        self.assertTrue(
+            any(
+                item.title.startswith("Redirect to implementer-shadow:")
+                for item in work_items_response.items
+            )
+        )
+
+    def test_internal_operator_routes_are_hidden_from_public_schema(self) -> None:
+        operator_router = __import__("backend.api.routes_operator", fromlist=["router"]).router
+        hidden_paths = {
+            "/operator/redirect-session",
+            "/operator/complete-doc-harvest",
+            "/operator/poll-session-output",
+            "/operator/run-loop-once",
+            "/operator/loop-status",
+            "/operator/start-loop",
+            "/operator/stop-loop",
+        }
+
+        hidden_route_paths = {
+            route.path
+            for route in operator_router.routes
+            if getattr(route, "include_in_schema", True) is False
+        }
+
+        self.assertTrue(hidden_paths.issubset(hidden_route_paths))
+
+    def test_internal_debug_routes_are_hidden_from_public_schema(self) -> None:
+        events_router = __import__("backend.api.routes_events", fromlist=["router"]).router
+        roles_router = __import__("backend.api.routes_roles", fromlist=["router"]).router
+
+        hidden_route_paths = {
+            route.path
+            for route in [*events_router.routes, *roles_router.routes]
+            if getattr(route, "include_in_schema", True) is False
+        }
+
+        self.assertIn("/events", hidden_route_paths)
+        self.assertIn("/roles/output", hidden_route_paths)
+        self.assertIn("/roles/collect-output", hidden_route_paths)
+
+    def test_openapi_schema_excludes_internal_routes(self) -> None:
+        from backend.api.app import create_app
+
+        with patch("backend.api.app.build_dependencies", return_value=object()):
+            app = create_app()
+
+        schema = app.openapi()
+        paths = schema.get("paths", {})
+
+        self.assertIn("/sessions", paths)
+        self.assertIn("/operator/runtime-defaults", paths)
+        self.assertIn("/events", paths)
+        self.assertIn("get", paths["/events"])
+        self.assertNotIn("post", paths["/events"])
+        self.assertNotIn("/sessions/prepare", paths)
+        self.assertNotIn("/roles/output", paths)
+        self.assertNotIn("/roles/collect-output", paths)
+        self.assertNotIn("/operator/redirect-session", paths)
+        self.assertNotIn("/operator/run-loop-once", paths)
+        self.assertNotIn("/operator/poll-session-output", paths)
+
+
+if __name__ == "__main__":
+    unittest.main()

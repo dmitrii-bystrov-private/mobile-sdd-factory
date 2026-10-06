@@ -1,0 +1,681 @@
+"""Persistent role workspace scaffolding."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+import os
+
+
+@dataclass(frozen=True, slots=True)
+class RoleWorkspace:
+    role_name: str
+    directory: Path
+    agents_path: Path
+    claude_path: Path
+
+
+def _task_snapshot_root(workdir_root: Path, task_key: str) -> Path:
+    return workdir_root / task_key
+
+
+def _task_repo_root(workdir_root: Path, task_key: str) -> Path:
+    return _task_snapshot_root(workdir_root, task_key) / "repo"
+
+
+def _task_runtime_root(workdir_root: Path, task_key: str) -> Path:
+    return _task_snapshot_root(workdir_root, task_key) / "runtime"
+
+
+def _task_tmp_root(workdir_root: Path, task_key: str) -> Path:
+    return _task_snapshot_root(workdir_root, task_key) / "tmp"
+
+
+def _task_artifacts_root(workdir_root: Path, task_key: str) -> Path:
+    return workdir_root / "factory-artifacts" / task_key
+
+
+def _ensure_task_output_directories(workdir_root: Path, task_key: str) -> None:
+    task_root = _task_snapshot_root(workdir_root, task_key)
+    for directory in (
+        task_root / "tmp",
+        task_root / "review",
+        task_root / "review" / "convention",
+        task_root / "review" / "requirements",
+        task_root / "review" / "documentation",
+        task_root / "spec",
+        task_root / "spec" / "context",
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+
+
+def _repo_guidance_entrypoints() -> str:
+    return (
+        "- Repository guidance entry points: `{task_repo_root}/AGENTS.md`, "
+        "`{task_repo_root}/CLAUDE.md`, `{task_repo_root}/README.md`, and linked local docs/templates"
+    )
+
+
+def _role_relevant_paths(role_name: str) -> list[str]:
+    if role_name == "implementer":
+        return [
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Task artifacts and generated outputs: `{task_artifacts_root}`",
+            "- Main repo scripts: `{repo_root}/scripts`",
+            _repo_guidance_entrypoints(),
+        ]
+    if role_name == "verification-coordinator":
+        return [
+            "- Task repo worktree: `{task_repo_root}`",
+            _repo_guidance_entrypoints(),
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Task artifacts and verification outputs: `{task_artifacts_root}`",
+            "- Build/test/lint wrappers: `{repo_root}/scripts/run-build.sh`, `{repo_root}/scripts/run-test.sh`, `{repo_root}/scripts/run-lint.sh`",
+            "- Platform-native verification phases: `{repo_root}/scripts/ios-*.sh`, `{repo_root}/scripts/android-*.sh`",
+            "- Final verification report target: `{task_snapshot_root}/spec/final-verification.md`",
+            "- Verification strategy input: `{task_snapshot_root}/spec/verification-strategy.json`",
+        ]
+    if role_name == "convention-reviewer":
+        return [
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Diff input: `{task_snapshot_root}/spec/diff.md`",
+            "- Review report directory and current pass target: `{task_snapshot_root}/review/convention`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Task artifacts and review outputs: `{task_artifacts_root}`",
+            _repo_guidance_entrypoints(),
+        ]
+    if role_name == "requirements-reviewer":
+        return [
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Canonical task ordering: `{task_snapshot_root}/statuses.md`",
+            "- Task description and comments: `{task_snapshot_root}/description.md`, `{task_snapshot_root}/comments.md`",
+            "- Diff input: `{task_snapshot_root}/spec/diff.md`",
+            "- Review report directory and current pass target: `{task_snapshot_root}/review/requirements`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Task artifacts and review outputs: `{task_artifacts_root}`",
+            _repo_guidance_entrypoints(),
+        ]
+    if role_name == "doc-harvest-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Diff source of truth: `{task_snapshot_root}/spec/full-diff.md`",
+            "- Changed-doc targets inside the task repo worktree: `{task_repo_root}`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            "- Task artifacts and documentation outputs: `{task_artifacts_root}`",
+            "- Main repo diff helper: `{repo_root}/scripts/generate-diff.sh`",
+            _repo_guidance_entrypoints(),
+        ]
+    if role_name == "documentation-reviewer":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Documentation diff input: `{task_snapshot_root}/spec/doc-diff.md`",
+            "- Full diff input: `{task_snapshot_root}/spec/full-diff.md`",
+            "- Deterministic documentation precheck: `{task_snapshot_root}/spec/documentation-precheck.md`",
+            "- Task repo worktree: `{task_repo_root}`",
+            _repo_guidance_entrypoints(),
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task artifacts and documentation review outputs: `{task_artifacts_root}`",
+        ]
+    if role_name == "proposal-context-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Required snapshot inputs: `{task_snapshot_root}/description.md`, `{task_snapshot_root}/comments.md`",
+            "- Proposal target: `{task_snapshot_root}/spec/proposal.md`",
+            "- Context directory: `{task_snapshot_root}/spec/context`",
+            "- Required context output: `{task_snapshot_root}/spec/context/feature-overview.md`",
+            "- Optional context outputs: `{task_snapshot_root}/spec/context/relevant-code.md`, `{task_snapshot_root}/spec/context/documentation.md`, `{task_snapshot_root}/spec/context/implementation-patterns.md`, `{task_snapshot_root}/spec/context/preconditions.md`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            _repo_guidance_entrypoints(),
+        ]
+    if role_name == "requirements-clarifier-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Proposal input: `{task_snapshot_root}/spec/proposal.md`",
+            "- Requirements target: `{task_snapshot_root}/spec/requirements.md`",
+            "- Context directory: `{task_snapshot_root}/spec/context`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            _repo_guidance_entrypoints(),
+        ]
+    if role_name == "acceptance-criteria-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Proposal input: `{task_snapshot_root}/spec/proposal.md`",
+            "- Requirements input: `{task_snapshot_root}/spec/requirements.md`",
+            "- Acceptance criteria target: `{task_snapshot_root}/spec/acceptance_criteria.md`",
+            "- Context directory: `{task_snapshot_root}/spec/context`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            _repo_guidance_entrypoints(),
+        ]
+    if role_name == "constraints-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Proposal input: `{task_snapshot_root}/spec/proposal.md`",
+            "- Requirements input: `{task_snapshot_root}/spec/requirements.md`",
+            "- Acceptance criteria input: `{task_snapshot_root}/spec/acceptance_criteria.md`",
+            "- Constraints target: `{task_snapshot_root}/spec/constraints.md`",
+            "- Context directory: `{task_snapshot_root}/spec/context`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            _repo_guidance_entrypoints(),
+        ]
+    if role_name == "spec-verifier-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Proposal input: `{task_snapshot_root}/spec/proposal.md`",
+            "- Requirements input: `{task_snapshot_root}/spec/requirements.md`",
+            "- Acceptance criteria input: `{task_snapshot_root}/spec/acceptance_criteria.md`",
+            "- Constraints input: `{task_snapshot_root}/spec/constraints.md`",
+            "- Verification target: `{task_snapshot_root}/spec/spec_verification.md`",
+            "- Context directory: `{task_snapshot_root}/spec/context`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            _repo_guidance_entrypoints(),
+        ]
+    if role_name == "task-decomposer-worker":
+        return [
+            "- Task snapshot metadata: `{task_snapshot_root}`",
+            "- Proposal input: `{task_snapshot_root}/spec/proposal.md`",
+            "- Requirements input: `{task_snapshot_root}/spec/requirements.md`",
+            "- Acceptance criteria input: `{task_snapshot_root}/spec/acceptance_criteria.md`",
+            "- Constraints input: `{task_snapshot_root}/spec/constraints.md`",
+            "- Planning verification input: `{task_snapshot_root}/spec/spec_verification.md`",
+            "- Decomposition target: `{task_snapshot_root}/spec/decomposition.md`",
+            "- Task repo worktree: `{task_repo_root}`",
+            "- Task-local runtime root: `{task_runtime_root}`",
+            "- Task-local temp root: `{task_tmp_root}`",
+            _repo_guidance_entrypoints(),
+        ]
+    return [
+        "- Task snapshot metadata: `{task_snapshot_root}`",
+        "- Task artifacts: `{task_artifacts_root}`",
+        "- Main repo scripts: `{repo_root}/scripts`",
+    ]
+
+
+def _role_responsibility(role_name: str) -> list[str]:
+    if role_name == "implementer":
+        return [
+            "- You execute routed implementation work for one task session.",
+            "- You focus only on the currently assigned work item.",
+            "- Work only on the current routed task. Do not inspect or modify unrelated task/session state.",
+        ]
+    if role_name == "verification-coordinator":
+        return [
+            "- You execute routed verification work for one task session.",
+            "- You validate changes through deterministic checks and review the resulting evidence.",
+            "- Do not modify product code; report verification results and required corrections only.",
+        ]
+    if role_name == "convention-reviewer":
+        return [
+            "- You execute one bounded convention review pass for one task session.",
+            "- You review the routed diff against local repository conventions and produce a durable structured report for the current pass.",
+            "- You do not review requirement completeness or broad maintainability cleanup.",
+            "- Do not run build, test, or lint verification. Submit your review result; verification happens after this role finishes.",
+        ]
+    if role_name == "requirements-reviewer":
+        return [
+            "- You execute one bounded requirements review pass for one task session.",
+            "- You review whether the current implementation satisfies the cumulative Jira task/subtask scope in canonical statuses order.",
+            "- You protect earlier accepted subtasks from regressions unless a newer Jira follow-up explicitly overrides them.",
+            "- You do not review convention/style/documentation hygiene unless it directly breaks behavior or coverage.",
+            "- Do not run build, test, or lint verification. Submit your review result; verification happens after this role finishes.",
+        ]
+    if role_name == "doc-harvest-worker":
+        return [
+            "- You execute one bounded documentation-harvest task for one completed task session.",
+            "- You update or create feature-level README files from grounded diff evidence in the task worktree.",
+            "- You use repository guidance entry points and their linked documentation guidance when present, and fall back to stable behavior/contract documentation rules when they are absent.",
+            "- You stop after committing only the documentation updates and reporting the compact result summary.",
+        ]
+    if role_name == "documentation-reviewer":
+        return [
+            "- You execute one bounded documentation quality review for one completed documentation pass.",
+            "- You verify production docs and doc comments against repository guidance entry points and their linked documentation guidance when present, otherwise against stable behavior/contract documentation rules.",
+            "- You do not edit files; report either a clean pass, a skip, or actionable documentation-only findings.",
+        ]
+    if role_name == "proposal-context-worker":
+        return [
+            "- You execute one bounded proposal/context preparation task for one story session.",
+            "- Produce `spec/proposal.md` plus the `spec/context/` package, submit the result, then stop.",
+            "- Read `description.md` and `comments.md` first; when they conflict, treat `comments.md` as the fresher source and record the conflict explicitly in the proposal.",
+            "- Resolve explicit HTTP/HTTPS links from the snapshot as operator-provided context references rather than mandatory fetched inputs.",
+            "- Resolve only explicit local file references from the snapshot before broadening to any narrower repo exploration.",
+            "- Do not continue into requirements, decomposition, or implementation work.",
+        ]
+    if role_name == "requirements-clarifier-worker":
+        return [
+            "- You execute one bounded requirements-clarification task for one story session.",
+            "- When critical ambiguity remains, you must ask the operator directly in the live session and continue after the operator replies.",
+            "- Produce the routed requirements result, submit it, then stop.",
+        ]
+    if role_name == "acceptance-criteria-worker":
+        return [
+            "- You execute one bounded acceptance-criteria preparation task for one story session.",
+            "- Produce the routed acceptance-criteria result, submit it, then stop.",
+            "- Do not continue into constraints, decomposition, or implementation work.",
+        ]
+    if role_name == "constraints-worker":
+        return [
+            "- You execute one bounded constraints-preparation task for one story session.",
+            "- Produce the routed constraints result, submit it, then stop.",
+            "- Do not continue into decomposition or implementation work.",
+        ]
+    if role_name == "spec-verifier-worker":
+        return [
+            "- You execute one bounded planning-verification task for one story session.",
+            "- Produce the routed verification result and then stop only when the planning package is actually clean; if critical blockers remain, continue after the operator replies in the same live session.",
+            "- Do not continue into decomposition or implementation work.",
+        ]
+    if role_name == "task-decomposer-worker":
+        return [
+            "- You execute one bounded task-decomposition task for one story session.",
+            "- Produce the routed decomposition result, submit it, then stop.",
+            "- Do not continue into implementation work.",
+        ]
+    return [
+        "- You operate only on routed work for one task session.",
+        "- You should not infer responsibilities outside your current role.",
+    ]
+
+
+def _role_operating_rules(role_name: str) -> list[str]:
+    if role_name == "implementer":
+        return [
+            "- Read all routed spec inputs before writing code.",
+            "- For implementation work, read the task snapshot inputs (`description.md`, `comments.md`, and `spec/diff.md`) when they exist before concluding that no concrete work was routed.",
+            "- Treat repository conventions as the default implementation contract. A task spec, planning artifact, or decomposition note overrides a local convention only when Jira/operator input explicitly states that this task is intentionally changing that convention.",
+            "- If a routed spec conflicts with established local convention without an explicit convention-change instruction, follow the convention when the semantic requirement can still be satisfied; escalate only when the conflict changes product behavior or cannot be resolved locally.",
+            "- When you add or edit tests, follow the existing local test conventions in the touched area instead of inventing new fixture, assertion, naming, or helper patterns.",
+            "- Use the closest existing test file as the reference implementation for structure, setup, and expectations before introducing a new style.",
+            "- Use RAG tools first for code exploration; fall back to filesystem search only for structural queries.",
+            "- Keep implementation aligned to the routed task or correction scope, but make any adjacent code changes that are necessary to fix the real root cause cleanly and avoid regressions.",
+            "- If a routed correction conflicts with already-authoritative product/operator direction or cannot be resolved safely without a fresh operator decision, stop and escalate instead of forcing a local patch.",
+            "- In that escalation, provide a reasoned disagreement package: the concrete conflict, the premise you believe is wrong or outdated, the technical direction you recommend instead, and the exact operator decision needed.",
+            "- Do not run build, test, or lint verification. Submit your implementation result; verification happens after this role finishes.",
+        ]
+    if role_name == "verification-coordinator":
+        return [
+            "- Run only deterministic verification work for the routed task session.",
+            "- Start from the routed verification strategy file when it is provided and preserve its selected gate unless a clear repo signal forces a broader fallback.",
+            "- When the routed strategy includes iOS impact mapping, treat that mapping as the primary source for impacted areas, preferred schemes, test targets, and fallback confidence instead of re-deriving repository scope heuristically.",
+            "- When the routed strategy provides explicit commands, execute that routed sequence as written instead of reconstructing the gate manually.",
+            "- For iOS strategies, prefer the routed `bash scripts/ios-verify.sh \"$SDD_FACTORY_TASK_KEY\"` command or the routed iOS phase commands over manually invoking `run-test.sh` plus `run-lint.sh` separately.",
+            "- For Android strategies, prefer the routed `bash scripts/android-verify.sh \"$SDD_FACTORY_TASK_KEY\"` command or the routed Android phase commands over manually invoking `run-test.sh` plus `run-lint.sh` separately.",
+            "- When no explicit strategy commands are provided, treat `run-test.sh` and `run-lint.sh` as the fallback workflow-level verification gate and do not run `run-build.sh` here.",
+            "- If the routed strategy explicitly marks the task as docs-only with no code-verification phases, preserve that skip decision and explain it in the verification report instead of forcing a build/test pass.",
+            "- For iOS tasks, prefer the routed task-local verification context paths for DerivedData, xcresult bundles, cloned source packages, and logs instead of relying on shared global Xcode state.",
+            "- For Android tasks, prefer the routed task-local Gradle user home and verification log paths instead of relying on shared global Gradle state.",
+            "- Always treat each verification round as a fresh deterministic gate and refresh the verification evidence.",
+            "- Always write or refresh `spec/final-verification.md` for the current round; on failure include the failed checks and their relevant command output.",
+            "- Keep the role evidence-first: summarize failures, but do not attempt fixes.",
+            "- Do not modify product code.",
+        ]
+    if role_name == "convention-reviewer":
+        return [
+            "- Read the routed diff first, then inspect only touched full files and directly relevant local convention sources.",
+            "- Repository guidance: read `AGENTS.md` and `CLAUDE.md` when present, read `README.md` when present, and follow their links to relevant local convention docs/templates for the touched diff.",
+            "- Infer conventions from the repository context; do not import platform-, language-, or architecture-specific rules from this factory repo.",
+            "- Treat local repository convention sources and stable nearby precedent as authoritative over downstream spec/decomposition text unless Jira/operator input explicitly says this task is meant to change the convention.",
+            "- If a task intentionally changes a convention, expect the diff to update the relevant convention source or adjacent canonical examples; otherwise report the inconsistency instead of accepting a silent convention override.",
+            "- Check local structure, naming, layering, test style, fixtures, helpers, established APIs, and error handling only when grounded by touched files.",
+            "- Write or refresh the structured convention review report before finishing.",
+            "- Report findings only when they are concrete, actionable, and likely to improve consistency of the submitted diff.",
+            "- Keep outputs compact and fixer-oriented.",
+            "- Do not re-flag issues already raised in the immediate correction chain when that context is provided.",
+            "- Treat similar issues that return after later follow-up, subtask, or implementation work as normal failed review findings, not blocked review cycles.",
+        ]
+    if role_name == "requirements-reviewer":
+        return [
+            "- Read `statuses.md` first when present and use Jira keys plus their order there as the canonical source of task/subtask ordering.",
+            "- Read root description/comments and per-key Jira description/comments in statuses order; newer Jira follow-ups override older scope only on explicit conflict.",
+            "- Treat earlier accepted subtasks as a regression contract unless a newer Jira follow-up explicitly overrides them.",
+            "- Do not use `plan/index.md` or `plan/NN-*.md` as authoritative follow-up inputs.",
+            "- Do not treat spec/decomposition wording as an implicit override of local code conventions. A convention override is authoritative only when Jira/operator input explicitly says the task intentionally changes that convention.",
+            "- When a semantic requirement can be satisfied while following local convention, accept the convention-aligned implementation rather than requiring a literal spec shape that exists only in downstream planning artifacts.",
+            "- Treat exact names, tags, string constants, analytics keys, and identifiers from downstream specs/decomposition as derived guidance unless they are explicitly present in Jira/operator input or already accepted in an earlier completed subtask.",
+            "- When a derived exact value conflicts with local repository convention or a convention-review correction, do not require restoring the derived value; review the requirement at the semantic level instead.",
+            "- Review cumulative behavior, missing requirements, edge cases, acceptance gaps, and tests that should protect the requirement.",
+            "- Avoid convention/style/documentation findings unless they directly cause a behavior or coverage failure.",
+            "- Write or refresh the structured requirements review report before finishing.",
+            "- Keep outputs compact and fixer-oriented.",
+            "- Do not re-flag issues already raised in the immediate correction chain when that context is provided.",
+            "- Treat similar issues that return after later follow-up, subtask, or implementation work as normal failed review findings, not blocked review cycles.",
+        ]
+    if role_name == "doc-harvest-worker":
+        return [
+            "- Treat each routed work item as one bounded documentation pass: generate or refresh `spec/full-diff.md`, update grounded feature-level README targets, write one terminal result, and stop.",
+            "- Use `spec/full-diff.md` as the primary source of truth for branch changes and prefer changed README/doc anchors over broad repo scanning.",
+            "- Use repository guidance entry points (`AGENTS.md`/`CLAUDE.md`, `README.md`) and their linked documentation guides/templates when present; otherwise write durable behavior and contract documentation without preserving task/review history.",
+            "- Read selectively and skip ambiguous multi-feature diffs instead of inventing a single arbitrary documentation target.",
+            "- Commit only the README/doc files you changed, then report a compact summary.",
+        ]
+    if role_name == "documentation-reviewer":
+        return [
+            "- Treat each routed work item as one bounded documentation review pass: inspect the current documentation changes, write one terminal result, and stop.",
+            "- Start from `spec/documentation-precheck.md`, `spec/doc-diff.md`, `spec/full-diff.md`, repository guidance entry points (`AGENTS.md`/`CLAUDE.md`, `README.md`), and linked documentation guides/templates when present; otherwise apply the stable documentation rules from this prompt.",
+            "- For each routed work item, perform a fresh review of the current documentation files. Do not reuse prior findings files or prior review conclusions after a documentation correction.",
+            "- Review production README files, docs, public/doc comments, and ordinary inline source comments changed by the branch for stable-contract documentation quality.",
+            "- For inline source comments, require a short local invariant/lifecycle/call-order explanation; flag verbose blocks, task mechanics, retry history, and comments that copy removed README/docs content into production code.",
+            "- Flag Jira/review history, file inventories in module READMEs, duplicated explanations, stale implementation narration, and documentation that preserves how the task was implemented instead of the durable behavior.",
+            "- Do not edit files; keep findings scoped to documentation/comment changes.",
+            "- If findings exist, write the actionable findings to a markdown file and submit it with `--issues-markdown-file <path>`; a local notes file is not delivered unless it is passed to the helper.",
+            "- Emit `skipped_not_needed` only when there are no documentation/comment changes to review.",
+        ]
+    if role_name == "proposal-context-worker":
+        return [
+            "- Treat each routed work item as one bounded proposal-context pass: produce `spec/proposal.md` and the `spec/context/` package, write one terminal result, and stop.",
+            "- Always write `spec/context/feature-overview.md`; write the other `spec/context/*` files only when they contain concrete task-specific findings.",
+            "- Read snapshot description/comments first; use repo sources and local docs only when they are directly needed to ground the proposal/context outputs.",
+            "- Keep the output compact and reusable for the next routed planning step.",
+        ]
+    if role_name == "requirements-clarifier-worker":
+        return [
+            "- Treat this role as a bounded worker for one story session: clarify requirements, ask live follow-up questions when needed, then write the routed result and exit.",
+            "- Start from `spec/proposal.md` and `spec/context/feature-overview.md`; read the rest of `spec/context/*` selectively when it materially helps resolve ambiguity.",
+            "- Preserve existing repository conventions as default constraints. Do not phrase a requirement as a convention override unless Jira/operator input explicitly asks to change that convention.",
+            "- Do not invent exact names, tags, string constants, analytics keys, or identifiers when the source only asks for stable values; ground them in explicit Jira/operator input or existing repository convention, otherwise leave the requirement semantic and ask the operator when the value itself matters.",
+            "- If a risky ambiguity remains, ask the operator directly in the live session instead of guessing.",
+            "- Keep the output compact and reusable for the next routed planning step.",
+        ]
+    if role_name == "acceptance-criteria-worker":
+        return [
+            "- Treat each routed work item as one bounded acceptance-criteria pass: prepare acceptance criteria, write one terminal result, and stop.",
+            "- Start from `spec/proposal.md`, clarified requirements, and `spec/context/feature-overview.md`; read other context files only when they materially affect behavior coverage.",
+            "- Write independently testable criteria in WHEN-THEN-SHALL form and cover happy paths, edge cases, and error scenarios from the clarified requirements.",
+            "- Ensure each meaningful decision from the clarified requirements is covered by at least one criterion before finishing.",
+            "- Keep the output compact and reusable for the next routed planning step.",
+        ]
+    if role_name == "constraints-worker":
+        return [
+            "- Treat each routed work item as one bounded constraints pass: prepare implementation constraints, write one terminal result, and stop.",
+            "- Start from the proposal, clarified requirements, acceptance criteria, and `spec/context/feature-overview.md`; use `implementation-patterns.md`, `documentation.md`, and `preconditions.md` when they materially shape constraints.",
+            "- Treat `spec/context/project.md` as architectural ground truth, cite it instead of restating generic conventions, and keep constraints task-specific and grounded.",
+            "- State convention changes only when Jira/operator input explicitly requests them; otherwise constrain implementation to satisfy the requirement within existing local conventions.",
+            "- For concrete names, tags, string constants, analytics keys, and identifiers, constrain the implementation to explicit Jira/operator values or local repository convention instead of inventing new literal values in the constraints.",
+            "- Express constraints as imperative MUST, MUST NOT, and SHOULD statements across only the applicable categories.",
+            "- Keep the output compact and reusable for the next routed planning step.",
+        ]
+    if role_name == "spec-verifier-worker":
+        return [
+            "- Treat this role as a bounded planning verifier: verify the assembled planning package, write the routed result, and exit only when the package is actually clean.",
+            "- Start from the proposal, requirements, acceptance criteria, constraints, and `spec/context/feature-overview.md`; use the rest of `spec/context/*` selectively when checking planning coherence.",
+            "- Do not treat a missing `spec/spec_verification.md` as a blocker before the verification pass completes; that file is your output when the package is clean.",
+            "- Treat `spec/context/documentation.md`, `implementation-patterns.md`, `preconditions.md`, and `relevant-code.md` as optional supporting inputs unless a specific planning claim depends on them.",
+            "- Flag planning claims that silently override local repository conventions without explicit Jira/operator authority and without updating the relevant convention source or canonical examples.",
+            "- Flag or fix planning package claims that invent exact names, tags, string constants, analytics keys, or identifiers without grounding in Jira/operator input or local repository convention.",
+            "- Fix non-blocking issues autonomously. If critical blockers remain, summarize them clearly, ask the operator direct live questions, and continue verification after answers arrive.",
+            "- Keep the output compact and downstream-oriented so decomposition can start from a verified planning package instead of rediscovering planning gaps.",
+        ]
+    if role_name == "task-decomposer-worker":
+        return [
+            "- Treat each routed work item as one bounded decomposition pass: prepare task decomposition, write one terminal result, and stop.",
+            "- Start from the verified planning package and `spec/context/feature-overview.md`; use `relevant-code.md` and `implementation-patterns.md` when they materially affect task boundaries.",
+            "- Write the decomposition package directly into `plan/` inside your role workspace: mandatory machine-readable `plan/tasks.json` plus self-contained Markdown task files for each task; `plan/index.md` is optional companion context only.",
+            "- Keep ordering in filenames like `plan/NN-*.md`, but do not prefix the human-facing task titles or Markdown headings with `Task 01`, `Task 02`, and similar numbering.",
+            "- `plan/tasks.json` is the source of truth for Jira subtask materialization. It must be valid JSON with `{ \"version\": 1, \"tasks\": [{ \"order\": 1, \"filename\": \"01-something.md\", \"title\": \"Human title\" }] }` and every listed file must exist.",
+            "- Keep the routed output minimal: return a concise summary only after the `plan/` package is fully written.",
+            "- Make every task file self-contained: copy relevant acceptance criteria, constraints, exact repo file paths, and validation steps into the task instead of pointing back to spec files.",
+            "- Do not convert a semantic requirement into a convention override. If the verified planning package does not explicitly authorize changing a local convention, decompose the work so implementation follows the existing convention.",
+            "- Do not introduce exact names, tags, string constants, analytics keys, or identifiers that are absent from the verified planning package; if a stable value is required but not specified, instruct implementation to follow the local repository convention.",
+            "- Keep the output compact and downstream-oriented so execution can start from an explicit decomposition instead of implicit planning assumptions.",
+        ]
+    return [
+        "- Stay within the routed task scope and use ROUTED_WORK.md as the active payload.",
+    ]
+
+
+def _terminal_result_contract(role_name: str) -> list[str]:
+    helper = 'bash "$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh"'
+    common = [
+        "- Replace `<work_item_id>` with the exact value from `HYDRATION.json` when present.",
+        "- Keep summaries short and operator-readable.",
+    ]
+    if role_name in {"convention-reviewer", "requirements-reviewer"}:
+        return [
+            "- Clean review:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type passed --summary \"Review passed\"`",
+            "- Review with findings:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Review found issues\" --issues-markdown-file <path>`",
+            "- Non-converging correction loop that genuinely needs operator decision:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type blocked_review_cycle --summary \"Review cycle blocked\" --issues-markdown-file <path>`",
+            *common,
+        ]
+    if role_name == "documentation-reviewer":
+        return [
+            "- Clean documentation review:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type passed --summary \"Documentation review passed\"`",
+            "- No documentation/comment changes to review:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type skipped_not_needed --summary \"No documentation review needed\"`",
+            "- Documentation findings:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Documentation review found issues\" --issues-markdown-file <path>`",
+            *common,
+        ]
+    if role_name == "verification-coordinator":
+        return [
+            "- Verification passed:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --result passed --summary \"Verification passed\"`",
+            "- Verification failed:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --result failed --summary \"Verification failed\" --failure \"<failed check>\"`",
+            "- Non-converging verification loop that genuinely needs operator decision:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type blocked_verification_cycle --summary \"Verification cycle blocked\" --details \"<why blocked>\"`",
+            *common,
+        ]
+    if role_name == "implementer":
+        return [
+            "- Implementation completed:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --summary \"Implementation completed\"`",
+            "- Subtask implementation completed:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --subtask-key <subtask_key> --summary \"Subtask completed\"`",
+            "- Use the subtask completion command only for routed subtask implementation work; replace `<subtask_key>` with the exact value from `HYDRATION.json`.",
+            "- If a correction request is satisfied by confirming that no source change is needed, or by explaining that the verifier/reviewer should rerun after external regeneration, submit `completed`; do not use `--needs-operator-input` just to hand work back to a downstream gate.",
+            "- Implementation could not complete:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Implementation blocked\" --details \"<what prevented completion>\"`",
+            "- Operator decision required before this implementation/correction can continue:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Operator decision needed\" --details \"<why blocked>\" --needs-operator-input`",
+            "- Reasoned disagreement with a correction/review request:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Operator decision needed\" --details \"<why the requested correction should not be applied as-is>\" --needs-operator-input --conflict-point \"<what conflicts>\" --reviewer-premise \"<premise being challenged>\" --preferred-direction \"<recommended direction>\" --requested-decision \"<decision needed>\" --supporting-evidence \"<optional grounded evidence>\"`",
+            *common,
+        ]
+    if role_name == "doc-harvest-worker":
+        return [
+            "- Documentation updated:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --summary \"Documentation updated\"`",
+            "- No documentation update needed:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type skipped_not_needed --summary \"No documentation update needed\"`",
+            *common,
+        ]
+    if role_name == "spec-verifier-worker":
+        return [
+            "- Planning package verified:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type passed --summary \"Planning package verified\" --verified-focus \"<verified scope>\"`",
+            "- Planning package has blockers:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Planning verification failed\" --blocker-question \"<question or blocker>\"`",
+            *common,
+        ]
+    if role_name in {
+        "proposal-context-worker",
+        "requirements-clarifier-worker",
+        "acceptance-criteria-worker",
+        "constraints-worker",
+        "task-decomposer-worker",
+    }:
+        return [
+            "- Planning step completed:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type completed --summary \"Planning step completed\"`",
+            "- Planning step needs operator input:",
+            f"  `{helper} --work-item-id <work_item_id> --output-type failed --summary \"Planning blocked\" --needs-operator-input --blocker-question \"<question>\"`",
+            *common,
+        ]
+    return [
+        f"- Use `{helper} --work-item-id <work_item_id> --output-type completed --summary \"Completed\"` for normal completion.",
+        *common,
+    ]
+
+
+def _structured_terminal_markers(role_name: str) -> list[str]:
+    common = [
+        "- These markers are parsed from terminal output. Keep each marker on one line and put exactly one JSON object after the marker prefix.",
+        "- Replace example `work_item_id` value `123` with the numeric `work_item_id` from `HYDRATION.json` when present.",
+        "- Do not invent marker names, wrapper keys, markdown formats, or extra schema variants.",
+        "- Do not use terminal markers for normal pass/fail/completed/skipped outcomes; use the helper commands in `Terminal Result Contract`.",
+        "- Progress marker format:",
+        '  `SDD_PROGRESS: {"status":"in_progress","message":"<short status>","work_item_id":123}`',
+        "- Runtime/tooling blocker marker format:",
+        '  `SDD_ERROR: {"summary":"<short summary>","details":"<specific failure>","needs_operator_input":false,"work_item_id":123}`',
+        "- Operator-actionable runtime blocker marker format:",
+        '  `SDD_ERROR: {"summary":"<short summary>","details":"<what the operator must do>","needs_operator_input":true,"work_item_id":123}`',
+        "- Use `SDD_ERROR` only for runtime/protocol/tooling blockers where the helper cannot represent or deliver the current outcome.",
+    ]
+    if role_name == "implementer":
+        common.append(
+            "- For implementation blockers and operator decisions, prefer the `failed` helper command with `--needs-operator-input`; do not use `SDD_ERROR` as routed work delivery."
+        )
+    return common
+
+
+def build_role_agents_md(
+    *,
+    role_name: str,
+    task_key: str,
+    repo_root: Path,
+    workdir_root: Path,
+    role_directory: Path,
+) -> str:
+    relevant_paths = [
+        line.format(
+            repo_root=repo_root,
+            task_snapshot_root=_task_snapshot_root(workdir_root, task_key),
+            task_repo_root=_task_repo_root(workdir_root, task_key),
+            task_runtime_root=_task_runtime_root(workdir_root, task_key),
+            task_tmp_root=_task_tmp_root(workdir_root, task_key),
+            task_artifacts_root=_task_artifacts_root(workdir_root, task_key),
+        )
+        for line in _role_relevant_paths(role_name)
+    ]
+    responsibility = _role_responsibility(role_name)
+    operating_rules = _role_operating_rules(role_name)
+    if task_key.startswith("QA-"):
+        operating_rules += [
+            f"- This is a mobile e2e task. Read `{repo_root}/docs/e2e-workflow.md` for the factory execution/evidence contract.",
+            "- The factory contract defines the e2e workflow and verification evidence; implementation conventions come from the task checkout. Do not load external workspace e2e docs, skills, helper scripts or configuration to run this workflow.",
+            "- Repository conventions in the task checkout remain authoritative. Keep the shared main checkout on master; implement only in the task repo worktree.",
+            "- The verification coordinator prepares task-specific commands, environment, collection scope and check identifiers in spec/verification-strategy.json e2e.platforms from the current checkout. Task-local integration helpers belong in the snapshot and must be listed in e2e.support_files. Preserve existing bound recipes during an operator-accepted continuation.",
+            "- Use clean master app artifacts by default. Select another app only when Jira/operator instructions explicitly specify it; record its path and source SHA in the verification strategy.",
+            "- Follow the current project's implementation and test conventions; do not infer its framework layout, case-ID rules, fixtures or selectors from factory defaults. Local verification does not authorize external reporting, CI launches or MR merges.",
+            "- For QA verification the e2e strategy supersedes the iOS/Android build/test/lint fallback: execute the routed e2e-verify.sh command, inspect e2e-verdict.json and its logs, then submit passed with --result passed for a passed or accepted_with_warnings verdict, or failed with --result failed for a failed or blocked verdict through write-result.sh. Only recorded operator decisions can accept specific baseline failures for the current gate; the native runner verifies every remaining scenario and preserves warnings in the report. The coordinator routes infrastructure blockers to recovery and evidenced baseline failures to an operator decision; do not use blocked_verification_cycle for either. Do not fabricate evidence, create operator decisions, or skip Appium runs.",
+            "- Compare task and master versions of the tests on the same app build. The runner re-runs failures and records the comparison. Infrastructure or baseline failures block verification; only verified test regressions enter the implementation correction loop.",
+            "- Existing smoke plus retained scenarios verify a deletion; collection/import checks cover both platforms when shared page objects change. New/changed tests and neighbours must pass again after a fresh install.",
+        ]
+    terminal_result_contract = _terminal_result_contract(role_name)
+    structured_terminal_markers = _structured_terminal_markers(role_name)
+    return "\n".join(
+        [
+            f"# {role_name} AGENTS",
+            "",
+            "## Role",
+            "",
+            f"- Role name: `{role_name}`",
+            f"- Task session: `{task_key}`",
+            "",
+            "## Responsibility",
+            "",
+            *responsibility,
+            "",
+            "## Relevant Paths",
+            "",
+            *relevant_paths,
+            "",
+            "## Runtime Rules",
+            "",
+            "- Start from this role workspace and keep your work scoped to the routed task session.",
+            "- Read this file once when the role starts. Do not reread it on every routed work item unless context was compacted or role boundaries are unclear.",
+            "- Use HYDRATION.json and routed work instructions as the current task payload.",
+            "- Treat this file as durable role context; treat routed handoff prompts as per-work instructions.",
+            "- Paths written as `spec/...`, `review/...`, or `plan/...` refer to the task snapshot metadata root listed above, not to this role workspace current directory.",
+            "- When hydration or the relevant-path list provides explicit absolute `*_path` values, use those exact paths directly instead of reconstructing task paths relative to the current directory.",
+            "- For terminal outcomes, call `bash \"$SDD_FACTORY_REPO_ROOT/scripts/write-result.sh\" --work-item-id <work_item_id> ...` instead of hand-writing JSON or managing terminal files directly.",
+            "- A terminal outcome is delivered only after that exact helper command has run with the current routed `work_item_id` and exited 0. Do not say or imply that work was submitted, delivered, completed, or handed off until you have observed that successful helper exit.",
+            "- If you realize you described completion but did not run the helper, run the helper immediately for the current routed `work_item_id`; do not wait for a fresh dispatch and do not treat a plain chat summary as delivery.",
+            "- For markdown payloads that contain backticks, parentheses, or paths with spaces, write the markdown to a file first and pass it with helper file flags such as `--issues-markdown-file <path>` instead of inline shell arguments.",
+            "- When passing a generated file to the helper, use the literal path printed by the file-creation command or assign and use the shell variable inside one same command; do not rely on shell variables from earlier tool calls.",
+            "- Do not call `scripts/write-result.py` directly, do not choose terminal output paths yourself, and do not try to recreate fallback files manually.",
+            "- Do not override `SDD_FACTORY_BACKEND_URL`, `SDD_FACTORY_BACKEND_HOST`, or `SDD_FACTORY_BACKEND_PORT`, and do not debug transport or fallback behavior from inside the role.",
+            "- When the routed hydration payload includes `work_item_id`, pass that same `work_item_id` into the helper unchanged.",
+            "- After the helper exits successfully, stop immediately and do not submit the same work item again.",
+            "- If the helper exits non-zero or the routed stage has already moved on, stop and wait for fresh routed work; do not retry through alternate scripts, alternate environment variables, or manual files.",
+            "",
+            "## Operating Rules",
+            "",
+            *operating_rules,
+            "",
+            "## Structured Terminal Markers",
+            "",
+            *structured_terminal_markers,
+            "",
+            "## Terminal Result Contract",
+            "",
+            *terminal_result_contract,
+        ]
+    ) + "\n"
+
+
+class RoleWorkspaceManager:
+    """Create isolated persistent workspaces for long-running roles."""
+
+    def __init__(self, runtime_root: Path, repo_root: Path, workdir_root: Path) -> None:
+        self.runtime_root = runtime_root
+        self.repo_root = repo_root
+        self.workdir_root = workdir_root
+
+    def session_root(self, task_key: str) -> Path:
+        return _task_runtime_root(self.workdir_root, task_key) / "role-workspaces"
+
+    def role_directory(self, task_key: str, role_name: str) -> Path:
+        return self.session_root(task_key) / role_name
+
+    def ensure_role_workspace(self, task_key: str, role_name: str) -> RoleWorkspace:
+        _ensure_task_output_directories(self.workdir_root, task_key)
+        directory = self.role_directory(task_key, role_name)
+        directory.mkdir(parents=True, exist_ok=True)
+
+        agents_path = directory / "AGENTS.md"
+        agents_path.write_text(
+            build_role_agents_md(
+                role_name=role_name,
+                task_key=task_key,
+                repo_root=self.repo_root,
+                workdir_root=self.workdir_root,
+                role_directory=directory,
+            )
+        )
+
+        claude_path = directory / "CLAUDE.md"
+        if claude_path.exists() or claude_path.is_symlink():
+            claude_path.unlink()
+        relative_target = os.path.relpath(agents_path, start=directory)
+        claude_path.symlink_to(relative_target)
+
+        return RoleWorkspace(
+            role_name=role_name,
+            directory=directory,
+            agents_path=agents_path,
+            claude_path=claude_path,
+        )

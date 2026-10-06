@@ -1,0 +1,910 @@
+"""Operator action routes."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+import os
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from backend.api.routes_sessions import to_session_response
+from backend.api.schemas import (
+    BootstrapGuidanceResponse,
+    CompleteDocHarvestRequest,
+    CompleteDocHarvestResponse,
+    CleanupTaskRequest,
+    CleanupTaskResponse,
+    SkipCurrentSubtaskRequest,
+    SkipCurrentSubtaskResponse,
+    EnvironmentDoctorResponse,
+    RuntimeCapabilitiesResponse,
+    RuntimeDefaultsResponse,
+    UpdateRuntimeDefaultsRequest,
+    CreateSubtasksFromPlanRequest,
+    CreateSubtasksFromPlanResponse,
+    RefreshSnapshotRequest,
+    RefreshSnapshotResponse,
+    RefreshSubtaskStateRequest,
+    RefreshSubtaskStateResponse,
+    CreateMrRequest,
+    CreateMrResponse,
+    ReviewMessagePreviewRequest,
+    ReviewMessagePreviewResponse,
+    ReopenFromQaRequest,
+    ReopenFromQaResponse,
+    RedirectSessionRequest,
+    RedirectSessionResponse,
+    RestartRuntimeRoleRequest,
+    RestartRuntimeRoleResponse,
+    RestartRuntimeSessionRequest,
+    RestartRuntimeSessionResponse,
+    StopRuntimeRoleRequest,
+    StopRuntimeRoleResponse,
+    StopRuntimeSessionRequest,
+    StopRuntimeSessionResponse,
+    LoopRunnerControlResponse,
+    LoopRunnerStatusResponse,
+    PauseSessionRequest,
+    PauseSessionResponse,
+    PollSessionOutputRequest,
+    PollSessionOutputResponse,
+    RetrySessionRequest,
+    ResolveE2EBaselineRequest,
+    ResolveE2EBaselineResponse,
+    RetrySessionResponse,
+    LaunchIOSAppRequest,
+    LaunchIOSAppResponse,
+    SendOperatorRuntimeInputRequest,
+    SendOperatorRuntimeInputResponse,
+    SendToTestRequest,
+    SendToTestResponse,
+    StartSubtaskGraphRequest,
+    StartSubtaskGraphResponse,
+    ResumeSessionRequest,
+    ResumeSessionResponse,
+    RunLoopOnceResponse,
+)
+from backend.coordinator.artifacts import write_text_artifact
+from backend.coordinator.intake import IntakeError
+from backend.dependencies import AppDependencies
+from backend.tools.command_runner import CommandRunner
+from backend.runtime_defaults import load_runtime_defaults, save_runtime_defaults
+from factory.doctor.bootstrap_guidance import build_bootstrap_guidance
+from factory.doctor.environment_doctor import build_report
+from factory.doctor.runtime_capabilities import build_runtime_capabilities
+
+router = APIRouter(prefix="/operator", tags=["operator"])
+
+DEFAULT_REVIEW_MESSAGE_CACHE_TTL_SECONDS = 600
+
+
+def get_dependencies(request: Request) -> AppDependencies:
+    return request.app.state.dependencies
+
+
+def _repo_root_from_dependencies(dependencies: AppDependencies) -> Path:
+    if dependencies.config is not None:
+        return dependencies.config.repo_root
+    coordinator = dependencies.coordinator_service
+    if coordinator.role_launcher_manager is not None:
+        return coordinator.role_launcher_manager.repo_root
+    if coordinator.role_workspace_manager is not None:
+        return coordinator.role_workspace_manager.repo_root
+    return Path(__file__).resolve().parents[2]
+
+
+def _artifacts_root_from_dependencies(dependencies: AppDependencies) -> Path:
+    if dependencies.config is not None:
+        return dependencies.config.workdir_root / "factory-artifacts"
+    coordinator = dependencies.coordinator_service
+    if coordinator.artifacts_root is not None:
+        return coordinator.artifacts_root
+    if coordinator.workdir_root is not None:
+        return coordinator.workdir_root / "factory-artifacts"
+    return _repo_root_from_dependencies(dependencies) / "workdir" / "factory-artifacts"
+
+
+def _review_message_cache_ttl_seconds() -> int:
+    raw_value = os.environ.get("REVIEW_MESSAGE_CACHE_TTL_SECONDS", "").strip()
+    if not raw_value:
+        return DEFAULT_REVIEW_MESSAGE_CACHE_TTL_SECONDS
+    try:
+        ttl_seconds = int(raw_value)
+    except ValueError:
+        return DEFAULT_REVIEW_MESSAGE_CACHE_TTL_SECONDS
+    return max(0, ttl_seconds)
+
+
+def _artifact_created_at_utc(created_at: object) -> datetime | None:
+    if created_at is None:
+        return None
+    if isinstance(created_at, datetime):
+        value = created_at
+    elif isinstance(created_at, str):
+        try:
+            value = datetime.fromisoformat(created_at)
+        except ValueError:
+            return None
+    else:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _cached_review_message_preview(
+    dependencies: AppDependencies,
+    *,
+    session_id: int,
+    platform: str,
+    mr_id: str,
+) -> tuple[str, bool, str | None] | None:
+    ttl_seconds = _review_message_cache_ttl_seconds()
+    for artifact in reversed(dependencies.artifact_repository.list_for_session(session_id)):
+        if artifact.artifact_type != "review_message_preview":
+            continue
+        metadata = artifact.metadata or {}
+        if metadata.get("platform") != platform or metadata.get("mr_id") != mr_id:
+            continue
+        artifact_path = Path(artifact.path)
+        if not artifact_path.exists() or not artifact_path.is_file():
+            continue
+        try:
+            text = artifact_path.read_text().strip()
+        except OSError:
+            continue
+        created_at = _artifact_created_at_utc(artifact.created_at)
+        stale = False
+        refreshed_at = None
+        if created_at is not None:
+            refreshed_at = created_at.isoformat()
+            stale = ttl_seconds > 0 and (datetime.now(UTC) - created_at).total_seconds() >= ttl_seconds
+        return text, stale, refreshed_at
+    return None
+
+
+def _store_review_message_preview(
+    dependencies: AppDependencies,
+    *,
+    session_id: int,
+    task_key: str,
+    platform: str,
+    mr_id: str,
+    text: str,
+) -> None:
+    artifact_path = write_text_artifact(
+        _artifacts_root_from_dependencies(dependencies),
+        task_key,
+        "review-message-preview",
+        f"mr-{mr_id}.txt",
+        text.strip() + "\n",
+    )
+    dependencies.artifact_repository.create(
+        session_id=session_id,
+        stage_name="review-message-preview",
+        artifact_type="review_message_preview",
+        path=str(artifact_path),
+        metadata={
+            "task_key": task_key,
+            "platform": platform,
+            "mr_id": mr_id,
+            "cached": True,
+            "preview_text": text.strip(),
+        },
+    )
+
+
+def _build_review_message_preview(
+    *,
+    dependencies: AppDependencies,
+    session_id: int,
+    mr_id: str,
+    force_refresh: bool,
+) -> ReviewMessagePreviewResponse:
+    session = dependencies.session_repository.get_by_id(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+    normalized_mr_id = mr_id.strip()
+    if not normalized_mr_id:
+        raise HTTPException(status_code=400, detail="MR id is required")
+
+    repo_root = _repo_root_from_dependencies(dependencies)
+    platform = _platform_for_task_key(session.task_key)
+    ttl_seconds = _review_message_cache_ttl_seconds()
+    if not force_refresh:
+        cached = _cached_review_message_preview(
+            dependencies,
+            session_id=session.id,
+            platform=platform,
+            mr_id=normalized_mr_id,
+        )
+        if cached is not None:
+            cached_text, stale, refreshed_at = cached
+            return ReviewMessagePreviewResponse(
+                available=True,
+                platform=platform,
+                mr_id=normalized_mr_id,
+                text=cached_text,
+                cached=True,
+                stale=stale,
+                refreshed_at=refreshed_at,
+                ttl_seconds=ttl_seconds,
+            )
+
+    result = CommandRunner().run(
+        ["bash", "scripts/request-review-message.sh", platform, normalized_mr_id],
+        cwd=repo_root,
+    )
+    if not result.ok:
+        detail = result.stderr.strip() or result.stdout.strip() or "Failed to build review message preview"
+        raise HTTPException(status_code=400, detail=detail)
+
+    text = result.stdout.strip()
+    _store_review_message_preview(
+        dependencies,
+        session_id=session.id,
+        task_key=session.task_key,
+        platform=platform,
+        mr_id=normalized_mr_id,
+        text=text,
+    )
+
+    return ReviewMessagePreviewResponse(
+        available=True,
+        platform=platform,
+        mr_id=normalized_mr_id,
+        text=text,
+        cached=False,
+        stale=False,
+        refreshed_at=datetime.now(UTC).isoformat(),
+        ttl_seconds=ttl_seconds,
+    )
+
+
+def _platform_for_task_key(task_key: str) -> str:
+    if task_key.startswith("QA-"):
+        return "e2e"
+    return "android" if task_key.startswith("ANDR-") else "ios"
+
+
+@router.get("/environment-doctor", response_model=EnvironmentDoctorResponse)
+def get_environment_doctor(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> EnvironmentDoctorResponse:
+    repo_root = _repo_root_from_dependencies(dependencies)
+    report = build_report(repo_root=repo_root)
+    return EnvironmentDoctorResponse(**report)
+
+
+def get_bootstrap_guidance(
+    dependencies: AppDependencies,
+    request: Request | None = None,
+) -> BootstrapGuidanceResponse:
+    repo_root = _repo_root_from_dependencies(dependencies)
+    report = build_report(repo_root=repo_root)
+    backend_base = (
+        str(request.base_url).rstrip("/")
+        if request is not None
+        else f"http://{os.environ.get('SDD_FACTORY_BACKEND_HOST', '127.0.0.1')}:{os.environ.get('SDD_FACTORY_BACKEND_PORT', '8000')}"
+    )
+    ui_host = os.environ.get("SDD_FACTORY_UI_HOST", "127.0.0.1")
+    ui_port = os.environ.get("SDD_FACTORY_UI_PORT", "4173")
+    guidance = build_bootstrap_guidance(
+        report,
+        backend_url=backend_base,
+        ui_url=f"http://{ui_host}:{ui_port}",
+    )
+    return BootstrapGuidanceResponse(**guidance)
+
+
+@router.get("/bootstrap-guidance", response_model=BootstrapGuidanceResponse)
+def get_bootstrap_guidance_route(
+    request: Request,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> BootstrapGuidanceResponse:
+    return get_bootstrap_guidance(
+        dependencies=dependencies,
+        request=request,
+    )
+
+
+@router.get("/runtime-capabilities", response_model=RuntimeCapabilitiesResponse)
+def get_runtime_capabilities(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RuntimeCapabilitiesResponse:
+    repo_root = _repo_root_from_dependencies(dependencies)
+    capabilities = build_runtime_capabilities(repo_root=repo_root)
+    return RuntimeCapabilitiesResponse(**capabilities)
+
+
+@router.get("/runtime-defaults", response_model=RuntimeDefaultsResponse)
+def get_runtime_defaults(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RuntimeDefaultsResponse:
+    repo_root = _repo_root_from_dependencies(dependencies)
+    defaults = load_runtime_defaults(repo_root)
+    return RuntimeDefaultsResponse(**defaults)
+
+
+@router.post("/runtime-defaults", response_model=RuntimeDefaultsResponse)
+def update_runtime_defaults(
+    payload: UpdateRuntimeDefaultsRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RuntimeDefaultsResponse:
+    repo_root = _repo_root_from_dependencies(dependencies)
+    defaults = save_runtime_defaults(
+        repo_root,
+        default_runner=payload.default_runner,
+        role_defaults={
+            role_name: {
+                "runner": value.runner,
+                "model": value.model,
+                "effort": value.effort,
+            }
+            for role_name, value in payload.role_defaults.items()
+        },
+        policy_defaults=payload.policy_defaults,
+        e2e_defaults=payload.e2e_defaults.model_dump() if payload.e2e_defaults is not None else None,
+    )
+    return RuntimeDefaultsResponse(**defaults)
+
+
+@router.post("/review-message-preview", response_model=ReviewMessagePreviewResponse)
+def review_message_preview(
+    payload: ReviewMessagePreviewRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> ReviewMessagePreviewResponse:
+    return _build_review_message_preview(
+        dependencies=dependencies,
+        session_id=payload.session_id,
+        mr_id=payload.mr_id,
+        force_refresh=False,
+    )
+
+
+@router.post("/review-message-preview/refresh", response_model=ReviewMessagePreviewResponse)
+def refresh_review_message_preview(
+    payload: ReviewMessagePreviewRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> ReviewMessagePreviewResponse:
+    return _build_review_message_preview(
+        dependencies=dependencies,
+        session_id=payload.session_id,
+        mr_id=payload.mr_id,
+        force_refresh=True,
+    )
+
+
+@router.post("/pause-session", response_model=PauseSessionResponse)
+def pause_session(
+    payload: PauseSessionRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> PauseSessionResponse:
+    try:
+        session, event = dependencies.coordinator_service.pause_session(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return PauseSessionResponse(
+        paused=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+    )
+
+
+@router.post("/resume-session", response_model=ResumeSessionResponse)
+def resume_session(
+    payload: ResumeSessionRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> ResumeSessionResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.resume_session(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ResumeSessionResponse(
+        resumed=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event is not None else None,
+    )
+
+
+@router.post("/send-runtime-input", response_model=SendOperatorRuntimeInputResponse)
+def send_runtime_input(
+    payload: SendOperatorRuntimeInputRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> SendOperatorRuntimeInputResponse:
+    try:
+        session, event = dependencies.coordinator_service.send_operator_runtime_input(
+            session_id=payload.session_id,
+            text=payload.text,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return SendOperatorRuntimeInputResponse(
+        sent=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+    )
+
+
+@router.post("/retry-session", response_model=RetrySessionResponse)
+def retry_session(
+    payload: RetrySessionRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RetrySessionResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.retry_session(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return RetrySessionResponse(
+        retried=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type,
+    )
+
+
+@router.post("/resolve-e2e-baseline", response_model=ResolveE2EBaselineResponse)
+def resolve_e2e_baseline(
+    payload: ResolveE2EBaselineRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> ResolveE2EBaselineResponse:
+    try:
+        session, event, followup = dependencies.coordinator_service.resolve_e2e_baseline(**payload.model_dump())
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return ResolveE2EBaselineResponse(resolved=True, session=to_session_response(session),
+                                      event_type=event.event_type, followup_event_type=followup.event_type)
+
+
+@router.post(
+    "/redirect-session",
+    response_model=RedirectSessionResponse,
+    include_in_schema=False,
+)
+def redirect_session(
+    payload: RedirectSessionRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RedirectSessionResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.redirect_session(
+            session_id=payload.session_id,
+            target_role_name=payload.target_role_name,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return RedirectSessionResponse(
+        redirected=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type,
+    )
+
+
+@router.post("/stop-runtime-role", response_model=StopRuntimeRoleResponse)
+def stop_runtime_role(
+    payload: StopRuntimeRoleRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> StopRuntimeRoleResponse:
+    try:
+        session, event = dependencies.coordinator_service.stop_runtime_role(
+            session_id=payload.session_id,
+            role_name=payload.role_name,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return StopRuntimeRoleResponse(
+        stopped=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+    )
+
+
+@router.post("/restart-runtime-role", response_model=RestartRuntimeRoleResponse)
+def restart_runtime_role(
+    payload: RestartRuntimeRoleRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RestartRuntimeRoleResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.restart_runtime_role(
+            session_id=payload.session_id,
+            role_name=payload.role_name,
+            refresh_runtime_config=payload.refresh_runtime_config,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    dependencies.loop_runner.start()
+
+    return RestartRuntimeRoleResponse(
+        restarted=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
+@router.post("/stop-runtime-session", response_model=StopRuntimeSessionResponse)
+def stop_runtime_session(
+    payload: StopRuntimeSessionRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> StopRuntimeSessionResponse:
+    try:
+        session, event = dependencies.coordinator_service.stop_runtime_session(
+            session_id=payload.session_id,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return StopRuntimeSessionResponse(
+        stopped=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+    )
+
+
+@router.post("/restart-runtime-session", response_model=RestartRuntimeSessionResponse)
+def restart_runtime_session(
+    payload: RestartRuntimeSessionRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RestartRuntimeSessionResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.restart_runtime_session(
+            session_id=payload.session_id,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    dependencies.loop_runner.start()
+
+    return RestartRuntimeSessionResponse(
+        restarted=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
+@router.post("/cleanup-task", response_model=CleanupTaskResponse)
+def cleanup_task(
+    payload: CleanupTaskRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> CleanupTaskResponse:
+    try:
+        result = dependencies.coordinator_service.cleanup_task(
+            session_id=payload.session_id,
+            cleanup_mode=payload.cleanup_mode,
+            force=payload.force,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    session = result.get("session")
+    return CleanupTaskResponse(
+        cleaned=bool(result["cleaned"]),
+        deleted_session=bool(result["deleted_session"]),
+        cleanup_mode=str(result["cleanup_mode"]),
+        task_key=str(result["task_key"]),
+        jira_status=(
+            str(result["jira_status"]) if result.get("jira_status") is not None else None
+        ),
+        full_cleanup_allowed=bool(result["full_cleanup_allowed"]),
+        removed_paths=[str(path) for path in result["removed_paths"]],
+        session=to_session_response(session) if session is not None else None,
+    )
+
+
+@router.post("/create-mr", response_model=CreateMrResponse)
+def create_mr(
+    payload: CreateMrRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> CreateMrResponse:
+    try:
+        session, event, mr_url = dependencies.coordinator_service.create_mr_handoff(
+            session_id=payload.session_id
+        )
+        followup_event_type = None
+        if event.event_type == "mr_handoff_completed":
+            session, followup_event = dependencies.coordinator_service.send_to_test_handoff(
+                session_id=session.id
+            )
+            followup_event_type = followup_event.event_type
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return CreateMrResponse(
+        handed_off=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event_type,
+        mr_url=mr_url,
+    )
+
+
+@router.post(
+    "/complete-doc-harvest",
+    response_model=CompleteDocHarvestResponse,
+    include_in_schema=False,
+)
+def complete_doc_harvest(
+    payload: CompleteDocHarvestRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> CompleteDocHarvestResponse:
+    try:
+        session, event = dependencies.coordinator_service.complete_doc_harvest(
+            session_id=payload.session_id,
+            summary=payload.summary,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return CompleteDocHarvestResponse(
+        completed=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+    )
+
+
+@router.post("/send-to-test", response_model=SendToTestResponse)
+def send_to_test(
+    payload: SendToTestRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> SendToTestResponse:
+    try:
+        session, event = dependencies.coordinator_service.send_to_test_handoff(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return SendToTestResponse(
+        handed_off=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+    )
+
+
+@router.post("/launch-ios-app", response_model=LaunchIOSAppResponse)
+def launch_ios_app(
+    payload: LaunchIOSAppRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> LaunchIOSAppResponse:
+    try:
+        session, event = dependencies.coordinator_service.launch_ios_app(
+            session_id=payload.session_id,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return LaunchIOSAppResponse(
+        launched=event.event_type == "ios_app_launch_completed",
+        session=to_session_response(session),
+        event_type=event.event_type,
+    )
+
+
+@router.post("/start-subtask-graph", response_model=StartSubtaskGraphResponse)
+def start_subtask_graph(
+    payload: StartSubtaskGraphRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> StartSubtaskGraphResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.start_subtask_graph(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return StartSubtaskGraphResponse(
+        started=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type,
+    )
+
+
+@router.post("/create-subtasks-from-plan", response_model=CreateSubtasksFromPlanResponse)
+def create_subtasks_from_plan(
+    payload: CreateSubtasksFromPlanRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> CreateSubtasksFromPlanResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.create_subtasks_from_plan(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return CreateSubtasksFromPlanResponse(
+        created=event.event_type == "jira_subtasks_created",
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
+@router.post("/refresh-subtask-state", response_model=RefreshSubtaskStateResponse)
+def refresh_subtask_state(
+    payload: RefreshSubtaskStateRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RefreshSubtaskStateResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.refresh_subtask_state(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return RefreshSubtaskStateResponse(
+        refreshed=event.event_type == "subtask_state_refreshed_by_operator",
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
+@router.post("/skip-current-subtask", response_model=SkipCurrentSubtaskResponse)
+def skip_current_subtask(
+    payload: SkipCurrentSubtaskRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> SkipCurrentSubtaskResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.skip_current_subtask(
+            session_id=payload.session_id,
+            reason=payload.reason,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return SkipCurrentSubtaskResponse(
+        skipped=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
+@router.post("/refresh-snapshot", response_model=RefreshSnapshotResponse)
+def refresh_snapshot(
+    payload: RefreshSnapshotRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RefreshSnapshotResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.refresh_snapshot_and_continue(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return RefreshSnapshotResponse(
+        refreshed=event.event_type == "snapshot_refreshed_by_operator",
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
+@router.post("/reopen-from-qa", response_model=ReopenFromQaResponse)
+def reopen_from_qa(
+    payload: ReopenFromQaRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> ReopenFromQaResponse:
+    try:
+        session, event, followup_event = dependencies.coordinator_service.reopen_from_qa(
+            session_id=payload.session_id,
+            comment_text=payload.comment_text,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ReopenFromQaResponse(
+        reopened=True,
+        session=to_session_response(session),
+        event_type=event.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+    )
+
+
+@router.post(
+    "/poll-session-output",
+    response_model=PollSessionOutputResponse,
+    include_in_schema=False,
+)
+def poll_session_output(
+    payload: PollSessionOutputRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> PollSessionOutputResponse:
+    try:
+        session, event, role_count, chunk_count = dependencies.coordinator_service.poll_session_output(
+            session_id=payload.session_id
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return PollSessionOutputResponse(
+        polled=chunk_count > 0,
+        session=to_session_response(session),
+        role_count=role_count,
+        chunk_count=chunk_count,
+        event_type=event.event_type if event else None,
+    )
+
+
+@router.post(
+    "/run-loop-once",
+    response_model=RunLoopOnceResponse,
+    include_in_schema=False,
+)
+def run_loop_once(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> RunLoopOnceResponse:
+    event, session_count, chunk_count = dependencies.coordinator_service.run_loop_once()
+    return RunLoopOnceResponse(
+        ran=session_count > 0,
+        session_count=session_count,
+        chunk_count=chunk_count,
+        event_type=event.event_type if event else None,
+    )
+
+
+def to_loop_status_response(status) -> LoopRunnerStatusResponse:
+    return LoopRunnerStatusResponse(
+        running=status.running,
+        interval_seconds=status.interval_seconds,
+        tick_count=status.tick_count,
+        last_session_count=status.last_session_count,
+        last_chunk_count=status.last_chunk_count,
+    )
+
+
+@router.get(
+    "/loop-status",
+    response_model=LoopRunnerStatusResponse,
+    include_in_schema=False,
+)
+def loop_status(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> LoopRunnerStatusResponse:
+    return to_loop_status_response(dependencies.loop_runner.status())
+
+
+@router.post(
+    "/start-loop",
+    response_model=LoopRunnerControlResponse,
+    include_in_schema=False,
+)
+def start_loop(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> LoopRunnerControlResponse:
+    changed = dependencies.loop_runner.start()
+    return LoopRunnerControlResponse(
+        changed=changed,
+        status=to_loop_status_response(dependencies.loop_runner.status()),
+    )
+
+
+@router.post(
+    "/stop-loop",
+    response_model=LoopRunnerControlResponse,
+    include_in_schema=False,
+)
+def stop_loop(
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> LoopRunnerControlResponse:
+    changed = dependencies.loop_runner.stop()
+    return LoopRunnerControlResponse(
+        changed=changed,
+        status=to_loop_status_response(dependencies.loop_runner.status()),
+    )

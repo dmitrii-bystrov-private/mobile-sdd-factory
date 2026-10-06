@@ -1,0 +1,12465 @@
+"""Top-level coordinator facade."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from functools import wraps
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import threading
+import time
+from pathlib import Path
+
+from backend.api.sse import SessionEventBus
+from backend.coordinator.artifacts import write_text_artifact
+from backend.coordinator.intake import IntakeError, classify_task_readiness
+from backend.coordinator.subtasks import completed_subtasks, read_snapshot_subtasks, unresolved_subtasks
+from backend.coordinator.verification_strategy import materialize_verification_strategy
+from backend.coordinator.hydration import build_role_hydration
+from backend.models.event import Event
+from backend.models.artifact import Artifact
+from backend.models.dispatch import Dispatch
+from backend.models.enums import DispatchStatus, RoleStatus, SessionStatus, WorkItemStatus
+from backend.models.session import Session
+from backend.models.role import Role
+from backend.models.work_item import WorkItem
+from backend.role_runtime_config import normalize_role_runtime_config
+from backend.roles.prompts import role_handoff_prompt
+from backend.roles.launcher import RoleLauncherManager
+from backend.roles.agent_trust import remove_task_role_workspace_trust
+from backend.roles.workspace import RoleWorkspaceManager
+from backend.roles.contracts import (
+    ALLOWED_STAGE_ROLE_TARGETS,
+    CONVENTION_REVIEWER_ROLE,
+    DOCUMENTATION_REVIEWER_ROLE,
+    DOC_HARVEST_ROLE,
+    PERSISTENT_SESSION_ROLES,
+    ACCEPTANCE_CRITERIA_WORKER_ROLE,
+    CONSTRAINTS_WORKER_ROLE,
+    PROPOSAL_CONTEXT_WORKER_ROLE,
+    REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+    REQUIREMENTS_REVIEWER_ROLE,
+    SPEC_VERIFIER_WORKER_ROLE,
+    TASK_DECOMPOSER_WORKER_ROLE,
+    IMPLEMENTER_ROLE,
+    VERIFICATION_COORDINATOR_ROLE,
+)
+from backend.session_backend.base import SessionBackend
+from backend.session_policy import infer_workflow_profile, normalize_session_policy
+from backend.session_backend.runtime_models import RuntimeOutputChunk, RuntimeRoleHandle, RuntimeSessionHandle
+from backend.state.artifact_repository import ArtifactRepository
+from backend.state.dispatch_repository import DispatchRepository
+from backend.state.event_repository import EventRepository
+from backend.state.role_repository import RoleRepository
+from backend.state.session_repository import SessionRepository
+from backend.state.work_item_repository import WorkItemRepository
+from backend.tools.gitlab_adapter import GitLabAdapter
+from backend.tools.ios_app_launcher import IOSAppLauncher
+from backend.tools.jira_adapter import JiraAdapter
+from backend.tools.snapshot_adapter import SnapshotAdapter
+from backend.tools.command_runner import CommandResult
+
+
+_CLOSED_JIRA_STATUSES = {"resolved", "done", "closed", "cancelled"}
+_POST_CREATE_SUBTASK_SNAPSHOT_REFRESH_ATTEMPTS = 3
+_POST_CREATE_SUBTASK_SNAPSHOT_REFRESH_DELAY_SECONDS = 2.0
+_TASK_KEY_PATTERN = re.compile(r"^[A-Z]+-\d+$")
+_INLINE_TASK_KEY_PATTERN = re.compile(r"\b[A-Z]+-\d+\b")
+_EXPLICIT_URL_PATTERN = re.compile(r"https?://[^\s)>\]]+")
+_PERSIST_POLL_TELEMETRY_ENV = "SDD_FACTORY_PERSIST_POLL_TELEMETRY"
+_STORY_PLANNING_WORK_TYPE_BY_STAGE = {
+    "proposal_context_requested": "proposal_context",
+    "requirements_requested": "requirements",
+    "acceptance_criteria_requested": "acceptance_criteria",
+    "constraints_requested": "constraints",
+    "spec_verification_requested": "spec_verification",
+    "task_decomposition_requested": "task_decomposition",
+}
+_ACTIVE_WORK_TYPE_BY_STAGE = {
+    "proposal_context_requested": "proposal_context",
+    "requirements_requested": "requirements",
+    "convention_review_requested": "convention_review",
+    "requirements_review_requested": "requirements_review",
+    "doc_harvest_requested": "doc_harvest",
+    "documentation_review_requested": "documentation_review",
+    "acceptance_criteria_requested": "acceptance_criteria",
+    "constraints_requested": "constraints",
+    "spec_verification_requested": "spec_verification",
+    "task_decomposition_requested": "task_decomposition",
+    "subtask_implementation_requested": "subtask_implementation",
+    "implementation_requested": "implementation",
+    "convention_review_correction_requested": "convention_review_correction",
+    "requirements_review_correction_requested": "requirements_review_correction",
+    "documentation_review_correction_requested": "documentation_review_correction",
+    "verification_requested": "verification",
+    "verification_correction_requested": "verification_correction",
+    "qa_reopen_requested": "followup_implementation",
+}
+_STORY_PLANNING_ROLES = {
+    PROPOSAL_CONTEXT_WORKER_ROLE,
+    REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+    ACCEPTANCE_CRITERIA_WORKER_ROLE,
+    CONSTRAINTS_WORKER_ROLE,
+    SPEC_VERIFIER_WORKER_ROLE,
+    TASK_DECOMPOSER_WORKER_ROLE,
+}
+_INTERNAL_REVIEW_METRIC_EVENT_TYPES = {
+    "convention_review_requested",
+    "convention_review_passed",
+    "convention_review_issues_found",
+    "convention_review_blocked",
+    "convention_review_correction_requested",
+    "requirements_review_requested",
+    "requirements_review_passed",
+    "requirements_review_issues_found",
+    "requirements_review_blocked",
+    "requirements_review_correction_requested",
+    "documentation_review_requested",
+    "documentation_review_correction_requested",
+    "session_escalated_to_operator",
+}
+
+_DUAL_REVIEW_ROLE_BY_LANE = {
+    "convention": CONVENTION_REVIEWER_ROLE,
+    "requirements": REQUIREMENTS_REVIEWER_ROLE,
+}
+_DUAL_REVIEW_STAGE_BY_LANE = {
+    "convention": "convention_review_requested",
+    "requirements": "requirements_review_requested",
+}
+_DUAL_REVIEW_WORK_TYPE_BY_LANE = {
+    "convention": "convention_review",
+    "requirements": "requirements_review",
+}
+_DUAL_REVIEW_CORRECTION_STAGE_BY_LANE = {
+    "convention": "convention_review_correction_requested",
+    "requirements": "requirements_review_correction_requested",
+}
+_DUAL_REVIEW_CORRECTION_WORK_TYPE_BY_LANE = {
+    "convention": "convention_review_correction",
+    "requirements": "requirements_review_correction",
+}
+_DUAL_REVIEW_EVENT_PREFIX_BY_LANE = {
+    "convention": "convention_review",
+    "requirements": "requirements_review",
+}
+_DUAL_REVIEW_REPORT_ARTIFACT_BY_LANE = {
+    "convention": "convention_review_report_markdown",
+    "requirements": "requirements_review_report_markdown",
+}
+_DUAL_REVIEW_OUTCOME_ARTIFACT_BY_LANE = {
+    "convention": "convention_review_outcome_json",
+    "requirements": "requirements_review_outcome_json",
+}
+
+
+def _serialize_session_transition(method):
+    @wraps(method)
+    def serialized(self, session_id, *args, **kwargs):
+        lock = self._session_transition_locks.setdefault(session_id, threading.RLock())
+        with lock:
+            return method(self, session_id, *args, **kwargs)
+    return serialized
+
+
+@dataclass
+class CoordinatorService:
+    """Entry point for coordinator-owned use cases."""
+
+    session_repository: SessionRepository
+    role_repository: RoleRepository
+    event_repository: EventRepository
+    artifact_repository: ArtifactRepository
+    work_item_repository: WorkItemRepository
+    session_backend: SessionBackend
+    default_roles: list[str]
+    dispatch_repository: DispatchRepository | None = None
+    jira_adapter: JiraAdapter | None = None
+    snapshot_adapter: SnapshotAdapter | None = None
+    gitlab_adapter: GitLabAdapter | None = None
+    ios_app_launcher: IOSAppLauncher | None = None
+    artifacts_root: Path | None = None
+    workdir_root: Path | None = None
+    event_bus: SessionEventBus | None = None
+    role_workspace_manager: RoleWorkspaceManager | None = None
+    role_launcher_manager: RoleLauncherManager | None = None
+    post_create_subtask_snapshot_refresh_attempts: int = _POST_CREATE_SUBTASK_SNAPSHOT_REFRESH_ATTEMPTS
+    post_create_subtask_snapshot_refresh_delay_seconds: float = (
+        _POST_CREATE_SUBTASK_SNAPSHOT_REFRESH_DELAY_SECONDS
+    )
+    _dispatch_locks: dict[tuple[int, int, int, str], threading.Lock] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+    _session_transition_locks: dict[int, threading.RLock] = field(default_factory=dict, init=False, repr=False)
+
+    def create_task_session(
+        self,
+        task_key: str,
+        workflow_profile: str,
+        policy: dict[str, str] | None = None,
+        role_config: dict[str, dict[str, str]] | None = None,
+    ) -> tuple[Session, Event, bool]:
+        """Create or reuse a task session and emit the initial session event."""
+
+        normalized_policy = normalize_session_policy(workflow_profile, policy)
+        effective_roles = self._effective_role_names(
+            normalized_policy.workflow_profile,
+            normalized_policy.policy,
+        )
+        normalized_role_config = normalize_role_runtime_config(
+            repo_root=self._repo_root(),
+            role_names=effective_roles,
+            provided=role_config,
+        )
+        existing = self.session_repository.get_by_task_key(task_key)
+        if existing is not None:
+            if existing.workflow_profile != normalized_policy.workflow_profile:
+                raise IntakeError(
+                    f"Session {task_key} already exists with workflow profile "
+                    f"{existing.workflow_profile}, not {normalized_policy.workflow_profile}"
+                )
+            if (existing.policy or {}) != normalized_policy.policy:
+                raise IntakeError(
+                    f"Session {task_key} already exists with different stored policy"
+                )
+            if (existing.role_config or {}) != normalized_role_config:
+                raise IntakeError(
+                    f"Session {task_key} already exists with different stored role runtime config"
+                )
+            event = self._append_event(
+                session_id=existing.id,
+                event_type="task_session_reused",
+                producer_type="coordinator",
+                payload={
+                    "task_key": task_key,
+                    "current_stage": existing.current_stage,
+                    "workflow_profile": existing.workflow_profile,
+                    "policy": existing.policy or {},
+                    "role_config": existing.role_config or {},
+                },
+            )
+            return existing, event, False
+
+        session = self.session_repository.create(
+            task_key=task_key,
+            current_stage="intake",
+            workflow_profile=normalized_policy.workflow_profile,
+            policy=normalized_policy.policy,
+            role_config=normalized_role_config,
+        )
+        runtime_session = self.session_backend.create_task_session(task_key)
+        for role_name in effective_roles:
+            runtime_role = self._spawn_role_runtime(
+                runtime_session=runtime_session,
+                task_key=task_key,
+                role_name=role_name,
+                role_config=normalized_role_config.get(role_name),
+            )
+            self.role_repository.create(
+                session_id=session.id,
+                role_name=role_name,
+                runtime_backend=runtime_role.backend_name,
+                runtime_handle=runtime_role.role_id,
+                status=RoleStatus.RUNNING,
+            )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="task_started",
+            producer_type="coordinator",
+            payload={
+                "task_key": task_key,
+                "current_stage": session.current_stage,
+                "workflow_profile": session.workflow_profile,
+                "policy": session.policy or {},
+                "role_config": session.role_config or {},
+                "runtime_session_id": runtime_session.session_id,
+                "roles": effective_roles,
+            },
+        )
+        return session, event, True
+
+    def prepare_task_session(
+        self,
+        raw_task_key: str,
+        workflow_profile: str | None = None,
+        policy: dict[str, str] | None = None,
+        role_config: dict[str, dict[str, str]] | None = None,
+    ) -> tuple[Session, Event, bool, dict[str, str | int | None]]:
+        """Run deterministic intake/setup for a task session."""
+
+        if self.jira_adapter is None or self.snapshot_adapter is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing intake adapters or artifact root")
+
+        parent_result = self.jira_adapter.resolve_parent(raw_task_key)
+        if not parent_result.ok:
+            raise IntakeError(parent_result.stderr or parent_result.stdout or "Failed to resolve parent task")
+        resolved_task_key = parent_result.stdout.strip()
+        if not resolved_task_key:
+            raise IntakeError("Parent task resolution returned an empty key")
+
+        issue_type_result = self.jira_adapter.get_issue_type(resolved_task_key)
+        if not issue_type_result.ok:
+            raise IntakeError(issue_type_result.stderr or issue_type_result.stdout or "Failed to resolve issue type")
+        issue_type = issue_type_result.stdout.strip()
+        if not issue_type:
+            raise IntakeError("Issue type resolution returned an empty value")
+
+        readiness = classify_task_readiness(resolved_task_key, issue_type)
+        existing = self.session_repository.get_by_task_key(resolved_task_key)
+        session, _, created = self.create_task_session(
+            resolved_task_key,
+            workflow_profile=(
+                workflow_profile
+                if workflow_profile is not None
+                else (
+                    existing.workflow_profile
+                    if existing is not None
+                    else infer_workflow_profile(issue_type)
+                )
+            ),
+            policy=policy if policy is not None else (existing.policy if existing is not None else None),
+            role_config=(
+                role_config
+                if role_config is not None
+                else (existing.role_config if existing is not None else None)
+            ),
+        )
+
+        snapshot_result = self.snapshot_adapter.run(resolved_task_key)
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            resolved_task_key,
+            "intake",
+            "snapshot.stdout.log",
+            snapshot_result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            resolved_task_key,
+            "intake",
+            "snapshot.stderr.log",
+            snapshot_result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="intake",
+            artifact_type="snapshot_stdout",
+            path=str(stdout_path),
+            metadata={"task_key": resolved_task_key, "command": snapshot_result.command},
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="intake",
+            artifact_type="snapshot_stderr",
+            path=str(stderr_path),
+            metadata={"task_key": resolved_task_key, "command": snapshot_result.command},
+        )
+
+        event_type = "task_prepared"
+        event_payload = {
+            "raw_task_key": raw_task_key,
+            "resolved_task_key": resolved_task_key,
+            "issue_type": issue_type,
+            "readiness": readiness,
+            "snapshot_exit_code": snapshot_result.returncode,
+        }
+        if snapshot_result.returncode != 0:
+            event_type = "task_preparation_failed"
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="intake_failed",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.FAILED)
+            event_payload.update(
+                {
+                    "summary": "Task bootstrap failed",
+                    "details": self._snapshot_failure_details(snapshot_result.stderr, snapshot_result.stdout),
+                    "stdout_path": str(stdout_path),
+                    "stderr_path": str(stderr_path),
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                }
+            )
+
+        event = self._append_event(
+            session_id=session.id,
+            event_type=event_type,
+            producer_type="coordinator",
+            payload=event_payload,
+        )
+        details = {
+            "resolved_task_key": resolved_task_key,
+            "issue_type": issue_type,
+            "readiness": readiness,
+            "snapshot_exit_code": snapshot_result.returncode,
+            "followup_event_type": None,
+        }
+        if snapshot_result.ok and readiness == "ready_for_execution":
+            if created:
+                resumed_followup = self._maybe_resume_subtasks_from_intake(
+                    session=session,
+                    source_event=event,
+                )
+                if resumed_followup is not None:
+                    details["followup_event_type"] = resumed_followup.event_type
+                    session = self._get_session_or_raise(session.id)
+                    return session, event, created, details
+            if session.workflow_profile == "story_full":
+                details["followup_event_type"] = self._enqueue_proposal_context(
+                    session=session,
+                    source_event=event,
+                ).event_type
+            else:
+                details["followup_event_type"] = self._enqueue_initial_implementation(
+                    session=session,
+                    resolved_task_key=resolved_task_key,
+                    source_event=event,
+                ).event_type
+            session = self._get_session_or_raise(session.id)
+        return session, event, created, details
+
+    def _snapshot_failure_details(self, stderr: str, stdout: str) -> str:
+        source = stderr.strip() or stdout.strip()
+        if not source:
+            return "Snapshot/bootstrap command exited non-zero without stderr output."
+        lines = [line.rstrip() for line in source.splitlines() if line.strip()]
+        if len(lines) <= 24:
+            return "\n".join(lines)
+        return "\n".join(lines[-24:])
+
+    def _maybe_resume_subtasks_from_intake(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+    ) -> Event | None:
+        subtasks = self._read_snapshot_subtasks(session.task_key)
+        if subtasks is None:
+            return None
+        unresolved = unresolved_subtasks(subtasks)
+        completed = completed_subtasks(subtasks)
+        if not unresolved or not completed:
+            return None
+
+        implementation_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title=f"Resume subtask execution for {session.task_key}",
+            owner_role_id=None,
+            source_event_id=source_event.id,
+            priority=95,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="implementation_requested",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._append_event(
+            session_id=session.id,
+            event_type="subtask_resume_detected_on_intake",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "completed_count": len(completed),
+                "unresolved_count": len(unresolved),
+                "workflow_profile": session.workflow_profile,
+                "work_item_id": implementation_item.id,
+            },
+        )
+        _graph_event, followup_event = self._start_subtask_graph_flow(
+            session=session,
+            producer_type="coordinator",
+            subtasks=subtasks,
+            initial_work_item=implementation_item,
+            decomposition_artifact=None,
+        )
+        return followup_event
+
+    def get_subtask_graph_summary(self, session_id: int) -> dict[str, object]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} does not exist")
+
+        subtasks = self._read_snapshot_subtasks(session.task_key)
+        if subtasks is None:
+            return {
+                "available": False,
+                "rows": [],
+                "completed_count": 0,
+                "total_count": 0,
+                "unresolved_count": 0,
+            }
+
+        completed = completed_subtasks(subtasks)
+        unresolved = unresolved_subtasks(subtasks)
+        return {
+            "available": True,
+            "rows": [
+                {
+                    "key": subtask.key,
+                    "issue_type": subtask.issue_type,
+                    "title": subtask.title,
+                    "status": subtask.status,
+                }
+                for subtask in subtasks
+            ],
+            "completed_count": len(completed),
+            "total_count": len(subtasks),
+            "unresolved_count": len(unresolved),
+        }
+
+    def get_subtask_progress_summary(self, session_id: int) -> dict[str, object]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} does not exist")
+
+        items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "subtask_implementation"
+        ]
+        if not items:
+            return {
+                "available": False,
+                "current_subtask_key": None,
+                "current_subtask_title": None,
+                "total_count": 0,
+                "completed_count": 0,
+                "remaining_count": 0,
+                "items": [],
+            }
+
+        progress_items: list[dict[str, object]] = []
+        for index, item in enumerate(items, start=1):
+            parsed = self._parse_subtask_work_item_title(item.title)
+            progress_items.append(
+                {
+                    "work_item_id": item.id,
+                    "key": parsed["key"],
+                    "title": parsed["title"],
+                    "status": item.status.value,
+                    "queue_position": index,
+                }
+            )
+
+        current = next((item for item in progress_items if item["status"] == WorkItemStatus.ASSIGNED.value), None)
+        completed_count = sum(1 for item in progress_items if item["status"] == WorkItemStatus.COMPLETED.value)
+        remaining_count = sum(
+            1
+            for item in progress_items
+            if item["status"] in {WorkItemStatus.ASSIGNED.value, WorkItemStatus.UNASSIGNED.value}
+        )
+        return {
+            "available": True,
+            "current_subtask_key": current["key"] if current is not None else None,
+            "current_subtask_title": current["title"] if current is not None else None,
+            "total_count": len(progress_items),
+            "completed_count": completed_count,
+            "remaining_count": remaining_count,
+            "items": progress_items,
+        }
+
+    def get_created_jira_subtasks_summary(self, session_id: int) -> dict[str, object]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} does not exist")
+
+        created_event = None
+        for event in reversed(self.event_repository.list_for_session(session.id)):
+            if event.event_type == "jira_subtasks_created":
+                created_event = event
+                break
+        if created_event is None:
+            return {
+                "available": False,
+                "total_count": 0,
+                "items": [],
+            }
+
+        raw_keys = created_event.payload.get("created_subtask_keys", [])
+        created_keys = [str(item).strip() for item in raw_keys if str(item).strip()]
+        if not created_keys:
+            return {
+                "available": False,
+                "total_count": 0,
+                "items": [],
+            }
+
+        graph_summary = self.get_subtask_graph_summary(session.id)
+        graph_rows_by_key = {
+            str(row["key"]): row
+            for row in graph_summary.get("rows", [])
+            if isinstance(row, dict) and row.get("key") is not None
+        }
+        progress_summary = self.get_subtask_progress_summary(session.id)
+        progress_items_by_key = {
+            str(item["key"]): item
+            for item in progress_summary.get("items", [])
+            if isinstance(item, dict) and item.get("key") is not None
+        }
+        current_subtask_key = progress_summary.get("current_subtask_key")
+
+        items: list[dict[str, object]] = []
+        for key in created_keys:
+            graph_row = graph_rows_by_key.get(key, {})
+            progress_item = progress_items_by_key.get(key, {})
+            items.append(
+                {
+                    "key": key,
+                    "title": graph_row.get("title"),
+                    "status": graph_row.get("status"),
+                    "queue_position": progress_item.get("queue_position"),
+                    "is_current": current_subtask_key == key,
+                }
+            )
+
+        return {
+            "available": True,
+            "total_count": len(items),
+            "items": items,
+        }
+
+    def get_interactive_state_summary(self, session_id: int) -> dict[str, object]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} does not exist")
+        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
+            return {
+                "available": False,
+                "role_name": None,
+                "current_stage": None,
+                "summary": None,
+                "details": None,
+                "source_event_type": None,
+                "source_reason": None,
+                "review_family": None,
+                "review_lane": None,
+                "needs_operator_input": False,
+                "resume_strategy": None,
+            }
+
+        events = self.event_repository.list_for_session(session.id)
+        blocker_event = None
+        clear_event = None
+        for event in reversed(events):
+            if (
+                blocker_event is None
+                and (
+                    event.event_type == "session_escalated_to_operator"
+                    or event.event_type == "role_runtime_error_reported"
+                    or event.event_type == "git_commit_failed"
+                )
+            ):
+                blocker_event = event
+            if (
+                clear_event is None
+                and event.event_type
+                in {
+                    "operator_runtime_input_sent",
+                    "session_resumed_by_operator",
+                    "session_retried_by_operator",
+                    "session_redirected_by_operator",
+                    "e2e_baseline_accepted_by_operator",
+                }
+            ):
+                clear_event = event
+            if blocker_event is not None and clear_event is not None:
+                break
+
+        if blocker_event is not None and clear_event is not None and clear_event.id > blocker_event.id:
+            blocker_event = None
+
+        source_event = blocker_event
+        if source_event is not None and self._interactive_blocker_is_stale_for_session(source_event, session):
+            source_event = None
+        pending_operator_item = self._find_operator_pending_work_item(session.id)
+        if pending_operator_item is not None and self._operator_reply_requires_routed_continuation(pending_operator_item) and (
+            source_event is None
+            or not self._payload_truthy(source_event.payload.get("needs_operator_input"))
+        ):
+            pending_summary = self._operator_pending_interactive_summary(session, pending_operator_item)
+            if pending_summary is not None:
+                return pending_summary
+        if source_event is None:
+            return {
+                "available": False,
+                "role_name": None,
+                "current_stage": None,
+                "summary": None,
+                "details": None,
+                "source_event_type": None,
+                "source_reason": None,
+                "review_family": None,
+                "review_lane": None,
+                "needs_operator_input": False,
+                "resume_strategy": None,
+            }
+
+        review_family, review_lane = self._interactive_review_context(source_event.payload)
+        if source_event.event_type == "git_commit_failed":
+            return self._git_commit_failed_interactive_summary(session, source_event)
+
+        details = source_event.payload.get("details")
+        if not str(details or "").strip() and source_event.payload.get("reason") == "spec_verification_blocked":
+            details = self._spec_verification_operator_details_from_history(events, source_event.id)
+        implement_now_count = source_event.payload.get("implement_now_count")
+        tech_debt_candidate_count = source_event.payload.get("tech_debt_candidate_count")
+        e2e_decision = None
+        if session.task_key.startswith("QA-") and source_event.payload.get("reason") == "e2e_environment":
+            try:
+                from factory.e2e.runner import describe_verdict
+                _, verdict, _, e2e_decision = self._e2e_operator_context(session)
+                diagnostics = describe_verdict(verdict)
+                details = diagnostics["details"]
+            except IntakeError:
+                pass
+        return {
+            "available": True,
+            "role_name": source_event.payload.get("role_name"),
+            "current_stage": source_event.payload.get("current_stage", session.current_stage),
+            "summary": source_event.payload.get("summary") or source_event.payload.get("reason"),
+            "details": details,
+            "source_event_type": source_event.event_type,
+            "source_reason": source_event.payload.get("reason"),
+            "review_family": review_family,
+            "review_lane": review_lane,
+            "needs_operator_input": self._payload_truthy(source_event.payload.get("needs_operator_input")),
+            "resume_strategy": source_event.payload.get("resume_strategy"),
+            "implement_now_count": implement_now_count,
+            "tech_debt_candidate_count": tech_debt_candidate_count,
+            "e2e_decision": e2e_decision,
+            "e2e_continuation_available": source_event.payload.get("reason") == "e2e_environment"
+                and self._e2e_continuation_available(session, pending_operator_item),
+        }
+
+    def _operator_pending_interactive_summary(
+        self,
+        session: Session,
+        work_item: WorkItem,
+    ) -> dict[str, object] | None:
+        if work_item.owner_role_id is None:
+            return None
+        role = self.role_repository.get_by_id(work_item.owner_role_id)
+        if role is None:
+            return None
+        source_event: Event | None = None
+        for event in reversed(self.event_repository.list_for_session(session.id)):
+            if event.event_type != "session_escalated_to_operator":
+                continue
+            if not self._payload_truthy(event.payload.get("needs_operator_input")):
+                continue
+            event_role = str(event.payload.get("role_name") or "").strip()
+            if event_role and event_role != role.role_name:
+                continue
+            event_stage = str(event.payload.get("current_stage") or "").strip()
+            if event_stage and event_stage != session.current_stage:
+                continue
+            source_event = event
+            break
+
+        payload = source_event.payload if source_event is not None else {}
+        review_family, review_lane = self._interactive_review_context(payload)
+        return {
+            "available": True,
+            "role_name": role.role_name,
+            "current_stage": payload.get("current_stage", session.current_stage),
+            "summary": payload.get("summary") or work_item.title or "Operator input required",
+            "details": payload.get("details") or work_item.title,
+            "source_event_type": source_event.event_type if source_event is not None else "work_item_waiting_for_operator",
+            "source_reason": payload.get("reason") or work_item.work_type,
+            "review_family": review_family,
+            "review_lane": review_lane,
+            "needs_operator_input": True,
+            "resume_strategy": payload.get("resume_strategy"),
+            "implement_now_count": payload.get("implement_now_count"),
+            "tech_debt_candidate_count": payload.get("tech_debt_candidate_count"),
+        }
+
+    def _interactive_blocker_is_stale_for_session(self, source_event: Event, session: Session) -> bool:
+        event_stage = str(source_event.payload.get("current_stage") or "").strip()
+        if event_stage and event_stage != session.current_stage:
+            return True
+        if source_event.event_type == "git_commit_failed":
+            return False
+        if source_event.event_type not in {"session_escalated_to_operator", "role_runtime_error_reported"}:
+            return False
+        role_name = str(source_event.payload.get("role_name") or "").strip()
+        if not role_name:
+            return False
+        role = self.role_repository.get_by_name(session.id, role_name)
+        if role is None:
+            return False
+        pending_item = self._find_operator_pending_work_item(session.id)
+        if pending_item is None or pending_item.owner_role_id != role.id:
+            return False
+        replayed = self._replayed_runtime_error_from_prior_dispatch(
+            session=session,
+            role=role,
+            active_item=pending_item,
+            payload=source_event.payload,
+            current_event_id=source_event.id,
+        )
+        return replayed is not None
+
+    def _git_commit_failed_interactive_summary(self, session: Session, source_event: Event) -> dict[str, object]:
+        context = str(source_event.payload.get("context") or "task state").strip()
+        returncode = source_event.payload.get("returncode")
+        details_parts = [f"The factory could not commit the {context} checkpoint for {session.task_key}."]
+        if returncode is not None:
+            details_parts.append(f"commit-task-state exited with code {returncode}.")
+        artifact_details = self._git_commit_failure_artifact_details(session, context)
+        if artifact_details:
+            details_parts.append(artifact_details)
+        else:
+            details_parts.append("No commit-task-state stderr/stdout details were captured.")
+        details_parts.append("Fix the commit/Jira environment issue, then retry the current stage.")
+        return {
+            "available": True,
+            "role_name": None,
+            "current_stage": source_event.payload.get("current_stage", session.current_stage),
+            "summary": "Task state checkpoint commit failed",
+            "details": "\n\n".join(details_parts),
+            "source_event_type": source_event.event_type,
+            "source_reason": "git_commit_failed",
+            "review_family": None,
+            "review_lane": None,
+            "needs_operator_input": False,
+            "resume_strategy": "retry_current_stage",
+            "implement_now_count": None,
+            "tech_debt_candidate_count": None,
+        }
+
+    def _git_commit_failure_artifact_details(self, session: Session, context: str) -> str | None:
+        artifacts = [
+            artifact
+            for artifact in self.artifact_repository.list_for_session(session.id)
+            if artifact.stage_name == "commit-task-state"
+            and artifact.metadata.get("context") == context
+            and artifact.artifact_type in {"commit_task_state_stderr", "commit_task_state_stdout"}
+        ]
+        lines: list[str] = []
+        for artifact in artifacts[-2:]:
+            try:
+                content = Path(artifact.path).read_text(encoding="utf-8").strip()
+            except OSError:
+                content = ""
+            if not content:
+                continue
+            heading = "stderr" if artifact.artifact_type.endswith("_stderr") else "stdout"
+            lines.append(f"{heading}: {content[:2000]}")
+        return "\n\n".join(lines) if lines else None
+
+    def _interactive_review_context(self, payload: object) -> tuple[str | None, str | None]:
+        if not isinstance(payload, dict):
+            return None, None
+        review_lane = str(payload.get("review_lane") or "").strip()
+        if review_lane:
+            return "internal_review", review_lane
+        reason = str(payload.get("reason") or "").strip()
+        return None, None
+
+    def _payload_truthy(self, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return False
+
+    def handle_operator_event(
+        self,
+        session_id: int,
+        event_type: str,
+        payload: dict,
+    ) -> tuple[Session, Event | None]:
+        session = self._get_session_or_raise(session_id)
+        accepted_event = self._append_event(
+            session_id=session_id,
+            event_type=event_type,
+            producer_type="operator",
+            payload=payload,
+        )
+        if event_type == "proposal_context_completed":
+            session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "spec_verification_blocked":
+            session, followup_event = self._handle_spec_verification_blocked(session, accepted_event)
+            return session, followup_event
+        if event_type == "requirements_completed":
+            session, followup_event = self._handle_requirements_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "convention_review_passed":
+            session, followup_event = self._handle_dual_review_passed(session, accepted_event, lane="convention")
+            return session, followup_event
+        if event_type == "convention_review_issues_found":
+            session, followup_event = self._handle_dual_review_issues_found(session, accepted_event, lane="convention")
+            return session, followup_event
+        if event_type == "requirements_review_passed":
+            session, followup_event = self._handle_dual_review_passed(session, accepted_event, lane="requirements")
+            return session, followup_event
+        if event_type == "requirements_review_issues_found":
+            session, followup_event = self._handle_dual_review_issues_found(session, accepted_event, lane="requirements")
+            return session, followup_event
+        if event_type == "acceptance_criteria_completed":
+            session, followup_event = self._handle_acceptance_criteria_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "constraints_completed":
+            session, followup_event = self._handle_constraints_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "spec_verification_completed":
+            session, followup_event = self._handle_spec_verification_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "task_decomposition_completed":
+            session, followup_event = self._handle_task_decomposition_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "subtask_completed":
+            session, followup_event = self._handle_subtask_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "implementation_completed":
+            session, followup_event = self._handle_implementation_completed(session, accepted_event)
+            return session, followup_event
+        if event_type == "verification_failed":
+            session, followup_event = self._handle_verification_failed(session, accepted_event)
+            return session, followup_event
+        if event_type == "verification_passed":
+            session, followup_event = self._handle_verification_passed(session, accepted_event)
+            return session, followup_event
+        return session, None
+
+    def create_mr_handoff(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event, str | None]:
+        if self.gitlab_adapter is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing GitLab adapter or artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        allowed_retry = (
+            session.status == SessionStatus.WAITING_FOR_OPERATOR
+            and session.current_stage == "mr_handoff_failed"
+        )
+        if session.status != SessionStatus.COMPLETED and not allowed_retry:
+            raise IntakeError(
+                f"Session {session_id} must be completed before MR handoff can run"
+            )
+        if session.current_stage == "mr_handoff_completed":
+            raise IntakeError(f"Session {session_id} has already completed MR handoff")
+        self._require_passed_verification_for_delivery(session)
+
+        result = self.gitlab_adapter.create_mr(session.task_key)
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "mr-handoff",
+            "create-mr.stdout.log",
+            result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "mr-handoff",
+            "create-mr.stderr.log",
+            result.stderr,
+        )
+        mr_url = self._extract_mr_url(result.stdout)
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="mr-handoff",
+            artifact_type="mr_handoff_stdout",
+            path=str(stdout_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+                "mr_url": mr_url,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="mr-handoff",
+            artifact_type="mr_handoff_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+
+        if not result.ok:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="mr_handoff_failed",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="mr_handoff_failed",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "returncode": result.returncode,
+                    "mr_url": mr_url,
+                },
+            )
+            return session, event, mr_url
+
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="mr_handoff_completed",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="mr_handoff_completed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "returncode": result.returncode,
+                "mr_url": mr_url,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event, mr_url
+
+    def complete_doc_harvest(
+        self,
+        session_id: int,
+        summary: str,
+    ) -> tuple[Session, Event]:
+        if self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        normalized_summary = summary.strip()
+        if not normalized_summary:
+            raise IntakeError("Doc harvest summary must not be empty")
+
+        if session.current_stage not in {"completed", "doc_harvest_requested"}:
+            raise IntakeError(
+                f"Session {session_id} is not in a doc-harvest-capable stage"
+            )
+        policy_mode = self._optional_lane_policy_mode(session.policy, "doc_harvest_policy")
+        if policy_mode == "disabled":
+            raise IntakeError(f"Session {session_id} has doc harvest disabled by policy")
+        if policy_mode != "enabled":
+            raise IntakeError("Manual doc harvest completion is only allowed when doc_harvest_policy is enabled")
+        if session.current_stage == "doc_harvest_requested":
+            doc_items = [
+                item
+                for item in self.work_item_repository.list_for_session(session.id)
+                if item.work_type == "doc_harvest" and item.status != WorkItemStatus.COMPLETED
+            ]
+            if doc_items:
+                self.work_item_repository.update_status(doc_items[0].id, WorkItemStatus.COMPLETED)
+            self._stop_on_demand_role(session, DOC_HARVEST_ROLE)
+        self._materialize_doc_harvest_outcome_file(
+            session=session,
+            source_event=Event(
+                id=None,
+                session_id=session.id,
+                event_type="doc_harvest_completed",
+                producer_type="coordinator",
+                producer_id=None,
+                payload={"task_key": session.task_key, "summary": normalized_summary},
+            ),
+            status="completed",
+        )
+        session, event = self._finalize_doc_harvest(
+            session=session,
+            summary=normalized_summary,
+            producer_type="coordinator",
+            producer_id=None,
+            session_status=SessionStatus.ACTIVE,
+            advance_session=False,
+        )
+        self._refresh_post_harvest_diff_artifacts(session.task_key)
+        if event is None:
+            raise IntakeError("Doc harvest completion did not emit an event")
+        session, _followup_event = self._enqueue_documentation_review(session=session, source_event=event)
+        return session, event
+
+    def send_to_test_handoff(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event]:
+        if self.jira_adapter is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing Jira adapter or artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        allowed_retry = (
+            session.status == SessionStatus.WAITING_FOR_OPERATOR
+            and session.current_stage == "send_to_test_failed"
+        )
+        if session.status != SessionStatus.COMPLETED and not allowed_retry:
+            raise IntakeError(
+                f"Session {session_id} must be completed before send-to-test handoff can run"
+            )
+        if session.current_stage not in {"mr_handoff_completed", "send_to_test_failed"}:
+            raise IntakeError(
+                f"Session {session_id} must complete MR handoff before send-to-test handoff"
+            )
+        self._require_passed_verification_for_delivery(session)
+
+        result = self.jira_adapter.send_to_test(session.task_key)
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "send-to-test",
+            "send-to-test.stdout.log",
+            result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "send-to-test",
+            "send-to-test.stderr.log",
+            result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="send-to-test",
+            artifact_type="send_to_test_stdout",
+            path=str(stdout_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="send-to-test",
+            artifact_type="send_to_test_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+
+        if not result.ok:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="send_to_test_failed",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="send_to_test_failed",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "returncode": result.returncode,
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                },
+            )
+            return session, event
+
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="send_to_test_completed",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="send_to_test_completed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "returncode": result.returncode,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event
+
+    def launch_ios_app(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event]:
+        if self.ios_app_launcher is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing iOS app launcher or artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        if not session.task_key.startswith("IOS-"):
+            raise IntakeError(f"Session {session_id} is not an iOS task")
+
+        result = self.ios_app_launcher.launch(session.task_key)
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "ios-launch",
+            "ios-launch.stdout.log",
+            result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "ios-launch",
+            "ios-launch.stderr.log",
+            result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="ios-launch",
+            artifact_type="ios_launch_stdout",
+            path=str(stdout_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="ios-launch",
+            artifact_type="ios_launch_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="ios_app_launch_completed" if result.ok else "ios_app_launch_failed",
+            producer_type="operator",
+            payload={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+                "stdout_artifact_path": str(stdout_path),
+                "stderr_artifact_path": str(stderr_path),
+            },
+        )
+        return session, event
+
+    def create_subtasks_from_plan(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event, Event | None]:
+        if (
+            self.jira_adapter is None
+            or self.snapshot_adapter is None
+            or self.artifacts_root is None
+            or self.workdir_root is None
+        ):
+            raise IntakeError("Coordinator is missing Jira adapter, snapshot adapter, workdir root, or artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        if session.workflow_profile != "story_full":
+            raise IntakeError(
+                f"Session {session_id} is {session.workflow_profile}, but plan-based subtask creation is only supported for story_full"
+            )
+
+        plan_index_path = self.workdir_root / session.task_key / "plan" / "index.md"
+        if not plan_index_path.exists():
+            raise IntakeError(f"plan/index.md not found for session {session.task_key}")
+
+        plan_dir = plan_index_path.parent
+        result = self.jira_adapter.create_subtasks(session.task_key, plan_dir)
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "subtasks-batch",
+            "create-subtasks.stdout.log",
+            result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "subtasks-batch",
+            "create-subtasks.stderr.log",
+            result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="subtasks-batch",
+            artifact_type="jira_subtasks_stdout",
+            path=str(stdout_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="subtasks-batch",
+            artifact_type="jira_subtasks_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        created_subtask_keys = self._extract_created_subtask_keys(result.stdout)
+        if created_subtask_keys:
+            summary_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "subtasks-batch",
+                "created-subtasks.md",
+                self._jira_subtasks_summary_markdown(created_subtask_keys),
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="subtasks-batch",
+                artifact_type="jira_subtasks_summary",
+                path=str(summary_path),
+                metadata={
+                    "task_key": session.task_key,
+                    "created_subtask_keys": created_subtask_keys,
+                },
+            )
+
+        snapshot_refresh_exit_code: int | None = None
+        snapshot_refresh_attempts = 0
+        snapshot_refresh_matched_created_subtasks: bool | None = None
+        if result.ok:
+            self._cleanup_temporary_plan_package(session)
+            refresh_result, snapshot_refresh_attempts, snapshot_refresh_matched_created_subtasks = (
+                self._refresh_snapshot_after_subtask_creation(
+                    session=session,
+                    created_subtask_keys=created_subtask_keys,
+                )
+            )
+            snapshot_refresh_exit_code = refresh_result.returncode
+            refresh_stdout_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "subtasks-batch",
+                "refresh-snapshot.stdout.log",
+                refresh_result.stdout,
+            )
+            refresh_stderr_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "subtasks-batch",
+                "refresh-snapshot.stderr.log",
+                refresh_result.stderr,
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="subtasks-batch",
+                artifact_type="subtasks_snapshot_stdout",
+                path=str(refresh_stdout_path),
+                metadata={
+                    "task_key": session.task_key,
+                    "command": refresh_result.command,
+                    "returncode": refresh_result.returncode,
+                    "attempts": snapshot_refresh_attempts,
+                    "expected_subtask_keys": created_subtask_keys,
+                    "matched_created_subtasks": snapshot_refresh_matched_created_subtasks,
+                },
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="subtasks-batch",
+                artifact_type="subtasks_snapshot_stderr",
+                path=str(refresh_stderr_path),
+                metadata={
+                    "task_key": session.task_key,
+                    "command": refresh_result.command,
+                    "returncode": refresh_result.returncode,
+                    "attempts": snapshot_refresh_attempts,
+                    "expected_subtask_keys": created_subtask_keys,
+                    "matched_created_subtasks": snapshot_refresh_matched_created_subtasks,
+                },
+            )
+
+        event_type = "jira_subtasks_created" if result.ok else "jira_subtasks_creation_failed"
+        if not result.ok:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="subtask_creation_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        elif created_subtask_keys and snapshot_refresh_matched_created_subtasks is False:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="subtask_creation_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        event = self._append_event(
+            session_id=session.id,
+            event_type=event_type,
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "returncode": result.returncode,
+                "created_subtask_keys": created_subtask_keys,
+                "snapshot_refresh_exit_code": snapshot_refresh_exit_code,
+                "snapshot_refresh_attempts": snapshot_refresh_attempts,
+                "snapshot_refresh_matched_created_subtasks": snapshot_refresh_matched_created_subtasks,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        followup_event: Event | None = None
+        if result.ok and session.current_stage in {"implementation_requested", "subtask_creation_requested"}:
+            active_item: WorkItem | None = None
+            if session.current_stage == "implementation_requested":
+                active_item = self._find_active_primary_coding_work_item(session)
+            elif session.current_stage == "subtask_creation_requested":
+                implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+                if implementer_role is not None:
+                    active_item = next(
+                        (
+                            item
+                            for item in self.work_item_repository.list_for_session(session.id)
+                            if item.work_type == "implementation"
+                            and item.owner_role_id == implementer_role.id
+                            and item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+                        ),
+                        None,
+                    )
+            decomposition_artifact = self._latest_artifact_for_session_type(
+                session.id,
+                "task_decomposition_markdown",
+            )
+            subtasks = self._read_snapshot_subtasks(session.task_key)
+            if (
+                active_item is not None
+                and active_item.work_type == "implementation"
+                and decomposition_artifact is not None
+                and subtasks is not None
+                and unresolved_subtasks(subtasks)
+            ):
+                if active_item.status == WorkItemStatus.WAITING_FOR_OPERATOR:
+                    self.work_item_repository.update_status(active_item.id, WorkItemStatus.ASSIGNED)
+                _graph_event, followup_event = self._start_subtask_graph_flow(
+                    session=session,
+                    producer_type="coordinator",
+                    subtasks=subtasks,
+                    initial_work_item=active_item,
+                    decomposition_artifact=decomposition_artifact,
+                )
+                session = self._get_session_or_raise(session.id)
+        if not result.ok:
+            self._append_event(
+                session_id=session.id,
+                event_type="session_escalated_to_operator",
+                producer_type="coordinator",
+                payload={
+                    "reason": "subtask_creation_failed",
+                    "summary": "jira subtask creation failed",
+                    "details": "Fix Jira subtask creation or snapshot issues, then retry subtask materialization.",
+                    "current_stage": session.current_stage,
+                },
+            )
+        elif created_subtask_keys and snapshot_refresh_matched_created_subtasks is False:
+            self._append_event(
+                session_id=session.id,
+                event_type="session_escalated_to_operator",
+                producer_type="coordinator",
+                payload={
+                    "reason": "subtask_snapshot_missing_created_subtasks",
+                    "summary": "created Jira subtasks were not visible in the refreshed snapshot",
+                    "details": (
+                        "Jira subtask creation succeeded, but the bounded snapshot refresh did not return "
+                        "all created subtasks. Wait for Jira indexing, then refresh subtask state."
+                    ),
+                    "created_subtask_keys": created_subtask_keys,
+                    "snapshot_refresh_attempts": snapshot_refresh_attempts,
+                    "current_stage": session.current_stage,
+                },
+            )
+        return session, event, followup_event
+
+    def _refresh_snapshot_after_subtask_creation(
+        self,
+        *,
+        session: Session,
+        created_subtask_keys: list[str],
+    ) -> tuple[CommandResult, int, bool | None]:
+        if self.snapshot_adapter is None:
+            raise IntakeError("Coordinator is missing snapshot adapter")
+
+        max_attempts = max(1, int(self.post_create_subtask_snapshot_refresh_attempts))
+        delay_seconds = max(0.0, float(self.post_create_subtask_snapshot_refresh_delay_seconds))
+        expected_keys = set(created_subtask_keys)
+        attempts: list[CommandResult] = []
+
+        for attempt_index in range(max_attempts):
+            result = self.snapshot_adapter.run(session.task_key)
+            attempts.append(result)
+            matched_created_subtasks = (
+                self._snapshot_contains_subtask_keys(session.task_key, expected_keys)
+                if result.ok
+                else False
+            )
+            if result.ok and matched_created_subtasks is not False:
+                return self._combine_snapshot_refresh_attempts(attempts), len(attempts), matched_created_subtasks
+            if attempt_index < max_attempts - 1 and delay_seconds > 0:
+                time.sleep(delay_seconds)
+
+        final_result = self._combine_snapshot_refresh_attempts(attempts)
+        return (
+            final_result,
+            len(attempts),
+            self._snapshot_contains_subtask_keys(session.task_key, expected_keys) if final_result.ok else False,
+        )
+
+    def _snapshot_contains_subtask_keys(self, task_key: str, expected_keys: set[str]) -> bool | None:
+        if not expected_keys:
+            return None
+        subtasks = self._read_snapshot_subtasks(task_key)
+        if subtasks is None:
+            return False
+        present_keys = {subtask.key for subtask in subtasks}
+        return expected_keys.issubset(present_keys)
+
+    def _combine_snapshot_refresh_attempts(self, attempts: list[CommandResult]) -> CommandResult:
+        latest = attempts[-1]
+        if len(attempts) == 1:
+            return latest
+        stdout = "\n".join(
+            f"--- snapshot refresh attempt {index} ---\n{attempt.stdout.rstrip()}"
+            for index, attempt in enumerate(attempts, start=1)
+        ).rstrip()
+        stderr = "\n".join(
+            f"--- snapshot refresh attempt {index} ---\n{attempt.stderr.rstrip()}"
+            for index, attempt in enumerate(attempts, start=1)
+        ).rstrip()
+        return CommandResult(
+            command=latest.command,
+            returncode=latest.returncode,
+            stdout=f"{stdout}\n" if stdout else "",
+            stderr=f"{stderr}\n" if stderr else "",
+        )
+
+    def refresh_subtask_state(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event, Event | None]:
+        if self.snapshot_adapter is None or self.workdir_root is None:
+            raise IntakeError("Coordinator is missing snapshot adapter or workdir root")
+
+        session = self._get_session_or_raise(session_id)
+        subtasks, refresh_ok = self._refresh_subtask_snapshot(session)
+        session = self._get_session_or_raise(session.id)
+
+        if not refresh_ok:
+            event = self._append_event(
+                session_id=session.id,
+                event_type="subtask_state_refresh_failed_by_operator",
+                producer_type="operator",
+                payload={
+                    "task_key": session.task_key,
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                },
+            )
+            return session, event, None
+
+        unresolved = unresolved_subtasks(subtasks) if subtasks is not None else []
+        event = self._append_event(
+            session_id=session.id,
+            event_type="subtask_state_refreshed_by_operator",
+            producer_type="operator",
+            payload={
+                "task_key": session.task_key,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+                "subtask_count": len(subtasks or []),
+                "unresolved_count": len(unresolved),
+            },
+        )
+
+        if not unresolved or session.current_stage not in {
+            "implementation_requested",
+            "subtask_creation_requested",
+            "subtask_implementation_requested",
+        }:
+            return session, event, None
+
+        active_item: WorkItem | None
+        if session.current_stage == "subtask_creation_requested":
+            active_item = self._find_operator_pending_work_item(session.id)
+            if active_item is not None:
+                self.work_item_repository.update_status(active_item.id, WorkItemStatus.ASSIGNED)
+        elif session.current_stage == "subtask_implementation_requested":
+            active_item = self._find_active_primary_coding_work_item(session)
+        else:
+            active_item = self._find_active_primary_coding_work_item(session)
+        decomposition_artifact = self._latest_artifact_for_session_type(
+            session.id,
+            "task_decomposition_markdown",
+        )
+        if active_item is None or decomposition_artifact is None or subtasks is None:
+            return session, event, None
+
+        if session.current_stage == "subtask_implementation_requested":
+            if active_item.work_type != "subtask_implementation":
+                return session, event, None
+            completed_subtask_keys = {
+                parsed["key"]
+                for item in self.work_item_repository.list_for_session(session.id)
+                if item.work_type == "subtask_implementation"
+                and item.status == WorkItemStatus.COMPLETED
+                for parsed in [self._parse_subtask_work_item_title(item.title)]
+                if parsed["key"] is not None
+            }
+            active_subtask_key = self._parse_subtask_work_item_title(active_item.title)["key"]
+            queued_items = self._pending_subtask_queue_items(
+                session.id,
+                exclude_ids={active_item.id},
+            )
+            self._reconcile_subtask_queue_after_refresh(
+                session=session,
+                source_event=event,
+                queued_items=queued_items,
+                unresolved=[
+                    subtask
+                    for subtask in unresolved
+                    if subtask.key not in completed_subtask_keys and subtask.key != active_subtask_key
+                ],
+            )
+            session = self._get_session_or_raise(session.id)
+            return session, event, None
+
+        if active_item.work_type != "implementation":
+            return session, event, None
+
+        _graph_event, followup_event = self._start_subtask_graph_flow(
+            session=session,
+            producer_type="coordinator",
+            subtasks=subtasks,
+            initial_work_item=active_item,
+            decomposition_artifact=decomposition_artifact,
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event, followup_event
+
+    def refresh_snapshot_and_continue(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event, Event | None]:
+        if self.snapshot_adapter is None or self.workdir_root is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing snapshot adapter or workdir root")
+
+        session = self._get_session_or_raise(session_id)
+        result = self.snapshot_adapter.run(session.task_key)
+
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "operator-refresh",
+            "snapshot-refresh.stdout.txt",
+            result.stdout,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="operator-refresh",
+            artifact_type="snapshot_refresh_stdout",
+            path=str(stdout_path),
+            metadata={"task_key": session.task_key, "command": result.command, "exit_code": result.returncode},
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "operator-refresh",
+            "snapshot-refresh.stderr.txt",
+            result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="operator-refresh",
+            artifact_type="snapshot_refresh_stderr",
+            path=str(stderr_path),
+            metadata={"task_key": session.task_key, "command": result.command, "exit_code": result.returncode},
+        )
+
+        if not result.ok:
+            event = self._append_event(
+                session_id=session.id,
+                event_type="snapshot_refresh_failed_by_operator",
+                producer_type="operator",
+                payload={
+                    "task_key": session.task_key,
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                    "snapshot_exit_code": result.returncode,
+                },
+            )
+            return session, event, None
+
+        event = self._append_event(
+            session_id=session.id,
+            event_type="snapshot_refreshed_by_operator",
+            producer_type="operator",
+            payload={
+                "task_key": session.task_key,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+                "snapshot_exit_code": result.returncode,
+            },
+        )
+
+        if session.status == SessionStatus.COMPLETED:
+            subtasks = self._read_snapshot_subtasks(session.task_key)
+            unresolved = unresolved_subtasks(subtasks) if subtasks is not None else []
+            decomposition_artifact = self._latest_artifact_for_session_type(
+                session.id,
+                "task_decomposition_markdown",
+            )
+            if unresolved and subtasks is not None:
+                implementation_item = self.work_item_repository.create(
+                    session_id=session.id,
+                    work_type="implementation",
+                    title=f"Post-delivery implementation follow-up for {session.task_key}",
+                    owner_role_id=None,
+                    source_event_id=event.id,
+                    priority=95,
+                )
+                session = self.session_repository.update_stage_and_owner(
+                    session.id,
+                    current_stage="implementation_requested",
+                    current_owner=None,
+                )
+                session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+                _graph_event, followup_event = self._start_subtask_graph_flow(
+                    session=session,
+                    producer_type="operator",
+                    subtasks=subtasks,
+                    initial_work_item=implementation_item,
+                    decomposition_artifact=decomposition_artifact,
+                )
+                session = self._get_session_or_raise(session.id)
+                return session, event, followup_event
+
+        if session.status != SessionStatus.ACTIVE:
+            return session, event, None
+
+        loop_event, session_count, chunk_count = self.run_loop_once()
+        session = self._get_session_or_raise(session.id)
+        followup_event = self._append_event(
+            session_id=session.id,
+            event_type="snapshot_continue_processed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "session_count": session_count,
+                "chunk_count": chunk_count,
+                "loop_event_type": loop_event.event_type if loop_event is not None else None,
+            },
+        )
+        return session, event, followup_event
+
+    def reopen_from_qa(
+        self,
+        session_id: int,
+        comment_text: str,
+    ) -> tuple[Session, Event, Event]:
+        if self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing artifact root")
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.COMPLETED:
+            raise IntakeError(
+                f"Session {session_id} must be completed before QA can reopen it"
+            )
+        normalized_comment = comment_text.strip()
+        if not normalized_comment:
+            raise IntakeError("QA comment text must not be empty")
+
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "qa-reopen",
+            "qa-comments.md",
+            normalized_comment,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="qa-reopen",
+            artifact_type="qa_reopen_comments",
+            path=str(artifact_path),
+            metadata={"comment_length": len(normalized_comment)},
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="qa_reopened",
+            producer_type="coordinator",
+            payload={"comment_length": len(normalized_comment)},
+        )
+        if session.workflow_profile == "story_full":
+            decomposition_artifact = self._latest_artifact_for_session_type(
+                session.id,
+                "task_decomposition_markdown",
+            )
+            subtasks: list | None
+            refresh_ok = False
+            if decomposition_artifact is not None and self.snapshot_adapter is not None and self.workdir_root is not None:
+                subtasks, refresh_ok = self._refresh_subtask_snapshot(session)
+            else:
+                subtasks = self._read_snapshot_subtasks(session.task_key)
+            unresolved = unresolved_subtasks(subtasks) if subtasks is not None else []
+            if unresolved and subtasks is not None and decomposition_artifact is not None:
+                coding_role = self._primary_coding_role_for_work_type(session, "followup_implementation")
+                work_item = self.work_item_repository.create(
+                    session_id=session.id,
+                    work_type="followup_implementation",
+                    title=f"QA reopen execution for {session.task_key}",
+                    owner_role_id=coding_role.id,
+                    source_event_id=event.id,
+                    priority=115,
+                )
+                _graph_event, followup_event = self._start_subtask_graph_flow(
+                    session=session,
+                    producer_type="coordinator" if refresh_ok else "coordinator",
+                    subtasks=subtasks,
+                    initial_work_item=work_item,
+                    decomposition_artifact=decomposition_artifact,
+                )
+                refreshed = self._get_session_or_raise(session.id)
+                return refreshed, event, followup_event
+        followup_event = self._enqueue_qa_followup(
+            session=session,
+            source_event=event,
+        )
+        refreshed = self._get_session_or_raise(session.id)
+        return refreshed, event, followup_event
+
+    def skip_current_subtask(
+        self,
+        session_id: int,
+        reason: str,
+    ) -> tuple[Session, Event, Event]:
+        session = self._get_session_or_raise(session_id)
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise IntakeError("Subtask skip reason must not be empty")
+        if session.current_stage != "subtask_implementation_requested":
+            raise IntakeError(f"Session {session_id} is not waiting on subtask implementation")
+        if session.status not in {SessionStatus.ACTIVE, SessionStatus.WAITING_FOR_OPERATOR}:
+            raise IntakeError(f"Session {session_id} is not in a skippable subtask state")
+
+        active_item: WorkItem | None = None
+        if session.status == SessionStatus.WAITING_FOR_OPERATOR:
+            active_item = self._find_operator_pending_work_item(session.id)
+        if active_item is None:
+            active_item = self._find_active_primary_coding_work_item(session)
+        if active_item is None or active_item.work_type != "subtask_implementation":
+            raise IntakeError("No current subtask implementation work item found for skip")
+
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        parsed_subtask = self._parse_subtask_work_item_title(active_item.title)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="subtask_implementation_skipped_by_operator",
+            producer_type="operator",
+            payload={
+                "task_key": session.task_key,
+                "work_item_id": active_item.id,
+                "subtask_key": parsed_subtask["key"],
+                "subtask_title": parsed_subtask["title"],
+                "reason": normalized_reason,
+                "current_stage": session.current_stage,
+            },
+        )
+        self._materialize_skipped_subtasks_context(session)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        session, followup_event = self._advance_after_coding_completion(
+            session=session,
+            source_event=event,
+            completed_work_type="subtask_implementation",
+        )
+        return session, event, followup_event
+
+    def start_subtask_graph(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event, Event]:
+        if self.workdir_root is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing workdir root or artifact root")
+
+        session = self._get_session_or_raise(session_id)
+        if session.workflow_profile != "story_full":
+            raise IntakeError(
+                f"Session {session_id} is {session.workflow_profile}, but subtask graph is only supported for story_full"
+            )
+        active_item: WorkItem | None = None
+        if session.current_stage == "implementation_requested" and session.status == SessionStatus.ACTIVE:
+            active_item = self._find_active_primary_coding_work_item(session)
+        elif session.current_stage == "subtask_creation_requested" and session.status == SessionStatus.WAITING_FOR_OPERATOR:
+            active_item = self._find_operator_pending_work_item(session.id)
+            if active_item is not None:
+                self.work_item_repository.update_status(active_item.id, WorkItemStatus.ASSIGNED)
+        else:
+            raise IntakeError(
+                f"Session {session_id} must be at implementation_requested or subtask_creation_requested before starting subtask graph"
+            )
+        if active_item is None or active_item.work_type != "implementation":
+            raise IntakeError("No implementation work item found for subtask graph start")
+        decomposition_item = next(
+            (
+                item
+                for item in self.work_item_repository.list_for_session(session.id)
+                if item.work_type == "task_decomposition"
+                and item.status == WorkItemStatus.COMPLETED
+            ),
+            None,
+        )
+        if decomposition_item is None:
+            raise IntakeError("A completed task decomposition is required before starting subtask graph")
+        decomposition_artifact = self._latest_artifact_for_session_type(
+            session.id,
+            "task_decomposition_markdown",
+        )
+
+        subtasks = self._read_snapshot_subtasks_or_raise(session.task_key)
+        unresolved = unresolved_subtasks(subtasks)
+        if not unresolved:
+            raise IntakeError(f"No unresolved subtasks found for session {session.task_key}")
+        event, followup_event = self._start_subtask_graph_flow(
+            session=session,
+            producer_type="operator",
+            subtasks=subtasks,
+            initial_work_item=active_item,
+            decomposition_artifact=decomposition_artifact,
+        )
+        refreshed = self._get_session_or_raise(session.id)
+        return refreshed, event, followup_event
+
+    @_serialize_session_transition
+    def handle_role_output(
+        self,
+        session_id: int,
+        role_name: str,
+        output_type: str,
+        payload: dict,
+    ) -> tuple[Session, Event, Event | None]:
+        session = self._get_session_or_raise(session_id)
+        payload = self._normalize_role_output_payload(
+            session=session,
+            role_name=role_name,
+            output_type=output_type,
+            payload=payload,
+        )
+        self._record_role_output_artifacts(
+            session=session,
+            role_name=role_name,
+            output_type=output_type,
+            payload=payload,
+        )
+        mapped_event_type = self._map_role_output_to_event_type(
+            session=session,
+            role_name=role_name,
+            output_type=output_type,
+            payload=payload,
+        )
+        accepted_event = self._append_event(
+            session_id=session_id,
+            event_type=mapped_event_type,
+            producer_type="role",
+            producer_id=role_name,
+            payload=payload,
+        )
+        followup_event: Event | None = None
+        if mapped_event_type == "proposal_context_completed":
+            session, followup_event = self._handle_proposal_context_completed(session, accepted_event)
+        elif mapped_event_type == "spec_verification_blocked":
+            session, followup_event = self._handle_spec_verification_blocked(session, accepted_event)
+        elif mapped_event_type == "requirements_completed":
+            session, followup_event = self._handle_requirements_completed(session, accepted_event)
+        elif mapped_event_type == "story_planning_blocked":
+            session, followup_event = self._handle_story_planning_blocked(session, accepted_event)
+        elif mapped_event_type == "convention_review_passed":
+            session, followup_event = self._handle_dual_review_passed(session, accepted_event, lane="convention")
+        elif mapped_event_type == "convention_review_issues_found":
+            session, followup_event = self._handle_dual_review_issues_found(session, accepted_event, lane="convention")
+        elif mapped_event_type == "convention_review_blocked":
+            session, followup_event = self._handle_dual_review_blocked(session, accepted_event, lane="convention")
+        elif mapped_event_type == "requirements_review_passed":
+            session, followup_event = self._handle_dual_review_passed(session, accepted_event, lane="requirements")
+        elif mapped_event_type == "requirements_review_issues_found":
+            session, followup_event = self._handle_dual_review_issues_found(session, accepted_event, lane="requirements")
+        elif mapped_event_type == "requirements_review_blocked":
+            session, followup_event = self._handle_dual_review_blocked(session, accepted_event, lane="requirements")
+        elif mapped_event_type == "doc_harvest_completed":
+            session, followup_event = self._handle_doc_harvest_completed(session, accepted_event)
+        elif mapped_event_type == "documentation_review_passed":
+            session, followup_event = self._handle_documentation_review_passed(session, accepted_event)
+        elif mapped_event_type == "documentation_review_issues_found":
+            session, followup_event = self._handle_documentation_review_issues_found(session, accepted_event)
+        elif mapped_event_type == "acceptance_criteria_completed":
+            session, followup_event = self._handle_acceptance_criteria_completed(session, accepted_event)
+        elif mapped_event_type == "constraints_completed":
+            session, followup_event = self._handle_constraints_completed(session, accepted_event)
+        elif mapped_event_type == "spec_verification_completed":
+            session, followup_event = self._handle_spec_verification_completed(session, accepted_event)
+        elif mapped_event_type == "task_decomposition_completed":
+            session, followup_event = self._handle_task_decomposition_completed(session, accepted_event)
+        elif mapped_event_type == "subtask_completed":
+            session, followup_event = self._handle_subtask_completed(session, accepted_event)
+        elif mapped_event_type == "implementation_completed":
+            session, followup_event = self._handle_implementation_completed(session, accepted_event)
+        elif mapped_event_type == "implementation_blocked":
+            session, followup_event = self._handle_implementation_blocked(session, accepted_event)
+        elif mapped_event_type == "verification_failed":
+            session, followup_event = self._handle_verification_failed(session, accepted_event)
+        elif mapped_event_type == "verification_passed":
+            session, followup_event = self._handle_verification_passed(session, accepted_event)
+        elif mapped_event_type == "verification_blocked":
+            session, followup_event = self._handle_verification_blocked(session, accepted_event)
+        return session, accepted_event, followup_event
+
+    def _normalize_role_output_payload(
+        self,
+        *,
+        session: Session,
+        role_name: str,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        normalized_payload = dict(payload)
+        if role_name == VERIFICATION_COORDINATOR_ROLE and session.current_stage == "verification_requested":
+            if session.task_key.startswith("QA-") and output_type in {
+                "passed", "completed", "failed", "blocked_verification_cycle",
+            }:
+                from factory.e2e.runner import describe_verdict, validate_verdict
+                from factory.e2e.config import E2EError
+                try:
+                    verdict = validate_verdict(self.workdir_root / session.task_key, payload.get("work_item_id"))
+                except (E2EError, OSError, ValueError, KeyError) as exc:
+                    raise IntakeError(str(exc)) from exc
+                self._validate_e2e_operator_decisions(session, verdict)
+                normalized_payload["result"] = "passed" if verdict["result"] in {"passed", "accepted_with_warnings"} else "failed"
+                normalized_payload["e2e_result"] = verdict["result"]
+                diagnostics = describe_verdict(verdict)
+                normalized_payload["summary"] = diagnostics["summary"]
+                normalized_payload["details"] = diagnostics["details"]
+                normalized_payload["e2e_report_path"] = verdict["report_path"]
+            return self._normalize_verification_output_payload(
+                output_type=output_type,
+                payload=normalized_payload,
+            )
+        if role_name in {CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE}:
+            expected_stage = (
+                "convention_review_requested"
+                if role_name == CONVENTION_REVIEWER_ROLE
+                else "requirements_review_requested"
+            )
+            if session.current_stage == expected_stage:
+                return self._normalize_review_output_payload(
+                    output_type=output_type,
+                    payload=normalized_payload,
+                )
+        if role_name == IMPLEMENTER_ROLE:
+            return self._normalize_coding_output_payload(
+                session=session,
+                output_type=output_type,
+                payload=normalized_payload,
+            )
+        if role_name == DOC_HARVEST_ROLE and session.current_stage == "doc_harvest_requested":
+            return self._normalize_doc_harvest_output_payload(
+                output_type=output_type,
+                payload=normalized_payload,
+            )
+        if role_name == DOCUMENTATION_REVIEWER_ROLE and session.current_stage == "documentation_review_requested":
+            return self._normalize_documentation_review_output_payload(
+                output_type=output_type,
+                payload=normalized_payload,
+            )
+        if role_name in _STORY_PLANNING_ROLES and session.current_stage in _STORY_PLANNING_WORK_TYPE_BY_STAGE:
+            return self._normalize_story_planning_output_payload(
+                role_name=role_name,
+                output_type=output_type,
+                payload=normalized_payload,
+            )
+        return normalized_payload
+
+    def _normalize_verification_output_payload(
+        self,
+        *,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type == "blocked_verification_cycle":
+            return payload
+        if output_type not in {"passed", "completed", "failed"}:
+            return payload
+
+        explicit_result = str(payload.get("result") or "").strip().lower()
+        if output_type == "failed" and not explicit_result:
+            payload["result"] = "failed"
+            return payload
+        if explicit_result not in {"passed", "failed"}:
+            raise IntakeError(
+                "Verification output must include payload.result set to 'passed' or 'failed'"
+            )
+        payload["result"] = explicit_result
+        return payload
+
+    def _normalize_review_output_payload(
+        self,
+        *,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type in {"passed", "completed", "skipped_not_needed"}:
+            return payload
+        if output_type == "failed":
+            if not any(str(payload.get(key) or "").strip() for key in ("summary", "details", "issues_markdown")):
+                raise IntakeError(
+                    "Review failed output must include payload.summary, payload.details, or payload.issues_markdown"
+                )
+            return payload
+        if output_type == "blocked_review_cycle":
+            if not str(payload.get("summary") or "").strip():
+                raise IntakeError("Blocked review output must include payload.summary")
+            return payload
+        return payload
+
+    def _normalize_story_planning_output_payload(
+        self,
+        *,
+        role_name: str,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type in {"passed", "completed"} and not self._payload_truthy(payload.get("needs_operator_input")):
+            return payload
+
+        if role_name == SPEC_VERIFIER_WORKER_ROLE and output_type == "failed":
+            blocker_questions = payload.get("blocker_questions")
+            has_questions = isinstance(blocker_questions, list) and any(str(item).strip() for item in blocker_questions)
+            if not str(payload.get("summary") or "").strip() and not has_questions:
+                raise IntakeError(
+                    "Spec verification blocked output must include payload.summary or payload.blocker_questions"
+                )
+            return payload
+
+        if output_type == "failed" or (
+            output_type in {"passed", "completed"} and self._payload_truthy(payload.get("needs_operator_input"))
+        ):
+            has_signal = False
+            for key in ("summary", "details", "next_step"):
+                if str(payload.get(key) or "").strip():
+                    has_signal = True
+                    break
+            if not has_signal:
+                for key in ("failures", "missing_inputs", "pending_decisions", "blocker_questions"):
+                    value = payload.get(key)
+                    if isinstance(value, list) and any(str(item).strip() for item in value):
+                        has_signal = True
+                        break
+            if not has_signal:
+                raise IntakeError(
+                    f"{role_name} blocked output must include payload.summary, payload.details, payload.next_step, or structured blocker lists"
+                )
+        return payload
+
+    def _normalize_coding_output_payload(
+        self,
+        *,
+        session: Session,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type == "failed":
+            if self._payload_truthy(payload.get("needs_operator_input")) and not any(
+                str(payload.get(key) or "").strip() for key in ("summary", "details")
+            ):
+                raise IntakeError(
+                    "Coding blocked output must include payload.summary or payload.details when operator input is required"
+                )
+            return payload
+        if output_type != "completed":
+            return payload
+        if session.current_stage != "subtask_implementation_requested":
+            return payload
+        subtask_key = str(payload.get("subtask_key") or "").strip()
+        if not subtask_key:
+            raise IntakeError(
+                "Subtask implementation output must include payload.subtask_key"
+            )
+        payload["subtask_key"] = subtask_key
+        return payload
+
+    def _normalize_doc_harvest_output_payload(
+        self,
+        *,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type not in {"completed", "passed", "skipped_not_needed"}:
+            return payload
+        if not any(str(payload.get(key) or "").strip() for key in ("summary", "details")):
+            raise IntakeError(
+                "Doc harvest output must include payload.summary or payload.details"
+            )
+        return payload
+
+    def _normalize_documentation_review_output_payload(
+        self,
+        *,
+        output_type: str,
+        payload: dict,
+    ) -> dict:
+        if output_type in {"completed", "passed", "skipped_not_needed"}:
+            return payload
+        if output_type == "failed":
+            if not str(payload.get("issues_markdown") or "").strip():
+                raise IntakeError(
+                    "Documentation review failed output must include payload.issues_markdown with actionable findings"
+                )
+            return payload
+        return payload
+
+    @_serialize_session_transition
+    def collect_role_output(
+        self,
+        session_id: int,
+        role_name: str,
+    ) -> tuple[Session, Event | None, int]:
+        session = self._get_session_or_raise(session_id)
+        role = self.role_repository.get_by_name(session_id, role_name)
+        if role is None:
+            raise IntakeError(f"Role {role_name} is missing for session {session_id}")
+
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle or f"{role.runtime_backend}:{role.role_name}",
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        chunks = self.session_backend.read_output(runtime_role)
+        file_result: tuple[str, dict] | None = None
+        protocol_violation = False
+        try:
+            file_result = self._consume_role_result_file(session, role)
+        except IntakeError as exc:
+            session = self._handle_role_result_protocol_violation(
+                session=session,
+                role=role,
+                error_message=str(exc),
+            )
+            protocol_violation = True
+        if not chunks and file_result is None and not protocol_violation:
+            if role.runtime_handle is not None:
+                self._maybe_poke_stalled_runtime_role(
+                    session=session,
+                    role=role,
+                    runtime_role=runtime_role,
+                )
+            return session, None, 0
+
+        if chunks:
+            self._record_runtime_output_artifacts(session, role, chunks)
+        if file_result is not None:
+            output_type, output_payload = file_result
+            try:
+                handled_session = self._handle_collected_role_output(
+                    session=session,
+                    role=role,
+                    output_type=output_type,
+                    output_payload=output_payload,
+                )
+            except IntakeError as exc:
+                session, protocol_violation = self._handle_collected_result_intake_error(
+                    session=session,
+                    role=role,
+                    output_payload=output_payload,
+                    error_message=str(exc),
+                )
+            else:
+                if handled_session is not None:
+                    session = handled_session
+        elif chunks:
+            session = self._apply_runtime_output_markers(session, role, chunks)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="role_output_collected",
+            producer_type="coordinator",
+            payload={
+                "role_name": role_name,
+                "chunk_count": len(chunks) + (1 if file_result is not None or protocol_violation else 0),
+            },
+        )
+        return session, event, len(chunks) + (1 if file_result is not None or protocol_violation else 0)
+
+    @_serialize_session_transition
+    def poll_session_output(
+        self,
+        session_id: int,
+    ) -> tuple[Session, Event | None, int, int]:
+        session = self._get_session_or_raise(session_id)
+        roles = [
+            role
+            for role in self.role_repository.list_for_session(session_id)
+            if role.runtime_handle is not None
+        ]
+        total_chunks = 0
+        for role in roles:
+            runtime_role = RuntimeRoleHandle(
+                role_id=role.runtime_handle or f"{role.runtime_backend}:{role.role_name}",
+                session_id=self._runtime_session_id_for_role(role, session),
+                backend_name=role.runtime_backend,
+            )
+            chunks = self.session_backend.read_output(runtime_role)
+            file_result: tuple[str, dict] | None = None
+            protocol_violation = False
+            try:
+                file_result = self._consume_role_result_file(session, role)
+            except IntakeError as exc:
+                session = self._handle_role_result_protocol_violation(
+                    session=session,
+                    role=role,
+                    error_message=str(exc),
+                )
+                protocol_violation = True
+            if not chunks and file_result is None:
+                if not protocol_violation:
+                    self._maybe_poke_stalled_runtime_role(
+                        session=session,
+                        role=role,
+                        runtime_role=runtime_role,
+                    )
+                if protocol_violation:
+                    total_chunks += 1
+                continue
+            if chunks:
+                self._record_runtime_output_artifacts(session, role, chunks)
+            if file_result is not None:
+                output_type, output_payload = file_result
+                try:
+                    handled_session = self._handle_collected_role_output(
+                        session=session,
+                        role=role,
+                        output_type=output_type,
+                        output_payload=output_payload,
+                    )
+                except IntakeError as exc:
+                    session, protocol_violation = self._handle_collected_result_intake_error(
+                        session=session,
+                        role=role,
+                        output_payload=output_payload,
+                        error_message=str(exc),
+                    )
+                else:
+                    if handled_session is not None:
+                        session = handled_session
+            elif chunks:
+                session = self._apply_runtime_output_markers(session, role, chunks)
+            total_chunks += len(chunks) + (1 if file_result is not None or protocol_violation else 0)
+
+        if total_chunks == 0:
+            if self._reconcile_session_dispatch(session):
+                event = self._append_event(
+                    session_id=session.id,
+                    event_type="session_dispatch_reconciled_from_poll",
+                    producer_type="coordinator",
+                    payload={
+                        "current_stage": session.current_stage,
+                        "current_owner": session.current_owner,
+                    },
+                )
+                return session, event, len(roles), 0
+            return session, None, len(roles), 0
+
+        event = None
+        if self._should_persist_poll_telemetry():
+            event = self._append_event(
+                session_id=session.id,
+                event_type="session_output_polled",
+                producer_type="coordinator",
+                payload={
+                    "role_count": len(roles),
+                    "chunk_count": total_chunks,
+                },
+            )
+        return session, event, len(roles), total_chunks
+
+    def _consume_role_result_file(
+        self,
+        session: Session,
+        role: Role,
+    ) -> tuple[str, dict] | None:
+        if self.role_workspace_manager is None:
+            return None
+        candidate_paths = [
+            self.role_workspace_manager.role_directory(session.task_key, role.role_name) / "RESULT.json",
+        ]
+        if self.workdir_root is not None:
+            candidate_paths.append(self.workdir_root / session.task_key / "RESULT.json")
+
+        result_path: Path | None = None
+        output_type: str | None = None
+        output_payload: dict | None = None
+        parsed_payload: dict[str, object] | None = None
+        active_work_item = self._find_active_work_item_for_role(session.id, role.id)
+        invalid_result_detected = False
+
+        for candidate in candidate_paths:
+            if not candidate.is_file():
+                continue
+            raw_text = candidate.read_text()
+            parsed = self._parse_role_result_json(raw_text)
+            if parsed is None or not isinstance(parsed, dict):
+                invalid_result_detected = True
+                continue
+            candidate_output_type = parsed.get("output_type")
+            candidate_output_payload = parsed.get("payload")
+            if not isinstance(candidate_output_type, str) or not isinstance(candidate_output_payload, dict):
+                invalid_result_detected = True
+                continue
+            if active_work_item is not None:
+                payload_work_item_id = candidate_output_payload.get("work_item_id")
+                if candidate_output_type != "error" and payload_work_item_id != active_work_item.id:
+                    allow_subtask_stale_intake = (
+                        role.role_name == IMPLEMENTER_ROLE
+                        and active_work_item.work_type == "subtask_implementation"
+                        and candidate_output_type == "completed"
+                    )
+                    if not allow_subtask_stale_intake:
+                        continue
+            result_path = candidate
+            output_type = candidate_output_type
+            output_payload = candidate_output_payload
+            parsed_payload = parsed
+            break
+
+        if result_path is None or output_type is None or output_payload is None or parsed_payload is None:
+            if invalid_result_detected:
+                raise IntakeError("RESULT.json is invalid or does not match the required terminal schema")
+            return None
+        self._materialize_role_result_artifact(
+            session=session,
+            role=role,
+            parsed_payload=parsed_payload,
+            source_path=str(result_path),
+            submission_path="file",
+        )
+        result_path.unlink(missing_ok=True)
+        return output_type, output_payload
+
+    def _materialize_role_result_artifact(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        parsed_payload: dict[str, object],
+        source_path: str,
+        submission_path: str | None = None,
+    ) -> None:
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            f"role-result-{role.role_name}",
+            "RESULT.json",
+            json.dumps(parsed_payload, indent=2, sort_keys=True),
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            stage_name=f"role-result-{role.role_name}",
+            artifact_type="role_result_json",
+            path=str(artifact_path),
+            metadata={
+                "role_name": role.role_name,
+                "current_stage": session.current_stage,
+                "source_path": source_path,
+                "submission_path": submission_path or ("ingress" if source_path == "coordinator_ingress" else "file"),
+            },
+        )
+
+    def submit_role_result_document(
+        self,
+        *,
+        document: dict[str, object],
+    ) -> tuple[Session, Event, str | None, str | None, bool]:
+        output_type = document.get("output_type")
+        output_payload = document.get("payload")
+        if not isinstance(output_type, str) or not isinstance(output_payload, dict):
+            raise IntakeError("submitted result must contain string output_type and object payload")
+        work_item_id = output_payload.get("work_item_id")
+        if not isinstance(work_item_id, int):
+            raise IntakeError("submitted result payload must include integer work_item_id")
+        work_item = self.work_item_repository.get_by_id(work_item_id)
+        if work_item is None:
+            raise IntakeError(f"unknown work_item_id: {work_item_id}")
+        session = self._get_session_or_raise(work_item.session_id)
+        if work_item.owner_role_id is None:
+            raise IntakeError(f"work item {work_item_id} has no owner role")
+        role = self.role_repository.get_by_id(work_item.owner_role_id)
+        if role is None:
+            raise IntakeError(f"work item {work_item_id} references a missing owner role")
+
+        self._materialize_role_result_artifact(
+            session=session,
+            role=role,
+            parsed_payload={"output_type": output_type, "payload": output_payload},
+            source_path="coordinator_ingress",
+            submission_path="ingress",
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="role_result_ingress_accepted",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": work_item_id,
+                "current_stage": session.current_stage,
+                "output_type": output_type,
+            },
+        )
+
+        mapped_event_type: str | None = None
+        followup_event_type: str | None = None
+        ignored = False
+        try:
+            handled_session = self._handle_collected_role_output(
+                session=session,
+                role=role,
+                output_type=output_type,
+                output_payload=output_payload,
+            )
+        except IntakeError as exc:
+            if self._should_ignore_stale_result_intake_error(
+                session=session,
+                role=role,
+                output_payload=output_payload,
+                error_message=str(exc),
+            ):
+                ignored = True
+                self._append_stale_role_output_ignored_once(
+                    session_id=session.id,
+                    payload={
+                        "role_name": role.role_name,
+                        "current_stage": session.current_stage,
+                        "current_owner": session.current_owner,
+                        "reason": "duplicate_or_stale_result_after_accepted_output",
+                        "work_item_id": work_item_id,
+                        "details": str(exc),
+                    },
+                )
+                self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
+            else:
+                self._append_event(
+                    session_id=session.id,
+                    event_type="role_result_ingress_rejected",
+                    producer_type="coordinator",
+                    payload={
+                        "role_name": role.role_name,
+                        "work_item_id": work_item_id,
+                        "current_stage": session.current_stage,
+                        "output_type": output_type,
+                        "error": str(exc),
+                    },
+                )
+                session = self._handle_role_result_protocol_violation(
+                    session=session,
+                    role=role,
+                    error_message=str(exc),
+                )
+        except Exception as exc:
+            mapped_event = self._accepted_mapped_event_for_work_item(
+                session_id=session.id,
+                work_item_id=work_item_id,
+            )
+            if mapped_event is None:
+                raise
+            mapped_event_type = mapped_event.event_type
+            session = self._get_session_or_raise(session.id)
+            latest_event = self.event_repository.list_for_session(session.id)[-1]
+            if latest_event.id != mapped_event.id:
+                followup_event_type = latest_event.event_type
+            self._append_event(
+                session_id=session.id,
+                event_type="role_result_followup_dispatch_failed",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "work_item_id": work_item_id,
+                    "mapped_event_type": mapped_event_type,
+                    "current_stage": session.current_stage,
+                    "current_owner": session.current_owner,
+                    "error": str(exc),
+                },
+            )
+        else:
+            if handled_session is not None:
+                mapped_event_type = self._map_role_output_to_event_type(
+                    session=session,
+                    role_name=role.role_name,
+                    output_type=output_type,
+                    payload=output_payload,
+                )
+                latest_event = self.event_repository.list_for_session(session.id)[-1]
+                session = handled_session
+                if latest_event.event_type != mapped_event_type:
+                    followup_event_type = latest_event.event_type
+            else:
+                ignored = True
+
+        event = self._append_event(
+            session_id=session.id,
+            event_type="role_output_collected",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "chunk_count": 1,
+                "source": "ingress",
+            },
+        )
+        return session, event, mapped_event_type, followup_event_type, ignored
+
+    def _accepted_mapped_event_for_work_item(
+        self,
+        *,
+        session_id: int,
+        work_item_id: int,
+    ) -> Event | None:
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.producer_type != "role":
+                continue
+            if event.payload.get("work_item_id") != work_item_id:
+                continue
+            return event
+        return None
+
+    def _parse_role_result_json(self, raw_text: str) -> dict[str, object] | None:
+        try:
+            parsed = json.loads(raw_text)
+        except json.JSONDecodeError:
+            repaired_text = self._escape_raw_control_chars_in_json_strings(raw_text)
+            try:
+                parsed = json.loads(repaired_text)
+            except json.JSONDecodeError:
+                closed_text = self._close_truncated_json_containers(repaired_text)
+                if closed_text != repaired_text:
+                    try:
+                        parsed = json.loads(closed_text)
+                    except json.JSONDecodeError:
+                        parsed = None
+                    else:
+                        if isinstance(parsed, dict):
+                            return parsed
+                decoder = json.JSONDecoder()
+                try:
+                    parsed, end = decoder.raw_decode(repaired_text.lstrip())
+                except json.JSONDecodeError:
+                    return None
+                trailing = repaired_text.lstrip()[end:].strip()
+                if trailing and any(char != "}" for char in trailing):
+                    return None
+        if not isinstance(parsed, dict):
+            return None
+        return parsed
+
+    def _handle_role_result_protocol_violation(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        error_message: str,
+    ) -> Session:
+        result_path = None
+        raw_result = None
+        if self.role_workspace_manager is not None:
+            result_path = self.role_workspace_manager.role_directory(session.task_key, role.role_name) / "RESULT.json"
+            if result_path.is_file():
+                raw_result = result_path.read_text(encoding="utf-8")
+        if raw_result and self.artifacts_root is not None:
+            artifact_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                f"protocol-violation-{role.role_name}",
+                "invalid-result.json.txt",
+                raw_result,
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                role_id=role.id,
+                stage_name=f"protocol-violation-{role.role_name}",
+                artifact_type="invalid_role_result_raw",
+                path=str(artifact_path),
+                metadata={
+                    "role_name": role.role_name,
+                    "current_stage": session.current_stage,
+                    "source_path": str(result_path) if result_path is not None else "",
+                },
+            )
+        if result_path is not None:
+            result_path.unlink(missing_ok=True)
+        if (
+            session.current_owner != role.role_name
+            and self._find_active_work_item_for_role(session.id, role.id) is None
+            and not self._has_pending_operator_continuation(
+                session_id=session.id,
+                role_name=role.role_name,
+                work_item_id=None,
+                stage_name=session.current_stage,
+            )
+        ):
+            self._append_event(
+                session_id=session.id,
+                event_type="stale_role_result_protocol_violation_ignored",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "current_stage": session.current_stage,
+                    "current_owner": session.current_owner,
+                    "details": error_message,
+                    "result_path": str(result_path) if result_path is not None else None,
+                },
+            )
+            self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
+            return session
+        self._append_event(
+            session_id=session.id,
+            event_type="role_result_protocol_violation_reported",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "current_stage": session.current_stage,
+                "current_owner": session.current_owner,
+                "details": error_message,
+                "result_path": str(result_path) if result_path is not None else None,
+            },
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=None,
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "role_result_protocol_violation",
+                "role_name": role.role_name,
+                "summary": "RESULT.json is invalid or does not match the required terminal schema",
+                "details": error_message,
+                "needs_operator_input": False,
+                "resume_strategy": "protocol_recovery",
+                "current_stage": session.current_stage,
+            },
+        )
+        return session
+
+    def _handle_collected_result_intake_error(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        output_payload: dict,
+        error_message: str,
+    ) -> tuple[Session, bool]:
+        if self._should_ignore_stale_result_intake_error(
+            session=session,
+            role=role,
+            output_payload=output_payload,
+            error_message=error_message,
+        ):
+            self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
+            self._append_stale_role_output_ignored_once(
+                session_id=session.id,
+                payload={
+                    "role_name": role.role_name,
+                    "current_stage": session.current_stage,
+                    "current_owner": session.current_owner,
+                    "reason": "duplicate_or_stale_result_after_accepted_output",
+                    "work_item_id": self._payload_work_item_id(output_payload),
+                    "details": error_message,
+                },
+            )
+            self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
+            return session, False
+        return (
+            self._handle_role_result_protocol_violation(
+                session=session,
+                role=role,
+                error_message=error_message,
+            ),
+            True,
+        )
+
+    def _should_ignore_stale_result_intake_error(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        output_payload: dict,
+        error_message: str,
+    ) -> bool:
+        del error_message
+        work_item_id = self._payload_work_item_id(output_payload)
+        if work_item_id is None:
+            return False
+        work_item = self.work_item_repository.get_by_id(work_item_id)
+        if work_item is None or work_item.session_id != session.id or work_item.owner_role_id != role.id:
+            return False
+        if work_item.status != WorkItemStatus.COMPLETED:
+            return False
+        return self._accepted_mapped_event_for_work_item(
+            session_id=session.id,
+            work_item_id=work_item_id,
+        ) is not None
+
+    def _escape_raw_control_chars_in_json_strings(self, raw_text: str) -> str:
+        result: list[str] = []
+        in_string = False
+        escape = False
+        for char in raw_text:
+            if in_string:
+                if escape:
+                    result.append(char)
+                    escape = False
+                    continue
+                if char == "\\":
+                    result.append(char)
+                    escape = True
+                    continue
+                if char == '"':
+                    result.append(char)
+                    in_string = False
+                    continue
+                if char == "\n":
+                    result.append("\\n")
+                    continue
+                if char == "\r":
+                    result.append("\\r")
+                    continue
+                if char == "\t":
+                    result.append("\\t")
+                    continue
+                result.append(char)
+                continue
+            result.append(char)
+            if char == '"':
+                in_string = True
+                escape = False
+        return "".join(result)
+
+    def _unwrap_wrapped_json_strings(self, raw_text: str) -> str:
+        result: list[str] = []
+        in_string = False
+        escape = False
+        index = 0
+        while index < len(raw_text):
+            char = raw_text[index]
+            if in_string:
+                if escape:
+                    result.append(char)
+                    escape = False
+                    index += 1
+                    continue
+                if char == "\\":
+                    result.append(char)
+                    escape = True
+                    index += 1
+                    continue
+                if char == '"':
+                    result.append(char)
+                    in_string = False
+                    index += 1
+                    continue
+                if char in {"\n", "\r"}:
+                    if not result or result[-1] != " ":
+                        result.append(" ")
+                    index += 1
+                    while index < len(raw_text) and raw_text[index] in {" ", "\t"}:
+                        index += 1
+                    continue
+                result.append(char)
+                index += 1
+                continue
+            result.append(char)
+            if char == '"':
+                in_string = True
+                escape = False
+            index += 1
+        return "".join(result)
+
+    def _close_truncated_json_containers(self, raw_text: str) -> str:
+        in_string = False
+        escape = False
+        curly_balance = 0
+        square_balance = 0
+        for char in raw_text:
+            if in_string:
+                if escape:
+                    escape = False
+                    continue
+                if char == "\\":
+                    escape = True
+                    continue
+                if char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+                escape = False
+                continue
+            if char == "{":
+                curly_balance += 1
+            elif char == "}":
+                curly_balance -= 1
+            elif char == "[":
+                square_balance += 1
+            elif char == "]":
+                square_balance -= 1
+        if curly_balance <= 0 and square_balance <= 0:
+            return raw_text
+        if curly_balance > 4 or square_balance > 4:
+            return raw_text
+        return raw_text + ("]" * max(square_balance, 0)) + ("}" * max(curly_balance, 0))
+
+    def _handle_collected_role_output(
+        self,
+        session: Session,
+        role: Role,
+        output_type: str,
+        output_payload: dict,
+    ) -> Session | None:
+        replayed_blocker = self._replayed_blocked_output_after_operator_reply(
+            session=session,
+            role_name=role.role_name,
+            output_type=output_type,
+            output_payload=output_payload,
+        )
+        if replayed_blocker is not None:
+            self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
+            self._append_event(
+                session_id=session.id,
+                event_type="stale_role_output_ignored",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "output_type": output_type,
+                    "current_stage": session.current_stage,
+                    "current_owner": session.current_owner,
+                    **replayed_blocker,
+                },
+            )
+            self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
+            return None
+        output_mismatch = self._stale_role_output_mismatch(
+            session=session,
+            role_name=role.role_name,
+            output_type=output_type,
+            output_payload=output_payload,
+        )
+        if output_mismatch is not None:
+            self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
+            self._append_stale_role_output_ignored_once(
+                session_id=session.id,
+                payload={
+                    "role_name": role.role_name,
+                    "output_type": output_type,
+                    "current_stage": session.current_stage,
+                    "current_owner": session.current_owner,
+                    **output_mismatch,
+                },
+            )
+            self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
+            return None
+        if self._should_ignore_stale_role_output(
+            session=session,
+            role_name=role.role_name,
+            output_type=output_type,
+            output_payload=output_payload,
+        ):
+            self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
+            self._append_stale_role_output_ignored_once(
+                session_id=session.id,
+                payload={
+                    "role_name": role.role_name,
+                    "output_type": output_type,
+                    "current_stage": session.current_stage,
+                    "current_owner": session.current_owner,
+                },
+            )
+            self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
+            return None
+        if output_type == "error":
+            self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
+            self._record_runtime_marker_artifact(
+                session=session,
+                role=role,
+                marker_type="error",
+                payload=output_payload,
+            )
+            self._append_runtime_marker_event(
+                session=session,
+                role=role,
+                marker_type="error",
+                payload=output_payload,
+            )
+            return self._escalate_runtime_error(
+                session=session,
+                role=role,
+                payload=output_payload,
+            )
+        updated_session, _, _ = self.handle_role_output(
+            session_id=session.id,
+            role_name=role.role_name,
+            output_type=output_type,
+            payload=output_payload,
+        )
+        self._mark_dispatch_terminal_from_payload(session=session, role=role, output_payload=output_payload)
+        return updated_session
+
+    def _mark_dispatch_terminal_from_payload(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        output_payload: dict,
+    ) -> None:
+        if self.dispatch_repository is None or role.id is None:
+            return
+        work_item_id = output_payload.get("work_item_id")
+        if not isinstance(work_item_id, int):
+            return
+        self.dispatch_repository.mark_terminal_for_work_item(
+            session_id=session.id,
+            role_id=role.id,
+            work_item_id=work_item_id,
+        )
+
+    def _should_ignore_stale_role_output(
+        self,
+        session: Session,
+        role_name: str,
+        output_type: str,
+        output_payload: dict | None = None,
+    ) -> bool:
+        # A live verifier can finish its previous round slightly after the coordinator has
+        # already routed the implementer into verification corrections. Treat that late
+        # result as stale instead of failing the whole session intake path.
+        if (
+            role_name == IMPLEMENTER_ROLE
+            and output_type in {"completed", "error"}
+            and session.current_owner != role_name
+        ):
+            payload_work_item_id = output_payload.get("work_item_id") if isinstance(output_payload, dict) else None
+            if isinstance(payload_work_item_id, int):
+                matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
+                if (
+                    matching_item is not None
+                    and matching_item.session_id == session.id
+                    and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+                    and matching_item.work_type
+                    in {
+                        "subtask_implementation",
+                        "implementation",
+                        "convention_review_correction",
+                        "requirements_review_correction",
+                        "verification_correction",
+                        "documentation_review_correction",
+                        "followup_implementation",
+                    }
+                ):
+                    return False
+            return True
+        if (
+            role_name == IMPLEMENTER_ROLE
+            and output_type == "completed"
+            and session.current_stage == "subtask_implementation_requested"
+            and self._active_subtask_completion_dispatch_missing(session)
+        ):
+            return True
+        if (
+            role_name == VERIFICATION_COORDINATOR_ROLE
+            and output_type in {"passed", "completed", "failed", "blocked_verification_cycle", "error"}
+            and session.current_owner != VERIFICATION_COORDINATOR_ROLE
+        ):
+            return True
+        if (
+            role_name in {CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE}
+            and output_type in {"passed", "completed", "failed", "blocked_review_cycle", "skipped_not_needed", "error"}
+            and session.current_owner != role_name
+        ):
+            payload_work_item_id = output_payload.get("work_item_id") if isinstance(output_payload, dict) else None
+            expected_work_type = (
+                "convention_review"
+                if role_name == CONVENTION_REVIEWER_ROLE
+                else "requirements_review"
+            )
+            expected_work_types = {expected_work_type, f"{expected_work_type}_cycle_review"}
+            if isinstance(payload_work_item_id, int):
+                matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
+                if (
+                    matching_item is not None
+                    and matching_item.session_id == session.id
+                    and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+                    and matching_item.work_type in expected_work_types
+                ):
+                    return False
+            return True
+        if (
+            role_name == DOC_HARVEST_ROLE
+            and output_type in {"passed", "completed", "skipped_not_needed", "error"}
+            and session.current_owner != DOC_HARVEST_ROLE
+        ):
+            return True
+        if (
+            role_name == DOCUMENTATION_REVIEWER_ROLE
+            and output_type in {"passed", "completed", "failed", "skipped_not_needed", "error"}
+            and session.current_owner != DOCUMENTATION_REVIEWER_ROLE
+        ):
+            payload_work_item_id = output_payload.get("work_item_id") if isinstance(output_payload, dict) else None
+            if isinstance(payload_work_item_id, int):
+                matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
+                if (
+                    matching_item is not None
+                    and matching_item.session_id == session.id
+                    and matching_item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+                    and matching_item.work_type == "documentation_review"
+                ):
+                    return False
+            return True
+        return False
+
+    def _stale_role_output_mismatch(
+        self,
+        *,
+        session: Session,
+        role_name: str,
+        output_type: str,
+        output_payload: dict,
+    ) -> dict[str, str | int | None] | None:
+        if role_name != IMPLEMENTER_ROLE or output_type != "completed":
+            return None
+
+        payload_work_item_id = output_payload.get("work_item_id")
+        target_item: WorkItem | None = None
+        if isinstance(payload_work_item_id, int):
+            target_item = next(
+                (
+                    item
+                    for item in self.work_item_repository.list_for_session(session.id)
+                    if item.id == payload_work_item_id
+                    and item.work_type
+                    in {
+                        "subtask_implementation",
+                        "implementation",
+                        "convention_review_correction",
+                        "requirements_review_correction",
+                        "verification_correction",
+                        "documentation_review_correction",
+                        "followup_implementation",
+                    }
+                ),
+                None,
+            )
+
+        active_item = target_item or self._find_active_primary_coding_work_item(session)
+        if active_item is None or target_item is None and payload_work_item_id is None:
+            return None
+
+        if payload_work_item_id != active_item.id:
+            return {
+                "reason": "address_mismatch",
+                "expected_work_item_id": active_item.id,
+                "payload_work_item_id": payload_work_item_id if isinstance(payload_work_item_id, int) else None,
+                "expected_subtask_key": None,
+                "payload_subtask_key": None,
+            }
+
+        if active_item.work_type != "subtask_implementation":
+            return None
+
+        expected_subtask_key = self._parse_subtask_work_item_title(active_item.title)["key"]
+        payload_subtask_key = output_payload.get("subtask_key")
+        normalized_payload_subtask_key = (
+            payload_subtask_key.strip()
+            if isinstance(payload_subtask_key, str)
+            else None
+        )
+
+        if normalized_payload_subtask_key is None:
+            return None
+
+        if normalized_payload_subtask_key == expected_subtask_key:
+            return None
+
+        return {
+            "reason": "address_mismatch",
+            "expected_work_item_id": active_item.id,
+            "payload_work_item_id": payload_work_item_id,
+            "expected_subtask_key": expected_subtask_key,
+            "payload_subtask_key": normalized_payload_subtask_key,
+        }
+
+    def _replayed_blocked_output_after_operator_reply(
+        self,
+        *,
+        session: Session,
+        role_name: str,
+        output_type: str,
+        output_payload: dict,
+    ) -> dict[str, str | int | None] | None:
+        if role_name not in _STORY_PLANNING_ROLES:
+            return None
+        mapped_event_type = self._map_role_output_to_event_type(
+            session,
+            role_name,
+            output_type,
+            output_payload,
+        )
+        if mapped_event_type != "story_planning_blocked":
+            return None
+
+        role = self.role_repository.get_by_name(session.id, role_name)
+        active_work_item_id: int | None = None
+        if role is not None:
+            active_item = self._find_active_work_item_for_role(session.id, role.id)
+            if active_item is not None:
+                active_work_item_id = active_item.id
+        if not self._has_pending_operator_continuation(
+            session_id=session.id,
+            role_name=role_name,
+            work_item_id=active_work_item_id,
+            stage_name=session.current_stage,
+        ):
+            return None
+
+        latest_reply: Event | None = None
+        events = self.event_repository.list_for_session(session.id)
+        for event in reversed(events):
+            if event.event_type != "operator_runtime_input_sent":
+                continue
+            if event.payload.get("role_name") != role_name:
+                continue
+            if event.payload.get("current_stage") != session.current_stage:
+                continue
+            if active_work_item_id is not None and event.payload.get("work_item_id") != active_work_item_id:
+                continue
+            latest_reply = event
+            break
+        if latest_reply is None:
+            return None
+
+        latest_prior_blocked: Event | None = None
+        for event in reversed(events):
+            if event.id >= latest_reply.id:
+                continue
+            if event.event_type != "story_planning_blocked":
+                continue
+            if event.producer_id != role_name:
+                continue
+            latest_prior_blocked = event
+            break
+        if latest_prior_blocked is None:
+            return None
+
+        if self._normalized_json_signature(latest_prior_blocked.payload) != self._normalized_json_signature(
+            output_payload
+        ):
+            return None
+        return {
+            "reason": "replayed_blocker_after_operator_reply",
+            "operator_reply_event_id": latest_reply.id,
+            "replayed_event_id": latest_prior_blocked.id,
+        }
+
+    @staticmethod
+    def _normalized_json_signature(payload: dict) -> str:
+        return json.dumps(payload, sort_keys=True, ensure_ascii=True)
+
+    def _append_stale_role_output_ignored_once(
+        self,
+        *,
+        session_id: int,
+        payload: dict[str, object],
+    ) -> None:
+        latest = self._latest_event_by_type(session_id, {"stale_role_output_ignored"})
+        if latest is not None and self._normalized_json_signature(latest.payload) == self._normalized_json_signature(payload):
+            return
+        self._append_event(
+            session_id=session_id,
+            event_type="stale_role_output_ignored",
+            producer_type="coordinator",
+            payload=payload,
+        )
+
+    def _append_runtime_terminal_output_echo_ignored_once(
+        self,
+        *,
+        session_id: int,
+        payload: dict[str, object],
+    ) -> None:
+        latest = self._latest_event_by_type(session_id, {"runtime_terminal_output_echo_ignored"})
+        if latest is not None and self._normalized_json_signature(latest.payload) == self._normalized_json_signature(payload):
+            return
+        self._append_event(
+            session_id=session_id,
+            event_type="runtime_terminal_output_echo_ignored",
+            producer_type="coordinator",
+            payload=payload,
+        )
+
+    def _active_subtask_completion_dispatch_missing(self, session: Session) -> bool:
+        active_item = self._find_active_primary_coding_work_item(session)
+        if active_item is None:
+            return True
+        return not self._has_dispatch_event(
+            session.id,
+            active_item.id,
+            "subtask_implementation_requested",
+        )
+
+    def _maybe_stop_stale_runtime_role(self, *, session: Session, role_name: str) -> None:
+        if role_name in PERSISTENT_SESSION_ROLES:
+            return
+        role = self.role_repository.get_by_name(session.id, role_name)
+        if role is None or role.runtime_handle is None or role.status != RoleStatus.RUNNING:
+            return
+        if session.current_owner == role_name:
+            return
+        active_item = self._find_active_work_item_for_role(session.id, role.id)
+        if active_item is not None:
+            return
+        if self._has_pending_operator_continuation(
+            session_id=session.id,
+            role_name=role_name,
+            work_item_id=None,
+            stage_name=session.current_stage,
+        ):
+            return
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        self.session_backend.stop_role(runtime_role)
+        self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+        self._append_event(
+            session_id=session.id,
+            event_type="stale_runtime_role_stopped",
+            producer_type="coordinator",
+            payload={
+                "role_name": role_name,
+                "runtime_handle": role.runtime_handle,
+                "current_stage": session.current_stage,
+                "current_owner": session.current_owner,
+            },
+        )
+
+    def run_loop_once(self) -> tuple[Event | None, int, int]:
+        active_sessions = self.session_repository.list_by_status(SessionStatus.ACTIVE)
+        total_chunks = 0
+        polled_sessions = 0
+        reconciled_sessions = 0
+
+        for session in active_sessions:
+            session = self._recover_dead_owner_runtime_if_needed(session)
+            if self._reconcile_session_dispatch(session):
+                reconciled_sessions += 1
+            _, _, _, chunk_count = self.poll_session_output(session.id)
+            polled_sessions += 1
+            total_chunks += chunk_count
+
+        if polled_sessions == 0:
+            return None, 0, 0
+
+        summary_event = None
+        if self._should_persist_poll_telemetry():
+            summary_event = self._append_event(
+                session_id=active_sessions[0].id,
+                event_type="coordinator_loop_ran",
+                producer_type="coordinator",
+                payload={
+                    "session_count": polled_sessions,
+                    "chunk_count": total_chunks,
+                    "reconciled_count": reconciled_sessions,
+                },
+            )
+        return summary_event, polled_sessions, total_chunks
+
+    def _should_persist_poll_telemetry(self) -> bool:
+        return os.environ.get(_PERSIST_POLL_TELEMETRY_ENV, "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+    def _recover_dead_owner_runtime_if_needed(self, session: Session) -> Session:
+        if session.current_owner is None:
+            return session
+        role = self.role_repository.get_by_name(session.id, session.current_owner)
+        if role is None or role.runtime_handle is None or role.status != RoleStatus.RUNNING:
+            return session
+
+        if role.role_name in _STORY_PLANNING_ROLES:
+            active_item = self._find_active_work_item_for_role(session.id, role.id)
+            if active_item is None:
+                return self._reconcile_stale_story_planning_owner(session, role)
+
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        if self.session_backend.is_role_alive(runtime_role):
+            return session
+
+        if self._auto_recovery_already_attempted(session.id, role.role_name, role.runtime_handle):
+            return session
+
+        return self._attempt_dead_owner_runtime_recovery(session, role)
+
+    def _reconcile_stale_story_planning_owner(self, session: Session, role: Role) -> Session:
+        if role.status == RoleStatus.RUNNING:
+            self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+
+        expected_item = self._find_active_work_item_for_current_stage(session)
+        if expected_item is None or expected_item.owner_role_id is None:
+            return self._get_session_or_raise(session.id)
+
+        expected_role = self.role_repository.get_by_id(expected_item.owner_role_id)
+        if expected_role is None or expected_role.role_name == session.current_owner:
+            return self._get_session_or_raise(session.id)
+
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=expected_role.role_name,
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="session_owner_reconciled",
+            producer_type="coordinator",
+            payload={
+                "previous_owner": role.role_name,
+                "current_owner": expected_role.role_name,
+                "current_stage": session.current_stage,
+                "work_item_id": expected_item.id,
+                "reason": "stale_story_planning_owner_without_active_work",
+            },
+        )
+        return session
+
+    def _auto_recovery_already_attempted(self, session_id: int, role_name: str, dead_runtime_handle: str) -> bool:
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.event_type not in {
+                "runtime_role_auto_recovery_attempted",
+                "runtime_role_auto_recovery_failed",
+            }:
+                continue
+            if event.payload.get("role_name") != role_name:
+                continue
+            if event.payload.get("dead_runtime_handle") == dead_runtime_handle:
+                return True
+        return False
+
+    def _attempt_dead_owner_runtime_recovery(self, session: Session, role: Role) -> Session:
+        dead_runtime_handle = role.runtime_handle
+        assert dead_runtime_handle is not None
+        recovery_event_type = "runtime_role_auto_recovery_attempted"
+        try:
+            runtime_role = self._spawn_role_runtime(
+                runtime_session=self._runtime_session_handle_for_session(session),
+                task_key=session.task_key,
+                role_name=role.role_name,
+                role_config=(session.role_config or {}).get(role.role_name),
+                resume_mode=self._preferred_runtime_resume_mode((session.role_config or {}).get(role.role_name)),
+            )
+        except Exception as exc:
+            self.role_repository.update_status(role.id, RoleStatus.FAILED)
+            self._append_event(
+                session_id=session.id,
+                event_type="runtime_role_auto_recovery_failed",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "dead_runtime_handle": dead_runtime_handle,
+                    "error": str(exc),
+                    "current_stage": session.current_stage,
+                },
+            )
+            self.work_item_repository.mark_assigned_as_waiting_for_operator(session.id)
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage=session.current_stage,
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            self._append_event(
+                session_id=session.id,
+                event_type="session_escalated_to_operator",
+                producer_type="coordinator",
+                payload={
+                    "reason": "runtime_recovery_failed",
+                    "role_name": role.role_name,
+                    "summary": "automatic runtime recovery failed",
+                    "details": str(exc),
+                    "current_stage": session.current_stage,
+                },
+            )
+            return session
+
+        role = self.role_repository.update_runtime(
+            role.id,
+            runtime_backend=runtime_role.backend_name,
+            runtime_handle=runtime_role.role_id,
+            status=RoleStatus.RUNNING,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._append_event(
+            session_id=session.id,
+            event_type=recovery_event_type,
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "dead_runtime_handle": dead_runtime_handle,
+                "runtime_handle": role.runtime_handle,
+                "current_stage": session.current_stage,
+            },
+        )
+        self._reactivate_restarted_owner_work(session, role)
+        return self._get_session_or_raise(session.id)
+
+    def pause_session(self, session_id: int) -> tuple[Session, Event]:
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.ACTIVE:
+            raise IntakeError(
+                f"Session {session_id} is not active; current status is {session.status.value}"
+            )
+        session = self.session_repository.update_status(session.id, SessionStatus.PAUSED)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_paused_by_operator",
+            producer_type="operator",
+            payload={
+                "current_stage": session.current_stage,
+                "current_owner": session.current_owner,
+            },
+        )
+        return session, event
+
+    @_serialize_session_transition
+    def resume_session(self, session_id: int) -> tuple[Session, Event, Event | None]:
+        session = self._get_session_or_raise(session_id)
+        if session.status == SessionStatus.WAITING_FOR_OPERATOR:
+            return self._resume_waiting_session(session)
+        if session.status == SessionStatus.PAUSED:
+            return self._resume_paused_session(session)
+        raise IntakeError(
+            f"Session {session_id} is not resumable; current status is {session.status.value}"
+        )
+
+    def _resume_waiting_session(self, session: Session) -> tuple[Session, Event, Event | None]:
+        work_item = self._find_operator_pending_work_item(session.id)
+        if work_item is None:
+            raise IntakeError(f"Session {session.id} has no operator-pending work item to resume")
+        if work_item.owner_role_id is None:
+            raise IntakeError(f"Work item {work_item.id} is missing an owner role")
+
+        role = self.role_repository.get_by_id(work_item.owner_role_id)
+        if role is None:
+            raise IntakeError(f"Owner role {work_item.owner_role_id} is missing for session {session.id}")
+
+        e2e_continuation = self._e2e_continuation_available(session, work_item)
+        if e2e_continuation:
+            self._consume_role_result_file(session, role)
+            self._drain_e2e_runtime_history(session, role)
+        self.work_item_repository.update_status(work_item.id, WorkItemStatus.ASSIGNED)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        resumed_event = self._append_event(
+            session_id=session.id,
+            event_type="session_resumed_by_operator",
+            producer_type="operator",
+            payload={
+                "resume_reason": "waiting_for_operator",
+                "role_name": role.role_name,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        runtime_blocker = self._latest_runtime_blocker_event(session.id)
+        if runtime_blocker is not None and runtime_blocker.payload.get("resume_strategy") == "reactivate_only":
+            return session, resumed_event, None
+        if session.current_stage == "subtask_creation_requested":
+            return self._resume_after_subtask_creation(session, role, work_item, resumed_event)
+        instruction = self._stage_instruction(
+            session.current_stage,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(f"Session {session.id} cannot be resumed from stage {session.current_stage}")
+        if e2e_continuation:
+            instruction += " Continue the same native e2e gate with its recorded operator decisions. Run every remaining scenario and fresh-install check; accepted_with_warnings is submitted as passed --result passed."
+        dispatch_event = self._dispatch_role_work(
+            session=session,
+            role=role,
+            work_item=work_item,
+            stage_name=session.current_stage,
+            instruction=instruction,
+            force_redispatch=True,
+        )
+        return session, resumed_event, dispatch_event
+
+    def _resume_after_subtask_creation(
+        self,
+        session: Session,
+        role: Role,
+        work_item: WorkItem,
+        resumed_event: Event,
+    ) -> tuple[Session, Event, Event | None]:
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="implementation_requested",
+            current_owner=role.role_name,
+        )
+        subtasks = self._read_snapshot_subtasks(session.task_key)
+        decomposition_artifact = self._latest_artifact_for_session_type(
+            session.id,
+            "task_decomposition_markdown",
+        )
+        if (
+            work_item.work_type == "implementation"
+            and subtasks is not None
+            and unresolved_subtasks(subtasks)
+        ):
+            _graph_event, followup_event = self._start_subtask_graph_flow(
+                session=session,
+                producer_type="operator",
+                subtasks=subtasks,
+                initial_work_item=work_item,
+                decomposition_artifact=decomposition_artifact,
+            )
+            refreshed = self._get_session_or_raise(session.id)
+            return refreshed, resumed_event, followup_event
+
+        instruction = self._stage_instruction(
+            "implementation_requested",
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(f"Session {session.id} cannot start implementation after subtask creation")
+        dispatch_event = self._dispatch_role_work(
+            session=session,
+            role=role,
+            work_item=work_item,
+            stage_name="implementation_requested",
+            instruction=instruction,
+        )
+        refreshed = self._get_session_or_raise(session.id)
+        return refreshed, resumed_event, dispatch_event
+
+    def _latest_runtime_blocker_event(self, session_id: int) -> Event | None:
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if (
+                event.event_type == "session_escalated_to_operator"
+                and event.payload.get("reason") == "runtime_error"
+            ) or event.event_type == "role_runtime_error_reported":
+                return event
+        return None
+
+    def send_operator_runtime_input(self, session_id: int, text: str) -> tuple[Session, Event]:
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
+            raise IntakeError(
+                f"Session {session_id} is not waiting for operator; current status is {session.status.value}"
+            )
+        work_item = self._find_operator_pending_work_item(session.id)
+        if work_item is None:
+            raise IntakeError(f"Session {session.id} has no operator-pending work item to continue")
+        if work_item.owner_role_id is None:
+            raise IntakeError(f"Work item {work_item.id} is missing an owner role")
+        role = self.role_repository.get_by_id(work_item.owner_role_id)
+        if role is None:
+            raise IntakeError(f"Owner role {work_item.owner_role_id} is missing for session {session.id}")
+        if role.runtime_handle is None:
+            raise IntakeError(f"Role {role.role_name} has no runtime handle for session {session.id}")
+        if self._operator_reply_repeats_waiting_card(
+            session_id=session.id,
+            work_item_id=work_item.id,
+            role_name=role.role_name,
+            text=text,
+        ):
+            raise IntakeError(
+                "Operator reply appears to repeat the waiting-for-operator card. "
+                "Send the actual decision or answer instead."
+            )
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+
+        use_routed_operator_reply = self._operator_reply_requires_routed_continuation(work_item)
+        self.work_item_repository.update_status(work_item.id, WorkItemStatus.ASSIGNED)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="operator_runtime_input_sent",
+            producer_type="operator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+                "input_length": len(text),
+                "operator_reply": text.strip(),
+                "continuation_stage": session.current_stage,
+            },
+        )
+        if use_routed_operator_reply:
+            instruction = self._stage_instruction(
+                session.current_stage,
+                session.task_key,
+                workflow_profile=session.workflow_profile,
+                role_name=role.role_name,
+                session_policy=session.policy,
+            )
+            if instruction is None:
+                raise IntakeError(
+                    f"Session {session.id} cannot continue operator reply for stage {session.current_stage}"
+                )
+            continuation_instruction = (
+                f"{instruction}\n\n"
+                "Operator reply received for this routed work item. Treat it as authoritative, "
+                "continue under the current work_item_id from HYDRATION.json, and do not submit a result "
+                "for any earlier work item.\n\n"
+                f"Operator reply:\n{text.strip()}\n"
+            )
+            self._dispatch_role_work(
+                session=session,
+                role=role,
+                work_item=work_item,
+                stage_name=session.current_stage,
+                instruction=continuation_instruction,
+                extra_hydration={
+                    "operator_reply": text,
+                    "operator_reply_event_id": event.id,
+                },
+                force_redispatch=True,
+            )
+        elif role.role_name in PERSISTENT_SESSION_ROLES:
+            self.session_backend.send_input(runtime_role, text)
+        else:
+            if self.session_backend.is_role_alive(runtime_role):
+                self.session_backend.send_input(
+                    runtime_role,
+                    self._operator_reply_live_message(text),
+                )
+            else:
+                instruction = self._stage_instruction(
+                    session.current_stage,
+                    session.task_key,
+                    workflow_profile=session.workflow_profile,
+                    role_name=role.role_name,
+                    session_policy=session.policy,
+                )
+                if instruction is None:
+                    raise IntakeError(
+                        f"Session {session.id} cannot continue operator reply for stage {session.current_stage}"
+                    )
+                continuation_instruction = (
+                    f"{instruction}\n\n"
+                    "Operator reply received in this live session. Treat it as authoritative, "
+                    "continue the same routed work item, and do not re-ask the same question "
+                    "unless the reply is still genuinely ambiguous.\n\n"
+                    f"Operator reply:\n{text.strip()}\n"
+                )
+                self._dispatch_role_work(
+                    session=session,
+                    role=role,
+                    work_item=work_item,
+                    stage_name=session.current_stage,
+                    instruction=continuation_instruction,
+                    extra_hydration={
+                        "operator_reply": text,
+                        "operator_reply_event_id": event.id,
+                    },
+                    force_redispatch=True,
+                )
+        return session, event
+
+    def _operator_reply_repeats_waiting_card(
+        self,
+        *,
+        session_id: int,
+        work_item_id: int,
+        role_name: str,
+        text: str,
+    ) -> bool:
+        normalized_text = self._normalize_operator_reply_text(text)
+        if not normalized_text:
+            return False
+
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.event_type != "session_escalated_to_operator":
+                continue
+            if event.payload.get("work_item_id") != work_item_id:
+                continue
+            if event.payload.get("role_name") != role_name:
+                continue
+            if not event.payload.get("needs_operator_input"):
+                continue
+
+            summary = str(event.payload.get("summary") or "").strip()
+            details = str(event.payload.get("details") or "").strip()
+            title = f"{self._operator_role_display_name(role_name)} needs a reply"
+            candidates = [
+                "\n".join(part for part in [title, summary, "", details] if part != ""),
+                "\n".join(part for part in [summary, "", details] if part != ""),
+            ]
+            return any(
+                normalized_text == self._normalize_operator_reply_text(candidate)
+                for candidate in candidates
+            )
+        return False
+
+    def _normalize_operator_reply_text(self, text: str) -> str:
+        return " ".join(str(text).split()).strip()
+
+    def _operator_role_display_name(self, role_name: str) -> str:
+        role_labels = {
+            "implementer": "Implementer",
+            "verification-coordinator": "Build Verifier",
+            "convention-reviewer": "Convention Reviewer",
+            "requirements-reviewer": "Requirements Reviewer",
+            "final-verifier": "Final Verifier",
+            "doc-harvest-worker": "Documentation Writer",
+            "doc-harvest": "Documentation Writer",
+            "documentation-reviewer": "Documentation Reviewer",
+            "proposal-context-worker": "Context Builder",
+            "context-collector": "Context Collector",
+            "requirements-clarifier-worker": "Requirements Clarifier",
+            "requirements-clarifier": "Requirements Clarifier",
+            "acceptance-criteria-worker": "Acceptance Criteria",
+            "acceptance-criteria-writer": "Acceptance Criteria",
+            "constraints-worker": "Design Constraints",
+            "constraints-definer": "Design Constraints",
+            "spec-verifier-worker": "Spec Verifier",
+            "spec-verifier": "Spec Verifier",
+            "task-decomposer-worker": "Task Decomposer",
+            "task-decomposer": "Task Decomposer",
+        }
+        known = role_labels.get(role_name)
+        if known:
+            return known
+        return " ".join(part[:1].upper() + part[1:] for part in re.split("[-_]+", role_name) if part)
+
+    def _operator_reply_requires_routed_continuation(self, work_item: WorkItem) -> bool:
+        return work_item.work_type in {
+            "convention_review_cycle_review",
+            "requirements_review_cycle_review",
+            "verification_cycle_review",
+        }
+
+    def _operator_reply_live_message(self, text: str) -> str:
+        normalized_reply = " ".join(str(text).split()).strip()
+        if not normalized_reply:
+            normalized_reply = "[empty reply]"
+        return f"Operator answer: {normalized_reply}."
+
+    def _resume_paused_session(self, session: Session) -> tuple[Session, Event, Event]:
+        if session.current_owner is None:
+            pending_work_item = self._find_operator_pending_work_item(session.id)
+            if pending_work_item is not None:
+                waiting_session = self.session_repository.update_status(
+                    session.id,
+                    SessionStatus.WAITING_FOR_OPERATOR,
+                )
+                return self._resume_waiting_session(waiting_session)
+            raise IntakeError(
+                f"Paused session {session.id} has no current owner and cannot be resumed"
+            )
+        role = self.role_repository.get_by_name(session.id, session.current_owner)
+        if role is None:
+            raise IntakeError(f"Owner role {session.current_owner} is missing for session {session.id}")
+        work_item = self._find_active_work_item_for_role(session.id, role.id)
+        if work_item is None:
+            raise IntakeError(f"Paused session {session.id} has no assigned work item to resume")
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        resumed_event = self._append_event(
+            session_id=session.id,
+            event_type="session_resumed_by_operator",
+            producer_type="operator",
+            payload={
+                "resume_reason": "paused",
+                "role_name": role.role_name,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        instruction = self._stage_instruction(
+            session.current_stage,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(f"Session {session.id} cannot be resumed from stage {session.current_stage}")
+        dispatch_event = self._dispatch_role_work(
+            session=session,
+            role=role,
+            work_item=work_item,
+            stage_name=session.current_stage,
+            instruction=instruction,
+            force_redispatch=True,
+        )
+        return session, resumed_event, dispatch_event
+
+    def _e2e_operator_context(self, session: Session) -> tuple[WorkItem, dict, dict, dict]:
+        from factory.e2e.config import E2EError
+        from factory.e2e.runner import (baseline_findings, describe_verdict, digest, finding_id,
+                                       read_json, validate_binding, validate_receipts, validate_verdict)
+        if not session.task_key.startswith("QA-") or session.status != SessionStatus.WAITING_FOR_OPERATOR or session.current_stage != "verification_requested":
+            raise IntakeError("This session has no baseline failure awaiting an operator decision")
+        item = self._find_operator_pending_work_item(session.id)
+        if item is None or item.work_type != "verification":
+            raise IntakeError("No blocked verification work item is available")
+        task_root = self.workdir_root / session.task_key
+        try:
+            verdict = validate_verdict(task_root, item.id)
+            strategy = read_json(task_root / "spec/verification-strategy.json")
+            eligible = baseline_findings(verdict, strategy)
+            if verdict["result"] != "blocked" or verdict.get("details") or not eligible:
+                raise E2EError("Only evidenced baseline test failures can be accepted; infrastructure blockers require recovery")
+            validate_binding(task_root, verdict, item.id)
+            validate_receipts(verdict)
+            decision = {"work_item_id": item.id, "verdict_digest": digest(task_root / "spec/e2e-verdict.json"),
+                        "findings": [{"id": finding_id(finding), "platform": finding["platform"],
+                                      "test": finding["test"], "details": describe_verdict(dict(verdict, classifications=[finding], accepted_findings=[]))["details"]}
+                                     for finding in eligible]}
+            return item, verdict, strategy, decision
+        except (E2EError, OSError, ValueError, KeyError, TypeError) as exc:
+            raise IntakeError(str(exc)) from exc
+
+    @_serialize_session_transition
+    def resolve_e2e_baseline(self, session_id: int, *, work_item_id: int, verdict_digest: str,
+                             action: str, finding_ids: list[str], comment: str = "") -> tuple[Session, Event, Event]:
+        # Serialize decisions for the same gate, including double clicks.
+        lock = self._dispatch_locks.setdefault((session_id, 0, work_item_id, "e2e_operator_decision"), threading.Lock())
+        with lock:
+            return self._resolve_e2e_baseline(session_id, work_item_id=work_item_id, verdict_digest=verdict_digest,
+                                              action=action, finding_ids=finding_ids, comment=comment)
+
+    def _resolve_e2e_baseline(self, session_id: int, *, work_item_id: int, verdict_digest: str,
+                              action: str, finding_ids: list[str], comment: str) -> tuple[Session, Event, Event]:
+        from factory.e2e.runner import accepted_baseline_findings, write_json
+        session = self._get_session_or_raise(session_id)
+        item, verdict, strategy, context = self._e2e_operator_context(session)
+        if work_item_id != item.id or verdict_digest != context["verdict_digest"]:
+            raise IntakeError("Verification changed; refresh the card before making a decision")
+        if action not in {"accept", "correct"}:
+            raise IntakeError("Unknown baseline decision")
+        if action == "correct":
+            event = self._append_event(session_id=session.id, event_type="verification_failed", producer_type="operator",
+                payload={"work_item_id": item.id, "result": "failed", "e2e_result": "blocked",
+                         "summary": "Operator requested corrections for the baseline failure",
+                         "details": (comment.strip() + "\n\n" + "\n\n".join(finding["details"] for finding in context["findings"])).strip(),
+                         "e2e_report_path": verdict["report_path"], "reviewed_verdict_digest": verdict_digest})
+            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            session, followup = self._handle_verification_failed(session, event)
+            return session, event, followup
+        identifiers = set(finding_ids)
+        if not identifiers or identifiers - {finding["id"] for finding in context["findings"]}:
+            raise IntakeError("Select actual baseline findings from the current verification")
+        task_root = self.workdir_root / session.task_key
+        from factory.e2e.config import E2EError
+        try:
+            previous, _ = accepted_baseline_findings(task_root, item.id, strategy)
+        except (E2EError, OSError, ValueError, KeyError) as exc:
+            raise IntakeError(str(exc)) from exc
+        role = self.role_repository.get_by_id(item.owner_role_id)
+        if role is None:
+            raise IntakeError("Verification owner is missing")
+        # Ingress can leave the previous terminal file until the next poll. Archive
+        # and consume it before redispatching the same work item.
+        self._consume_role_result_file(session, role)
+        superseded_errors = self._drain_e2e_runtime_history(session, role)
+        evidence = Path(verdict["report_path"]).parent / f"operator-evidence-{verdict_digest}.json"
+        evidence.write_bytes((task_root / "spec/e2e-verdict.json").read_bytes())
+        decision = {"verdict_path": str(evidence), "verdict_digest": verdict_digest,
+                    "finding_ids": sorted(identifiers), "comment": comment.strip()}
+        event = self._append_event(session_id=session.id, event_type="e2e_baseline_accepted_by_operator", producer_type="operator",
+                                  payload={"work_item_id": item.id, "decision": decision,
+                                           "superseded_runtime_errors": superseded_errors})
+        decisions = previous + [dict(decision, event_id=event.id)]
+        path = task_root / "spec/e2e-operator-decisions.json"
+        write_json(path, {"work_item_id": item.id, "decisions": decisions})
+        self.artifact_repository.create(session_id=session.id, stage_name="verification",
+            artifact_type="e2e_operator_decision", path=str(evidence),
+            metadata={"operator_event_id": event.id, "work_item_id": item.id, "finding_ids": sorted(identifiers), "comment": comment.strip()})
+        self.work_item_repository.update_status(item.id, WorkItemStatus.ASSIGNED)
+        session = self.session_repository.update_stage_and_owner(session.id,
+            current_stage=session.current_stage, current_owner=role.role_name)
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        followup = self._dispatch_role_work(session=session, role=role, work_item=item,
+            stage_name=session.current_stage, force_redispatch=True,
+            instruction=(f"Continue the current e2e gate for {session.task_key}. Read spec/verification-strategy.json and run its command. "
+                         "The native runner consumes the operator's recorded baseline exceptions and runs every remaining selected scenario and fresh-install check. "
+                         "Do not change code or the plan. For accepted_with_warnings submit passed --result passed; preserve the warnings and native report. "
+                         "For blocked or failed submit failed --result failed. Do not reuse the previous terminal result."))
+        return session, event, followup
+
+    def _drain_e2e_runtime_history(self, session: Session, role: Role) -> list[str]:
+        runtime_role = RuntimeRoleHandle(role_id=role.runtime_handle or f"{role.runtime_backend}:{role.role_name}",
+            session_id=self._runtime_session_id_for_role(role, session), backend_name=role.runtime_backend)
+        chunks = self.session_backend.read_output(runtime_role)
+        if chunks:
+            self._record_runtime_output_artifacts(session, role, chunks)
+        return sorted({self._runtime_error_content_signature(payload) for chunk in chunks
+                       for marker, payload in self._extract_output_markers(chunk.text) if marker == "error"})
+
+    def _e2e_continuation_available(self, session: Session, item: WorkItem | None) -> bool:
+        if not session.task_key.startswith("QA-") or session.current_stage != "verification_requested" or item is None or item.work_type != "verification":
+            return False
+        from factory.e2e.runner import accepted_baseline_findings, read_json
+        from factory.e2e.config import E2EError
+        try:
+            root = self.workdir_root / session.task_key
+            decisions, findings = accepted_baseline_findings(root, item.id, read_json(root / "spec/verification-strategy.json"))
+            self._validate_e2e_operator_decisions(session, {"work_item_id": item.id, "operator_decisions": decisions})
+            receipts = {receipt["path"]: receipt for decision in decisions
+                        for receipt in read_json(Path(decision["verdict_path"]))["receipts"]}
+            return bool(findings) and all(Path(receipts[finding["evidence"]]["app"]["path"]).exists()
+                                          for finding in findings)
+        except (E2EError, IntakeError, OSError, ValueError, KeyError):
+            return False
+
+    def _validate_e2e_operator_decisions(self, session: Session, verdict: dict) -> None:
+        for decision in verdict.get("operator_decisions", []):
+            event = next((item for item in self.event_repository.list_for_session(session.id)
+                          if item.id == decision.get("event_id")), None)
+            evidence = {key: value for key, value in decision.items() if key != "event_id"}
+            if (event is None or event.session_id != session.id or event.producer_type != "operator"
+                or event.event_type != "e2e_baseline_accepted_by_operator"
+                or event.payload.get("work_item_id") != verdict.get("work_item_id")
+                or event.payload.get("decision") != evidence):
+                raise IntakeError("E2E exception has no matching operator decision in this session")
+
+    @_serialize_session_transition
+    def retry_session(self, session_id: int) -> tuple[Session, Event, Event]:
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
+            raise IntakeError(
+                f"Session {session_id} is not waiting for operator; current status is {session.status.value}"
+            )
+
+        latest_blocker = self._latest_event_by_type(
+            session.id,
+            {"session_escalated_to_operator", "role_runtime_error_reported", "git_commit_failed"},
+        )
+        if (
+            latest_blocker is not None
+            and latest_blocker.event_type == "session_escalated_to_operator"
+            and latest_blocker.payload.get("reason") == "role_result_protocol_violation"
+        ):
+            role_name = latest_blocker.payload.get("role_name")
+            if not isinstance(role_name, str) or not role_name.strip():
+                raise IntakeError(f"Session {session_id} is missing the blocked role for protocol recovery")
+            role = self.role_repository.get_by_name(session.id, role_name)
+            if role is None:
+                raise IntakeError(f"Blocked role {role_name} is missing for session {session_id}")
+            work_item = self._find_active_work_item_for_role(session.id, role.id)
+            if work_item is None:
+                raise IntakeError(f"Session {session_id} has no active work item for {role_name} protocol recovery")
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage=session.current_stage,
+                current_owner=role.role_name,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            retried_event = self._append_event(
+                session_id=session.id,
+                event_type="session_retried_by_operator",
+                producer_type="operator",
+                payload={
+                    "role_name": role.role_name,
+                    "retry_mode": "protocol_recovery",
+                    "retry_work_item_id": work_item.id,
+                    "current_stage": session.current_stage,
+                },
+            )
+            recovery_instruction = self._protocol_recovery_retry_instruction(session, work_item)
+            try:
+                dispatch_event = self._dispatch_role_work(
+                    session=session,
+                    role=role,
+                    work_item=work_item,
+                    stage_name=session.current_stage,
+                    instruction=recovery_instruction,
+                )
+            except RuntimeError:
+                runtime_session = self._runtime_session_handle_for_session(session)
+                if role.runtime_handle is not None and role.status == RoleStatus.RUNNING:
+                    self.session_backend.stop_role(
+                        RuntimeRoleHandle(
+                            role_id=role.runtime_handle,
+                            session_id=runtime_session.session_id,
+                            backend_name=role.runtime_backend,
+                        )
+                    )
+                    self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+                runtime_role = self._spawn_role_runtime(
+                    runtime_session=runtime_session,
+                    task_key=session.task_key,
+                    role_name=role.role_name,
+                    role_config=(session.role_config or {}).get(role.role_name),
+                    resume_mode=self._preferred_runtime_resume_mode((session.role_config or {}).get(role.role_name)),
+                )
+                role = self.role_repository.update_runtime(
+                    role.id,
+                    runtime_backend=runtime_role.backend_name,
+                    runtime_handle=runtime_role.role_id,
+                    status=RoleStatus.RUNNING,
+                )
+                self._append_event(
+                    session_id=session.id,
+                    event_type="runtime_role_restarted_by_operator",
+                    producer_type="operator",
+                    payload={
+                        "role_name": role.role_name,
+                        "runtime_handle": role.runtime_handle,
+                        "session_reactivated": True,
+                        "refresh_runtime_config": False,
+                        "role_config": (session.role_config or {}).get(role.role_name, {}),
+                        "restart_reason": "protocol_recovery_retry_fallback",
+                    },
+                )
+                dispatch_event = self._dispatch_role_work(
+                    session=session,
+                    role=role,
+                    work_item=work_item,
+                    stage_name=session.current_stage,
+                    instruction=recovery_instruction,
+                )
+            return session, retried_event, dispatch_event
+
+        if latest_blocker is not None and latest_blocker.event_type == "git_commit_failed":
+            return self._retry_git_commit_failed_session(session, latest_blocker)
+
+        previous_work_item = self._find_operator_pending_work_item(session.id)
+        if previous_work_item is None:
+            raise IntakeError(f"Session {session_id} has no operator-pending work item to retry")
+        if previous_work_item.owner_role_id is None:
+            raise IntakeError(f"Work item {previous_work_item.id} is missing an owner role")
+
+        role = self.role_repository.get_by_id(previous_work_item.owner_role_id)
+        if role is None:
+            raise IntakeError(
+                f"Owner role {previous_work_item.owner_role_id} is missing for session {session_id}"
+            )
+        if session.task_key.startswith("QA-") and previous_work_item.work_type in {"verification", "verification_cycle_review"}:
+            self._consume_role_result_file(session, role)
+            self._drain_e2e_runtime_history(session, role)
+
+        for stale_item in self.work_item_repository.list_for_session(session.id):
+            if stale_item.owner_role_id != previous_work_item.owner_role_id:
+                continue
+            if stale_item.work_type != previous_work_item.work_type:
+                continue
+            if stale_item.status != WorkItemStatus.WAITING_FOR_OPERATOR:
+                continue
+            self.work_item_repository.update_status(stale_item.id, WorkItemStatus.COMPLETED)
+            if self.dispatch_repository is not None and role.id is not None:
+                self.dispatch_repository.mark_terminal_for_work_item(
+                    session_id=session.id,
+                    role_id=role.id,
+                    work_item_id=stale_item.id,
+                )
+
+        retry_work_type = previous_work_item.work_type
+        if (
+            session.task_key.startswith("QA-")
+            and session.current_stage == "verification_requested"
+            and retry_work_type == "verification_cycle_review"
+        ):
+            retry_work_type = "verification"
+        retry_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type=retry_work_type,
+            title=self._retry_work_item_title(previous_work_item.title),
+            owner_role_id=previous_work_item.owner_role_id,
+            source_event_id=None,
+            priority=previous_work_item.priority,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        retried_event = self._append_event(
+            session_id=session.id,
+            event_type="session_retried_by_operator",
+            producer_type="operator",
+            payload={
+                "role_name": role.role_name,
+                "previous_work_item_id": previous_work_item.id,
+                "retry_work_item_id": retry_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        if session.current_stage == "subtask_creation_requested":
+            session, batch_event, followup_event = self.create_subtasks_from_plan(session.id)
+            return session, retried_event, followup_event or batch_event
+        instruction = self._stage_instruction(
+            session.current_stage,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(f"Session {session_id} cannot be retried from stage {session.current_stage}")
+        if retry_item.work_type == "verification" and session.task_key.startswith("QA-"):
+            strategy, strategy_path = materialize_verification_strategy(
+                task_key=session.task_key, workdir_root=self.workdir_root,
+                repo_root=self._repo_root(), work_item_id=retry_item.id,
+            )
+            instruction += (
+                f" Read {strategy_path} and run its e2e gate for the new work item. "
+                "Submit the result from spec/e2e-verdict.json; earlier receipts cannot satisfy this retry."
+            )
+        dispatch_event = self._dispatch_role_work(
+            session=session,
+            role=role,
+            work_item=retry_item,
+            stage_name=session.current_stage,
+            instruction=instruction,
+        )
+        return session, retried_event, dispatch_event
+
+    def _protocol_recovery_retry_instruction(self, session: Session, work_item: WorkItem) -> str:
+        return (
+            f"Do not rerun the substantive {work_item.work_type.replace('_', ' ')} work for {session.task_key}. "
+            "Resubmit only the terminal outcome for the current routed work item using the deterministic writer helper. "
+            "Reuse the work you already completed, preserve the same outcome, do not use manual files or fallback scripts, and stop immediately after the helper succeeds."
+        )
+
+    def _retry_git_commit_failed_session(self, session: Session, blocker_event: Event) -> tuple[Session, Event, Event]:
+        context = str(blocker_event.payload.get("context") or "").strip()
+        subtask_match = re.fullmatch(r"subtask\s+([A-Z]+-\d+)", context)
+        if subtask_match is None:
+            raise IntakeError(
+                f"Session {session.id} cannot retry git commit failure for context {context or '<empty>'}"
+            )
+        subtask_key = subtask_match.group(1)
+        active_item = self._latest_completed_subtask_work_item(session.id, subtask_key)
+        if active_item is None:
+            raise IntakeError(f"Session {session.id} has no completed work item for subtask {subtask_key}")
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        retried_event = self._append_event(
+            session_id=session.id,
+            event_type="session_retried_by_operator",
+            producer_type="operator",
+            payload={
+                "retry_mode": "git_commit_failed",
+                "commit_context": context,
+                "blocked_event_id": blocker_event.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        session, commit_event = self._commit_task_state(session, context)
+        if commit_event is not None:
+            return session, retried_event, commit_event
+        next_session, next_event = self._continue_after_subtask_checkpoint(
+            session=session,
+            source_event=blocker_event,
+            active_item=active_item,
+            parsed_subtask={"key": subtask_key},
+        )
+        return next_session, retried_event, next_event
+
+    def _latest_completed_subtask_work_item(self, session_id: int, subtask_key: str) -> WorkItem | None:
+        for item in reversed(self.work_item_repository.list_for_session(session_id)):
+            if item.work_type != "subtask_implementation":
+                continue
+            if item.status != WorkItemStatus.COMPLETED:
+                continue
+            parsed = self._parse_subtask_work_item_title(item.title)
+            if parsed["key"] == subtask_key:
+                return item
+        return None
+
+    def redirect_session(
+        self,
+        session_id: int,
+        target_role_name: str,
+    ) -> tuple[Session, Event, Event]:
+        session = self._get_session_or_raise(session_id)
+        if session.status != SessionStatus.WAITING_FOR_OPERATOR:
+            raise IntakeError(
+                f"Session {session_id} is not waiting for operator; current status is {session.status.value}"
+            )
+        allowed_targets = ALLOWED_STAGE_ROLE_TARGETS.get(session.current_stage, set())
+        if target_role_name not in allowed_targets:
+            allowed_list = ", ".join(sorted(allowed_targets)) if allowed_targets else "none"
+            raise IntakeError(
+                f"Role {target_role_name} is not allowed for stage {session.current_stage}; "
+                f"allowed targets: {allowed_list}"
+            )
+
+        previous_work_item = self._find_operator_pending_work_item(session.id)
+        if previous_work_item is None:
+            raise IntakeError(f"Session {session_id} has no operator-pending work item to redirect")
+        if previous_work_item.owner_role_id is None:
+            raise IntakeError(f"Work item {previous_work_item.id} is missing an owner role")
+
+        previous_role = self.role_repository.get_by_id(previous_work_item.owner_role_id)
+        if previous_role is None:
+            raise IntakeError(
+                f"Owner role {previous_work_item.owner_role_id} is missing for session {session_id}"
+            )
+        if previous_role.role_name == target_role_name:
+            raise IntakeError(
+                f"Redirect target role must differ from current parked owner {target_role_name}"
+            )
+
+        target_role = self.role_repository.get_by_name(session.id, target_role_name)
+        if target_role is None:
+            raise IntakeError(f"Target role {target_role_name} is missing for session {session_id}")
+
+        redirected_work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type=previous_work_item.work_type,
+            title=self._redirect_work_item_title(previous_work_item.title, target_role_name),
+            owner_role_id=target_role.id,
+            source_event_id=None,
+            priority=previous_work_item.priority,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=target_role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        redirected_event = self._append_event(
+            session_id=session.id,
+            event_type="session_redirected_by_operator",
+            producer_type="operator",
+            payload={
+                "previous_role_name": previous_role.role_name,
+                "target_role_name": target_role.role_name,
+                "previous_work_item_id": previous_work_item.id,
+                "redirect_work_item_id": redirected_work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        instruction = self._stage_instruction(
+            session.current_stage,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=target_role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(f"Session {session_id} cannot be redirected from stage {session.current_stage}")
+        dispatch_event = self._dispatch_role_work(
+            session=session,
+            role=target_role,
+            work_item=redirected_work_item,
+            stage_name=session.current_stage,
+            instruction=instruction,
+        )
+        return session, redirected_event, dispatch_event
+
+    def _enqueue_initial_implementation(
+        self,
+        session: Session,
+        resolved_task_key: str,
+        source_event: Event,
+        additional_context: str | None = None,
+    ) -> Event:
+        coding_role = self._primary_coding_role_for_work_type(session, "implementation")
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title=f"Initial implementation for {resolved_task_key}",
+            owner_role_id=coding_role.id,
+            source_event_id=source_event.id,
+            priority=100,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="implementation_requested",
+            current_owner=coding_role.role_name,
+        )
+        instruction = self._stage_instruction(
+            "implementation_requested",
+            resolved_task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(
+                f"No implementation instruction is available for role {coding_role.role_name}"
+            )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
+        self._dispatch_role_work(
+            session=session,
+            role=coding_role,
+            work_item=work_item,
+            stage_name="implementation_requested",
+            instruction=instruction,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="implementation_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": resolved_task_key,
+                "role_name": coding_role.role_name,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
+    def _enqueue_proposal_context(
+        self,
+        session: Session,
+        source_event: Event,
+        additional_context: str | None = None,
+    ) -> Event:
+        proposal_role = self._ensure_on_demand_role(session, PROPOSAL_CONTEXT_WORKER_ROLE)
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="proposal_context",
+            title=f"Proposal and context preparation for {session.task_key}",
+            owner_role_id=proposal_role.id,
+            source_event_id=source_event.id,
+            priority=103,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="proposal_context_requested",
+            current_owner=PROPOSAL_CONTEXT_WORKER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = (
+            f"Produce the proposal and context package for story {session.task_key} before downstream planning and decomposition. "
+            "Write or refresh `spec/proposal.md`, always write `spec/context/feature-overview.md`, "
+            "write the other `spec/context/*` files only when they contain grounded task-specific findings, "
+            "and synthesize the key problem statement, conflicts or clarifications from the snapshot, and the smallest useful project/context findings for later story roles."
+        )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
+        self._dispatch_role_work(
+            session=session,
+            role=proposal_role,
+            work_item=work_item,
+            stage_name="proposal_context_requested",
+            instruction=instruction,
+        )
+        self._emit_proposal_context_link_warning(session)
+        return self._append_event(
+            session_id=session.id,
+            event_type="proposal_context_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": PROPOSAL_CONTEXT_WORKER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
+    def _enqueue_requirements(
+        self,
+        session: Session,
+        source_event: Event,
+        additional_context: str | None = None,
+    ) -> Event:
+        requirements_role = self._ensure_on_demand_role(session, REQUIREMENTS_CLARIFIER_WORKER_ROLE)
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="requirements",
+            title=f"Requirements clarification for {session.task_key}",
+            owner_role_id=requirements_role.id,
+            source_event_id=source_event.id,
+            priority=102,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="requirements_requested",
+            current_owner=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        clarification_mode = self._requirements_clarification_mode(session.policy)
+        instruction = (
+            f"Clarify the implementation requirements for story {session.task_key}. "
+            "Resolve assumptions, edge cases, and out-of-scope boundaries so task decomposition can focus on concrete implementation work.\n"
+            f"Clarification mode for this session: {clarification_mode}."
+        )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
+        self._dispatch_role_work(
+            session=session,
+            role=requirements_role,
+            work_item=work_item,
+            stage_name="requirements_requested",
+            instruction=instruction,
+            extra_hydration={
+                "requirements_clarification_mode": clarification_mode,
+            },
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="requirements_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
+    def _enqueue_acceptance_criteria(
+        self,
+        session: Session,
+        source_event: Event,
+        additional_context: str | None = None,
+    ) -> Event:
+        acceptance_role = self._ensure_on_demand_role(session, ACCEPTANCE_CRITERIA_WORKER_ROLE)
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="acceptance_criteria",
+            title=f"Acceptance criteria preparation for {session.task_key}",
+            owner_role_id=acceptance_role.id,
+            source_event_id=source_event.id,
+            priority=101,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="acceptance_criteria_requested",
+            current_owner=ACCEPTANCE_CRITERIA_WORKER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = (
+            f"Prepare explicit acceptance criteria for story {session.task_key}. "
+            "Use independently testable WHEN-THEN-SHALL criteria, cover happy paths, edge cases, and error scenarios from the clarified requirements, "
+            "and ensure every meaningful clarified requirement decision is covered before task decomposition."
+        )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
+        self._dispatch_role_work(
+            session=session,
+            role=acceptance_role,
+            work_item=work_item,
+            stage_name="acceptance_criteria_requested",
+            instruction=instruction,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="acceptance_criteria_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": ACCEPTANCE_CRITERIA_WORKER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
+    def _enqueue_constraints(
+        self,
+        session: Session,
+        source_event: Event,
+        additional_context: str | None = None,
+    ) -> Event:
+        constraints_role = self._ensure_on_demand_role(session, CONSTRAINTS_WORKER_ROLE)
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="constraints",
+            title=f"Constraints preparation for {session.task_key}",
+            owner_role_id=constraints_role.id,
+            source_event_id=source_event.id,
+            priority=100,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="constraints_requested",
+            current_owner=CONSTRAINTS_WORKER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = (
+            f"Prepare grounded implementation constraints for story {session.task_key}. "
+            "Use `spec/context/project.md` as architectural ground truth, cite it instead of restating generic conventions, "
+            "and surface task-specific MUST, MUST NOT, and SHOULD constraints that should guide task decomposition and coding."
+        )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
+        self._dispatch_role_work(
+            session=session,
+            role=constraints_role,
+            work_item=work_item,
+            stage_name="constraints_requested",
+            instruction=instruction,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="constraints_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": CONSTRAINTS_WORKER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
+    def _enqueue_spec_verification(
+        self,
+        session: Session,
+        source_event: Event,
+        additional_context: str | None = None,
+    ) -> Event:
+        verifier_role = self._ensure_on_demand_role(session, SPEC_VERIFIER_WORKER_ROLE)
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="spec_verification",
+            title=f"Planning verification for {session.task_key}",
+            owner_role_id=verifier_role.id,
+            source_event_id=source_event.id,
+            priority=99,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="spec_verification_requested",
+            current_owner=SPEC_VERIFIER_WORKER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = (
+            f"Verify the assembled planning package for story {session.task_key} before task decomposition. "
+            "Check for contradictions, missing implementation-shaping details, or planning gaps that should be surfaced before coding starts."
+        )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
+        self._dispatch_role_work(
+            session=session,
+            role=verifier_role,
+            work_item=work_item,
+            stage_name="spec_verification_requested",
+            instruction=instruction,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="spec_verification_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": SPEC_VERIFIER_WORKER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
+    def _enqueue_task_decomposition(
+        self,
+        session: Session,
+        source_event: Event,
+        additional_context: str | None = None,
+    ) -> Event:
+        decomposer_role = self._ensure_on_demand_role(session, TASK_DECOMPOSER_WORKER_ROLE)
+
+        work_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="task_decomposition",
+            title=f"Task decomposition for {session.task_key}",
+            owner_role_id=decomposer_role.id,
+            source_event_id=source_event.id,
+            priority=97,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="task_decomposition_requested",
+            current_owner=TASK_DECOMPOSER_WORKER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = (
+            f"Prepare task decomposition for story {session.task_key} before implementation starts. "
+            "Produce a temporary `plan/index.md` plus self-contained `plan/NN-*.md` task package only for Jira subtask materialization, and break the verified planning package into the smallest useful execution-oriented chunks."
+        )
+        if additional_context:
+            instruction = f"{instruction}\n\n{additional_context}"
+        self._dispatch_role_work(
+            session=session,
+            role=decomposer_role,
+            work_item=work_item,
+            stage_name="task_decomposition_requested",
+            instruction=instruction,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="task_decomposition_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": TASK_DECOMPOSER_WORKER_ROLE,
+                "work_item_id": work_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
+    def _handle_proposal_context_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        proposal_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "proposal_context" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not proposal_items:
+            raise IntakeError("No active proposal/context work item found for the session")
+
+        active_item = proposal_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, PROPOSAL_CONTEXT_WORKER_ROLE)
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=PROPOSAL_CONTEXT_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
+        self._materialize_story_planning_outcome_file(
+            session=session,
+            source_event=source_event,
+            work_type="proposal_context",
+            status="completed",
+        )
+        self._materialize_story_spec_file(
+            session=session,
+            filename="proposal.md",
+            artifact_type="proposal_markdown",
+            title="Proposal",
+            explicit_markdown=str(source_event.payload.get("proposal_markdown") or "").strip(),
+            sections=[
+                ("Summary", str(source_event.payload.get("summary") or "").strip()),
+                ("Key Context Findings", str(source_event.payload.get("context_findings") or "").strip()),
+            ],
+        )
+
+        summary = str(source_event.payload.get("summary") or "").strip()
+        context_findings = str(source_event.payload.get("context_findings") or "").strip()
+        context_lines: list[str] = []
+        if summary:
+            context_lines.append(f"Proposal/context summary: {summary}")
+        if context_findings:
+            context_lines.append(f"Key context findings: {context_findings}")
+        context_lines.append(
+            "Context package available under `spec/context/`; read `feature-overview.md` first and use the other context files selectively."
+        )
+        additional_context = "\n".join(context_lines) if context_lines else None
+
+        event = self._enqueue_requirements(
+            session=session,
+            source_event=source_event,
+            additional_context=additional_context,
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event
+
+    def _handle_requirements_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        requirements_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "requirements" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not requirements_items:
+            raise IntakeError("No active requirements work item found for the session")
+
+        active_item = requirements_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, REQUIREMENTS_CLARIFIER_WORKER_ROLE)
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
+        self._materialize_story_planning_outcome_file(
+            session=session,
+            source_event=source_event,
+            work_type="requirements",
+            status="completed",
+        )
+        self._materialize_story_spec_file(
+            session=session,
+            filename="requirements.md",
+            artifact_type="requirements_markdown",
+            title="Requirements",
+            explicit_markdown=str(source_event.payload.get("requirements_markdown") or "").strip(),
+            sections=[
+                ("Summary", str(source_event.payload.get("summary") or "").strip()),
+                ("Assumptions", str(source_event.payload.get("assumptions") or "").strip()),
+            ],
+        )
+
+        summary = str(source_event.payload.get("summary") or "").strip()
+        assumptions = str(source_event.payload.get("assumptions") or "").strip()
+        context_lines: list[str] = []
+        if summary:
+            context_lines.append(f"Requirements summary: {summary}")
+        if assumptions:
+            context_lines.append(f"Explicit assumptions: {assumptions}")
+        additional_context = "\n".join(context_lines) if context_lines else None
+
+        event = self._enqueue_acceptance_criteria(
+            session=session,
+            source_event=source_event,
+            additional_context=additional_context,
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event
+
+    def _handle_story_planning_blocked(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        work_type = _STORY_PLANNING_WORK_TYPE_BY_STAGE.get(session.current_stage)
+        if work_type is None:
+            raise IntakeError(f"Stage {session.current_stage} is not a story planning stage")
+
+        planning_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == work_type and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not planning_items:
+            raise IntakeError(f"No active {work_type} work item found for the session")
+
+        active_item = planning_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=source_event.producer_id,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        if source_event.producer_id in _STORY_PLANNING_ROLES:
+            self._sync_role_workspace_outputs_to_task_snapshot(
+                session=session,
+                role_name=source_event.producer_id,
+                outputs=source_event.payload.get("outputs"),
+            )
+        if work_type == "spec_verification":
+            self._materialize_spec_verification_outcome_file(session=session, source_event=source_event)
+        else:
+            self._materialize_story_planning_outcome_file(
+                session=session,
+                source_event=source_event,
+                work_type=work_type,
+                status="blocked",
+            )
+
+        summary = str(source_event.payload.get("summary") or "").strip() or f"{work_type} requires operator input"
+        detail_lines: list[str] = []
+        details = str(source_event.payload.get("details") or "").strip()
+        if details:
+            detail_lines.append(details)
+        for key, label in (
+            ("failures", "Failures"),
+            ("missing_inputs", "Missing inputs"),
+            ("pending_decisions", "Pending decisions"),
+            ("blocker_questions", "Questions"),
+        ):
+            value = source_event.payload.get(key)
+            if isinstance(value, list):
+                rendered = [str(item).strip() for item in value if str(item).strip()]
+                if rendered:
+                    detail_lines.append(f"{label}:")
+                    detail_lines.extend(f"- {item}" for item in rendered)
+        next_step = str(source_event.payload.get("next_step") or "").strip()
+        if next_step:
+            detail_lines.append(f"Next step: {next_step}")
+        details = "\n".join(detail_lines).strip()
+
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": f"{work_type}_blocked",
+                "role_name": source_event.producer_id,
+                "work_item_id": active_item.id,
+                "summary": summary,
+                "details": details,
+                "needs_operator_input": True,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _handle_acceptance_criteria_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        acceptance_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "acceptance_criteria" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not acceptance_items:
+            raise IntakeError("No active acceptance criteria work item found for the session")
+
+        active_item = acceptance_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, ACCEPTANCE_CRITERIA_WORKER_ROLE)
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=ACCEPTANCE_CRITERIA_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
+        self._materialize_story_planning_outcome_file(
+            session=session,
+            source_event=source_event,
+            work_type="acceptance_criteria",
+            status="completed",
+        )
+        self._materialize_story_spec_file(
+            session=session,
+            filename="acceptance_criteria.md",
+            artifact_type="acceptance_criteria_markdown",
+            title="Acceptance Criteria",
+            explicit_markdown=str(source_event.payload.get("acceptance_criteria_markdown") or "").strip(),
+            sections=[
+                ("Summary", str(source_event.payload.get("summary") or "").strip()),
+                ("Highlighted Cases", str(source_event.payload.get("highlighted_cases") or "").strip()),
+            ],
+        )
+
+        summary = str(source_event.payload.get("summary") or "").strip()
+        highlighted_cases = str(source_event.payload.get("highlighted_cases") or "").strip()
+        context_lines: list[str] = []
+        if summary:
+            context_lines.append(f"Acceptance criteria summary: {summary}")
+        if highlighted_cases:
+            context_lines.append(f"Highlighted cases: {highlighted_cases}")
+        additional_context = "\n".join(context_lines) if context_lines else None
+
+        event = self._enqueue_constraints(
+            session=session,
+            source_event=source_event,
+            additional_context=additional_context,
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event
+
+    def _handle_constraints_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        constraint_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "constraints" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not constraint_items:
+            raise IntakeError("No active constraints work item found for the session")
+
+        active_item = constraint_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, CONSTRAINTS_WORKER_ROLE)
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=CONSTRAINTS_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
+        self._materialize_story_planning_outcome_file(
+            session=session,
+            source_event=source_event,
+            work_type="constraints",
+            status="completed",
+        )
+        self._materialize_story_spec_file(
+            session=session,
+            filename="constraints.md",
+            artifact_type="constraints_markdown",
+            title="Constraints",
+            explicit_markdown=str(source_event.payload.get("constraints_markdown") or "").strip(),
+            sections=[
+                ("Summary", str(source_event.payload.get("summary") or "").strip()),
+                ("Key Constraints", str(source_event.payload.get("key_constraints") or "").strip()),
+            ],
+        )
+
+        summary = str(source_event.payload.get("summary") or "").strip()
+        key_constraints = str(source_event.payload.get("key_constraints") or "").strip()
+        context_lines: list[str] = []
+        if summary:
+            context_lines.append(f"Constraints summary: {summary}")
+        if key_constraints:
+            context_lines.append(f"Key constraints: {key_constraints}")
+        additional_context = "\n".join(context_lines) if context_lines else None
+
+        event = self._enqueue_spec_verification(
+            session=session,
+            source_event=source_event,
+            additional_context=additional_context,
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event
+
+    def _handle_spec_verification_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        verification_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "spec_verification" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not verification_items:
+            raise IntakeError("No active spec verification work item found for the session")
+
+        active_item = verification_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, SPEC_VERIFIER_WORKER_ROLE)
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=SPEC_VERIFIER_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
+        self._materialize_spec_verification_outcome_file(session=session, source_event=source_event)
+        self._materialize_story_spec_file(
+            session=session,
+            filename="spec_verification.md",
+            artifact_type="spec_verification_markdown",
+            title="Spec Verification",
+            explicit_markdown=str(source_event.payload.get("spec_verification_markdown") or "").strip(),
+            sections=[
+                ("Summary", str(source_event.payload.get("summary") or "").strip()),
+                ("Verified Focus", str(source_event.payload.get("verified_focus") or "").strip()),
+            ],
+        )
+
+        summary = str(source_event.payload.get("summary") or "").strip()
+        verified_focus = str(source_event.payload.get("verified_focus") or "").strip()
+        context_lines: list[str] = []
+        if summary:
+            context_lines.append(f"Planning verification summary: {summary}")
+        if verified_focus:
+            context_lines.append(f"Verified focus: {verified_focus}")
+        additional_context = "\n".join(context_lines) if context_lines else None
+
+        event = self._enqueue_task_decomposition(
+            session=session,
+            source_event=source_event,
+            additional_context=additional_context,
+        )
+        session = self._get_session_or_raise(session.id)
+        return session, event
+
+    def _handle_task_decomposition_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        decomposition_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "task_decomposition" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not decomposition_items:
+            raise IntakeError("No active task decomposition work item found for the session")
+
+        active_item = decomposition_items[0]
+        summary = str(source_event.payload.get("summary") or "").strip()
+        task_breakdown = str(source_event.payload.get("task_breakdown") or "").strip()
+        self._sync_role_workspace_outputs_to_task_snapshot(
+            session=session,
+            role_name=TASK_DECOMPOSER_WORKER_ROLE,
+            outputs=source_event.payload.get("outputs"),
+        )
+        try:
+            plan_index_markdown, raw_plan_task_files, plan_manifest = self._normalize_task_decomposition_plan_package(
+                session=session,
+                payload=source_event.payload,
+            )
+        except IntakeError as exc:
+            self._stop_on_demand_role(session, TASK_DECOMPOSER_WORKER_ROLE)
+            self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="task_decomposition_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="session_escalated_to_operator",
+                producer_type="coordinator",
+                payload={
+                    "reason": "task_decomposition_package_invalid",
+                    "role_name": TASK_DECOMPOSER_WORKER_ROLE,
+                    "work_item_id": active_item.id,
+                    "summary": summary or "task decomposition package is invalid",
+                    "details": str(exc),
+                    "current_stage": session.current_stage,
+                },
+            )
+            return session, event
+
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, TASK_DECOMPOSER_WORKER_ROLE)
+        decomposition_artifact: Artifact | None = None
+        if self.artifacts_root is not None:
+            artifact_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "planning",
+                "task_decomposition.md",
+                self._task_decomposition_markdown(summary=summary, task_breakdown=task_breakdown),
+            )
+            decomposition_artifact = self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="planning",
+                artifact_type="task_decomposition_markdown",
+                path=str(artifact_path),
+                metadata={
+                    "task_key": session.task_key,
+                },
+            )
+            self._write_task_decomposition_plan_package(
+                session=session,
+                plan_index_markdown=plan_index_markdown,
+                raw_plan_task_files=raw_plan_task_files,
+                plan_manifest=plan_manifest,
+            )
+        coding_role = self._primary_coding_role_for_work_type(session, "implementation")
+        self.work_item_repository.create(
+            session_id=session.id,
+            work_type="implementation",
+            title=f"Initial implementation for {session.task_key}",
+            owner_role_id=coding_role.id,
+            source_event_id=source_event.id,
+            priority=100,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_creation_requested",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        batch_session, batch_event, followup_event = self.create_subtasks_from_plan(session.id)
+        if followup_event is not None:
+            return batch_session, followup_event
+        if batch_event.event_type == "jira_subtasks_creation_failed":
+            return batch_session, batch_event
+        return batch_session, batch_event
+
+    def _enqueue_subtask_graph(
+        self,
+        session: Session,
+        source_event: Event,
+        subtasks: list,
+        initial_work_item: WorkItem,
+        decomposition_artifact: Artifact | None = None,
+    ) -> Event:
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        if implementer_role is None:
+            raise IntakeError("Implementer role is missing for the session")
+
+        unresolved = unresolved_subtasks(subtasks)
+        if not unresolved:
+            raise IntakeError("No unresolved subtasks found for subtask graph dispatch")
+
+        first_subtask = unresolved[0]
+        active_item = self.work_item_repository.update_shape(
+            initial_work_item.id,
+            work_type="subtask_implementation",
+            title=f"Subtask implementation for {first_subtask.key}: {first_subtask.title}",
+            owner_role_id=implementer_role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+        for index, subtask in enumerate(unresolved[1:], start=1):
+            self.work_item_repository.create(
+                session_id=session.id,
+                work_type="subtask_implementation",
+                title=f"Subtask implementation for {subtask.key}: {subtask.title}",
+                owner_role_id=None,
+                source_event_id=source_event.id,
+                priority=max(70 - index, 1),
+                status=WorkItemStatus.UNASSIGNED,
+            )
+
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="subtask_implementation_requested",
+            current_owner=IMPLEMENTER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._dispatch_role_work(
+            session=session,
+            role=implementer_role,
+            work_item=active_item,
+            stage_name="subtask_implementation_requested",
+            instruction=(
+                f"Implement subtask {first_subtask.key} for parent task {session.task_key}. "
+                "Use the refreshed Jira subtask snapshot as the source of truth for scope and status. "
+                "Focus only on this subtask scope before moving to the next one."
+            ),
+        )
+        payload = {
+            "task_key": session.task_key,
+            "role_name": IMPLEMENTER_ROLE,
+            "work_item_id": active_item.id,
+            "current_stage": session.current_stage,
+            "subtask_key": first_subtask.key,
+            "remaining_subtask_count": len(unresolved),
+        }
+        if decomposition_artifact is not None:
+            payload["decomposition_artifact_id"] = decomposition_artifact.id
+        return self._append_event(
+            session_id=session.id,
+            event_type="subtask_implementation_requested",
+            producer_type="coordinator",
+            payload=payload,
+        )
+
+    def _start_subtask_graph_flow(
+        self,
+        session: Session,
+        producer_type: str,
+        subtasks: list,
+        initial_work_item: WorkItem,
+        decomposition_artifact: Artifact | None = None,
+    ) -> tuple[Event, Event]:
+        unresolved = unresolved_subtasks(subtasks)
+        self._record_subtask_statuses_artifact(session, subtasks)
+        payload = {
+            "subtask_count": len(subtasks),
+            "unresolved_count": len(unresolved),
+        }
+        if decomposition_artifact is not None:
+            payload["decomposition_artifact_id"] = decomposition_artifact.id
+        event = self._append_event(
+            session_id=session.id,
+            event_type="subtask_graph_requested",
+            producer_type=producer_type,
+            payload=payload,
+        )
+        followup_event = self._enqueue_subtask_graph(
+            session=session,
+            source_event=event,
+            subtasks=subtasks,
+            initial_work_item=initial_work_item,
+            decomposition_artifact=decomposition_artifact,
+        )
+        return event, followup_event
+
+    def _handle_subtask_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        active_item = self._coding_work_item_from_completion_event(session, source_event)
+        if active_item is None or active_item.work_type != "subtask_implementation":
+            raise IntakeError("No active subtask implementation work item found for the session")
+
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        parsed_subtask = self._parse_subtask_work_item_title(active_item.title)
+        subtask_context = (
+            f"subtask {parsed_subtask['key']}"
+            if parsed_subtask["key"] is not None
+            else "subtask implementation"
+        )
+        session, commit_event = self._commit_task_state(session, subtask_context)
+        if commit_event is not None:
+            return session, commit_event
+        return self._continue_after_subtask_checkpoint(
+            session=session,
+            source_event=source_event,
+            active_item=active_item,
+            parsed_subtask=parsed_subtask,
+        )
+
+    def _continue_after_subtask_checkpoint(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+        active_item: WorkItem,
+        parsed_subtask: dict[str, str | None],
+    ) -> tuple[Session, Event]:
+        if parsed_subtask["key"] is not None:
+            session, transition_event = self._complete_subtask_in_jira(
+                session=session,
+                subtask_key=parsed_subtask["key"],
+            )
+            if transition_event is not None:
+                return session, transition_event
+        refreshed_subtasks, _refresh_ok = self._refresh_subtask_snapshot(session)
+        implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        if implementer_role is None:
+            raise IntakeError("Implementer role is missing for the session")
+
+        remaining_items = self._pending_subtask_queue_items(
+            session.id,
+            exclude_ids={active_item.id},
+        )
+        if refreshed_subtasks is not None:
+            completed_subtask_keys = {
+                parsed["key"]
+                for item in self.work_item_repository.list_for_session(session.id)
+                if item.work_type == "subtask_implementation"
+                and item.status == WorkItemStatus.COMPLETED
+                for parsed in [self._parse_subtask_work_item_title(item.title)]
+                if parsed["key"] is not None
+            }
+            remaining_items = self._reconcile_subtask_queue_after_refresh(
+                session=session,
+                source_event=source_event,
+                queued_items=remaining_items,
+                unresolved=[
+                    subtask
+                    for subtask in unresolved_subtasks(refreshed_subtasks)
+                    if subtask.key not in completed_subtask_keys
+                ],
+            )
+        if remaining_items:
+            next_item = self.work_item_repository.update_assignment(
+                remaining_items[0].id,
+                owner_role_id=implementer_role.id,
+                status=WorkItemStatus.ASSIGNED,
+            )
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="subtask_implementation_requested",
+                current_owner=IMPLEMENTER_ROLE,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            self._dispatch_role_work(
+                session=session,
+                role=implementer_role,
+                work_item=next_item,
+                stage_name="subtask_implementation_requested",
+                instruction=(
+                    f"Continue subtask implementation for parent task {session.task_key}. "
+                    "Finish this subtask before moving forward."
+                ),
+            )
+            return session, self._append_event(
+                session_id=session.id,
+                event_type="subtask_implementation_requested",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "role_name": IMPLEMENTER_ROLE,
+                    "work_item_id": next_item.id,
+                    "current_stage": session.current_stage,
+                    "remaining_subtask_count": len(remaining_items),
+                    "subtask_key": self._parse_subtask_work_item_title(next_item.title)["key"],
+                },
+            )
+
+        return self._advance_after_coding_completion(
+            session=session,
+            source_event=source_event,
+            completed_work_type="subtask_implementation",
+        )
+
+    def _complete_subtask_in_jira(
+        self,
+        *,
+        session: Session,
+        subtask_key: str,
+    ) -> tuple[Session, Event | None]:
+        if self.jira_adapter is None or self.artifacts_root is None:
+            return session, None
+
+        result = self.jira_adapter.complete_subtask(subtask_key)
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "subtask-transition",
+            f"{subtask_key}.stdout.log",
+            result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "subtask-transition",
+            f"{subtask_key}.stderr.log",
+            result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="subtask-transition",
+            artifact_type="subtask_transition_stdout",
+            path=str(stdout_path),
+            metadata={
+                "task_key": session.task_key,
+                "subtask_key": subtask_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="subtask-transition",
+            artifact_type="subtask_transition_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "subtask_key": subtask_key,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+
+        if not result.ok:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="subtask_implementation_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="subtask_transition_failed",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "subtask_key": subtask_key,
+                    "returncode": result.returncode,
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                },
+            )
+            return session, event
+
+        self._append_event(
+            session_id=session.id,
+            event_type="subtask_transition_completed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "subtask_key": subtask_key,
+                "returncode": result.returncode,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, None
+
+    def _handle_implementation_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        active_item = self._coding_work_item_from_completion_event(session, source_event)
+        if active_item is None:
+            raise IntakeError("No active coding work item found for the session")
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        session, commit_event = self._commit_task_state(
+            session,
+            self._commit_context_for_work_type(active_item.work_type),
+        )
+        if commit_event is not None:
+            return session, commit_event
+        if active_item.work_type in _DUAL_REVIEW_CORRECTION_WORK_TYPE_BY_LANE.values():
+            return self._enqueue_dual_review(session=session, source_event=source_event, lane="convention")
+        if active_item.work_type == "verification_correction":
+            return self._enqueue_verification(session=session, source_event=source_event)
+        if active_item.work_type == "documentation_review_correction":
+            return self._enqueue_documentation_review(session=session, source_event=source_event)
+
+        return self._advance_after_coding_completion(
+            session=session,
+            source_event=source_event,
+            completed_work_type=active_item.work_type,
+        )
+
+    def _coding_work_item_from_completion_event(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> WorkItem | None:
+        payload_work_item_id = source_event.payload.get("work_item_id")
+        if isinstance(payload_work_item_id, int):
+            matching_item = next(
+                (
+                    item
+                    for item in self.work_item_repository.list_for_session(session.id)
+                if item.id == payload_work_item_id
+                ),
+                None,
+            )
+            if matching_item is not None and matching_item.work_type in {
+                "subtask_implementation",
+                "implementation",
+                "convention_review_correction",
+                "requirements_review_correction",
+                "verification_correction",
+                "documentation_review_correction",
+                "followup_implementation",
+            }:
+                return matching_item
+        return self._find_active_primary_coding_work_item(session)
+
+    def _advance_after_coding_completion(
+        self,
+        session: Session,
+        source_event: Event,
+        completed_work_type: str,
+    ) -> tuple[Session, Event]:
+
+        if (
+            completed_work_type in {"implementation", "subtask_implementation"}
+            and self._optional_lane_policy_mode(session.policy, "review_policy") != "disabled"
+        ):
+            return self._enqueue_dual_review(session=session, source_event=source_event, lane="convention")
+
+        return self._enqueue_post_implementation_quality_gate(
+            session=session,
+            source_event=source_event,
+        )
+
+    def _commit_context_for_work_type(self, work_type: str) -> str:
+        if work_type == "implementation":
+            return "implementation pass"
+        if work_type == "followup_implementation":
+            return "follow-up pass"
+        if work_type == "convention_review_correction":
+            return "convention review fixes"
+        if work_type == "requirements_review_correction":
+            return "requirements review fixes"
+        if work_type == "verification_correction":
+            return "verification fixes"
+        if work_type == "documentation_review_correction":
+            return "documentation review fixes"
+        return work_type.replace("_", " ")
+
+    def _commit_task_state(
+        self,
+        session: Session,
+        context: str | None,
+    ) -> tuple[Session, Event | None]:
+        if self.gitlab_adapter is None or self.artifacts_root is None:
+            return session, None
+
+        result = self.gitlab_adapter.commit_task_state(session.task_key, context=context)
+        context_slug = re.sub(r"[^a-z0-9]+", "-", (context or "checkpoint").lower()).strip("-") or "checkpoint"
+        stdout_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "commit-task-state",
+            f"{context_slug}.stdout.log",
+            result.stdout,
+        )
+        stderr_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "commit-task-state",
+            f"{context_slug}.stderr.log",
+            result.stderr,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="commit-task-state",
+            artifact_type="commit_task_state_stdout",
+            path=str(stdout_path),
+            metadata={
+                "task_key": session.task_key,
+                "context": context,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="commit-task-state",
+            artifact_type="commit_task_state_stderr",
+            path=str(stderr_path),
+            metadata={
+                "task_key": session.task_key,
+                "context": context,
+                "command": result.command,
+                "returncode": result.returncode,
+            },
+        )
+        if not result.ok:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage=session.current_stage,
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="git_commit_failed",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "context": context,
+                    "returncode": result.returncode,
+                    "current_stage": session.current_stage,
+                    "status": session.status.value,
+                },
+            )
+            return session, event
+
+        self._append_event(
+            session_id=session.id,
+            event_type="git_commit_completed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "context": context,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, None
+
+    def _enqueue_dual_review(
+        self,
+        session: Session,
+        source_event: Event,
+        *,
+        lane: str,
+    ) -> tuple[Session, Event]:
+        role_name = _DUAL_REVIEW_ROLE_BY_LANE[lane]
+        stage_name = _DUAL_REVIEW_STAGE_BY_LANE[lane]
+        work_type = _DUAL_REVIEW_WORK_TYPE_BY_LANE[lane]
+        reviewer_role = self.role_repository.get_by_name(session.id, role_name)
+        if reviewer_role is None:
+            raise IntakeError(f"{role_name} role is missing for the session")
+
+        review_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type=work_type,
+            title=f"{lane.title()} review for {session.task_key}",
+            owner_role_id=reviewer_role.id,
+            source_event_id=source_event.id,
+            priority=89 if lane == "convention" else 90,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=stage_name,
+            current_owner=role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction, review_hydration = self._dual_review_dispatch_context(
+            session,
+            lane=lane,
+            before_event_id=source_event.id,
+        )
+        self._dispatch_role_work(
+            session=session,
+            role=reviewer_role,
+            work_item=review_item,
+            stage_name=stage_name,
+            instruction=instruction,
+            extra_hydration=review_hydration,
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type=stage_name,
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": role_name,
+                "review_lane": lane,
+                "work_item_id": review_item.id,
+                "source_event_id": source_event.id,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event
+
+    def _dual_review_dispatch_context(
+        self,
+        session: Session,
+        *,
+        lane: str,
+        before_event_id: int | None = None,
+    ) -> tuple[str, dict[str, str | int | None]]:
+        previous_review_reports = self._dual_review_report_paths_for_current_chain(
+            session,
+            lane=lane,
+            before_event_id=before_event_id,
+        )
+        review_report_path = self._next_dual_review_report_target_path(session, lane=lane)
+        if lane == "convention":
+            instruction = (
+                f"Run convention review for {session.task_key}. "
+                "Start from the current diff, read CLAUDE.md and README.md when present, "
+                "follow their relevant local links for the touched diff, write the routed convention report, "
+                "and report a clean pass or grounded convention issues."
+            )
+        else:
+            instruction = (
+                f"Run requirements review for {session.task_key}. "
+                "Start from statuses.md as canonical Jira task/subtask order, read task and per-key Jira inputs in that order, "
+                "treat earlier accepted subtasks as regression contracts unless explicitly overridden by newer Jira follow-ups, "
+                "write the routed requirements report, and report a clean pass or grounded requirement/edge-case issues."
+            )
+        if previous_review_reports:
+            instruction += (
+                "\nPrevious review reports from this immediate correction chain "
+                "(read first and do not re-flag the same issues):\n"
+                + "\n".join(previous_review_reports)
+                + "\nOnly emit blocked_review_cycle when the current issue is the same unresolved issue "
+                "from this immediate correction chain. If a similar issue returns after later follow-up, "
+                "subtask, or implementation work, report it as a normal failed review finding."
+            )
+        operator_guidance_history = self._dual_review_operator_guidance_history(
+            session.id,
+            before_event_id=before_event_id,
+        )
+        if operator_guidance_history:
+            guidance_lines = []
+            for guidance in operator_guidance_history:
+                guidance_lines.append(
+                    f"- event {guidance['operator_reply_event_id']} during {guidance['continuation_stage']}: "
+                    f"{guidance['operator_reply']}"
+                )
+            instruction += (
+                "\nAuthoritative operator decisions from prior escalations in this session "
+                "(apply them when relevant to the same issue even if they contradict older review findings, "
+                "Jira wording, or downstream artifacts; do not re-flag a finding that directly contradicts "
+                "a relevant operator decision):\n"
+                + "\n".join(guidance_lines)
+            )
+        skipped_subtask_context_path = None
+        skipped_subtasks = []
+        if lane == "requirements":
+            skipped_subtasks = self._subtask_skip_history(session.id, before_event_id=before_event_id)
+            if skipped_subtasks:
+                skipped_subtask_context_path = self._materialize_skipped_subtasks_context(session)
+                skipped_lines = [
+                    f"- {item['subtask_key']}: {item['reason']}"
+                    for item in skipped_subtasks
+                    if item.get("subtask_key")
+                ]
+                instruction += (
+                    "\nOperator-skipped/deferred Jira subtasks for this run "
+                    "(read the skipped-subtasks context and do not require their scoped work in this review pass; "
+                    "continue to report regressions in already accepted non-skipped scope):\n"
+                    + "\n".join(skipped_lines)
+                )
+        hydration: dict[str, str | int | None] = {
+            "review_scope": "current_diff_only",
+            "review_lane": lane,
+            "review_report_path": str(review_report_path) if review_report_path is not None else None,
+            "previous_review_report_paths": "\n".join(previous_review_reports)
+            if previous_review_reports
+            else None,
+            "diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="source"),
+            "operator_resolution_history": json.dumps(operator_guidance_history, indent=2)
+            if operator_guidance_history
+            else None,
+            "review_cycle_resolution": "operator_guided_recheck" if operator_guidance_history else None,
+            "skipped_subtasks_path": skipped_subtask_context_path,
+            "skipped_subtasks": json.dumps(skipped_subtasks, indent=2) if skipped_subtasks else None,
+        }
+        if lane == "requirements" and self.workdir_root is not None:
+            task_root = self.workdir_root / session.task_key
+            hydration.update(
+                {
+                    "statuses_path": self._existing_file_path(str(task_root / "statuses.md")),
+                    "root_description_path": self._existing_file_path(str(task_root / "description.md")),
+                    "root_comments_path": self._existing_file_path(str(task_root / "comments.md")),
+                    "plan_artifacts_are_not_authoritative": "true",
+                }
+            )
+        return instruction, hydration
+
+    def _dual_review_operator_guidance_history(
+        self,
+        session_id: int,
+        *,
+        before_event_id: int | None = None,
+    ) -> list[dict[str, str | int]]:
+        guidance: list[dict[str, str | int]] = []
+        for event in self.event_repository.list_for_session(session_id):
+            if before_event_id is not None and event.id > before_event_id:
+                continue
+            if event.event_type != "operator_runtime_input_sent":
+                continue
+            continuation_stage = str(event.payload.get("continuation_stage") or "").strip()
+            current_stage = str(event.payload.get("current_stage") or "").strip()
+            operator_reply = str(event.payload.get("operator_reply") or "").strip()
+            if not operator_reply:
+                continue
+            guidance.append(
+                {
+                    "operator_reply": operator_reply,
+                    "operator_reply_event_id": event.id,
+                    "continuation_stage": continuation_stage or current_stage,
+                    "work_item_id": int(event.payload.get("work_item_id") or 0),
+                }
+            )
+        return guidance
+
+    def _spec_verification_operator_details(
+        self,
+        *,
+        details: object,
+        blocker_questions: object,
+    ) -> str:
+        rendered_details = str(details or "").strip()
+        if isinstance(blocker_questions, list) and blocker_questions:
+            rendered_questions = "\n".join(
+                f"- {str(item).strip()}" for item in blocker_questions if str(item).strip()
+            )
+            if rendered_questions:
+                rendered_details = (
+                    f"{rendered_details}\n\nQuestions:\n{rendered_questions}".strip()
+                    if rendered_details
+                    else f"Questions:\n{rendered_questions}"
+                )
+        return rendered_details
+
+    def _spec_verification_operator_details_from_history(
+        self,
+        events: list[Event],
+        blocker_event_id: int,
+    ) -> str:
+        for event in reversed(events):
+            if event.id >= blocker_event_id:
+                continue
+            if event.event_type not in {"story_planning_blocked", "spec_verification_blocked"}:
+                continue
+            rendered_details = self._spec_verification_operator_details(
+                details=event.payload.get("details"),
+                blocker_questions=event.payload.get("blocker_questions"),
+            )
+            if rendered_details:
+                return rendered_details
+        return ""
+
+    def _handle_spec_verification_blocked(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        verification_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "spec_verification" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not verification_items:
+            raise IntakeError("No active spec verification work item found for the session")
+
+        active_item = verification_items[0]
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        self._materialize_spec_verification_outcome_file(session=session, source_event=source_event)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="spec_verification_requested",
+            current_owner=SPEC_VERIFIER_WORKER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        summary = str(source_event.payload.get("summary") or "").strip() or "spec verification blockers require operator input"
+        details = self._spec_verification_operator_details(
+            details=source_event.payload.get("details"),
+            blocker_questions=source_event.payload.get("blocker_questions"),
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "spec_verification_blockers",
+                "role_name": SPEC_VERIFIER_WORKER_ROLE,
+                "work_item_id": active_item.id,
+                "summary": summary,
+                "details": details or "Resolve planning blockers with the verifier, then continue in the same live session.",
+                "needs_operator_input": True,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _handle_verification_failed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        verification_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "verification" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not verification_items:
+            raise IntakeError("No active verification work item found for the session")
+
+        payload_work_item_id = self._payload_work_item_id(source_event.payload)
+        verification_items = sorted(
+            verification_items,
+            key=lambda item: item.id != payload_work_item_id,
+        )
+        for item in verification_items:
+            self.work_item_repository.update_status(item.id, WorkItemStatus.COMPLETED)
+        self._materialize_verification_outcome_file(session=session, source_event=source_event)
+        self._materialize_final_verification_file(session=session, source_event=source_event)
+
+        coding_role = self._primary_coding_role_for_work_type(session, "verification_correction")
+
+        correction_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification_correction",
+            title=f"Verification corrections for {session.task_key}",
+            owner_role_id=coding_role.id,
+            source_event_id=source_event.id,
+            priority=95,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_correction_requested",
+            current_owner=coding_role.role_name,
+        )
+        instruction = self._stage_instruction(
+            "verification_correction_requested",
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(
+                f"No verification correction instruction is available for role {coding_role.role_name}"
+            )
+        self._dispatch_role_work(
+            session=session,
+            role=coding_role,
+            work_item=correction_item,
+            stage_name="verification_correction_requested",
+            instruction=instruction,
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="verification_correction_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": coding_role.role_name,
+                "work_item_id": correction_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _handle_verification_blocked(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        verification_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "verification" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not verification_items:
+            raise IntakeError("No active verification work item found for the session")
+
+        active_item = verification_items[0]
+        if source_event.payload.get("e2e_result") == "blocked":
+            self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+            self._materialize_final_verification_file(session=session, source_event=source_event)
+            session = self.session_repository.update_stage_and_owner(session.id,
+                current_stage=session.current_stage, current_owner=VERIFICATION_COORDINATOR_ROLE)
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id, event_type="session_escalated_to_operator", producer_type="coordinator",
+                payload={"reason": "e2e_environment", "summary": source_event.payload.get("summary") or "E2E verification needs recovery",
+                         "details": source_event.payload.get("details"), "needs_operator_input": False,
+                         "role_name": VERIFICATION_COORDINATOR_ROLE,
+                         "work_item_id": active_item.id, "current_stage": session.current_stage},
+            )
+            return session, event
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
+        self._materialize_final_verification_file(session=session, source_event=source_event)
+        verification_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        if verification_role is None:
+            raise IntakeError("Verification coordinator role is missing for the session")
+        self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification_cycle_review",
+            title=f"Verification cycle resolution for {session.task_key}",
+            owner_role_id=verification_role.id,
+            source_event_id=source_event.id,
+            priority=96,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_requested",
+            current_owner=VERIFICATION_COORDINATOR_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        report_path = self._latest_artifact_path(session.id, "final_verification_markdown")
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "verification_cycle",
+                "summary": str(source_event.payload.get("summary") or "").strip() or "verification cycle blocked",
+                "details": str(source_event.payload.get("details") or "").strip()
+                or "The verifier reported a non-converging verification cycle and stopped automatic retries.",
+                "verification_report_path": report_path,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _handle_verification_passed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        payload_work_item_id = self._payload_work_item_id(source_event.payload)
+        verification_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "verification" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not verification_items:
+            raise IntakeError("No active verification work item found for the session")
+
+        verification_items = sorted(
+            verification_items,
+            key=lambda item: item.id != payload_work_item_id,
+        )
+        if session.task_key.startswith("QA-"):
+            from factory.e2e.config import E2EError
+            from factory.e2e.runner import validate_verdict
+            try:
+                verdict = validate_verdict(self.workdir_root / session.task_key, verification_items[0].id)
+                self._validate_e2e_operator_decisions(session, verdict)
+                if verdict["result"] not in {"passed", "accepted_with_warnings"}:
+                    raise E2EError("QA completion requires a passing or explicitly accepted native e2e verdict")
+            except (E2EError, OSError, ValueError, KeyError) as exc:
+                raise IntakeError(str(exc)) from exc
+            source_event.payload["e2e_report_path"] = verdict["report_path"]
+        self._materialize_verification_outcome_file(session=session, source_event=source_event)
+        self._materialize_final_verification_file(session=session, source_event=source_event)
+        session = self._get_session_or_raise(session.id)
+        if self._verification_outcome_status(session) not in {"passed", "accepted_with_warnings"}:
+            return self._handle_verification_failed(session, source_event)
+        for item in verification_items:
+            self.work_item_repository.update_status(item.id, WorkItemStatus.COMPLETED)
+        doc_harvest_policy = self._optional_lane_policy_mode(session.policy, "doc_harvest_policy")
+        if doc_harvest_policy != "disabled":
+            session, event = self._enqueue_doc_harvest(session=session, source_event=source_event)
+            return session, event
+        return self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
+
+    def _complete_session_and_attempt_delivery(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        current_session = self._get_session_or_raise(session.id)
+        if current_session.current_stage in {
+            "completed",
+            "mr_handoff_failed",
+            "mr_handoff_completed",
+            "send_to_test_failed",
+            "send_to_test_completed",
+        }:
+            latest_terminal_event = self._latest_event_by_type(
+                current_session.id,
+                {
+                    "task_completed",
+                    "mr_handoff_failed",
+                    "mr_handoff_completed",
+                    "send_to_test_failed",
+                    "send_to_test_completed",
+                },
+            )
+            if latest_terminal_event is not None:
+                return current_session, latest_terminal_event
+
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="completed",
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        completed_event = self._append_event(
+            session_id=session.id,
+            event_type="task_completed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "source_event_id": source_event.id,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        if self.gitlab_adapter is None or self.jira_adapter is None:
+            return session, completed_event
+        session, mr_event, _mr_url = self.create_mr_handoff(session.id)
+        if mr_event.event_type != "mr_handoff_completed":
+            return session, mr_event
+        session, send_event = self.send_to_test_handoff(session.id)
+        return session, send_event
+
+    def _handle_dual_review_passed(
+        self,
+        session: Session,
+        source_event: Event,
+        *,
+        lane: str,
+    ) -> tuple[Session, Event]:
+        self._materialize_dual_review_outcome_file(session=session, source_event=source_event, lane=lane)
+        self._complete_active_dual_review_work_item(session, lane=lane)
+        if lane == "convention":
+            return self._enqueue_dual_review(session=session, source_event=source_event, lane="requirements")
+        return self._enqueue_verification(session=session, source_event=source_event)
+
+    def _handle_dual_review_issues_found(
+        self,
+        session: Session,
+        source_event: Event,
+        *,
+        lane: str,
+    ) -> tuple[Session, Event]:
+        self._materialize_dual_review_outcome_file(session=session, source_event=source_event, lane=lane)
+        self._complete_active_dual_review_work_item(session, lane=lane)
+        return self._enqueue_dual_review_correction(session=session, source_event=source_event, lane=lane)
+
+    def _handle_dual_review_blocked(
+        self,
+        session: Session,
+        source_event: Event,
+        *,
+        lane: str,
+    ) -> tuple[Session, Event]:
+        self._materialize_dual_review_outcome_file(session=session, source_event=source_event, lane=lane)
+        self._complete_active_dual_review_work_item(session, lane=lane)
+        role_name = _DUAL_REVIEW_ROLE_BY_LANE[lane]
+        stage_name = _DUAL_REVIEW_STAGE_BY_LANE[lane]
+        reviewer_role = self.role_repository.get_by_name(session.id, role_name)
+        if reviewer_role is None:
+            raise IntakeError(f"{role_name} role is missing for the session")
+        self.work_item_repository.create(
+            session_id=session.id,
+            work_type=f"{_DUAL_REVIEW_WORK_TYPE_BY_LANE[lane]}_cycle_review",
+            title=f"{lane.title()} review cycle resolution for {session.task_key}",
+            owner_role_id=reviewer_role.id,
+            source_event_id=source_event.id,
+            priority=92,
+            status=WorkItemStatus.WAITING_FOR_OPERATOR,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=stage_name,
+            current_owner=role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        report_paths = self._previous_dual_review_report_paths(session.id, lane=lane)[-2:]
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": f"{lane}_review_cycle",
+                "role_name": role_name,
+                "review_lane": lane,
+                "summary": str(source_event.payload.get("summary") or "").strip()
+                or f"{lane} review cycle blocked",
+                "details": self._review_cycle_operator_details(
+                    source_event.payload,
+                    report_paths=report_paths,
+                ),
+                "needs_operator_input": True,
+                "review_report_paths": report_paths,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _enqueue_dual_review_correction(
+        self,
+        session: Session,
+        source_event: Event,
+        *,
+        lane: str,
+    ) -> tuple[Session, Event]:
+        work_type = _DUAL_REVIEW_CORRECTION_WORK_TYPE_BY_LANE[lane]
+        stage_name = _DUAL_REVIEW_CORRECTION_STAGE_BY_LANE[lane]
+        coding_role = self._primary_coding_role_for_work_type(session, work_type)
+        correction_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type=work_type,
+            title=f"{lane.title()} review corrections for {session.task_key}",
+            owner_role_id=coding_role.id,
+            source_event_id=source_event.id,
+            priority=92,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=stage_name,
+            current_owner=coding_role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = self._stage_instruction(
+            stage_name,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(f"No {lane} review correction instruction is available for role {coding_role.role_name}")
+        self._dispatch_role_work(
+            session=session,
+            role=coding_role,
+            work_item=correction_item,
+            stage_name=stage_name,
+            instruction=instruction,
+            extra_hydration=self._correction_dispatch_hydration(session.id, stage_name),
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type=stage_name,
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": coding_role.role_name,
+                "review_lane": lane,
+                "work_item_id": correction_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _enqueue_qa_followup(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> Event:
+        coding_role = self._primary_coding_role_for_work_type(session, "followup_implementation")
+        followup_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="followup_implementation",
+            title=f"QA reopen follow-up for {session.task_key}",
+            owner_role_id=coding_role.id,
+            source_event_id=source_event.id,
+            priority=115,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="qa_reopen_requested",
+            current_owner=coding_role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = self._stage_instruction(
+            "qa_reopen_requested",
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(f"No QA reopen instruction is available for role {coding_role.role_name}")
+        self._dispatch_role_work(
+            session=session,
+            role=coding_role,
+            work_item=followup_item,
+            stage_name="qa_reopen_requested",
+            instruction=instruction,
+            extra_hydration=self._qa_followup_hydration(session),
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="qa_reopen_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": coding_role.role_name,
+                "work_item_id": followup_item.id,
+                "source_event_id": source_event.id,
+                "current_stage": session.current_stage,
+            },
+        )
+
+    def _handle_implementation_blocked(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        coding_role_name = str(source_event.producer_id or "").strip()
+        coding_role = self.role_repository.get_by_name(session.id, coding_role_name)
+        if coding_role is None:
+            raise IntakeError(f"Coding role {coding_role_name or '<unknown>'} is missing for the session")
+        active_item = self._find_active_work_item_for_role(session.id, coding_role.id)
+        if active_item is None:
+            raise IntakeError("No active coding work item found for operator escalation")
+        self.work_item_repository.update_status(active_item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=coding_role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "reason": "implementation_blocked",
+                "role_name": coding_role.role_name,
+                "work_item_id": active_item.id,
+                "summary": str(source_event.payload.get("summary") or "").strip()
+                or "implementation requires operator input",
+                "details": self._implementation_blocked_operator_details(source_event.payload),
+                "needs_operator_input": True,
+                "conflict_point": str(source_event.payload.get("conflict_point") or "").strip(),
+                "reviewer_premise": str(source_event.payload.get("reviewer_premise") or "").strip(),
+                "preferred_direction": str(source_event.payload.get("preferred_direction") or "").strip(),
+                "requested_decision": str(source_event.payload.get("requested_decision") or "").strip(),
+                "supporting_evidence": str(source_event.payload.get("supporting_evidence") or "").strip(),
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _implementation_blocked_operator_details(self, payload: object) -> str:
+        if not isinstance(payload, dict):
+            return "The coding lane reported a blocked pass and needs an operator decision before continuing."
+        explicit_details = str(payload.get("details") or "").strip()
+        conflict_point = str(payload.get("conflict_point") or "").strip()
+        reviewer_premise = str(payload.get("reviewer_premise") or "").strip()
+        preferred_direction = str(payload.get("preferred_direction") or "").strip()
+        requested_decision = str(payload.get("requested_decision") or "").strip()
+        supporting_evidence = str(payload.get("supporting_evidence") or "").strip()
+        lines: list[str] = []
+        if explicit_details:
+            lines.extend([explicit_details, ""])
+        if any((conflict_point, reviewer_premise, preferred_direction, requested_decision, supporting_evidence)):
+            lines.extend(["## Reasoned Disagreement", ""])
+            if conflict_point:
+                lines.append(f"- Conflict: {conflict_point}")
+            if reviewer_premise:
+                lines.append(f"- Premise to challenge: {reviewer_premise}")
+            if preferred_direction:
+                lines.append(f"- Preferred direction: {preferred_direction}")
+            if requested_decision:
+                lines.append(f"- Operator decision needed: {requested_decision}")
+            if supporting_evidence:
+                lines.append(f"- Supporting evidence: {supporting_evidence}")
+        if not lines:
+            return "The coding lane reported a blocked pass and needs an operator decision before continuing."
+        return "\n".join(lines).strip()
+
+    def _review_cycle_operator_details(
+        self,
+        payload: dict | None,
+        *,
+        report_paths: list[str] | None = None,
+    ) -> str:
+        if not isinstance(payload, dict):
+            return "The reviewer reported a non-converging review cycle and stopped automatic retries."
+        explicit_details = str(payload.get("details") or "").strip()
+        if explicit_details:
+            return explicit_details
+        issues_markdown = str(payload.get("issues_markdown") or "").strip()
+        if issues_markdown:
+            cleaned_lines: list[str] = []
+            for line in issues_markdown.splitlines():
+                if not cleaned_lines and line.strip().startswith("REVIEW_RESULT:"):
+                    continue
+                cleaned_lines.append(line)
+            cleaned = "\n".join(cleaned_lines).strip()
+            if cleaned:
+                return cleaned
+        issues = payload.get("issues")
+        if isinstance(issues, list) and issues:
+            rendered = self._render_review_issues_markdown(issues).strip()
+            if rendered:
+                summary = str(payload.get("summary") or "").strip()
+                if summary:
+                    return "\n".join([summary, "", rendered]).strip()
+                return rendered
+        for path_str in reversed(report_paths or []):
+            if not path_str:
+                continue
+            try:
+                report_text = Path(path_str).read_text(encoding="utf-8")
+            except OSError:
+                continue
+            cleaned_lines: list[str] = []
+            for line in report_text.splitlines():
+                if not cleaned_lines and line.strip().startswith("REVIEW_RESULT:"):
+                    continue
+                cleaned_lines.append(line)
+            cleaned = "\n".join(cleaned_lines).strip()
+            if cleaned:
+                return cleaned
+        return "The reviewer reported a non-converging review cycle and stopped automatic retries."
+
+    def _render_review_issues_markdown(self, issues: list[object]) -> str:
+        lines: list[str] = ["## Issues", ""]
+        for raw_issue in issues:
+            if isinstance(raw_issue, dict):
+                severity = str(raw_issue.get("severity") or "warning").strip()
+                file_path = str(raw_issue.get("file") or "unknown").strip()
+                convention = str(raw_issue.get("convention") or "").strip()
+                problem = str(raw_issue.get("problem") or "").strip()
+                required_change = str(raw_issue.get("required_change") or "").strip()
+                why_it_matters = str(raw_issue.get("why_it_matters") or "").strip()
+                required_direction = str(raw_issue.get("required_direction") or "").strip()
+                non_goals = str(raw_issue.get("non_goals") or "").strip()
+                evidence = str(raw_issue.get("evidence") or "").strip()
+                suggested_approach = str(raw_issue.get("suggested_approach") or "").strip()
+                test_expectations = str(raw_issue.get("test_expectations") or "").strip()
+                lines.extend([f"### [{severity}] {file_path}"])
+                if convention:
+                    lines.append(f"- Convention: {convention}")
+                if problem:
+                    lines.append(f"- Problem: {problem}")
+                if required_change:
+                    lines.append(f"- Required change: {required_change}")
+                if why_it_matters:
+                    lines.append(f"- Why it matters: {why_it_matters}")
+                if required_direction:
+                    lines.append(f"- Required direction: {required_direction}")
+                if non_goals:
+                    lines.append(f"- Non-goals: {non_goals}")
+                if evidence:
+                    lines.append(f"- Evidence: {evidence}")
+                if suggested_approach:
+                    lines.append(f"- Suggested approach: {suggested_approach}")
+                if test_expectations:
+                    lines.append(f"- Test expectations: {test_expectations}")
+                lines.append("")
+            else:
+                rendered = str(raw_issue).strip()
+                if rendered:
+                    lines.append(f"- {rendered}")
+        if lines and lines[-1] == "":
+            lines.pop()
+        return "\n".join(lines)
+
+    def _enqueue_verification(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        verification_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        if verification_role is None:
+            raise IntakeError("Verification coordinator role is missing for the session")
+
+        existing_item = self._find_work_item_by_source_event(
+            session_id=session.id,
+            work_type="verification",
+            source_event_id=source_event.id,
+        )
+        if existing_item is not None:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="verification_requested",
+                current_owner=VERIFICATION_COORDINATOR_ROLE,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            existing_event = self._find_stage_event_for_work_item(
+                session_id=session.id,
+                event_type="verification_requested",
+                work_item_id=existing_item.id,
+            )
+            if existing_event is not None:
+                return session, existing_event
+
+        verification_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="verification",
+            title=f"Verification for {session.task_key}",
+            owner_role_id=verification_role.id,
+            source_event_id=source_event.id,
+            priority=90,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="verification_requested",
+            current_owner=VERIFICATION_COORDINATOR_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        verification_report_path = None
+        verification_strategy = None
+        verification_strategy_path = None
+        if self.workdir_root is not None:
+            verification_report_path = str(
+                self.workdir_root / session.task_key / "spec" / "final-verification.md"
+            )
+            verification_strategy, verification_strategy_file = materialize_verification_strategy(
+                task_key=session.task_key,
+                workdir_root=self.workdir_root,
+                repo_root=self._repo_root(),
+                work_item_id=verification_item.id,
+            )
+            verification_strategy_path = str(verification_strategy_file)
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="verification_requested",
+                artifact_type="verification_strategy_json",
+                path=verification_strategy_path,
+                metadata={
+                    "platform": str(verification_strategy.get("platform") or "unknown"),
+                    "mode": str(verification_strategy.get("mode") or "unknown"),
+                },
+            )
+        self._dispatch_role_work(
+            session=session,
+            role=verification_role,
+            work_item=verification_item,
+            stage_name="verification_requested",
+            instruction=(
+                f"Run deterministic verification for {session.task_key}. "
+                "Treat this as a fresh workflow-level gate: start from the routed verification strategy, "
+                "execute its commands, "
+                "do not modify code, and refresh the final verification evidence."
+            ),
+            extra_hydration={
+                "verification_gate": "e2e-verify.sh" if session.task_key.startswith("QA-") else "run-test.sh + run-lint.sh",
+                "verification_report_path": verification_report_path,
+                "verification_strategy_path": verification_strategy_path,
+                "verification_platform": (
+                    str(verification_strategy.get("platform") or "") if verification_strategy else None
+                ),
+                "verification_strategy_mode": (
+                    str(verification_strategy.get("mode") or "") if verification_strategy else None
+                ),
+                "verification_strategy_reason": (
+                    str(verification_strategy.get("reason") or "") if verification_strategy else None
+                ),
+                "verification_context_root": (
+                    str((verification_strategy.get("ios_context") or {}).get("context_root") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_derived_data_path": (
+                    str((verification_strategy.get("ios_context") or {}).get("derived_data_path") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_xcresult_root": (
+                    str((verification_strategy.get("ios_context") or {}).get("xcresult_root") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_cloned_source_packages_path": (
+                    str((verification_strategy.get("ios_context") or {}).get("cloned_source_packages_path") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_logs_path": (
+                    str((verification_strategy.get("ios_context") or {}).get("logs_path") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_android_context_root": (
+                    str((verification_strategy.get("android_context") or {}).get("context_root") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_android_gradle_user_home_path": (
+                    str((verification_strategy.get("android_context") or {}).get("gradle_user_home_path") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+                "verification_android_logs_path": (
+                    str((verification_strategy.get("android_context") or {}).get("logs_path") or "")
+                    if isinstance(verification_strategy, dict)
+                    else None
+                ),
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="verification_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": VERIFICATION_COORDINATOR_ROLE,
+                "work_item_id": verification_item.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _find_work_item_by_source_event(
+        self,
+        *,
+        session_id: int,
+        work_type: str,
+        source_event_id: int | None,
+    ) -> WorkItem | None:
+        if source_event_id is None:
+            return None
+        for item in reversed(self.work_item_repository.list_for_session(session_id)):
+            if item.work_type == work_type and item.source_event_id == source_event_id:
+                return item
+        return None
+
+    def _find_stage_event_for_work_item(
+        self,
+        *,
+        session_id: int,
+        event_type: str,
+        work_item_id: int | None,
+    ) -> Event | None:
+        if work_item_id is None:
+            return None
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.event_type != event_type:
+                continue
+            if event.payload.get("work_item_id") == work_item_id:
+                return event
+        return None
+
+    def _enqueue_documentation_review(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        review_role = self._ensure_on_demand_role(session, DOCUMENTATION_REVIEWER_ROLE)
+        existing_item = self._find_work_item_by_source_event(
+            session_id=session.id,
+            work_type="documentation_review",
+            source_event_id=source_event.id,
+        )
+        if existing_item is not None:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="documentation_review_requested",
+                current_owner=DOCUMENTATION_REVIEWER_ROLE,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            existing_event = self._find_stage_event_for_work_item(
+                session_id=session.id,
+                event_type="documentation_review_requested",
+                work_item_id=existing_item.id,
+            )
+            if existing_event is not None:
+                return session, existing_event
+        review_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="documentation_review",
+            title=f"Documentation review for {session.task_key}",
+            owner_role_id=review_role.id,
+            source_event_id=source_event.id,
+            priority=111,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="documentation_review_requested",
+            current_owner=DOCUMENTATION_REVIEWER_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        self._dispatch_role_work(
+            session=session,
+            role=review_role,
+            work_item=review_item,
+            stage_name="documentation_review_requested",
+            instruction=(
+                f"Review documentation quality for {session.task_key}. "
+                "Use the routed deterministic precheck, docs diff, full diff, and DOCUMENTATION_GUIDE.md when present; when the guide is absent, apply stable behavior/contract documentation rules. "
+                "Check only production documentation and doc/comment changes. "
+                "Do not edit files."
+            ),
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="documentation_review_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": DOCUMENTATION_REVIEWER_ROLE,
+                "work_item_id": review_item.id,
+                "source_event_id": source_event.id,
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _complete_active_documentation_review_work_item(self, session: Session) -> None:
+        reviewer_role = self.role_repository.get_by_name(session.id, DOCUMENTATION_REVIEWER_ROLE)
+        if reviewer_role is None:
+            raise IntakeError("Documentation reviewer role is missing for the session")
+        review_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.owner_role_id == reviewer_role.id
+            and item.status != WorkItemStatus.COMPLETED
+            and item.work_type == "documentation_review"
+        ]
+        if not review_items:
+            raise IntakeError("No active documentation review work item found for the session")
+        self.work_item_repository.update_status(review_items[-1].id, WorkItemStatus.COMPLETED)
+
+    def _handle_documentation_review_passed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        self._materialize_documentation_review_report(
+            session=session,
+            output_type="passed",
+            payload=source_event.payload,
+        )
+        self._complete_active_documentation_review_work_item(session)
+        self._stop_on_demand_role(session, DOCUMENTATION_REVIEWER_ROLE)
+        if self._verification_gate_required_for_delivery(session) and self._verification_outcome_status(session) not in {"passed", "accepted_with_warnings"}:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="documentation_review_requested",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+            event = self._append_event(
+                session_id=session.id,
+                event_type="session_escalated_to_operator",
+                producer_type="coordinator",
+                payload={
+                    "reason": "delivery_gate_blocked_after_documentation_review",
+                    "role_name": DOCUMENTATION_REVIEWER_ROLE,
+                    "summary": "delivery blocked because workflow verification did not pass",
+                    "details": (
+                        "Documentation review passed, but the latest structured verification outcome is not "
+                        "passed. Resolve verification failures before delivery can continue."
+                    ),
+                    "current_stage": session.current_stage,
+                },
+            )
+            return session, event
+        return self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
+
+    def _handle_documentation_review_issues_found(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        report_path = self._materialize_documentation_review_report(
+            session=session,
+            output_type="failed",
+            payload=source_event.payload,
+        )
+        self._complete_active_documentation_review_work_item(session)
+        self._stop_on_demand_role(session, DOCUMENTATION_REVIEWER_ROLE)
+        return self._enqueue_documentation_review_correction(
+            session=session,
+            source_event=source_event,
+            report_path=report_path,
+        )
+
+    def _enqueue_documentation_review_correction(
+        self,
+        session: Session,
+        source_event: Event,
+        report_path: Path,
+    ) -> tuple[Session, Event]:
+        coding_role = self._primary_coding_role_for_work_type(session, "documentation_review_correction")
+        correction_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="documentation_review_correction",
+            title=f"Documentation review corrections for {session.task_key}",
+            owner_role_id=coding_role.id,
+            source_event_id=source_event.id,
+            priority=94,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="documentation_review_correction_requested",
+            current_owner=coding_role.role_name,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        instruction = self._stage_instruction(
+            "documentation_review_correction_requested",
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=coding_role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            raise IntakeError(
+                f"No documentation review correction instruction is available for role {coding_role.role_name}"
+            )
+        self._dispatch_role_work(
+            session=session,
+            role=coding_role,
+            work_item=correction_item,
+            stage_name="documentation_review_correction_requested",
+            instruction=instruction,
+            extra_hydration={
+                "documentation_review_report_path": str(report_path),
+                "issues_file_path": str(report_path),
+                "correction_source": "documentation_review",
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="documentation_review_correction_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": coding_role.role_name,
+                "work_item_id": correction_item.id,
+                "documentation_review_report_path": str(report_path),
+                "current_stage": session.current_stage,
+            },
+        )
+        return session, event
+
+    def _handle_doc_harvest_completed(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event | None]:
+        doc_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.work_type == "doc_harvest" and item.status != WorkItemStatus.COMPLETED
+        ]
+        if not doc_items:
+            raise IntakeError("No active doc harvest work item found for the session")
+
+        payload_work_item_id = self._payload_work_item_id(source_event.payload)
+        doc_items = sorted(
+            doc_items,
+            key=lambda item: item.id != payload_work_item_id,
+        )
+        for item in doc_items:
+            self.work_item_repository.update_status(item.id, WorkItemStatus.COMPLETED)
+        self._stop_on_demand_role(session, DOC_HARVEST_ROLE)
+        self._materialize_doc_harvest_outcome_file(session=session, source_event=source_event, status="completed")
+        summary = str(source_event.payload.get("summary") or "").strip()
+        if not summary:
+            summary = "Documentation harvest completed."
+        session, _ = self._finalize_doc_harvest(
+            session=self._get_session_or_raise(session.id),
+            summary=summary,
+            producer_type="coordinator",
+            producer_id=DOC_HARVEST_ROLE,
+            emit_event=False,
+            session_status=SessionStatus.ACTIVE,
+            advance_session=False,
+        )
+        session, _commit_event = self._commit_task_state(session, "doc harvest")
+        self._refresh_post_harvest_diff_artifacts(session.task_key)
+        return self._enqueue_documentation_review(session=session, source_event=source_event)
+
+    def _finalize_doc_harvest(
+        self,
+        session: Session,
+        summary: str,
+        producer_type: str,
+        producer_id: str | None,
+        emit_event: bool = True,
+        session_status: SessionStatus = SessionStatus.COMPLETED,
+        advance_session: bool = True,
+    ) -> tuple[Session, Event | None]:
+        if self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing artifact root")
+
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "doc-harvest",
+            "doc-harvest-summary.md",
+            summary,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="doc-harvest",
+            artifact_type="doc_harvest_summary",
+            path=str(artifact_path),
+            metadata={"summary_length": len(summary)},
+        )
+        if advance_session:
+            session = self.session_repository.update_stage_and_owner(
+                session.id,
+                current_stage="doc_harvest_completed",
+                current_owner=None,
+            )
+            session = self.session_repository.update_status(session.id, session_status)
+        if not emit_event:
+            return session, None
+        event = self._append_event(
+            session_id=session.id,
+            event_type="doc_harvest_completed",
+            producer_type=producer_type,
+            producer_id=producer_id,
+            payload={
+                "task_key": session.task_key,
+                "summary_length": len(summary),
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event
+
+    def _enqueue_doc_harvest(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        doc_role = self._ensure_on_demand_role(session, DOC_HARVEST_ROLE)
+        doc_item = self.work_item_repository.create(
+            session_id=session.id,
+            work_type="doc_harvest",
+            title=f"Doc harvest for {session.task_key}",
+            owner_role_id=doc_role.id,
+            source_event_id=source_event.id,
+            priority=112,
+        )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage="doc_harvest_requested",
+            current_owner=DOC_HARVEST_ROLE,
+        )
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        full_diff_path = None
+        if self.workdir_root is not None:
+            full_diff_path = str(self.workdir_root / session.task_key / "spec" / "full-diff.md")
+        self._dispatch_role_work(
+            session=session,
+            role=doc_role,
+            work_item=doc_item,
+            stage_name="doc_harvest_requested",
+            instruction=(
+                f"Run documentation harvest for {session.task_key}. "
+                "Generate or refresh `spec/full-diff.md`, use it as the source of truth, "
+                "update grounded feature-level README targets only, commit only the documentation changes, "
+                "and report a compact result summary."
+            ),
+            extra_hydration={
+                "full_diff_path": full_diff_path,
+            },
+        )
+        event = self._append_event(
+            session_id=session.id,
+            event_type="doc_harvest_requested",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "role_name": DOC_HARVEST_ROLE,
+                "work_item_id": doc_item.id,
+                "source_event_id": source_event.id,
+                "current_stage": session.current_stage,
+                "status": session.status.value,
+            },
+        )
+        return session, event
+
+    def _enqueue_post_implementation_quality_gate(
+        self,
+        session: Session,
+        source_event: Event,
+    ) -> tuple[Session, Event]:
+        return self._enqueue_verification(session=session, source_event=source_event)
+
+
+    def _get_session_or_raise(self, session_id: int) -> Session:
+        for session in self.session_repository.list_all():
+            if session.id == session_id:
+                return session
+        raise IntakeError(f"Session {session_id} was not found")
+
+    def _map_role_output_to_event_type(
+        self,
+        session: Session,
+        role_name: str,
+        output_type: str,
+        payload: dict,
+    ) -> str:
+        if (
+            role_name in _STORY_PLANNING_ROLES
+            and session.current_stage in _STORY_PLANNING_WORK_TYPE_BY_STAGE
+            and (
+                output_type == "failed"
+                or (
+                    output_type in {"passed", "completed"}
+                    and bool(payload.get("needs_operator_input") is True)
+                )
+            )
+        ):
+            return "story_planning_blocked"
+        if role_name == IMPLEMENTER_ROLE and output_type == "completed":
+            if session.current_stage == "subtask_implementation_requested":
+                return "subtask_completed"
+            if session.current_stage in {
+                "implementation_requested",
+                "convention_review_correction_requested",
+                "requirements_review_correction_requested",
+                "verification_correction_requested",
+                "documentation_review_correction_requested",
+                "qa_reopen_requested",
+            }:
+                return "implementation_completed"
+        if (
+            role_name == IMPLEMENTER_ROLE
+            and output_type == "failed"
+            and self._payload_truthy(payload.get("needs_operator_input"))
+            and session.current_stage in {
+                "subtask_implementation_requested",
+                "implementation_requested",
+                "convention_review_correction_requested",
+                "requirements_review_correction_requested",
+                "verification_correction_requested",
+                "qa_reopen_requested",
+            }
+        ):
+            return "implementation_blocked"
+        if role_name == VERIFICATION_COORDINATOR_ROLE:
+            if (
+                session.task_key.startswith("QA-")
+                and session.current_stage == "verification_requested"
+                and output_type in {"passed", "completed", "failed", "blocked_verification_cycle"}
+            ):
+                native_event = {
+                    "passed": "verification_passed",
+                    "accepted_with_warnings": "verification_passed",
+                    "failed": "verification_failed",
+                    "blocked": "verification_blocked",
+                }.get(payload.get("e2e_result"))
+                if native_event is not None:
+                    return native_event
+            explicit_result = str(payload.get("result") or "").strip().lower()
+            if (
+                output_type in {"passed", "completed"}
+                and session.current_stage == "verification_requested"
+                and explicit_result == "failed"
+            ):
+                return "verification_failed"
+            if (
+                output_type in {"passed", "completed"}
+                and session.current_stage == "verification_requested"
+                and explicit_result == "passed"
+            ):
+                return "verification_passed"
+            if output_type == "failed" and session.current_stage == "verification_requested":
+                return "verification_failed"
+            if output_type == "blocked_verification_cycle" and session.current_stage == "verification_requested":
+                return "verification_blocked"
+        if role_name == CONVENTION_REVIEWER_ROLE and session.current_stage == "convention_review_requested":
+            if output_type in {"passed", "completed"}:
+                return "convention_review_passed"
+            if output_type == "skipped_not_needed":
+                if self._optional_lane_policy_mode(session.policy, "review_policy") != "enabled":
+                    raise IntakeError("Convention review cannot be skipped when review gate policy is required")
+                return "convention_review_passed"
+            if output_type == "failed":
+                return "convention_review_issues_found"
+            if output_type == "blocked_review_cycle":
+                return "convention_review_blocked"
+        if role_name == REQUIREMENTS_REVIEWER_ROLE and session.current_stage == "requirements_review_requested":
+            if output_type in {"passed", "completed"}:
+                return "requirements_review_passed"
+            if output_type == "skipped_not_needed":
+                if self._optional_lane_policy_mode(session.policy, "review_policy") != "enabled":
+                    raise IntakeError("Requirements review cannot be skipped when review gate policy is required")
+                return "requirements_review_passed"
+            if output_type == "failed":
+                return "requirements_review_issues_found"
+            if output_type == "blocked_review_cycle":
+                return "requirements_review_blocked"
+        if role_name == DOC_HARVEST_ROLE and session.current_stage == "doc_harvest_requested":
+            if output_type in {"passed", "completed"}:
+                return "doc_harvest_completed"
+            if output_type == "skipped_not_needed":
+                if self._optional_lane_policy_mode(session.policy, "doc_harvest_policy") != "enabled":
+                    raise IntakeError("Doc harvest cannot be skipped when doc_harvest_policy is required")
+                return "doc_harvest_completed"
+        if role_name == DOCUMENTATION_REVIEWER_ROLE and session.current_stage == "documentation_review_requested":
+            if output_type in {"passed", "completed", "skipped_not_needed"}:
+                return "documentation_review_passed"
+            if output_type == "failed":
+                return "documentation_review_issues_found"
+        if role_name == PROPOSAL_CONTEXT_WORKER_ROLE and session.current_stage == "proposal_context_requested":
+            if output_type in {"passed", "completed"}:
+                return "proposal_context_completed"
+        if role_name == REQUIREMENTS_CLARIFIER_WORKER_ROLE and session.current_stage == "requirements_requested":
+            if output_type in {"passed", "completed"}:
+                return "requirements_completed"
+        if role_name == ACCEPTANCE_CRITERIA_WORKER_ROLE and session.current_stage == "acceptance_criteria_requested":
+            if output_type in {"passed", "completed"}:
+                return "acceptance_criteria_completed"
+        if role_name == CONSTRAINTS_WORKER_ROLE and session.current_stage == "constraints_requested":
+            if output_type in {"passed", "completed"}:
+                return "constraints_completed"
+        if role_name == SPEC_VERIFIER_WORKER_ROLE and session.current_stage == "spec_verification_requested":
+            if output_type in {"passed", "completed"}:
+                return "spec_verification_completed"
+            if output_type == "failed":
+                return "spec_verification_blocked"
+        if role_name == TASK_DECOMPOSER_WORKER_ROLE and session.current_stage == "task_decomposition_requested":
+            if output_type in {"passed", "completed"}:
+                return "task_decomposition_completed"
+        raise IntakeError(
+            f"Unsupported role output: role={role_name}, output_type={output_type}, stage={session.current_stage}"
+        )
+
+    def _record_role_output_artifacts(
+        self,
+        session: Session,
+        role_name: str,
+        output_type: str,
+        payload: dict,
+    ) -> Event:
+        role = self.role_repository.get_by_name(session.id, role_name)
+        if role is None:
+            raise IntakeError(f"Role {role_name} is missing for session {session.id}")
+
+        stage_name = f"role-output-{role_name}"
+        payload_text = json.dumps(payload, indent=2, sort_keys=True)
+        json_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            stage_name,
+            f"{output_type}.json",
+            payload_text,
+        )
+        summary_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            stage_name,
+            f"{output_type}.txt",
+            f"role={role_name}\noutput_type={output_type}\npayload={payload_text}\n",
+        )
+        metadata = {
+            "role_name": role_name,
+            "output_type": output_type,
+            "current_stage": session.current_stage,
+        }
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            stage_name=stage_name,
+            artifact_type="role_output_json",
+            path=str(json_path),
+            metadata=metadata,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            stage_name=stage_name,
+            artifact_type="role_output_summary",
+            path=str(summary_path),
+            metadata=metadata,
+        )
+        if session.task_key.startswith("QA-") and role_name == VERIFICATION_COORDINATOR_ROLE and payload.get("e2e_report_path"):
+            from factory.e2e.runner import read_json
+            verdict_path = Path(payload["e2e_report_path"]).parent / "verdict.json"
+            verdict = read_json(verdict_path)
+            for receipt in verdict["receipts"]:
+                self.artifact_repository.create(
+                    session_id=session.id, role_id=role.id, stage_name=stage_name,
+                    artifact_type="e2e_run_receipt", path=receipt["path"],
+                    metadata={"platform": receipt["platform"], "phase": receipt["phase"],
+                              "work_item_id": payload.get("work_item_id"), "ok": receipt["ok"]},
+                )
+        if role_name in {CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE}:
+            lane = "convention" if role_name == CONVENTION_REVIEWER_ROLE else "requirements"
+            if session.current_stage == _DUAL_REVIEW_STAGE_BY_LANE[lane]:
+                self._materialize_dual_review_report(
+                    session=session,
+                    output_type=output_type,
+                    payload=payload,
+                    lane=lane,
+                )
+
+    def _record_runtime_output_artifacts(
+        self,
+        session: Session,
+        role: Role,
+        chunks: list[RuntimeOutputChunk],
+    ) -> None:
+        stage_name = f"runtime-output-{role.role_name}"
+        joined_text = "\n".join(chunk.text for chunk in chunks)
+        output_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            stage_name,
+            "output.log",
+            joined_text,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            stage_name=stage_name,
+            artifact_type="runtime_output",
+            path=str(output_path),
+            metadata={
+                "role_name": role.role_name,
+                "chunk_count": len(chunks),
+                "current_stage": session.current_stage,
+            },
+        )
+
+    def _apply_runtime_output_markers(
+        self,
+        session: Session,
+        role: Role,
+        chunks: list[RuntimeOutputChunk],
+    ) -> Session:
+        for chunk in chunks:
+            for marker_type, payload in self._extract_output_markers(chunk.text):
+                if marker_type == "output":
+                    output_type = str(payload.get("output_type") or "").strip().lower()
+                    nested_payload = payload.get("payload")
+                    if isinstance(nested_payload, dict):
+                        output_mismatch = self._stale_role_output_mismatch(
+                            session=session,
+                            role_name=role.role_name,
+                            output_type=output_type,
+                            output_payload=nested_payload,
+                        )
+                        if output_mismatch is not None:
+                            self._append_stale_role_output_ignored_once(
+                                session_id=session.id,
+                                payload={
+                                    "role_name": role.role_name,
+                                    "output_type": output_type,
+                                    "current_stage": session.current_stage,
+                                    "current_owner": session.current_owner,
+                                    **output_mismatch,
+                                },
+                            )
+                            self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
+                            continue
+                    if self._should_ignore_stale_role_output(
+                        session=session,
+                        role_name=role.role_name,
+                        output_type=output_type,
+                    ):
+                        self._append_stale_role_output_ignored_once(
+                            session_id=session.id,
+                            payload={
+                                "role_name": role.role_name,
+                                "output_type": output_type,
+                                "current_stage": session.current_stage,
+                                "current_owner": session.current_owner,
+                            },
+                        )
+                        self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
+                        continue
+                    self._maybe_request_missing_result_file_recreation(
+                        session=session,
+                        role=role,
+                        payload=payload,
+                    )
+                    self._append_runtime_terminal_output_echo_ignored_once(
+                        session_id=session.id,
+                        payload={
+                            "role_name": role.role_name,
+                            "current_stage": session.current_stage,
+                            "current_owner": session.current_owner,
+                        },
+                    )
+                    continue
+                if marker_type == "error":
+                    stale_runtime_error = self._stale_runtime_error_mismatch(
+                        session=session,
+                        role=role,
+                        payload=payload,
+                    )
+                    if stale_runtime_error is not None:
+                        self._append_stale_role_output_ignored_once(
+                            session_id=session.id,
+                            payload={
+                                "role_name": role.role_name,
+                                "output_type": "error",
+                                "current_stage": session.current_stage,
+                                "current_owner": session.current_owner,
+                                **stale_runtime_error,
+                            },
+                        )
+                        continue
+                    if self._should_ignore_stale_role_output(
+                        session=session,
+                        role_name=role.role_name,
+                        output_type="error",
+                    ):
+                        self._append_stale_role_output_ignored_once(
+                            session_id=session.id,
+                            payload={
+                                "role_name": role.role_name,
+                                "output_type": "error",
+                                "current_stage": session.current_stage,
+                                "current_owner": session.current_owner,
+                            },
+                        )
+                        self._maybe_stop_stale_runtime_role(session=session, role_name=role.role_name)
+                        continue
+                    self._record_runtime_marker_artifact(
+                        session=session,
+                        role=role,
+                        marker_type=marker_type,
+                        payload=payload,
+                    )
+                    self._append_runtime_marker_event(
+                        session=session,
+                        role=role,
+                        marker_type=marker_type,
+                        payload=payload,
+                    )
+                    recovered_session = self._recover_review_result_from_helper_failure(
+                        session=session,
+                        role=role,
+                        payload=payload,
+                    )
+                    if recovered_session is not None:
+                        session = recovered_session
+                        continue
+                    session = self._escalate_runtime_error(
+                        session=session,
+                        role=role,
+                        payload=payload,
+                    )
+                    continue
+                self._record_runtime_marker_artifact(
+                    session=session,
+                    role=role,
+                    marker_type=marker_type,
+                    payload=payload,
+                )
+        return session
+
+    def _recover_review_result_from_helper_failure(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        payload: dict,
+    ) -> Session | None:
+        if not self._is_result_helper_failure_payload(payload):
+            return None
+        lane = self._dual_review_lane_for_role_stage(session=session, role=role)
+        if lane is None:
+            return None
+        active_work_item = self._find_active_work_item_for_role(session.id, role.id)
+        if active_work_item is None:
+            return None
+        payload_work_item_id = self._runtime_error_payload_work_item_id(payload)
+        if payload_work_item_id is not None and payload_work_item_id != active_work_item.id:
+            return None
+        dispatched_after = self._latest_role_dispatch_created_at(
+            session=session,
+            role=role,
+            work_item_id=active_work_item.id,
+        )
+        recovered = self._latest_dual_review_report_result_payload(
+            session=session,
+            lane=lane,
+            work_item_id=active_work_item.id,
+            created_after=dispatched_after,
+        )
+        if recovered is None:
+            return None
+        output_type, output_payload, report_path = recovered
+        try:
+            handled_session = self._handle_collected_role_output(
+                session=session,
+                role=role,
+                output_type=output_type,
+                output_payload=output_payload,
+            )
+        except IntakeError:
+            return None
+        self._append_event(
+            session_id=session.id,
+            event_type="review_result_recovered_from_helper_failure",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": active_work_item.id,
+                "review_lane": lane,
+                "output_type": output_type,
+                "report_path": str(report_path),
+                "runtime_error": dict(payload),
+            },
+        )
+        return handled_session or session
+
+    @staticmethod
+    def _is_result_helper_failure_payload(payload: dict) -> bool:
+        rendered = " ".join(
+            str(payload.get(key) or "")
+            for key in ("summary", "details", "error")
+        ).lower()
+        return (
+            "write-result.sh" in rendered
+            or "terminal result helper" in rendered
+            or "result submission helper" in rendered
+        ) and (
+            "non-zero" in rendered
+            or "exited" in rendered
+            or "failed" in rendered
+        )
+
+    @staticmethod
+    def _dual_review_lane_for_role_stage(*, session: Session, role: Role) -> str | None:
+        for lane, role_name in _DUAL_REVIEW_ROLE_BY_LANE.items():
+            if role.role_name == role_name and session.current_stage == _DUAL_REVIEW_STAGE_BY_LANE[lane]:
+                return lane
+        return None
+
+    def _latest_dual_review_report_result_payload(
+        self,
+        *,
+        session: Session,
+        lane: str,
+        work_item_id: int,
+        created_after: datetime | None,
+    ) -> tuple[str, dict, Path] | None:
+        if self.workdir_root is None:
+            return None
+        review_dir = self.workdir_root / session.task_key / "review" / lane
+        if not review_dir.is_dir():
+            return None
+        candidates = sorted(review_dir.glob("pass-*.md"), key=lambda path: path.stat().st_mtime, reverse=True)
+        for report_path in candidates:
+            if created_after is not None:
+                try:
+                    report_mtime = datetime.fromtimestamp(report_path.stat().st_mtime, UTC)
+                except OSError:
+                    continue
+                if report_mtime < created_after:
+                    continue
+            try:
+                report_text = report_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            output_type = self._dual_review_output_type_from_report(report_text)
+            if output_type is None:
+                continue
+            payload: dict[str, object] = {"work_item_id": work_item_id}
+            if output_type == "failed":
+                payload["summary"] = "Review found issues"
+                payload["issues_markdown"] = report_text
+            elif output_type == "passed":
+                payload["summary"] = "Review passed"
+            else:
+                payload["summary"] = "Review cycle blocked"
+                payload["issues_markdown"] = report_text
+            return output_type, payload, report_path
+        return None
+
+    @staticmethod
+    def _dual_review_output_type_from_report(report_text: str) -> str | None:
+        for line in report_text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped == "REVIEW_RESULT: issues_found":
+                return "failed"
+            if stripped in {"REVIEW_RESULT: passed", "REVIEW_RESULT: clean"}:
+                return "passed"
+            if stripped == "REVIEW_RESULT: blocked":
+                return "blocked_review_cycle"
+            return None
+        return None
+
+    def _latest_role_dispatch_created_at(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        work_item_id: int,
+    ) -> datetime | None:
+        event = self.event_repository.latest_for_session_by_type_and_payload(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            payload_matches={
+                "role_name": role.role_name,
+                "work_item_id": work_item_id,
+                "stage_name": session.current_stage,
+            },
+        )
+        if event is None:
+            return None
+        created_at = event.created_at
+        if created_at is None:
+            return None
+        if isinstance(created_at, str):
+            try:
+                return datetime.fromisoformat(created_at).replace(tzinfo=UTC)
+            except ValueError:
+                return None
+        if created_at.tzinfo is None:
+            return created_at.replace(tzinfo=UTC)
+        return created_at.astimezone(UTC)
+
+    def _maybe_request_missing_result_file_recreation(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        payload: dict,
+    ) -> None:
+        if self.role_workspace_manager is None or role.runtime_handle is None:
+            return
+        if (
+            session.status == SessionStatus.WAITING_FOR_OPERATOR
+            and session.current_owner == role.role_name
+        ):
+            return
+        output_type = str(payload.get("output_type") or "").strip().lower()
+        if output_type not in {"passed", "completed", "failed", "error", "blocked_verification_cycle", "blocked_review_cycle"}:
+            return
+        nested_payload = payload.get("payload")
+        if not isinstance(nested_payload, dict):
+            return
+        work_item_id = nested_payload.get("work_item_id")
+        if not isinstance(work_item_id, int):
+            return
+        active_item = self._find_active_work_item_for_role(session.id, role.id)
+        if active_item is not None and active_item.id != work_item_id:
+            return
+        if self._has_pending_operator_continuation(
+            session_id=session.id,
+            role_name=role.role_name,
+            work_item_id=active_item.id if active_item is not None else None,
+            stage_name=session.current_stage,
+        ):
+            return
+        result_path = self.role_workspace_manager.role_directory(session.task_key, role.role_name) / "RESULT.json"
+        if result_path.is_file():
+            return
+        for event in reversed(self.event_repository.list_for_session(session.id)):
+            if event.event_type != "missing_result_file_recreation_requested":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if event.payload.get("work_item_id") != work_item_id:
+                continue
+            return
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        recovery_prompt = (
+            "You already finished the current routed work item. "
+            f"Recreate RESULT.json exactly at {result_path} using the same terminal payload below. "
+            "Do not rerun commands, do not re-analyze the task, and do not modify code or docs. "
+            "Only rewrite the missing RESULT.json and then stop.\n\n"
+            f"Terminal payload:\n{json.dumps(payload, indent=2, sort_keys=True)}\n"
+        )
+        self.session_backend.send_input(runtime_role, recovery_prompt)
+        self._append_event(
+            session_id=session.id,
+            event_type="missing_result_file_recreation_requested",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": work_item_id,
+                "current_stage": session.current_stage,
+                "result_path": str(result_path),
+            },
+        )
+
+    def _has_pending_operator_continuation(
+        self,
+        *,
+        session_id: int,
+        role_name: str,
+        work_item_id: int | None,
+        stage_name: str | None,
+    ) -> bool:
+        operator_payload_matches: dict[str, object] = {"role_name": role_name}
+        if work_item_id is not None:
+            operator_payload_matches["work_item_id"] = work_item_id
+        if stage_name is not None:
+            operator_payload_matches["current_stage"] = stage_name
+        latest_operator_reply = self.event_repository.latest_for_session_by_type_and_payload(
+            session_id=session_id,
+            event_type="operator_runtime_input_sent",
+            payload_matches=operator_payload_matches,
+        )
+        if latest_operator_reply is None:
+            return False
+        latest_collection = self.event_repository.latest_for_session_by_type_and_payload(
+            session_id=session_id,
+            event_type="role_output_collected",
+            payload_matches={"role_name": role_name},
+        )
+        return (
+            latest_collection is None
+            or latest_operator_reply.id > latest_collection.id
+        )
+
+    def _extract_output_markers(self, text: str) -> list[tuple[str, dict]]:
+        results: list[tuple[str, dict]] = []
+        lines = text.splitlines()
+        index = 0
+        while index < len(lines):
+            line = lines[index]
+            marker_type = self._line_marker_type(line)
+            if marker_type is None:
+                index += 1
+                continue
+            payload_lines = [line.split(":", 1)[1].strip()]
+            cursor = index + 1
+            parsed_payload: dict | None = None
+            while True:
+                raw_payload = "\n".join(payload_lines)
+                parsed_payload = self._parse_marker_payload(raw_payload)
+                if parsed_payload is not None:
+                    break
+                if cursor >= len(lines) or self._line_marker_type(lines[cursor]) is not None:
+                    break
+                payload_lines.append(lines[cursor])
+                cursor += 1
+            if parsed_payload is not None:
+                results.append((marker_type, parsed_payload))
+            elif marker_type == "error":
+                raw_payload = "\n".join(payload_lines)
+                trimmed_payload = self._trim_live_capture_noise(raw_payload)
+                parsed_payload = self._parse_marker_payload(trimmed_payload)
+                if parsed_payload is not None:
+                    results.append((marker_type, parsed_payload))
+                elif self._looks_like_complete_marker_payload(trimmed_payload):
+                    results.append((marker_type, self._malformed_error_marker_payload(trimmed_payload)))
+            index = cursor
+        return results
+
+    def _parse_marker_payload(self, raw_payload: str) -> dict | None:
+        try:
+            parsed = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            repaired_text = self._escape_raw_control_chars_in_json_strings(
+                self._unwrap_wrapped_json_strings(raw_payload)
+            )
+            try:
+                parsed = json.loads(repaired_text)
+            except json.JSONDecodeError:
+                return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _trim_live_capture_noise(self, raw_payload: str) -> str:
+        clean_lines: list[str] = []
+        for line in raw_payload.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith(("✻", "✽", "❯")):
+                break
+            if self._looks_like_incomplete_live_marker_capture(line):
+                break
+            clean_lines.append(line)
+        return "\n".join(clean_lines).strip()
+
+    def _looks_like_incomplete_live_marker_capture(self, raw_payload: str) -> bool:
+        return (
+            " auto mode on " in raw_payload
+            or "shift+tab to cycle" in raw_payload
+            or re.search(r"─{8,}.*:[A-Z]+-\d+.*─{2,}", raw_payload) is not None
+        )
+
+    def _looks_like_complete_marker_payload(self, raw_payload: str) -> bool:
+        stripped = raw_payload.strip()
+        return stripped.startswith("{") and stripped.endswith("}")
+
+    def _malformed_error_marker_payload(self, raw_payload: str) -> dict:
+        cleaned_payload = raw_payload.strip()
+        return {
+            "summary": "runtime emitted malformed SDD_ERROR marker",
+            "details": (
+                "The runtime emitted an SDD_ERROR marker, but the payload was not valid JSON and could not be "
+                "parsed deterministically. Treat this as an operator-visible runtime protocol issue. Raw marker "
+                f"payload:\n{cleaned_payload}"
+            ),
+            "needs_operator_input": True,
+            "malformed_marker": True,
+        }
+
+    def _line_marker_type(self, line: str) -> str | None:
+        normalized = line.lstrip()
+        if normalized.startswith("• "):
+            normalized = normalized[2:].lstrip()
+        if normalized.startswith("SDD_OUTPUT:"):
+            return "output"
+        if normalized.startswith("SDD_PROGRESS:"):
+            return "progress"
+        if normalized.startswith("SDD_ERROR:"):
+            return "error"
+        return None
+
+    def _record_runtime_marker_artifact(
+        self,
+        session: Session,
+        role: Role,
+        marker_type: str,
+        payload: dict,
+    ) -> None:
+        stage_name = f"runtime-marker-{role.role_name}"
+        payload_text = json.dumps(payload, indent=2, sort_keys=True)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            stage_name,
+            f"{marker_type}.json",
+            payload_text,
+        )
+        artifact_type = f"runtime_{marker_type}_json"
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=role.id,
+            stage_name=stage_name,
+            artifact_type=artifact_type,
+            path=str(artifact_path),
+            metadata={
+                "role_name": role.role_name,
+                "marker_type": marker_type,
+                "current_stage": session.current_stage,
+            },
+        )
+
+    def _append_runtime_marker_event(
+        self,
+        session: Session,
+        role: Role,
+        marker_type: str,
+        payload: dict,
+    ) -> Event:
+        if marker_type == "progress":
+            event_type = "role_progress_reported"
+        elif marker_type == "error":
+            event_type = "role_runtime_error_reported"
+        else:
+            event_type = "role_runtime_marker_reported"
+        return self._append_event(
+            session_id=session.id,
+            event_type=event_type,
+            producer_type="role",
+            producer_id=role.role_name,
+            payload={
+                "role_name": role.role_name,
+                "marker_type": marker_type,
+                "current_stage": session.current_stage,
+                **payload,
+            },
+        )
+
+    def _escalate_runtime_error(
+        self,
+        session: Session,
+        role: Role,
+        payload: dict,
+    ) -> Session:
+        native_outcome = self._native_e2e_runtime_error_outcome(session, role)
+        if native_outcome is not None:
+            return native_outcome
+        if session.status == SessionStatus.WAITING_FOR_OPERATOR and session.current_owner is None:
+            return session
+        active_work_item = self._find_active_work_item_for_role(session.id, role.id)
+        if active_work_item is None and session.current_owner != role.role_name:
+            return session
+        if active_work_item is not None:
+            self.work_item_repository.update_status(
+                active_work_item.id,
+                WorkItemStatus.WAITING_FOR_OPERATOR,
+            )
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=None,
+        )
+        session = self.session_repository.update_status(
+            session.id,
+            SessionStatus.WAITING_FOR_OPERATOR,
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="session_escalated_to_operator",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "current_stage": session.current_stage,
+                "reason": "runtime_error",
+                **payload,
+            },
+        )
+        return session
+
+    def _fresh_e2e_runtime_verdict_available(self, session: Session, role: Role, item: WorkItem) -> bool:
+        dispatched_at = self._latest_role_dispatch_created_at(session=session, role=role, work_item_id=item.id)
+        path = self.workdir_root / session.task_key / "spec/e2e-verdict.json"
+        try:
+            if dispatched_at is None or not path.exists() or datetime.fromtimestamp(path.stat().st_mtime, UTC) < dispatched_at:
+                return False
+            from factory.e2e.runner import digest
+            approval = self.event_repository.latest_for_session_by_type_and_payload(
+                session_id=session.id, event_type="e2e_baseline_accepted_by_operator",
+                payload_matches={"work_item_id": item.id})
+            if approval is not None and digest(path) == approval.payload.get("decision", {}).get("verdict_digest"):
+                return False
+            return True
+        except (OSError, ValueError, KeyError):
+            return False
+
+    def _native_e2e_runtime_error_outcome(self, session: Session, role: Role) -> Session | None:
+        if not session.task_key.startswith("QA-") or session.current_stage != "verification_requested" or role.role_name != VERIFICATION_COORDINATOR_ROLE:
+            return None
+        item = self._find_active_work_item_for_role(session.id, role.id)
+        if item is None or not self._fresh_e2e_runtime_verdict_available(session, role, item):
+            return None
+        try:
+            updated, _, _ = self.handle_role_output(session.id, role.role_name, "failed", {"work_item_id": item.id})
+            return updated
+        except (IntakeError, OSError, ValueError, KeyError):
+            return None
+
+    def _stale_runtime_error_mismatch(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        payload: dict,
+    ) -> dict[str, object] | None:
+        payload_work_item_id = self._runtime_error_payload_work_item_id(payload)
+        active_item = self._find_active_work_item_for_role(session.id, role.id)
+        if active_item is None:
+            if payload_work_item_id is not None:
+                matching_item = self.work_item_repository.get_by_id(payload_work_item_id)
+                if (
+                    matching_item is not None
+                    and matching_item.session_id == session.id
+                    and matching_item.owner_role_id == role.id
+                    and matching_item.status not in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+                ):
+                    return {
+                        "reason": "stale_runtime_error_for_inactive_work_item",
+                        "payload_work_item_id": payload_work_item_id,
+                    }
+            replayed_after_acceptance = self._replayed_runtime_error_after_role_result_acceptance(
+                session=session,
+                role=role,
+                payload=payload,
+            )
+            if replayed_after_acceptance is not None:
+                return replayed_after_acceptance
+            return None
+        if (session.task_key.startswith("QA-") and role.role_name == VERIFICATION_COORDINATOR_ROLE
+                and payload_work_item_id in {None, active_item.id}):
+            approval = self.event_repository.latest_for_session_by_type_and_payload(
+                session_id=session.id, event_type="e2e_baseline_accepted_by_operator",
+                payload_matches={"work_item_id": active_item.id})
+            if approval is not None:
+                if (self._runtime_error_content_signature(payload) in approval.payload.get("superseded_runtime_errors", [])
+                        and not self._fresh_e2e_runtime_verdict_available(session, role, active_item)):
+                    return {"reason": "e2e_error_from_accepted_gate", "operator_event_id": approval.id,
+                            "expected_work_item_id": active_item.id}
+                previous = next((event for event in reversed(self.event_repository.list_for_session(session.id))
+                                 if event.id < approval.id and event.event_type == "verification_blocked"
+                                 and event.payload.get("work_item_id") == active_item.id), None)
+                if (previous is not None and payload.get("summary") == previous.payload.get("summary")
+                        and not self._fresh_e2e_runtime_verdict_available(session, role, active_item)):
+                    return {"reason": "e2e_error_from_accepted_gate", "operator_event_id": approval.id,
+                            "replayed_event_id": previous.id, "expected_work_item_id": active_item.id}
+        replayed_after_reply = self._replayed_runtime_error_after_operator_reply(
+            session=session,
+            role=role,
+            active_item=active_item,
+            payload=payload,
+        )
+        if replayed_after_reply is not None:
+            return replayed_after_reply
+        if payload_work_item_id is None:
+            replayed_error = self._replayed_runtime_error_after_accepted_result(
+                session=session,
+                role=role,
+                active_item=active_item,
+                payload=payload,
+            )
+            if replayed_error is not None:
+                return replayed_error
+            replayed_from_prior_dispatch = self._replayed_runtime_error_from_prior_dispatch(
+                session=session,
+                role=role,
+                active_item=active_item,
+                payload=payload,
+            )
+            if replayed_from_prior_dispatch is not None:
+                return replayed_from_prior_dispatch
+            return self._stale_runtime_error_subtask_mismatch(
+                session=session,
+                active_item=active_item,
+                payload=payload,
+            )
+        if payload_work_item_id == active_item.id:
+            return None
+        return {
+            "reason": "address_mismatch",
+            "expected_work_item_id": active_item.id,
+            "payload_work_item_id": payload_work_item_id,
+        }
+
+    def _replayed_runtime_error_after_role_result_acceptance(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        payload: dict,
+        current_event_id: int | None = None,
+    ) -> dict[str, object] | None:
+        if self._runtime_error_payload_work_item_id(payload) is not None:
+            return None
+
+        current_signature = self._runtime_error_content_signature(payload)
+        events = self.event_repository.list_for_session(session.id)
+        latest_prior_error: Event | None = None
+        for event in reversed(events):
+            if current_event_id is not None and event.id >= current_event_id:
+                continue
+            if event.event_type != "role_runtime_error_reported":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if self._runtime_error_content_signature(event.payload) != current_signature:
+                continue
+            latest_prior_error = event
+            break
+        if latest_prior_error is None:
+            return None
+
+        accepted_event: Event | None = None
+        for event in events:
+            if event.id <= latest_prior_error.id:
+                continue
+            if current_event_id is not None and event.id >= current_event_id:
+                continue
+            if event.event_type != "role_result_ingress_accepted":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            accepted_event = event
+
+        if accepted_event is None:
+            return None
+
+        return {
+            "reason": "replayed_runtime_error_after_role_result_acceptance",
+            "payload_work_item_id": None,
+            "replayed_event_id": latest_prior_error.id,
+            "accepted_event_id": accepted_event.id,
+            "accepted_work_item_id": accepted_event.payload.get("work_item_id"),
+        }
+
+    def _replayed_runtime_error_from_prior_dispatch(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_item: WorkItem,
+        payload: dict,
+        current_event_id: int | None = None,
+    ) -> dict[str, object] | None:
+        if self._runtime_error_payload_work_item_id(payload) is not None:
+            return None
+
+        current_signature = self._runtime_error_content_signature(payload)
+        events = self.event_repository.list_for_session(session.id)
+        latest_current_dispatch: Event | None = None
+        for event in reversed(events):
+            if current_event_id is not None and event.id >= current_event_id:
+                continue
+            if event.event_type != "role_input_dispatched":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if event.payload.get("work_item_id") != active_item.id:
+                continue
+            if event.payload.get("stage_name") != session.current_stage:
+                continue
+            latest_current_dispatch = event
+            break
+        if latest_current_dispatch is None:
+            return None
+
+        latest_prior_error: Event | None = None
+        for event in reversed(events):
+            if current_event_id is not None and event.id >= current_event_id:
+                continue
+            if event.id >= latest_current_dispatch.id:
+                continue
+            if event.event_type != "role_runtime_error_reported":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if self._runtime_error_content_signature(event.payload) != current_signature:
+                continue
+            latest_prior_error = event
+            break
+        if latest_prior_error is None:
+            return None
+
+        return {
+            "reason": "replayed_runtime_error_from_prior_dispatch",
+            "expected_work_item_id": active_item.id,
+            "payload_work_item_id": None,
+            "replayed_event_id": latest_prior_error.id,
+            "dispatch_event_id": latest_current_dispatch.id,
+        }
+
+    def _replayed_runtime_error_after_accepted_result(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_item: WorkItem,
+        payload: dict,
+    ) -> dict[str, object] | None:
+        current_signature = self._runtime_error_content_signature(payload)
+        events = self.event_repository.list_for_session(session.id)
+        prior_error: Event | None = None
+        for event in reversed(events):
+            if event.event_type != "role_runtime_error_reported":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if self._runtime_error_content_signature(event.payload) != current_signature:
+                continue
+            prior_error = event
+            break
+        if prior_error is None:
+            return None
+
+        accepted_work_item_id: int | None = None
+        accepted_event_id: int | None = None
+        for event in events:
+            if event.id <= prior_error.id:
+                continue
+            if event.event_type not in {"role_result_ingress_accepted", "role_output_collected"}:
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            work_item_id = event.payload.get("work_item_id")
+            if not isinstance(work_item_id, int):
+                continue
+            if work_item_id == active_item.id:
+                continue
+            accepted_work_item_id = work_item_id
+            accepted_event_id = event.id
+
+        if accepted_work_item_id is None or accepted_event_id is None:
+            return None
+
+        has_current_dispatch = any(
+            event.id > accepted_event_id
+            and event.event_type == "role_input_dispatched"
+            and event.payload.get("role_name") == role.role_name
+            and event.payload.get("work_item_id") == active_item.id
+            for event in events
+        )
+        if not has_current_dispatch:
+            return None
+
+        return {
+            "reason": "replayed_runtime_error_after_accepted_result",
+            "expected_work_item_id": active_item.id,
+            "payload_work_item_id": None,
+            "replayed_event_id": prior_error.id,
+            "accepted_work_item_id": accepted_work_item_id,
+            "accepted_event_id": accepted_event_id,
+        }
+
+    def _replayed_runtime_error_after_operator_reply(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_item: WorkItem,
+        payload: dict,
+    ) -> dict[str, object] | None:
+        if not self._has_pending_operator_continuation(
+            session_id=session.id,
+            role_name=role.role_name,
+            work_item_id=active_item.id,
+            stage_name=session.current_stage,
+        ):
+            return None
+
+        events = self.event_repository.list_for_session(session.id)
+        latest_reply: Event | None = None
+        for event in reversed(events):
+            if event.event_type != "operator_runtime_input_sent":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if event.payload.get("current_stage") != session.current_stage:
+                continue
+            if event.payload.get("work_item_id") != active_item.id:
+                continue
+            latest_reply = event
+            break
+        if latest_reply is None:
+            return None
+
+        current_signature = self._runtime_error_content_signature(payload)
+        latest_prior_error: Event | None = None
+        for event in reversed(events):
+            if event.id >= latest_reply.id:
+                continue
+            if event.event_type != "role_runtime_error_reported":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            if self._runtime_error_content_signature(event.payload) != current_signature:
+                continue
+            latest_prior_error = event
+            break
+        if latest_prior_error is None:
+            return None
+
+        return {
+            "reason": "replayed_runtime_error_after_operator_reply",
+            "expected_work_item_id": active_item.id,
+            "payload_work_item_id": self._runtime_error_payload_work_item_id(payload),
+            "operator_reply_event_id": latest_reply.id,
+            "replayed_event_id": latest_prior_error.id,
+        }
+
+    def _runtime_error_content_signature(self, payload: dict) -> str:
+        content = dict(payload)
+        for key in ("role_name", "marker_type", "current_stage", "reason"):
+            content.pop(key, None)
+        return self._normalized_json_signature(content)
+
+    def _runtime_error_payload_work_item_id(self, payload: dict) -> int | None:
+        direct_value = payload.get("work_item_id")
+        if isinstance(direct_value, int):
+            return direct_value
+        for key in ("token", "dispatch_token"):
+            token = payload.get(key)
+            if isinstance(token, str):
+                match = re.search(r"(?:^|-)wi(\d+)(?:$|[^0-9])", token)
+                if match is not None:
+                    return int(match.group(1))
+        return None
+
+    def _stale_runtime_error_subtask_mismatch(
+        self,
+        *,
+        session: Session,
+        active_item: WorkItem,
+        payload: dict,
+    ) -> dict[str, object] | None:
+        if active_item.work_type != "subtask_implementation":
+            return None
+        expected_subtask_key = self._parse_subtask_work_item_title(active_item.title)["key"]
+        if expected_subtask_key is None:
+            return None
+
+        payload_task_keys = self._runtime_error_payload_task_keys(payload)
+        candidate_subtask_keys = sorted(key for key in payload_task_keys if key != session.task_key)
+        if not candidate_subtask_keys or expected_subtask_key in candidate_subtask_keys:
+            return None
+
+        return {
+            "reason": "subtask_key_mismatch",
+            "expected_work_item_id": active_item.id,
+            "payload_work_item_id": None,
+            "expected_subtask_key": expected_subtask_key,
+            "payload_subtask_keys": candidate_subtask_keys,
+        }
+
+    def _runtime_error_payload_task_keys(self, payload: dict) -> set[str]:
+        task_keys: set[str] = set()
+        for field in ("summary", "details", "missing_input", "pending_decision"):
+            raw_value = payload.get(field)
+            if not isinstance(raw_value, str):
+                continue
+            task_keys.update(_INLINE_TASK_KEY_PATTERN.findall(raw_value))
+        return task_keys
+
+    def _reconcile_session_dispatch(self, session: Session) -> bool:
+        if session.current_owner is None:
+            return False
+
+        if self._reconcile_terminal_outcome_progress(session):
+            return True
+
+        role = self.role_repository.get_by_name(session.id, session.current_owner)
+        if role is None:
+            return False
+
+        work_item = self._find_active_work_item_for_role(session.id, role.id)
+        if work_item is None:
+            work_item = self._reconcile_missing_subtask_assignment(session, role)
+            if work_item is None:
+                return False
+
+        if self._has_pending_operator_continuation(
+            session_id=session.id,
+            role_name=role.role_name,
+            work_item_id=work_item.id,
+            stage_name=session.current_stage,
+        ):
+            return False
+
+        force_redispatch = False
+        if self.dispatch_repository is not None:
+            active_dispatch = self.dispatch_repository.get_latest_active_for_target(
+                session_id=session.id,
+                role_id=role.id,
+                work_item_id=work_item.id,
+                stage_name=session.current_stage,
+            )
+            if active_dispatch is not None:
+                if self._delivered_launcher_dispatch_missing_routed_work(
+                    session=session,
+                    role=role,
+                    active_dispatch=active_dispatch,
+                ):
+                    force_redispatch = True
+                    self._append_event(
+                        session_id=session.id,
+                        event_type="role_input_dispatch_repair_requested",
+                        producer_type="coordinator",
+                        payload={
+                            "role_name": role.role_name,
+                            "work_item_id": work_item.id,
+                            "stage_name": session.current_stage,
+                            "dispatch_token": active_dispatch.dispatch_token,
+                            "reason": "delivered_launcher_dispatch_missing_routed_work",
+                        },
+                    )
+                elif self._submit_visible_unconfirmed_launcher_dispatch(
+                    session=session,
+                    role=role,
+                    active_dispatch=active_dispatch,
+                ):
+                    return True
+                elif self._stalled_launcher_dispatch_repairable(
+                    session=session,
+                    role=role,
+                    active_dispatch=active_dispatch,
+                ):
+                    force_redispatch = True
+                    self._append_event(
+                        session_id=session.id,
+                        event_type="role_input_dispatch_repair_requested",
+                        producer_type="coordinator",
+                        payload={
+                            "role_name": role.role_name,
+                            "work_item_id": work_item.id,
+                            "stage_name": session.current_stage,
+                            "dispatch_token": active_dispatch.dispatch_token,
+                            "reason": "launcher_dispatch_delivery_unconfirmed",
+                        },
+                    )
+                else:
+                    return False
+        else:
+            if self._has_dispatch_event(
+                session_id=session.id,
+                work_item_id=work_item.id,
+                stage_name=session.current_stage,
+            ):
+                return False
+
+            if self._has_recent_matching_dispatch_event(
+                session_id=session.id,
+                role_name=role.role_name,
+                work_item_id=work_item.id,
+                stage_name=session.current_stage,
+            ):
+                return False
+
+            if self._role_recently_dispatched(role):
+                latest_dispatch = self._latest_event_by_type(session.id, {"role_input_dispatched"})
+                if (
+                    latest_dispatch is not None
+                    and latest_dispatch.payload.get("role_name") == role.role_name
+                    and latest_dispatch.payload.get("work_item_id") == work_item.id
+                    and latest_dispatch.payload.get("stage_name") == session.current_stage
+                ):
+                    return False
+
+        extra_hydration: dict[str, str | int | None] | None = None
+        if role.role_name == CONVENTION_REVIEWER_ROLE and session.current_stage == "convention_review_requested":
+            instruction, extra_hydration = self._dual_review_dispatch_context(session, lane="convention")
+        elif role.role_name == REQUIREMENTS_REVIEWER_ROLE and session.current_stage == "requirements_review_requested":
+            instruction, extra_hydration = self._dual_review_dispatch_context(session, lane="requirements")
+        else:
+            instruction = self._stage_instruction(
+                session.current_stage,
+                session.task_key,
+                workflow_profile=session.workflow_profile,
+                role_name=role.role_name,
+                session_policy=session.policy,
+            )
+        if instruction is None:
+            return False
+
+        self._dispatch_role_work(
+            session=session,
+            role=role,
+            work_item=work_item,
+            stage_name=session.current_stage,
+            instruction=instruction,
+            extra_hydration=extra_hydration,
+            force_redispatch=force_redispatch,
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="session_dispatch_reconciled",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": work_item.id,
+                "stage_name": session.current_stage,
+            },
+        )
+        return True
+
+    def _delivered_launcher_dispatch_missing_routed_work(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_dispatch: Dispatch,
+    ) -> bool:
+        if active_dispatch.status != DispatchStatus.DELIVERED:
+            return False
+        if role.runtime_backend != "tmux":
+            return False
+        role_runtime_config = (session.role_config or {}).get(role.role_name, {})
+        if role_runtime_config.get("runner") not in {"claude", "codex"}:
+            return False
+        if self.role_workspace_manager is None:
+            return False
+        workspace = self.role_workspace_manager.role_directory(session.task_key, role.role_name)
+        return not (workspace / "ROUTED_WORK.md").is_file()
+
+    def _submit_visible_unconfirmed_launcher_dispatch(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_dispatch: Dispatch,
+    ) -> bool:
+        if active_dispatch.status != DispatchStatus.STALLED:
+            return False
+        if active_dispatch.error_text != self._launcher_dispatch_delivery_errors().get("submitted_unconfirmed"):
+            return False
+        if not self._launcher_dispatch_token_visible(
+            session=session,
+            role=role,
+            dispatch_token=active_dispatch.dispatch_token,
+        ):
+            return False
+        submit_probe = getattr(self.session_backend, "submit_visible_launcher_input", None)
+        if submit_probe is None or role.runtime_handle is None:
+            return False
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        try:
+            submit_result = submit_probe(runtime_role, active_dispatch.dispatch_token)
+        except Exception as exc:
+            self._append_event(
+                session_id=session.id,
+                event_type="role_input_visible_submit_repair_failed",
+                producer_type="coordinator",
+                payload={
+                    "role_name": role.role_name,
+                    "work_item_id": active_dispatch.work_item_id,
+                    "stage_name": active_dispatch.stage_name,
+                    "dispatch_token": active_dispatch.dispatch_token,
+                    "error": str(exc),
+                },
+            )
+            return False
+        if not submit_result:
+            return False
+        if self.dispatch_repository is not None:
+            self.dispatch_repository.update_status(
+                active_dispatch.dispatch_token,
+                status=DispatchStatus.DELIVERED,
+                error_text=None,
+            )
+        self._append_event(
+            session_id=session.id,
+            event_type="role_input_visible_submit_repaired",
+            producer_type="coordinator",
+            payload={
+                "role_name": role.role_name,
+                "work_item_id": active_dispatch.work_item_id,
+                "stage_name": active_dispatch.stage_name,
+                "dispatch_token": active_dispatch.dispatch_token,
+                **submit_result,
+            },
+        )
+        return True
+
+    def _stalled_launcher_dispatch_repairable(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_dispatch: Dispatch,
+    ) -> bool:
+        if active_dispatch.status != DispatchStatus.STALLED:
+            return False
+        if active_dispatch.error_text not in self._launcher_dispatch_delivery_errors().values():
+            return False
+        if self._launcher_dispatch_token_visible(
+            session=session,
+            role=role,
+            dispatch_token=active_dispatch.dispatch_token,
+        ):
+            return False
+        if not self._launcher_role_ready_for_buffered_repair(session=session, role=role):
+            return False
+        return True
+
+    @staticmethod
+    def _launcher_dispatch_delivery_errors() -> dict[str, str]:
+        return {
+            "buffered_pre_ready": "launcher-backed role was not ready; routed input is buffered but not yet visible",
+            "submitted_unconfirmed": "launcher-backed role input was submitted but not confirmed visible",
+        }
+
+    def _launcher_role_ready_for_buffered_repair(self, *, session: Session, role: Role) -> bool:
+        readiness_probe = getattr(self.session_backend, "launcher_role_ready", None)
+        if readiness_probe is None:
+            return True
+        if role.runtime_handle is None:
+            return False
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        return bool(readiness_probe(runtime_role))
+
+    def _launcher_dispatch_token_visible(self, *, session: Session, role: Role, dispatch_token: str) -> bool:
+        token_probe = getattr(self.session_backend, "launcher_dispatch_token_visible", None)
+        if token_probe is None or role.runtime_handle is None:
+            return False
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session),
+            backend_name=role.runtime_backend,
+        )
+        return bool(token_probe(runtime_role, dispatch_token))
+
+    def _role_recently_dispatched(self, role: Role, *, window_seconds: int = 5) -> bool:
+        if role.last_hydration_version <= 0:
+            return False
+        if role.status != RoleStatus.RUNNING:
+            return False
+        if role.updated_at is None:
+            return False
+        updated_at = role.updated_at
+        if isinstance(updated_at, str):
+            try:
+                updated_at_dt = datetime.fromisoformat(updated_at)
+            except ValueError:
+                return False
+        else:
+            updated_at_dt = updated_at
+        if updated_at_dt.tzinfo is None:
+            updated_at_dt = updated_at_dt.replace(tzinfo=UTC)
+        return updated_at_dt >= (datetime.now(UTC) - timedelta(seconds=window_seconds))
+
+    def _has_recent_matching_dispatch_event(
+        self,
+        *,
+        session_id: int,
+        role_name: str,
+        work_item_id: int,
+        stage_name: str,
+        window_seconds: int = 10,
+    ) -> bool:
+        cutoff = datetime.now(UTC) - timedelta(seconds=window_seconds)
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.event_type != "role_input_dispatched":
+                continue
+            if event.payload.get("role_name") != role_name:
+                continue
+            if event.payload.get("work_item_id") != work_item_id:
+                continue
+            if event.payload.get("stage_name") != stage_name:
+                continue
+            created_at = event.created_at
+            if isinstance(created_at, str):
+                try:
+                    created_at_dt = datetime.fromisoformat(created_at)
+                except ValueError:
+                    return True
+            else:
+                created_at_dt = created_at
+            if created_at_dt.tzinfo is None:
+                created_at_dt = created_at_dt.replace(tzinfo=UTC)
+            return created_at_dt >= cutoff
+        return False
+
+    def _reconcile_terminal_outcome_progress(self, session: Session) -> bool:
+        if session.current_stage == "verification_correction_requested":
+            source_event = self._latest_event_by_type(session.id, {"implementation_completed"})
+            if source_event is not None:
+                completed_item = self._coding_work_item_from_completion_event(session, source_event)
+                if (
+                    completed_item is not None
+                    and completed_item.work_type == "verification_correction"
+                    and completed_item.status == WorkItemStatus.COMPLETED
+                ):
+                    latest_verification_request = self._latest_event_by_type(session.id, {"verification_requested"})
+                    if latest_verification_request is not None and latest_verification_request.id > source_event.id:
+                        return False
+                    implementer_role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+                    if implementer_role is not None:
+                        for item in self.work_item_repository.list_for_session(session.id):
+                            if item.id == completed_item.id:
+                                continue
+                            if item.owner_role_id != implementer_role.id:
+                                continue
+                            if item.work_type != "verification_correction":
+                                continue
+                            if item.status != WorkItemStatus.ASSIGNED:
+                                continue
+                            self.work_item_repository.update_status(item.id, WorkItemStatus.WAITING_FOR_OPERATOR)
+                    _session, followup_event = self._enqueue_verification(session=session, source_event=source_event)
+                    self._append_event(
+                        session_id=session.id,
+                        event_type="session_outcome_reconciled",
+                        producer_type="coordinator",
+                        payload={
+                            "stage_name": "verification_correction_requested",
+                            "outcome_status": "completed",
+                            "work_item_id": completed_item.id,
+                            "followup_event_type": followup_event.event_type,
+                        },
+                    )
+                    return True
+
+        if session.current_stage == "verification_requested":
+            verification_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+            if verification_role is None:
+                return False
+            active_item = self._find_active_work_item_for_role(session.id, verification_role.id)
+            if active_item is not None:
+                return False
+            if self._verification_outcome_status(session) not in {"passed", "accepted_with_warnings"}:
+                return False
+            source_event = self._latest_event_by_type(session.id, {"verification_passed"})
+            if source_event is None:
+                return False
+            latest_doc_harvest = self._latest_event_after_by_type(
+                session.id,
+                source_event.id,
+                {"doc_harvest_requested"},
+            )
+            if latest_doc_harvest is not None:
+                doc_role = self.role_repository.get_by_name(session.id, DOC_HARVEST_ROLE)
+                if doc_role is None:
+                    return False
+                session = self.session_repository.update_stage_and_owner(
+                    session.id,
+                    current_stage="doc_harvest_requested",
+                    current_owner=DOC_HARVEST_ROLE,
+                )
+                self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+                self._append_event(
+                    session_id=session.id,
+                    event_type="session_outcome_reconciled",
+                    producer_type="coordinator",
+                    payload={
+                        "stage_name": "verification_requested",
+                        "outcome_status": "passed",
+                        "followup_event_type": latest_doc_harvest.event_type,
+                        "reason": "stage_restored_to_existing_followup",
+                    },
+                )
+                return True
+            if self._has_event_after(
+                session.id,
+                source_event.id,
+                {"doc_harvest_requested", "task_completed", "mr_handoff_failed", "mr_handoff_completed"},
+            ):
+                return False
+            if self._optional_lane_policy_mode(session.policy, "doc_harvest_policy") != "disabled":
+                _session, followup_event = self._enqueue_doc_harvest(session=session, source_event=source_event)
+            else:
+                _session, followup_event = self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
+            self._append_event(
+                session_id=session.id,
+                event_type="session_outcome_reconciled",
+                producer_type="coordinator",
+                payload={
+                    "stage_name": "verification_requested",
+                    "outcome_status": "passed",
+                    "followup_event_type": followup_event.event_type,
+                },
+            )
+            return True
+
+        if session.current_stage == "doc_harvest_requested":
+            doc_role = self.role_repository.get_by_name(session.id, DOC_HARVEST_ROLE)
+            if doc_role is None:
+                return False
+            active_item = self._find_active_work_item_for_role(session.id, doc_role.id)
+            if active_item is not None:
+                return False
+            if self._doc_harvest_outcome_status(session) != "completed":
+                return False
+            source_event = self._latest_event_by_type(session.id, {"doc_harvest_completed"})
+            if source_event is None:
+                return False
+            latest_documentation_review = self._latest_event_after_by_type(
+                session.id,
+                source_event.id,
+                {"documentation_review_requested"},
+            )
+            if latest_documentation_review is not None:
+                review_role = self.role_repository.get_by_name(session.id, DOCUMENTATION_REVIEWER_ROLE)
+                if review_role is None:
+                    return False
+                session = self.session_repository.update_stage_and_owner(
+                    session.id,
+                    current_stage="documentation_review_requested",
+                    current_owner=DOCUMENTATION_REVIEWER_ROLE,
+                )
+                self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+                self._append_event(
+                    session_id=session.id,
+                    event_type="session_outcome_reconciled",
+                    producer_type="coordinator",
+                    payload={
+                        "stage_name": "doc_harvest_requested",
+                        "outcome_status": "completed",
+                        "followup_event_type": latest_documentation_review.event_type,
+                        "reason": "stage_restored_to_existing_followup",
+                    },
+                )
+                return True
+            if self._has_event_after(
+                session.id,
+                source_event.id,
+                {"documentation_review_requested", "task_completed", "mr_handoff_failed", "mr_handoff_completed"},
+            ):
+                return False
+            _session, followup_event = self._enqueue_documentation_review(session=session, source_event=source_event)
+            self._append_event(
+                session_id=session.id,
+                event_type="session_outcome_reconciled",
+                producer_type="coordinator",
+                payload={
+                    "stage_name": "doc_harvest_requested",
+                    "outcome_status": "completed",
+                    "followup_event_type": followup_event.event_type,
+                },
+            )
+            return True
+
+        if session.current_stage == "documentation_review_requested":
+            review_role = self.role_repository.get_by_name(session.id, DOCUMENTATION_REVIEWER_ROLE)
+            if review_role is None:
+                return False
+            active_item = self._find_active_work_item_for_role(session.id, review_role.id)
+            if active_item is not None:
+                return False
+            source_event = self._latest_event_by_type(session.id, {"documentation_review_passed"})
+            if source_event is None:
+                return False
+            if self._has_event_after(
+                session.id,
+                source_event.id,
+                {"task_completed", "mr_handoff_failed", "mr_handoff_completed", "send_to_test_failed", "send_to_test_completed"},
+            ):
+                return False
+            _session, followup_event = self._complete_session_and_attempt_delivery(session=session, source_event=source_event)
+            self._append_event(
+                session_id=session.id,
+                event_type="session_outcome_reconciled",
+                producer_type="coordinator",
+                payload={
+                    "stage_name": "documentation_review_requested",
+                    "outcome_status": "passed",
+                    "followup_event_type": followup_event.event_type,
+                },
+            )
+            return True
+
+        return False
+
+    def _has_event_after(self, session_id: int, after_event_id: int | None, event_types: set[str]) -> bool:
+        if after_event_id is None:
+            return False
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.id <= after_event_id:
+                return False
+            if event.event_type in event_types:
+                return True
+        return False
+
+    def _latest_event_after_by_type(
+        self,
+        session_id: int,
+        after_event_id: int | None,
+        event_types: set[str],
+    ) -> Event | None:
+        if after_event_id is None:
+            return None
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.id <= after_event_id:
+                return None
+            if event.event_type in event_types:
+                return event
+        return None
+
+    def _latest_event_by_type(self, session_id: int, event_types: set[str]) -> Event | None:
+        return self.event_repository.latest_for_session_by_type(session_id, event_types)
+
+    def _latest_dispatch_event_for_target(
+        self,
+        *,
+        session_id: int,
+        role_name: str,
+        work_item_id: int,
+        stage_name: str,
+    ) -> Event | None:
+        for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.event_type != "role_input_dispatched":
+                continue
+            if event.payload.get("role_name") != role_name:
+                continue
+            if event.payload.get("work_item_id") != work_item_id:
+                continue
+            if event.payload.get("stage_name") != stage_name:
+                continue
+            return event
+        return None
+
+    def _reconcile_missing_subtask_assignment(
+        self,
+        session: Session,
+        role: Role,
+    ) -> WorkItem | None:
+        if session.current_stage != "subtask_implementation_requested":
+            return None
+        if role.role_name != IMPLEMENTER_ROLE:
+            return None
+
+        next_item = next(
+            (
+                item
+                for item in self._pending_subtask_queue_items(session.id)
+                if item.status == WorkItemStatus.UNASSIGNED
+            ),
+            None,
+        )
+        if next_item is None:
+            return None
+
+        return self.work_item_repository.update_assignment(
+            next_item.id,
+            owner_role_id=role.id,
+            status=WorkItemStatus.ASSIGNED,
+        )
+
+    def _pending_subtask_queue_items(
+        self,
+        session_id: int,
+        *,
+        exclude_ids: set[int] | None = None,
+    ) -> list[WorkItem]:
+        excluded = exclude_ids or set()
+        return [
+            item
+            for item in self.work_item_repository.list_for_session(session_id)
+            if item.id not in excluded
+            and item.work_type == "subtask_implementation"
+            and item.status in {WorkItemStatus.UNASSIGNED, WorkItemStatus.ASSIGNED}
+        ]
+
+    def _find_active_work_item_for_role(
+        self,
+        session_id: int,
+        role_id: int | None,
+    ) -> WorkItem | None:
+        if role_id is None:
+            return None
+        for item in reversed(self.work_item_repository.list_for_session(session_id)):
+            if item.owner_role_id != role_id:
+                continue
+            if item.status != WorkItemStatus.ASSIGNED:
+                continue
+            return item
+        return None
+
+    def _find_active_work_item_for_current_stage(self, session: Session) -> WorkItem | None:
+        work_type = _ACTIVE_WORK_TYPE_BY_STAGE.get(session.current_stage)
+        if work_type is None:
+            return None
+        for item in reversed(self.work_item_repository.list_for_session(session.id)):
+            if item.work_type != work_type:
+                continue
+            if item.status != WorkItemStatus.ASSIGNED:
+                continue
+            return item
+        return None
+
+    def _find_active_primary_coding_work_item(
+        self,
+        session: Session,
+    ) -> WorkItem | None:
+        active_role = self._primary_coding_role_for_stage(session)
+        if active_role is None:
+            return None
+        active_item = self._find_active_work_item_for_role(session.id, active_role.id)
+        if active_item is None:
+            return None
+        if active_item.work_type not in {
+            "subtask_implementation",
+            "implementation",
+            "convention_review_correction",
+            "requirements_review_correction",
+            "verification_correction",
+            "documentation_review_correction",
+            "followup_implementation",
+        }:
+            return None
+        return active_item
+
+    def _complete_active_dual_review_work_item(self, session: Session, *, lane: str) -> None:
+        role_name = _DUAL_REVIEW_ROLE_BY_LANE[lane]
+        reviewer_role = self.role_repository.get_by_name(session.id, role_name)
+        if reviewer_role is None:
+            raise IntakeError(f"{role_name} role is missing for the session")
+        work_type = _DUAL_REVIEW_WORK_TYPE_BY_LANE[lane]
+        cycle_work_type = f"{work_type}_cycle_review"
+        review_items = [
+            item
+            for item in self.work_item_repository.list_for_session(session.id)
+            if item.owner_role_id == reviewer_role.id
+            and item.status != WorkItemStatus.COMPLETED
+            and item.work_type in {work_type, cycle_work_type}
+        ]
+        if not review_items:
+            raise IntakeError(f"No active {lane} review work item found for the session")
+        self.work_item_repository.update_status(review_items[0].id, WorkItemStatus.COMPLETED)
+
+    def _previous_dual_review_report_paths(self, session_id: int, *, lane: str) -> list[str]:
+        return self._internal_review_artifact_paths(
+            session_id,
+            review_lane=lane,
+            artifact_role="report",
+            fallback_artifact_types={_DUAL_REVIEW_REPORT_ARTIFACT_BY_LANE[lane]},
+        )
+
+    def _dual_review_report_paths_for_current_chain(
+        self,
+        session: Session,
+        *,
+        lane: str,
+        before_event_id: int | None,
+    ) -> list[str]:
+        review_event_id = self._current_dual_review_source_event_id(
+            session,
+            lane=lane,
+            before_event_id=before_event_id,
+        )
+        if review_event_id is None:
+            return []
+
+        review_event = next(
+            (
+                item
+                for item in self.event_repository.list_for_session(session.id)
+                if item.id == review_event_id
+            ),
+            None,
+        )
+        if review_event is None:
+            return []
+
+        review_work_item_id = review_event.payload.get("work_item_id")
+        candidate_paths: list[str] = []
+        for artifact in self.artifact_repository.list_for_session(session.id):
+            metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+            if str(metadata.get("report_family") or "").strip() != "internal_review":
+                continue
+            if str(metadata.get("review_lane") or "").strip() != lane:
+                continue
+            if str(metadata.get("artifact_role") or "").strip() != "report":
+                continue
+            if isinstance(review_work_item_id, int) and metadata.get("work_item_id") == review_work_item_id:
+                candidate_paths.append(artifact.path)
+        if candidate_paths:
+            return candidate_paths
+
+        all_paths = self._previous_dual_review_report_paths(session.id, lane=lane)
+        return all_paths[-1:] if all_paths else []
+
+    def _current_dual_review_source_event_id(
+        self,
+        session: Session,
+        *,
+        lane: str,
+        before_event_id: int | None,
+    ) -> int | None:
+        if before_event_id is None:
+            active_item = self._find_active_work_item_for_current_stage(session)
+            before_event_id = active_item.source_event_id if active_item is not None else None
+        if before_event_id is None:
+            return None
+
+        event = next(
+            (
+                item
+                for item in self.event_repository.list_for_session(session.id)
+                if item.id == before_event_id
+            ),
+            None,
+        )
+        if event is None:
+            return None
+        if event.event_type in {
+            f"{_DUAL_REVIEW_EVENT_PREFIX_BY_LANE[lane]}_issues_found",
+            f"{_DUAL_REVIEW_EVENT_PREFIX_BY_LANE[lane]}_blocked",
+        }:
+            return event.id
+        if event.event_type != "implementation_completed":
+            return None
+
+        work_item_id = event.payload.get("work_item_id")
+        if not isinstance(work_item_id, int):
+            return None
+        work_item = self.work_item_repository.get_by_id(work_item_id)
+        if work_item is None or work_item.work_type != _DUAL_REVIEW_CORRECTION_WORK_TYPE_BY_LANE[lane]:
+            return None
+        return work_item.source_event_id
+
+    def _latest_artifact_path(
+        self,
+        session_id: int,
+        artifact_type: str,
+        *,
+        role_name: str | None = None,
+    ) -> str | None:
+        role_id = None
+        if role_name is not None:
+            role = self.role_repository.get_by_name(session_id, role_name)
+            if role is None:
+                return None
+            role_id = role.id
+
+        latest_path: str | None = None
+        for artifact in self.artifact_repository.list_for_session(session_id):
+            if artifact.artifact_type != artifact_type:
+                continue
+            if role_id is not None and artifact.role_id != role_id:
+                continue
+            latest_path = artifact.path
+        return latest_path
+
+    def _default_extra_hydration_for_dispatch(
+        self,
+        session: Session,
+        role: Role,
+        stage_name: str,
+    ) -> dict[str, str | int | None]:
+        if role.role_name == CONVENTION_REVIEWER_ROLE and stage_name == "convention_review_requested":
+            _instruction, payload = self._dual_review_dispatch_context(session, lane="convention")
+            return payload
+        if role.role_name == REQUIREMENTS_REVIEWER_ROLE and stage_name == "requirements_review_requested":
+            _instruction, payload = self._dual_review_dispatch_context(session, lane="requirements")
+            return payload
+        if role.role_name == DOC_HARVEST_ROLE and stage_name == "doc_harvest_requested":
+            guide_path = None
+            if self.workdir_root is not None:
+                guide_path = self._existing_file_path(
+                    str(self.workdir_root / session.task_key / "repo" / "DOCUMENTATION_GUIDE.md")
+                )
+            return {
+                "full_diff_path": self._refresh_structured_diff_artifact(session.task_key, mode="full"),
+                "documentation_guide_path": guide_path,
+            }
+        if role.role_name == DOCUMENTATION_REVIEWER_ROLE and stage_name == "documentation_review_requested":
+            doc_diff_path = self._refresh_structured_diff_artifact(session.task_key, mode="docs")
+            full_diff_path = self._refresh_structured_diff_artifact(session.task_key, mode="full")
+            precheck_path = self._materialize_documentation_precheck(session.task_key)
+            guide_path = None
+            if self.workdir_root is not None:
+                guide_path = self._existing_file_path(
+                    str(self.workdir_root / session.task_key / "repo" / "DOCUMENTATION_GUIDE.md")
+                )
+            return {
+                "doc_diff_path": doc_diff_path,
+                "full_diff_path": full_diff_path,
+                "documentation_precheck_path": precheck_path,
+                "documentation_guide_path": guide_path,
+            }
+        if session.workflow_profile == "story_full":
+            story_payload = self._story_context_extra_hydration(session.task_key)
+            if role.role_name == PROPOSAL_CONTEXT_WORKER_ROLE and stage_name == "proposal_context_requested":
+                return story_payload
+            if role.role_name == REQUIREMENTS_CLARIFIER_WORKER_ROLE and stage_name == "requirements_requested":
+                payload = dict(story_payload)
+                payload["requirements_clarification_mode"] = self._requirements_clarification_mode(session.policy)
+                return payload
+            if role.role_name in {
+                ACCEPTANCE_CRITERIA_WORKER_ROLE,
+                CONSTRAINTS_WORKER_ROLE,
+                SPEC_VERIFIER_WORKER_ROLE,
+                TASK_DECOMPOSER_WORKER_ROLE,
+            }:
+                return story_payload
+            if role.role_name == IMPLEMENTER_ROLE:
+                payload = dict(story_payload)
+                payload.update(self._correction_dispatch_hydration(session.id, stage_name))
+                return payload
+        if role.role_name == REQUIREMENTS_CLARIFIER_WORKER_ROLE and stage_name == "requirements_requested":
+            return {
+                "requirements_clarification_mode": self._requirements_clarification_mode(session.policy),
+            }
+        if role.role_name == IMPLEMENTER_ROLE:
+            payload: dict[str, str | int | None] = {}
+            payload.update(self._correction_dispatch_hydration(session.id, stage_name))
+            if stage_name == "qa_reopen_requested":
+                payload.update(self._qa_followup_hydration(session))
+            if payload:
+                return payload
+        return {}
+
+    def _qa_followup_hydration(self, session: Session) -> dict[str, str | int | None]:
+        return {
+            "followup_comments_path": self._existing_file_path(
+                self._latest_artifact_path(
+                    session.id,
+                    "qa_reopen_comments",
+                )
+            )
+        }
+
+    def _correction_dispatch_hydration(
+        self,
+        session_id: int,
+        stage_name: str,
+    ) -> dict[str, str | int | None]:
+        config_by_stage = {
+            "convention_review_correction_requested": {
+                "source": "convention_review",
+                "review_lane": "convention",
+                "artifact_role": "report",
+                "fallback_artifact_types": {"convention_review_report_markdown"},
+            },
+            "requirements_review_correction_requested": {
+                "source": "requirements_review",
+                "review_lane": "requirements",
+                "artifact_role": "report",
+                "fallback_artifact_types": {"requirements_review_report_markdown"},
+            },
+            "verification_correction_requested": {
+                "source": "verification",
+                "artifact_type": "final_verification_markdown",
+            },
+            "documentation_review_correction_requested": {
+                "source": "documentation_review",
+                "artifact_type": "documentation_review_report_markdown",
+            },
+        }
+        config = config_by_stage.get(stage_name)
+        if config is None:
+            return {}
+        report_path = None
+        if "review_lane" in config:
+            report_path = self._existing_file_path(
+                self._latest_internal_review_artifact_path(
+                    session_id,
+                    review_lane=str(config["review_lane"]),
+                    artifact_role=str(config["artifact_role"]),
+                    fallback_artifact_types=set(config["fallback_artifact_types"]),
+                )
+            )
+        else:
+            report_path = self._existing_file_path(
+                self._latest_artifact_path(
+                    session_id,
+                    str(config["artifact_type"]),
+                )
+            )
+        payload = {
+            "correction_source": str(config["source"]),
+            "correction_report_path": report_path,
+            "issues_file_path": report_path,
+        }
+        if stage_name in {
+            "convention_review_correction_requested",
+            "requirements_review_correction_requested",
+        }:
+            operator_guidance_history = self._dual_review_operator_guidance_history(session_id)
+            if operator_guidance_history:
+                payload.update(
+                    {
+                        "operator_resolution_history": json.dumps(operator_guidance_history, indent=2),
+                    }
+                )
+            if stage_name == "requirements_review_correction_requested":
+                session = self.session_repository.get_by_id(session_id)
+                if session is not None:
+                    skipped_subtasks = self._subtask_skip_history(session_id)
+                    if skipped_subtasks:
+                        payload.update(
+                            {
+                                "skipped_subtasks_path": self._materialize_skipped_subtasks_context(session),
+                                "skipped_subtasks": json.dumps(skipped_subtasks, indent=2),
+                            }
+                        )
+        return payload
+
+    def _requirements_clarification_mode(self, policy: dict[str, str] | None) -> str:
+        return (policy or {}).get("requirements_clarification_mode", "ask-selectively")
+
+    def _existing_file_path(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        candidate = Path(value)
+        return value if candidate.is_file() else None
+
+    def _refresh_structured_diff_artifact(self, task_key: str, *, mode: str) -> str | None:
+        if self.workdir_root is None:
+            return None
+        output_name = {
+            "source": "diff.md",
+            "docs": "doc-diff.md",
+            "full": "full-diff.md",
+        }.get(mode)
+        if output_name is None:
+            raise IntakeError(f"Unsupported diff mode: {mode}")
+
+        task_root = self.workdir_root / task_key
+        repo_dir = task_root / "repo"
+        target_path = task_root / "spec" / output_name
+        if not repo_dir.exists():
+            return self._existing_file_path(str(target_path))
+
+        origin_master = subprocess.run(
+            ["git", "-C", str(repo_dir), "rev-parse", "--verify", "origin/master"],
+            capture_output=True,
+            text=True,
+        )
+        if origin_master.returncode != 0:
+            return self._existing_file_path(str(target_path))
+
+        script_path = self._repo_root() / "scripts" / "generate-diff.sh"
+        env = os.environ.copy()
+        env["SDD_WORKDIR"] = str(self.workdir_root)
+        command = ["bash", str(script_path), task_key, "--mode", mode]
+        result = subprocess.run(
+            command,
+            cwd=self._repo_root(),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if result.returncode != 0:
+            raise IntakeError(result.stderr.strip() or result.stdout.strip() or f"Failed to refresh {output_name}")
+        refreshed = self._existing_file_path(str(target_path))
+        if refreshed is None:
+            raise IntakeError(f"Diff refresh did not produce {target_path}")
+        return refreshed
+
+    def _refresh_post_harvest_diff_artifacts(self, task_key: str) -> None:
+        for mode in ("source", "docs", "full"):
+            self._refresh_structured_diff_artifact(task_key, mode=mode)
+
+    def _materialize_documentation_precheck(self, task_key: str) -> str | None:
+        if self.workdir_root is None:
+            return None
+        task_root = self.workdir_root / task_key
+        repo_dir = task_root / "repo"
+        spec_root = task_root / "spec"
+        target_path = spec_root / "documentation-precheck.md"
+        if not repo_dir.exists():
+            return self._existing_file_path(str(target_path))
+
+        changed_files = self._changed_files_for_documentation_precheck(repo_dir)
+        findings = self._documentation_precheck_findings(repo_dir, changed_files)
+        lines = [
+            f"# Documentation Precheck: {task_key}",
+            "",
+            "This deterministic precheck flags documentation hygiene smells for the documentation reviewer.",
+            "It is not a replacement for the reviewer verdict.",
+            "",
+            f"Changed documentation/comment candidate files: {len(changed_files)}",
+            f"Findings: {len(findings)}",
+            "",
+        ]
+        if findings:
+            lines.extend(["## Findings", ""])
+            for index, finding in enumerate(findings, start=1):
+                lines.extend(
+                    [
+                        f"### {index}. {finding['title']}",
+                        "",
+                        f"- File: `{finding['file']}`",
+                        f"- Line: {finding['line']}",
+                        f"- Evidence: {finding['evidence']}",
+                        f"- Suggested direction: {finding['direction']}",
+                        "",
+                    ]
+                )
+        else:
+            lines.extend(["## Findings", "", "No deterministic documentation hygiene findings.", ""])
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        if self.artifacts_root is not None:
+            self.artifact_repository.create(
+                session_id=self._session_id_for_task_key(task_key),
+                stage_name="documentation-review",
+                artifact_type="documentation_precheck_markdown",
+                path=str(target_path),
+                metadata={"finding_count": len(findings), "changed_file_count": len(changed_files)},
+            )
+        return str(target_path)
+
+    def _session_id_for_task_key(self, task_key: str) -> int:
+        session = self.session_repository.get_by_task_key(task_key)
+        if session is None:
+            raise IntakeError(f"Session for {task_key} was not found")
+        return session.id
+
+    def _changed_files_for_documentation_precheck(self, repo_dir: Path) -> list[str]:
+        result = subprocess.run(
+            ["git", "-C", str(repo_dir), "diff", "--name-only", "origin/master...HEAD"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return []
+        candidate_suffixes = (".md", ".markdown", ".adoc", ".rst", ".txt", ".swift", ".kt", ".kts", ".java")
+        ignored_parts = {"Pods", ".build", "node_modules", "DerivedData", ".gradle"}
+        files: list[str] = []
+        for raw_line in result.stdout.splitlines():
+            rel_path = raw_line.strip()
+            if not rel_path or not rel_path.endswith(candidate_suffixes):
+                continue
+            if any(part in ignored_parts for part in Path(rel_path).parts):
+                continue
+            files.append(rel_path)
+        return files
+
+    def _documentation_precheck_findings(self, repo_dir: Path, changed_files: list[str]) -> list[dict[str, str | int]]:
+        findings: list[dict[str, str | int]] = []
+        history_pattern = re.compile(
+            r"\b(jira|follow[- ]?up|review finding|review history|moved from|no longer|task history|workaround|temporary)\b",
+            re.IGNORECASE,
+        )
+        task_pattern = re.compile(r"\b[A-Z]+-\d+\b")
+        for rel_path in changed_files:
+            path = repo_dir / rel_path
+            if not path.is_file():
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except UnicodeDecodeError:
+                continue
+            is_markdown = path.suffix.lower() in {".md", ".markdown", ".adoc", ".rst", ".txt"}
+            is_readme = path.name.lower() == "readme.md"
+            for index, line in enumerate(lines, start=1):
+                searchable = line.strip()
+                if not searchable:
+                    continue
+                if not is_markdown and not self._looks_like_comment_line(searchable):
+                    continue
+                if task_pattern.search(searchable):
+                    findings.append(
+                        {
+                            "title": "Task key in production documentation/comment",
+                            "file": rel_path,
+                            "line": index,
+                            "evidence": searchable[:240],
+                            "direction": "Remove Jira/task IDs from production docs and comments; keep durable behavior only.",
+                        }
+                    )
+                if history_pattern.search(searchable):
+                    findings.append(
+                        {
+                            "title": "Review/task history wording",
+                            "file": rel_path,
+                            "line": index,
+                            "evidence": searchable[:240],
+                            "direction": "Rewrite as stable subsystem or caller-facing documentation, not task execution history.",
+                        }
+                    )
+                if is_readme and self._looks_like_file_inventory_table(lines, index - 1):
+                    findings.append(
+                        {
+                            "title": "README file inventory table",
+                            "file": rel_path,
+                            "line": index,
+                            "evidence": searchable[:240],
+                            "direction": "Avoid file listings in module READMEs unless they are genuinely stable key entry points.",
+                        }
+                    )
+            if path.suffix.lower() in {".swift", ".kt", ".kts", ".java"}:
+                findings.extend(self._inline_comment_block_findings(rel_path, lines))
+        return findings[:100]
+
+    def _inline_comment_block_findings(self, rel_path: str, lines: list[str]) -> list[dict[str, str | int]]:
+        findings: list[dict[str, str | int]] = []
+        current_block: list[tuple[int, str]] = []
+
+        def flush_block() -> None:
+            if not current_block:
+                return
+            findings.extend(self._documentation_findings_for_comment_block(rel_path, current_block))
+            current_block.clear()
+
+        for index, line in enumerate(lines, start=1):
+            stripped = line.strip()
+            if stripped.startswith("//") and not stripped.startswith("///"):
+                current_block.append((index, stripped))
+                continue
+            flush_block()
+        flush_block()
+        return findings
+
+    def _documentation_findings_for_comment_block(
+        self,
+        rel_path: str,
+        block: list[tuple[int, str]],
+    ) -> list[dict[str, str | int]]:
+        if not block:
+            return []
+        findings: list[dict[str, str | int]] = []
+        comment_lines = [line for _index, line in block]
+        text = " ".join(line.removeprefix("//").strip() for line in comment_lines)
+        lower_text = text.lower()
+        first_line = block[0][0]
+        evidence = " / ".join(comment_lines)[:240]
+        if len(block) >= 3:
+            findings.append(
+                {
+                    "title": "Verbose inline comment block",
+                    "file": rel_path,
+                    "line": first_line,
+                    "evidence": evidence,
+                    "direction": (
+                        "Inline comments should usually be one or two lines and explain only the local "
+                        "non-obvious invariant, lifecycle, ownership, or call-order constraint."
+                    ),
+                }
+            )
+        history_terms = (
+            "retry once",
+            "fallback",
+            "recovery flow",
+            "before surfacing",
+            "backend message",
+            "history",
+            "workaround",
+        )
+        if len(block) >= 2 and any(term in lower_text for term in history_terms):
+            findings.append(
+                {
+                    "title": "Inline comment explains task mechanics instead of a stable invariant",
+                    "file": rel_path,
+                    "line": first_line,
+                    "evidence": evidence,
+                    "direction": (
+                        "Keep only the stable invariant needed by a local reader; move broader flow/history "
+                        "explanations to durable documentation or delete them when the code is self-explanatory."
+                    ),
+                }
+            )
+        return findings
+
+    def _looks_like_comment_line(self, line: str) -> bool:
+        return line.startswith("//") or line.startswith("///") or line.startswith("*") or line.startswith("/*")
+
+    def _looks_like_file_inventory_table(self, lines: list[str], index: int) -> bool:
+        if index + 1 >= len(lines):
+            return False
+        header = lines[index].strip().lower()
+        separator = lines[index + 1].strip()
+        if not (header.startswith("|") and separator.startswith("|") and "---" in separator):
+            return False
+        return any(token in header for token in ("file", "path", "source"))
+
+    def _existing_directory_path(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        candidate = Path(value)
+        return value if candidate.is_dir() else None
+
+    def _sanitize_dispatch_hydration(
+        self,
+        payload: dict[str, str | int | None],
+    ) -> dict[str, str | int | None]:
+        return {
+            key: value
+            for key, value in payload.items()
+            if value is not None
+        }
+
+    def _optional_lane_policy_mode(
+        self,
+        policy: dict[str, str] | None,
+        policy_key: str,
+    ) -> str:
+        value = str((policy or {}).get(policy_key, "enabled")).strip()
+        if value in {"disabled", "enabled", "required"}:
+            return value
+        return "enabled"
+
+    def _story_context_extra_hydration(
+        self,
+        task_key: str,
+    ) -> dict[str, str | int | None]:
+        if self.workdir_root is None:
+            return {}
+        context_root = self.workdir_root / task_key / "spec" / "context"
+        payload: dict[str, str | int | None] = {
+            "context_directory_path": str(context_root),
+        }
+
+        candidate_paths = {
+            "proposal_path": self.workdir_root / task_key / "spec" / "proposal.md",
+            "feature_overview_path": context_root / "feature-overview.md",
+            "relevant_code_path": context_root / "relevant-code.md",
+            "documentation_path": context_root / "documentation.md",
+            "implementation_patterns_path": context_root / "implementation-patterns.md",
+            "preconditions_path": context_root / "preconditions.md",
+        }
+        for key, candidate in candidate_paths.items():
+            if candidate.is_file():
+                payload[key] = str(candidate)
+        return payload
+
+    def _find_operator_pending_work_item(self, session_id: int) -> WorkItem | None:
+        for item in reversed(self.work_item_repository.list_for_session(session_id)):
+            if item.status != WorkItemStatus.WAITING_FOR_OPERATOR:
+                continue
+            if item.owner_role_id is None:
+                continue
+            return item
+        return None
+
+    def _retry_work_item_title(self, title: str) -> str:
+        if title.startswith("Retry: "):
+            return title
+        return f"Retry: {title}"
+
+    def _redirect_work_item_title(self, title: str, target_role_name: str) -> str:
+        return f"Redirect to {target_role_name}: {title}"
+
+    def _has_dispatch_event(
+        self,
+        session_id: int,
+        work_item_id: int | None,
+        stage_name: str,
+    ) -> bool:
+        if work_item_id is None:
+            return False
+        for event in self.event_repository.list_for_session(session_id):
+            if event.event_type != "role_input_dispatched":
+                continue
+            if event.payload.get("work_item_id") != work_item_id:
+                continue
+            if event.payload.get("stage_name") != stage_name:
+                continue
+            return True
+        return False
+
+    def _stage_instruction(
+        self,
+        stage_name: str,
+        task_key: str,
+        workflow_profile: str | None = None,
+        role_name: str | None = None,
+        session_policy: dict[str, str] | None = None,
+    ) -> str | None:
+        if stage_name == "proposal_context_requested":
+            return (
+                f"Collect proposal and context foundations for story {task_key}. "
+                "Read `description.md` and `comments.md`, treat comments as the fresher source when they conflict, "
+                "resolve explicit local file references from the snapshot, "
+                "treat external links as operator-provided context references, "
+                "and extract the compact problem statement, key clarifications, and the smallest useful project/context findings for later planning and decomposition."
+            )
+        if stage_name == "requirements_requested":
+            clarification_mode = self._requirements_clarification_mode(session_policy)
+            return (
+                f"Clarify the implementation requirements for story {task_key}. "
+                "Resolve assumptions, edge cases, and out-of-scope boundaries before task decomposition. "
+                f"Clarification mode: {clarification_mode}. "
+                "If critical ambiguity remains, ask the operator directly in the live session instead of guessing."
+            )
+        if stage_name == "acceptance_criteria_requested":
+            return (
+                f"Prepare explicit acceptance criteria for story {task_key}. "
+                "Use independently testable WHEN-THEN-SHALL criteria, cover happy paths, edge cases, and error scenarios from the clarified requirements, "
+                "and ensure every meaningful clarified requirement decision is covered before task decomposition."
+            )
+        if stage_name == "constraints_requested":
+            return (
+                f"Prepare grounded implementation constraints for story {task_key}. "
+                "Use `spec/context/project.md` as architectural ground truth, cite it instead of restating generic conventions, "
+                "and surface task-specific MUST, MUST NOT, and SHOULD constraints before task decomposition."
+            )
+        if stage_name == "spec_verification_requested":
+            return (
+                f"Verify the assembled planning package for story {task_key}. "
+                "Check for contradictions, missing implementation-shaping details, and planning gaps before task decomposition."
+            )
+        if stage_name == "task_decomposition_requested":
+            return (
+                f"Prepare task decomposition for story {task_key}. "
+                "Produce a temporary `plan/index.md` plus self-contained `plan/NN-*.md` task package only for Jira subtask materialization, then hand execution over to the Jira-subtask flow."
+            )
+        if stage_name == "subtask_implementation_requested":
+            return (
+                f"Continue sequential subtask implementation for {task_key}. "
+                "Use Jira subtasks from the refreshed snapshot as the source of truth, and finish the currently assigned subtask before moving to the next one."
+            )
+        if stage_name == "implementation_requested":
+            return (
+                f"Start implementation work for {task_key}. "
+                "Read task snapshot inputs such as `description.md`, `comments.md`, and `spec/diff.md` when they exist before deciding that no concrete implementation work is present."
+            )
+        if stage_name == "verification_requested":
+            if task_key.startswith("QA-"):
+                return (
+                    f"Run the routed native e2e gate for {task_key}. "
+                    "Read the factory e2e contract and current task checkout. Complete spec/verification-strategy.json "
+                    "e2e.platforms with task-specific command arrays, environment, collection and selected checks, "
+                    "and list task-local integration helpers in e2e.support_files. Preserve the routed work item, "
+                    "policy, baseline SHA and any operator-accepted execution recipe. Execute its e2e-verify.sh command, "
+                    "and inspect spec/e2e-verdict.json and the referenced report and receipts. "
+                    "Submit passed with result passed for a passed or accepted_with_warnings verdict, or failed with result failed "
+                    "for a failed or blocked verdict through write-result.sh. "
+                    "The coordinator routes a blocked native verdict to e2e environment recovery. "
+                    "Do not use blocked_verification_cycle for infrastructure or baseline failures."
+                )
+            return (
+                f"Run deterministic verification for {task_key}. "
+                "Emit passed when the gate is clean, failed when concrete corrections are needed, "
+                "or blocked_verification_cycle when the same verification loop is no longer converging and needs operator intervention."
+            )
+        if stage_name == "verification_correction_requested":
+            return (
+                f"Apply verification corrections for {task_key}. "
+                "If no source change is needed and the correct outcome is to rerun verification after regenerated files, environment changes, or refreshed artifacts, "
+                "submit this correction as completed with that summary; do not block for operator input merely to hand the task back to verification."
+            )
+        if stage_name == "documentation_review_requested":
+            return (
+                f"Review documentation quality for {task_key}. "
+                "Use the routed documentation precheck, docs diff, full diff, and DOCUMENTATION_GUIDE.md when present; when the guide is absent, apply stable behavior/contract documentation rules. "
+                "Emit passed when production docs/comments are clean, failed when documentation-only corrections are needed, "
+                "or skipped_not_needed when there are no docs/comment changes to review."
+            )
+        if stage_name == "convention_review_requested":
+            return (
+                f"Run convention review for {task_key}. "
+                "Review the current diff against local project conventions from CLAUDE.md, README.md, and relevant linked local docs/templates. "
+                "Emit passed if clean, failed for grounded convention issues, or blocked_review_cycle when the immediate correction chain no longer converges."
+            )
+        if stage_name == "requirements_review_requested":
+            return (
+                f"Run requirements review for {task_key}. "
+                "Use statuses.md as canonical Jira task/subtask order and check cumulative requirements, explicit follow-up priority, regressions, edge cases, and focused test coverage. "
+                "Emit passed if clean, failed for grounded requirement issues, or blocked_review_cycle when the immediate correction chain no longer converges."
+            )
+        if stage_name == "convention_review_correction_requested":
+            return (
+                f"Apply convention review corrections for {task_key}. "
+                "Stay aligned to the routed convention findings; fix the local consistency issue cleanly without broadening into unrelated cleanup. "
+                "If the grounded correction is that no source change is needed, submit completed with the evidence instead of blocking for operator input."
+            )
+        if stage_name == "requirements_review_correction_requested":
+            return (
+                f"Apply requirements review corrections for {task_key}. "
+                "Stay aligned to the routed requirement or regression findings; fix behavior and focused tests without broadening into unrelated cleanup. "
+                "If the requested evidence belongs to a later verification gate and no source change is needed in this correction, submit completed with that handoff summary instead of blocking for operator input."
+            )
+        if stage_name == "documentation_review_correction_requested":
+            return (
+                f"Apply documentation review corrections for {task_key}. "
+                "Edit only production documentation and comments needed to resolve the routed documentation review findings. "
+                "Do not change product behavior or broaden into code cleanup."
+            )
+        if stage_name == "doc_harvest_requested":
+            policy_mode = self._optional_lane_policy_mode(session_policy, "doc_harvest_policy")
+            if policy_mode == "required":
+                return (
+                    f"Run documentation harvest for {task_key}. "
+                    "Generate or refresh `spec/full-diff.md`, use it as the source of truth, update grounded feature-level README targets only, "
+                    "use DOCUMENTATION_GUIDE.md when present and stable behavior/contract documentation rules when absent, "
+                    "commit only the documentation changes, and report a compact result summary. "
+                    "This documentation lane is required for this session, so do not emit skipped_not_needed."
+                )
+            return (
+                f"Run documentation harvest for {task_key}. "
+                "Generate or refresh `spec/full-diff.md`, use it as the source of truth, update grounded feature-level README targets only, use DOCUMENTATION_GUIDE.md when present and stable behavior/contract documentation rules when absent, commit only the documentation changes, and report a compact result summary."
+                " Emit skipped_not_needed when the completed change has no grounded README/doc target or does not warrant a documentation update."
+            )
+        if stage_name == "qa_reopen_requested":
+            return f"Apply QA reopen follow-up changes for {task_key}."
+        return None
+
+    def _effective_role_names(self, workflow_profile: str, policy: dict[str, str] | None) -> list[str]:
+        role_names = list(self.default_roles)
+        if (policy or {}).get("review_policy") != "disabled":
+            for role_name in (CONVENTION_REVIEWER_ROLE, REQUIREMENTS_REVIEWER_ROLE):
+                if role_name not in role_names:
+                    role_names.append(role_name)
+        if (policy or {}).get("doc_harvest_policy") != "disabled" and DOC_HARVEST_ROLE not in role_names:
+            role_names.append(DOC_HARVEST_ROLE)
+        if (policy or {}).get("doc_harvest_policy") != "disabled" and DOCUMENTATION_REVIEWER_ROLE not in role_names:
+            role_names.append(DOCUMENTATION_REVIEWER_ROLE)
+        if workflow_profile == "story_full":
+            for role_name in (
+                PROPOSAL_CONTEXT_WORKER_ROLE,
+                REQUIREMENTS_CLARIFIER_WORKER_ROLE,
+                ACCEPTANCE_CRITERIA_WORKER_ROLE,
+                CONSTRAINTS_WORKER_ROLE,
+                SPEC_VERIFIER_WORKER_ROLE,
+                TASK_DECOMPOSER_WORKER_ROLE,
+            ):
+                if role_name not in role_names:
+                    role_names.append(role_name)
+        return role_names
+
+    def _primary_coding_role_name_for_work_type(self, session: Session, work_type: str) -> str:
+        if work_type == "doc_harvest":
+            return DOC_HARVEST_ROLE
+        return IMPLEMENTER_ROLE
+
+    def _primary_coding_role_for_work_type(self, session: Session, work_type: str) -> Role:
+        role_name = self._primary_coding_role_name_for_work_type(session, work_type)
+        role = self.role_repository.get_by_name(session.id, role_name)
+        if role is None:
+            raise IntakeError(f"{role_name} role is missing for the session")
+        return role
+
+    def _primary_coding_role_for_stage(self, session: Session) -> Role | None:
+        work_type = _ACTIVE_WORK_TYPE_BY_STAGE.get(session.current_stage)
+        if work_type is None:
+            return None
+        try:
+            return self._primary_coding_role_for_work_type(session, work_type)
+        except IntakeError:
+            return None
+
+    def _ensure_on_demand_role(self, session: Session, role_name: str) -> Role:
+        existing = self.role_repository.get_by_name(session.id, role_name)
+        if existing is not None and existing.status != RoleStatus.STOPPED:
+            return existing
+
+        runtime_session = self._runtime_session_handle_for_session(session)
+        runtime_role = self._spawn_role_runtime(
+            runtime_session=runtime_session,
+            task_key=session.task_key,
+            role_name=role_name,
+            role_config=(session.role_config or {}).get(role_name),
+        )
+        if existing is not None:
+            return self.role_repository.update_runtime(
+                existing.id,
+                runtime_backend=runtime_role.backend_name,
+                runtime_handle=runtime_role.role_id,
+                status=RoleStatus.RUNNING,
+            )
+        return self.role_repository.create(
+            session_id=session.id,
+            role_name=role_name,
+            runtime_backend=runtime_role.backend_name,
+            runtime_handle=runtime_role.role_id,
+            status=RoleStatus.RUNNING,
+        )
+
+    def _ensure_dispatchable_role(self, session: Session, role: Role) -> Role:
+        if role.status == RoleStatus.RUNNING and role.runtime_handle is not None:
+            return role
+
+        runtime_session = self._runtime_session_handle_for_session(session)
+        runtime_role = self._spawn_role_runtime(
+            runtime_session=runtime_session,
+            task_key=session.task_key,
+            role_name=role.role_name,
+            role_config=(session.role_config or {}).get(role.role_name),
+            resume_mode=self._preferred_runtime_resume_mode((session.role_config or {}).get(role.role_name)),
+        )
+        return self.role_repository.update_runtime(
+            role.id,
+            runtime_backend=runtime_role.backend_name,
+            runtime_handle=runtime_role.role_id,
+            status=RoleStatus.RUNNING,
+        )
+
+    def _stop_on_demand_role(self, session: Session, role_name: str) -> None:
+        if role_name in PERSISTENT_SESSION_ROLES:
+            return
+        role = self.role_repository.get_by_name(session.id, role_name)
+        if role is None or role.runtime_handle is None:
+            return
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_handle_for_session(session).session_id,
+            backend_name=role.runtime_backend,
+        )
+        self.session_backend.stop_role(runtime_role)
+        self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+
+    def _runtime_session_handle_for_session(self, session: Session) -> RuntimeSessionHandle:
+        for role in self.role_repository.list_for_session(session.id):
+            if role.runtime_handle and ":" in role.runtime_handle:
+                runtime_session_id = role.runtime_handle.split(":", 1)[0]
+                return RuntimeSessionHandle(session_id=runtime_session_id)
+        raise IntakeError(f"Could not infer runtime session handle for session {session.id}")
+
+    def get_runtime_state_summary(self, session_id: int) -> dict:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} not found")
+        roles = self.role_repository.list_for_session(session_id)
+        runtime_session_id = None
+        try:
+            runtime_session_id = self._runtime_session_handle_for_session(session).session_id
+        except IntakeError:
+            runtime_session_id = None
+        tmux_session_visibility = None
+        if runtime_session_id is not None and hasattr(self.session_backend, "get_tmux_visibility"):
+            tmux_session_visibility = self.session_backend.get_tmux_visibility(runtime_session_id)
+        role_summaries = []
+        for role in roles:
+            is_current_owner = session.current_owner == role.role_name
+            has_active_work_item = self._find_active_work_item_for_role(session.id, role.id) is not None
+            has_pending_operator_continuation = self._has_pending_operator_continuation(
+                session_id=session.id,
+                role_name=role.role_name,
+                work_item_id=None,
+                stage_name=session.current_stage,
+            )
+            live_state = role.status.value
+            if role.status == RoleStatus.RUNNING:
+                runtime_alive = False
+                if role.runtime_handle is not None:
+                    runtime_alive = self.session_backend.is_role_alive(
+                        RuntimeRoleHandle(
+                            role_id=role.runtime_handle,
+                            session_id=self._runtime_session_id_for_role(role, session),
+                            backend_name=role.runtime_backend,
+                        )
+                    )
+                if not runtime_alive:
+                    live_state = "dead-stale"
+                elif is_current_owner:
+                    live_state = "owner-active"
+                else:
+                    live_state = "live-idle"
+            role_tmux_visibility = None
+            if (
+                runtime_session_id is not None
+                and role.runtime_handle is not None
+                and hasattr(self.session_backend, "get_tmux_visibility")
+            ):
+                role_tmux_visibility = self.session_backend.get_tmux_visibility(
+                    runtime_session_id,
+                    role.runtime_handle,
+                )
+            role_summaries.append(
+                {
+                    "role_name": role.role_name,
+                    "status": role.status.value,
+                    "live_state": live_state,
+                    "runtime_backend": role.runtime_backend,
+                    "runtime_handle": role.runtime_handle,
+                    "is_current_owner": is_current_owner,
+                    "has_active_work_item": has_active_work_item,
+                    "has_pending_operator_continuation": has_pending_operator_continuation,
+                    "tmux_attach_command": (
+                        role_tmux_visibility.get("tmux_role_attach_command")
+                        if isinstance(role_tmux_visibility, dict)
+                        else None
+                    ),
+                    "tmux_capture_command": (
+                        role_tmux_visibility.get("tmux_role_capture_command")
+                        if isinstance(role_tmux_visibility, dict)
+                        else None
+                    ),
+                }
+            )
+        last_auto_recovery = None
+        latest_auto_recovery = self._latest_event_by_type(session_id, {"runtime_role_auto_recovery_attempted"})
+        if latest_auto_recovery is not None:
+            last_auto_recovery = {
+                "role_name": latest_auto_recovery.payload.get("role_name"),
+                "current_stage": latest_auto_recovery.payload.get("current_stage"),
+                "runtime_handle": latest_auto_recovery.payload.get("runtime_handle"),
+                "dead_runtime_handle": latest_auto_recovery.payload.get("dead_runtime_handle"),
+                "event_id": latest_auto_recovery.id,
+                "created_at": latest_auto_recovery.created_at,
+            }
+        return {
+            "available": runtime_session_id is not None,
+            "runtime_session_id": runtime_session_id,
+            "tmux_socket_path": (
+                tmux_session_visibility.get("tmux_socket_path")
+                if isinstance(tmux_session_visibility, dict)
+                else None
+            ),
+            "tmux_attach_command": (
+                tmux_session_visibility.get("tmux_attach_command")
+                if isinstance(tmux_session_visibility, dict)
+                else None
+            ),
+            "last_auto_recovery": last_auto_recovery,
+            "roles": role_summaries,
+        }
+
+    def get_active_runtime_output_summary(self, session_id: int) -> dict:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} not found")
+        if session.status != SessionStatus.ACTIVE:
+            return {
+                "available": False,
+                "role_name": None,
+                "runtime_handle": None,
+                "content": "",
+            }
+
+        active_role: Role | None = None
+        if session.current_owner is not None:
+            current_owner_role = self.role_repository.get_by_name(session_id, session.current_owner)
+            if (
+                current_owner_role is not None
+                and current_owner_role.runtime_handle is not None
+                and current_owner_role.status == RoleStatus.RUNNING
+            ):
+                active_role = current_owner_role
+
+        if active_role is None:
+            active_work_item = self._find_active_work_item_for_current_stage(session)
+            if active_work_item is not None and active_work_item.owner_role_id is not None:
+                owner_role = self.role_repository.get_by_id(active_work_item.owner_role_id)
+                if (
+                    owner_role is not None
+                    and owner_role.runtime_handle is not None
+                    and owner_role.status == RoleStatus.RUNNING
+                ):
+                    active_role = owner_role
+
+        if active_role is None:
+            return {
+                "available": False,
+                "role_name": None,
+                "runtime_handle": None,
+                "content": "",
+            }
+
+        runtime_role = RuntimeRoleHandle(
+            role_id=active_role.runtime_handle,
+            session_id=self._runtime_session_handle_for_session(session).session_id,
+            backend_name=active_role.runtime_backend,
+        )
+        content = self.session_backend.capture_output_snapshot(runtime_role)
+        self._maybe_poke_stalled_runtime_role(
+            session=session,
+            role=active_role,
+            runtime_role=runtime_role,
+            snapshot=content,
+        )
+        return {
+            "available": True,
+            "role_name": active_role.role_name,
+            "runtime_handle": active_role.runtime_handle,
+            "content": content,
+        }
+
+    def _maybe_poke_stalled_runtime_role(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        runtime_role: RuntimeRoleHandle,
+        snapshot: str | None = None,
+    ) -> None:
+        if not hasattr(self.session_backend, "maybe_poke_stalled_role"):
+            return
+        if (
+            session.current_owner != role.role_name
+            and self._find_active_work_item_for_role(session.id, role.id) is None
+        ):
+            return
+        if self._has_pending_role_result_file(session=session, role=role):
+            return
+        active_item = self._find_active_work_item_for_role(session.id, role.id)
+        try:
+            if self._has_unresolved_stall_poke(
+                session=session,
+                role=role,
+                active_work_item_id=active_item.id if active_item is not None else None,
+            ):
+                capacity_check = getattr(self.session_backend, "model_capacity_blocked", None)
+                if capacity_check is None:
+                    return
+                if snapshot is None:
+                    snapshot = self.session_backend.capture_output_snapshot(runtime_role)
+                if not capacity_check(snapshot):
+                    return
+            if snapshot is None:
+                snapshot = self.session_backend.capture_output_snapshot(runtime_role)
+            poke_result = self.session_backend.maybe_poke_stalled_role(
+                runtime_role,
+                snapshot=snapshot,
+            )
+        except Exception as exc:
+            self._append_event(
+                session_id=session.id,
+                event_type="runtime_role_stall_poke_failed",
+                producer_type="system",
+                payload={
+                    "role_name": role.role_name,
+                    "runtime_handle": role.runtime_handle,
+                    "error": str(exc),
+                },
+            )
+            return
+        if not poke_result:
+            return
+        self._append_event(
+            session_id=session.id,
+            event_type="runtime_role_stall_poked",
+            producer_type="system",
+            payload={
+                "role_name": role.role_name,
+                "runtime_handle": role.runtime_handle,
+                **poke_result,
+                "current_stage": session.current_stage,
+                "work_item_id": active_item.id if active_item is not None else None,
+            },
+        )
+
+    def _has_unresolved_stall_poke(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        active_work_item_id: int | None,
+    ) -> bool:
+        for event in reversed(self.event_repository.list_for_session(session.id)):
+            if event.event_type in {
+                "role_input_dispatched",
+                "role_result_ingress_accepted",
+                "role_output_collected",
+                "operator_runtime_input_sent",
+                "session_retried_by_operator",
+                "session_resumed_by_operator",
+            }:
+                return False
+            if event.event_type != "runtime_role_stall_poked":
+                continue
+            if event.payload.get("role_name") != role.role_name:
+                continue
+            event_stage = event.payload.get("current_stage")
+            if event_stage is not None and event_stage != session.current_stage:
+                continue
+            event_work_item_id = event.payload.get("work_item_id")
+            if event_work_item_id is not None and event_work_item_id != active_work_item_id:
+                continue
+            return True
+        return False
+
+    def _has_pending_role_result_file(self, *, session: Session, role: Role) -> bool:
+        candidate_paths: list[Path] = []
+        if self.role_workspace_manager is not None:
+            candidate_paths.append(
+                self.role_workspace_manager.role_directory(session.task_key, role.role_name) / "RESULT.json"
+            )
+        if self.workdir_root is not None:
+            candidate_paths.append(self.workdir_root / session.task_key / "RESULT.json")
+        return any(path.is_file() for path in candidate_paths)
+
+    def stop_runtime_role(self, session_id: int, role_name: str) -> tuple[Session, Event]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} not found")
+        role = self.role_repository.get_by_name(session_id, role_name)
+        if role is None or role.runtime_handle is None:
+            raise IntakeError(f"Role {role_name} has no live runtime handle")
+        runtime_role = RuntimeRoleHandle(
+            role_id=role.runtime_handle,
+            session_id=self._runtime_session_handle_for_session(session).session_id,
+            backend_name=role.runtime_backend,
+        )
+        self.session_backend.stop_role(runtime_role)
+        self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+        session = self._pause_session_for_runtime_stop_if_resumable(session)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="runtime_role_stopped_by_operator",
+            producer_type="operator",
+            payload={
+                "role_name": role_name,
+                "runtime_handle": role.runtime_handle,
+            },
+        )
+        return session, event
+
+    def stop_runtime_session(self, session_id: int) -> tuple[Session, Event]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} not found")
+        runtime_session = self._runtime_session_handle_for_session(session)
+        self.session_backend.stop_session(runtime_session)
+        for role in self.role_repository.list_for_session(session_id):
+            self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+        session = self._pause_session_for_runtime_stop_if_resumable(session)
+        event = self._append_event(
+            session_id=session.id,
+            event_type="runtime_session_stopped_by_operator",
+            producer_type="operator",
+            payload={
+                "runtime_session_id": runtime_session.session_id,
+            },
+        )
+        return session, event
+
+    def _pause_session_for_runtime_stop_if_resumable(self, session: Session) -> Session:
+        if session.status in {
+            SessionStatus.CREATED,
+            SessionStatus.ACTIVE,
+            SessionStatus.PAUSED,
+        }:
+            return self.session_repository.update_status(session.id, SessionStatus.PAUSED)
+        return session
+
+    def _refresh_session_role_runtime_config(
+        self,
+        session: Session,
+        role_name: str,
+    ) -> tuple[Session, dict[str, str]]:
+        refreshed_role_config = normalize_role_runtime_config(
+            repo_root=self._repo_root(),
+            role_names=[role_name],
+            provided=None,
+        ).get(role_name)
+        if refreshed_role_config is None:
+            raise IntakeError(f"Could not refresh runtime config for role {role_name}")
+        updated_role_config = dict(session.role_config or {})
+        updated_role_config[role_name] = dict(refreshed_role_config)
+        session = self.session_repository.update_role_config(
+            session.id,
+            role_config=updated_role_config,
+        )
+        return session, dict(refreshed_role_config)
+
+    def restart_runtime_role(
+        self,
+        session_id: int,
+        role_name: str,
+        *,
+        refresh_runtime_config: bool = False,
+    ) -> tuple[Session, Event, Event | None]:
+        session = self._get_session_or_raise(session_id)
+        role = self.role_repository.get_by_name(session_id, role_name)
+        if role is None:
+            raise IntakeError(f"Role {role_name} is missing for session {session_id}")
+        if role.status not in {RoleStatus.RUNNING, RoleStatus.STOPPED}:
+            raise IntakeError(f"Role {role_name} cannot be restarted from status {role.status.value}")
+
+        runtime_session = self._runtime_session_handle_for_session(session)
+        if role.status == RoleStatus.RUNNING:
+            if role.runtime_handle is None:
+                raise IntakeError(f"Role {role_name} has no live runtime handle")
+            self.session_backend.stop_role(
+                RuntimeRoleHandle(
+                    role_id=role.runtime_handle,
+                    session_id=runtime_session.session_id,
+                    backend_name=role.runtime_backend,
+                )
+            )
+            self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+
+        role_config = (session.role_config or {}).get(role.role_name)
+        if refresh_runtime_config:
+            session, role_config = self._refresh_session_role_runtime_config(session, role.role_name)
+
+        runtime_role = self._spawn_role_runtime(
+            runtime_session=runtime_session,
+            task_key=session.task_key,
+            role_name=role.role_name,
+            role_config=role_config,
+            resume_mode=self._preferred_runtime_resume_mode(role_config),
+        )
+        role = self.role_repository.update_runtime(
+            role.id,
+            runtime_backend=runtime_role.backend_name,
+            runtime_handle=runtime_role.role_id,
+            status=RoleStatus.RUNNING,
+        )
+        followup_event = self._reactivate_restarted_owner_work(session, role)
+        refreshed = self._get_session_or_raise(session_id)
+        event = self._append_event(
+            session_id=refreshed.id,
+            event_type="runtime_role_restarted_by_operator",
+            producer_type="operator",
+            payload={
+                "role_name": role.role_name,
+                "runtime_handle": role.runtime_handle,
+                "session_reactivated": followup_event is not None,
+                "refresh_runtime_config": refresh_runtime_config,
+                "role_config": (refreshed.role_config or {}).get(role.role_name, {}),
+            },
+        )
+        return refreshed, event, followup_event
+
+    def restart_runtime_session(self, session_id: int) -> tuple[Session, Event, Event | None]:
+        session = self._get_session_or_raise(session_id)
+        runtime_session = self.session_backend.create_task_session(session.task_key)
+        updated_owner: Role | None = None
+        for role in self.role_repository.list_for_session(session.id):
+            runtime_role = self._spawn_role_runtime(
+                runtime_session=runtime_session,
+                task_key=session.task_key,
+                role_name=role.role_name,
+                role_config=(session.role_config or {}).get(role.role_name),
+                resume_mode=self._preferred_runtime_resume_mode((session.role_config or {}).get(role.role_name)),
+            )
+            updated_role = self.role_repository.update_runtime(
+                role.id,
+                runtime_backend=runtime_role.backend_name,
+                runtime_handle=runtime_role.role_id,
+                status=RoleStatus.RUNNING,
+            )
+            if updated_role.role_name == session.current_owner:
+                updated_owner = updated_role
+
+        followup_event = self._reactivate_restarted_owner_work(session, updated_owner)
+        refreshed = self._get_session_or_raise(session_id)
+        event = self._append_event(
+            session_id=refreshed.id,
+            event_type="runtime_session_restarted_by_operator",
+            producer_type="operator",
+            payload={
+                "runtime_session_id": runtime_session.session_id,
+                "session_reactivated": followup_event is not None,
+            },
+        )
+        return refreshed, event, followup_event
+
+    def cleanup_task(
+        self,
+        session_id: int,
+        *,
+        cleanup_mode: str,
+        force: bool = False,
+    ) -> dict:
+        session = self._get_session_or_raise(session_id)
+        if cleanup_mode not in {"soft", "full", "smart"}:
+            raise IntakeError(f"Unsupported cleanup mode: {cleanup_mode}")
+
+        jira_status = self._get_jira_status_name(session.task_key)
+        full_cleanup_allowed = (
+            jira_status is not None and jira_status.strip().lower() in _CLOSED_JIRA_STATUSES
+        )
+        effective_cleanup_mode = "full" if cleanup_mode == "smart" and full_cleanup_allowed else cleanup_mode
+        if effective_cleanup_mode == "smart":
+            effective_cleanup_mode = "soft"
+        if effective_cleanup_mode == "full" and not force and not full_cleanup_allowed:
+            raise IntakeError(
+                f"Full cleanup requires a closed Jira status; current status is {jira_status or 'unknown'}"
+            )
+
+        removed_paths: list[str] = []
+        removed_paths.extend(self._stop_and_clear_runtime_handles(session))
+        removed_paths.extend(self._remove_task_runtime_residue(session.task_key))
+        removed_paths.extend(self._remove_runner_private_residue(session.task_key))
+
+        deleted_session = False
+        if effective_cleanup_mode == "full":
+            removed_paths.extend(self._remove_task_artifacts(session.task_key))
+            removed_paths.extend(self._remove_task_worktree_and_directory(session.task_key))
+            self.session_repository.delete(session.id)
+            deleted_session = True
+        else:
+            refreshed = self._get_session_or_raise(session_id)
+            self._append_event(
+                session_id=refreshed.id,
+                event_type="task_runtime_cleaned_by_operator",
+                producer_type="operator",
+                payload={
+                    "task_key": refreshed.task_key,
+                    "cleanup_mode": effective_cleanup_mode,
+                    "removed_paths": removed_paths,
+                },
+            )
+
+        return {
+            "cleaned": True,
+            "deleted_session": deleted_session,
+            "cleanup_mode": effective_cleanup_mode,
+            "task_key": session.task_key,
+            "jira_status": jira_status,
+            "full_cleanup_allowed": full_cleanup_allowed,
+            "removed_paths": removed_paths,
+            "session": None if deleted_session else self._get_session_or_raise(session_id),
+        }
+
+    def cleanup_closed_tasks(self) -> list[dict]:
+        if self.workdir_root is None:
+            raise IntakeError("Coordinator is missing workdir root")
+
+        results: list[dict] = []
+        candidates: set[str] = set()
+        for session in self.session_repository.list_all():
+            candidates.add(session.task_key)
+        for child in self.workdir_root.iterdir():
+            if child.is_dir() and _TASK_KEY_PATTERN.match(child.name):
+                candidates.add(child.name)
+        candidates.update(self._runner_private_residue_task_keys())
+
+        for task_key in sorted(candidates):
+            jira_status = self._get_jira_status_name(task_key)
+            if jira_status is None or jira_status.strip().lower() not in _CLOSED_JIRA_STATUSES:
+                continue
+            session = self.session_repository.get_by_task_key(task_key)
+            if session is None:
+                removed_paths: list[str] = []
+                removed_paths.extend(self._remove_task_runtime_residue(task_key))
+                removed_paths.extend(self._remove_runner_private_residue(task_key))
+                removed_paths.extend(self._remove_task_artifacts(task_key))
+                removed_paths.extend(self._remove_task_worktree_and_directory(task_key))
+                results.append(
+                    {
+                        "task_key": task_key,
+                        "jira_status": jira_status,
+                        "deleted_session": False,
+                        "removed_paths": removed_paths,
+                    }
+                )
+                continue
+
+            result = self.cleanup_task(session.id, cleanup_mode="full", force=True)
+            results.append(
+                {
+                    "task_key": task_key,
+                    "jira_status": jira_status,
+                    "deleted_session": bool(result["deleted_session"]),
+                    "removed_paths": list(result["removed_paths"]),
+                }
+            )
+        return results
+
+    def _spawn_role_runtime(
+        self,
+        *,
+        runtime_session: RuntimeSessionHandle,
+        task_key: str,
+        role_name: str,
+        role_config: dict[str, str] | None,
+        resume_mode: str | None = None,
+    ) -> RuntimeRoleHandle:
+        if role_config is None:
+            role_config = normalize_role_runtime_config(
+                repo_root=self._repo_root(),
+                role_names=[role_name],
+                provided=None,
+            ).get(role_name)
+        start_directory = None
+        launch_command = None
+        if self.role_workspace_manager is not None:
+            workspace = self.role_workspace_manager.ensure_role_workspace(task_key, role_name)
+            start_directory = workspace.directory
+            if self.role_launcher_manager is not None:
+                launch_plan = self.role_launcher_manager.ensure_launch_plan(
+                    task_key=task_key,
+                    workspace=workspace,
+                    role_config=role_config,
+                    resume_mode=resume_mode,
+                )
+                launch_command = launch_plan.command
+        return self.session_backend.spawn_role(
+            runtime_session,
+            role_name,
+            start_directory=start_directory,
+            launch_command=launch_command,
+        )
+
+    @staticmethod
+    def _preferred_runtime_resume_mode(role_config: dict[str, str] | None) -> str | None:
+        runner = str((role_config or {}).get("runner") or "").strip()
+        if runner == "codex":
+            return "native"
+        return None
+
+    def _reactivate_restarted_owner_work(self, session: Session, role: Role | None) -> Event | None:
+        if role is None or session.current_owner != role.role_name:
+            return None
+
+        work_item = self._find_active_work_item_for_role(session.id, role.id)
+        if work_item is None:
+            return None
+
+        instruction = self._resume_stage_instruction(
+            session.current_stage,
+            session.task_key,
+            workflow_profile=session.workflow_profile,
+            role_name=role.role_name,
+            session_policy=session.policy,
+        )
+        if instruction is None:
+            return None
+
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        session = self.session_repository.update_stage_and_owner(
+            session.id,
+            current_stage=session.current_stage,
+            current_owner=role.role_name,
+        )
+        return self._dispatch_role_work(
+            session=session,
+            role=role,
+            work_item=work_item,
+            stage_name=session.current_stage,
+            instruction=instruction,
+            force_redispatch=True,
+        )
+
+    def _resume_stage_instruction(
+        self,
+        stage_name: str,
+        task_key: str,
+        *,
+        workflow_profile: str,
+        role_name: str,
+        session_policy: dict[str, str] | None = None,
+    ) -> str | None:
+        base_instruction = self._stage_instruction(
+            stage_name,
+            task_key,
+            workflow_profile=workflow_profile,
+            role_name=role_name,
+            session_policy=session_policy,
+        )
+        if base_instruction is None:
+            return None
+        return (
+            f"{base_instruction}\n\n"
+            "This task session was restored after a runtime interruption.\n"
+            "If this routed work was already in progress, continue and finish the same unfinished work from your existing live session context.\n"
+            "Do not restart the whole analysis from scratch unless the current workspace files require a targeted refresh."
+        )
+
+    def _read_snapshot_subtasks(self, task_key: str) -> list | None:
+        if self.workdir_root is None:
+            return None
+        statuses_file = self.workdir_root / task_key / "statuses.md"
+        if not statuses_file.exists():
+            return None
+        return read_snapshot_subtasks(statuses_file)
+
+    def _read_snapshot_subtasks_or_raise(self, task_key: str) -> list:
+        subtasks = self._read_snapshot_subtasks(task_key)
+        if subtasks is None:
+            raise IntakeError(f"statuses.md not found for session {task_key}")
+        return subtasks
+
+    def _parse_subtask_work_item_title(self, title: str) -> dict[str, str | None]:
+        normalized_title = title.removeprefix("Retry: ")
+        prefix = "Subtask implementation for "
+        if not normalized_title.startswith(prefix):
+            return {"key": None, "title": title}
+        payload = normalized_title[len(prefix):]
+        if ": " not in payload:
+            return {"key": payload.strip() or None, "title": title}
+        key, item_title = payload.split(": ", 1)
+        return {
+            "key": key.strip() or None,
+            "title": item_title.strip() or title,
+        }
+
+    def _refresh_subtask_snapshot(self, session: Session) -> tuple[list | None, bool]:
+        if self.snapshot_adapter is None:
+            return None, False
+
+        result = self.snapshot_adapter.run(session.task_key)
+        if self.artifacts_root is not None:
+            stdout_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "subtask-graph",
+                "snapshot-refresh.stdout.txt",
+                result.stdout,
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="subtask-graph",
+                artifact_type="subtask_snapshot_refresh_stdout",
+                path=str(stdout_path),
+                metadata={"exit_code": result.returncode},
+            )
+            stderr_path = write_text_artifact(
+                self.artifacts_root,
+                session.task_key,
+                "subtask-graph",
+                "snapshot-refresh.stderr.txt",
+                result.stderr,
+            )
+            self.artifact_repository.create(
+                session_id=session.id,
+                stage_name="subtask-graph",
+                artifact_type="subtask_snapshot_refresh_stderr",
+                path=str(stderr_path),
+                metadata={"exit_code": result.returncode},
+            )
+
+        if not result.ok:
+            self._append_event(
+                session_id=session.id,
+                event_type="subtask_snapshot_refresh_failed",
+                producer_type="coordinator",
+                payload={
+                    "task_key": session.task_key,
+                    "snapshot_exit_code": result.returncode,
+                },
+            )
+            return None, False
+
+        subtasks = self._read_snapshot_subtasks(session.task_key)
+        if subtasks is None:
+            return None, True
+
+        self._record_subtask_statuses_artifact(session, subtasks)
+        unresolved = unresolved_subtasks(subtasks)
+        self._append_event(
+            session_id=session.id,
+            event_type="subtask_snapshot_refreshed",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "snapshot_exit_code": result.returncode,
+                "subtask_count": len(subtasks),
+                "unresolved_count": len(unresolved),
+            },
+        )
+        return subtasks, True
+
+    def _reconcile_subtask_queue_after_refresh(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+        queued_items: list[WorkItem],
+        unresolved: list,
+    ) -> list[WorkItem]:
+        if not unresolved:
+            for item in queued_items:
+                self.work_item_repository.update_status(item.id, WorkItemStatus.COMPLETED)
+            return []
+
+        desired_count = len(unresolved)
+        normalized_items = queued_items[:desired_count]
+        for extra_item in queued_items[desired_count:]:
+            self.work_item_repository.update_status(extra_item.id, WorkItemStatus.COMPLETED)
+
+        reconciled: list[WorkItem] = []
+        for index, subtask in enumerate(unresolved):
+            title = f"Subtask implementation for {subtask.key}: {subtask.title}"
+            priority = max(70 - index, 1)
+            if index < len(normalized_items):
+                reconciled.append(
+                    self.work_item_repository.update_shape(
+                        normalized_items[index].id,
+                        work_type="subtask_implementation",
+                        title=title,
+                        owner_role_id=None,
+                        status=WorkItemStatus.UNASSIGNED,
+                    )
+                )
+                continue
+            reconciled.append(
+                self.work_item_repository.create(
+                    session_id=session.id,
+                    work_type="subtask_implementation",
+                    title=title,
+                    owner_role_id=None,
+                    source_event_id=source_event.id,
+                    priority=priority,
+                    status=WorkItemStatus.UNASSIGNED,
+                )
+            )
+        return reconciled
+
+    def _record_subtask_statuses_artifact(self, session: Session, subtasks: list) -> None:
+        if self.artifacts_root is None or self.workdir_root is None:
+            raise IntakeError("Coordinator is missing workdir root or artifact root")
+
+        unresolved = unresolved_subtasks(subtasks)
+        statuses_file = self.workdir_root / session.task_key / "statuses.md"
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "subtask-graph",
+            "statuses.md",
+            statuses_file.read_text(),
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="subtask-graph",
+            artifact_type="subtask_statuses_markdown",
+            path=str(artifact_path),
+            metadata={
+                "subtask_count": len(subtasks),
+                "unresolved_count": len(unresolved),
+            },
+        )
+
+    def _subtask_skip_history(
+        self,
+        session_id: int,
+        *,
+        before_event_id: int | None = None,
+    ) -> list[dict[str, object]]:
+        entries: list[dict[str, object]] = []
+        for event in self.event_repository.list_for_session(session_id):
+            if before_event_id is not None and event.id >= before_event_id:
+                continue
+            if event.event_type != "subtask_implementation_skipped_by_operator":
+                continue
+            subtask_key = str(event.payload.get("subtask_key") or "").strip()
+            if not subtask_key:
+                continue
+            entries.append(
+                {
+                    "event_id": event.id,
+                    "subtask_key": subtask_key,
+                    "subtask_title": str(event.payload.get("subtask_title") or "").strip(),
+                    "reason": str(event.payload.get("reason") or "").strip(),
+                }
+            )
+        return entries
+
+    def _materialize_skipped_subtasks_context(self, session: Session) -> str | None:
+        if self.workdir_root is None:
+            return None
+        entries = self._subtask_skip_history(session.id)
+        if not entries:
+            return None
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / "skipped-subtasks.md"
+        lines = [
+            "# Operator-Skipped Subtasks",
+            "",
+            "These Jira subtasks were explicitly skipped or deferred by the operator for this run.",
+            "Do not require their scoped work in downstream review passes for this run.",
+            "Continue to report regressions in already accepted non-skipped scope.",
+            "",
+            "## Entries",
+            "",
+        ]
+        for entry in entries:
+            title = str(entry.get("subtask_title") or "").strip()
+            heading = str(entry["subtask_key"])
+            if title:
+                heading = f"{heading}: {title}"
+            lines.extend(
+                [
+                    f"### {heading}",
+                    "",
+                    f"- Operator event: {entry['event_id']}",
+                    f"- Reason: {entry.get('reason') or 'No reason recorded.'}",
+                    "",
+                ]
+            )
+        target_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+        return str(target_path)
+
+    def _latest_artifact_for_session_type(
+        self,
+        session_id: int,
+        artifact_type: str,
+    ) -> Artifact | None:
+        for artifact in reversed(self.artifact_repository.list_for_session(session_id)):
+            if artifact.artifact_type == artifact_type:
+                return artifact
+        return None
+
+    def _task_decomposition_markdown(
+        self,
+        *,
+        summary: str,
+        task_breakdown: str,
+    ) -> str:
+        lines = ["# Task Decomposition", ""]
+        if summary:
+            lines.extend(["## Summary", "", summary, ""])
+        if task_breakdown:
+            lines.extend(["## Task Breakdown", "", task_breakdown, ""])
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _materialize_story_spec_file(
+        self,
+        *,
+        session: Session,
+        filename: str,
+        artifact_type: str,
+        title: str,
+        explicit_markdown: str,
+        sections: list[tuple[str, str]],
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / filename
+        if explicit_markdown:
+            content = explicit_markdown.rstrip() + "\n"
+        elif target_path.is_file():
+            existing_content = target_path.read_text().strip()
+            if existing_content:
+                content = existing_content.rstrip() + "\n"
+            else:
+                lines = [f"# {title}", ""]
+                for heading, body in sections:
+                    normalized = body.strip()
+                    if not normalized:
+                        continue
+                    lines.extend([f"## {heading}", "", normalized, ""])
+                content = "\n".join(lines).rstrip() + "\n"
+        else:
+            lines = [f"# {title}", ""]
+            for heading, body in sections:
+                normalized = body.strip()
+                if not normalized:
+                    continue
+                lines.extend([f"## {heading}", "", normalized, ""])
+            content = "\n".join(lines).rstrip() + "\n"
+        target_path.write_text(content)
+
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "planning",
+            filename,
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="planning",
+            artifact_type=artifact_type,
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+            },
+        )
+
+    def _sync_role_workspace_outputs_to_task_snapshot(
+        self,
+        *,
+        session: Session,
+        role_name: str,
+        outputs: object,
+    ) -> None:
+        if self.role_workspace_manager is None or self.workdir_root is None:
+            return
+        if not isinstance(outputs, list):
+            return
+
+        workspace_root = self.role_workspace_manager.role_directory(session.task_key, role_name)
+        task_root = self.workdir_root / session.task_key
+        for raw_output in outputs:
+            relative_path = str(raw_output).strip()
+            if not relative_path or relative_path == "RESULT.json":
+                continue
+            candidate = Path(relative_path)
+            if candidate.is_absolute():
+                continue
+            normalized = Path(*[part for part in candidate.parts if part not in {"", "."}])
+            if any(part == ".." for part in normalized.parts):
+                continue
+            source_path = workspace_root / normalized
+            if not source_path.is_file():
+                continue
+            target_path = task_root / normalized
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_path, target_path)
+
+    def _materialize_final_verification_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / "final-verification.md"
+        explicit_markdown = str(source_event.payload.get("final_verification_markdown") or "").strip()
+        if session.task_key.startswith("QA-") and source_event.payload.get("e2e_report_path"):
+            content = Path(source_event.payload["e2e_report_path"]).read_text()
+            target_path.write_text(content)
+        elif explicit_markdown:
+            content = explicit_markdown.rstrip() + "\n"
+            target_path.write_text(content)
+        elif target_path.is_file() and self._verification_event_outcome_status(source_event) == "passed":
+            content = target_path.read_text()
+        else:
+            summary = str(source_event.payload.get("summary") or "").strip()
+            failures = source_event.payload.get("failures")
+            failure_list: list[str] = []
+            if isinstance(failures, list):
+                failure_list = [str(item).strip() for item in failures if str(item).strip()]
+            check_outputs = source_event.payload.get("check_outputs")
+            rendered_outputs: list[tuple[str, str]] = []
+            if isinstance(check_outputs, dict):
+                for name, value in check_outputs.items():
+                    rendered_name = str(name).strip()
+                    rendered_value = str(value).strip()
+                    if rendered_name and rendered_value:
+                        rendered_outputs.append((rendered_name, rendered_value))
+            passed = self._verification_event_outcome_status(source_event) == "passed"
+            strategy_lines: list[str] = []
+            strategy_path = spec_root / "verification-strategy.json"
+            if strategy_path.is_file():
+                try:
+                    strategy = json.loads(strategy_path.read_text())
+                except json.JSONDecodeError:
+                    strategy = None
+                if isinstance(strategy, dict):
+                    platform = str(strategy.get("platform") or "").strip()
+                    mode = str(strategy.get("mode") or "").strip()
+                    reason = str(strategy.get("reason") or "").strip()
+                    phases = strategy.get("phases")
+                    phase_lines: list[str] = []
+                    if isinstance(phases, list):
+                        phase_lines = [str(item).strip() for item in phases if str(item).strip()]
+                    strategy_lines.extend(["## Strategy", ""])
+                    if platform:
+                        strategy_lines.append(f"- Platform: {platform}")
+                    if mode:
+                        strategy_lines.append(f"- Mode: {mode}")
+                    if phase_lines:
+                        strategy_lines.append(f"- Phases: {', '.join(phase_lines)}")
+                    impact_mapping = strategy.get("impact_mapping")
+                    if isinstance(impact_mapping, dict):
+                        impact_confidence = str(impact_mapping.get("confidence") or "").strip()
+                        impact_reason = str(impact_mapping.get("reason") or "").strip()
+                        fallback_required = bool(impact_mapping.get("fallback_required"))
+                        impacted_areas = impact_mapping.get("impacted_areas")
+                        impacted_modules = impact_mapping.get("impacted_modules")
+                        impacted_build_tasks = impact_mapping.get("impacted_build_tasks")
+                        impacted_test_tasks = impact_mapping.get("impacted_test_tasks")
+                        impacted_lint_tasks = impact_mapping.get("impacted_lint_tasks")
+                        unmapped_files = impact_mapping.get("unmapped_files")
+                        strategy_lines.extend(["", "### Impact Mapping", ""])
+                        if impact_confidence:
+                            strategy_lines.append(f"- Confidence: {impact_confidence}")
+                        strategy_lines.append(
+                            f"- Broad fallback required: {'yes' if fallback_required else 'no'}"
+                        )
+                        if isinstance(impacted_areas, list):
+                            rendered_areas = [str(item).strip() for item in impacted_areas if str(item).strip()]
+                            if rendered_areas:
+                                strategy_lines.append(f"- Impacted areas: {', '.join(rendered_areas)}")
+                        if isinstance(impacted_modules, list):
+                            rendered_modules = [str(item).strip() for item in impacted_modules if str(item).strip()]
+                            if rendered_modules:
+                                strategy_lines.append(f"- Impacted modules: {', '.join(rendered_modules)}")
+                        if isinstance(impacted_build_tasks, list):
+                            rendered_build_tasks = [str(item).strip() for item in impacted_build_tasks if str(item).strip()]
+                            if rendered_build_tasks:
+                                strategy_lines.append(f"- Build tasks: {', '.join(rendered_build_tasks)}")
+                        if isinstance(impacted_test_tasks, list):
+                            rendered_test_tasks = [str(item).strip() for item in impacted_test_tasks if str(item).strip()]
+                            if rendered_test_tasks:
+                                strategy_lines.append(f"- Test tasks: {', '.join(rendered_test_tasks)}")
+                        if isinstance(impacted_lint_tasks, list):
+                            rendered_lint_tasks = [str(item).strip() for item in impacted_lint_tasks if str(item).strip()]
+                            if rendered_lint_tasks:
+                                strategy_lines.append(f"- Lint tasks: {', '.join(rendered_lint_tasks)}")
+                        if isinstance(unmapped_files, list):
+                            rendered_unmapped = [str(item).strip() for item in unmapped_files if str(item).strip()]
+                            if rendered_unmapped:
+                                strategy_lines.extend(["", "#### Unmapped Files", ""])
+                                strategy_lines.extend(f"- `{item}`" for item in rendered_unmapped[:10])
+                        if impact_reason:
+                            strategy_lines.extend(["", "#### Mapping Rationale", "", impact_reason])
+                    commands = strategy.get("commands")
+                    if isinstance(commands, list):
+                        rendered_commands = [str(item).strip() for item in commands if str(item).strip()]
+                        if rendered_commands:
+                            strategy_lines.extend(["", "### Commands", ""])
+                            strategy_lines.extend(f"- `{item}`" for item in rendered_commands)
+                    changed_files = strategy.get("changed_files")
+                    if isinstance(changed_files, list):
+                        rendered_changed_files = [str(item).strip() for item in changed_files if str(item).strip()]
+                        if rendered_changed_files:
+                            strategy_lines.extend(["", "### Changed Files", ""])
+                            strategy_lines.extend(f"- `{item}`" for item in rendered_changed_files[:20])
+                    if reason:
+                        strategy_lines.extend(["", "### Why This Path", "", reason])
+            lines = [f"# Final Verification: {session.task_key}", ""]
+            if strategy_lines:
+                lines.extend(strategy_lines)
+                lines.append("")
+            if passed:
+                lines.extend(
+                    [
+                        "## Result",
+                        "PASS",
+                        "",
+                        "## Checks",
+                        "- Tests: passed",
+                        "- Linter: passed",
+                    ]
+                )
+                if summary:
+                    lines.extend(["", "## Summary", "", summary])
+            else:
+                lines.extend(["## Result", "FAIL"])
+                if failure_list:
+                    lines.extend(["", "## Failed checks", ""])
+                    lines.extend(f"- {item}" for item in failure_list)
+                if summary:
+                    lines.extend(["", "## Summary", "", summary])
+                for check_name, output_text in rendered_outputs:
+                    lines.extend(
+                        [
+                            "",
+                            f"## Output: {check_name}",
+                            "",
+                            "```text",
+                            output_text,
+                            "```",
+                        ]
+                    )
+            content = "\n".join(lines).rstrip() + "\n"
+            target_path.write_text(content)
+
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "verification",
+            "final-verification.md",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="verification",
+            artifact_type="final_verification_markdown",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+            },
+        )
+
+    def _materialize_verification_outcome_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / "verification-outcome.json"
+
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        failures = payload.get("failures")
+        normalized_failures = (
+            [str(item).strip() for item in failures if str(item).strip()]
+            if isinstance(failures, list)
+            else []
+        )
+        if not normalized_failures:
+            failure = payload.get("failure")
+            if isinstance(failure, dict):
+                normalized_failures = [str(item).strip() for item in failure.values() if str(item).strip()]
+            elif isinstance(failure, list):
+                normalized_failures = [str(item).strip() for item in failure if str(item).strip()]
+            else:
+                rendered_failure = str(failure or "").strip()
+                if rendered_failure:
+                    normalized_failures = [rendered_failure]
+        check_outputs = payload.get("check_outputs")
+        normalized_check_outputs = check_outputs if isinstance(check_outputs, dict) else {}
+        commands = payload.get("commands")
+        normalized_commands: list[dict[str, object]] = []
+        if isinstance(commands, list):
+            normalized_commands = [command for command in commands if isinstance(command, dict)]
+        elif isinstance(commands, dict):
+            for command_name, command_payload in commands.items():
+                if not isinstance(command_payload, dict):
+                    continue
+                normalized_commands.append(
+                    {
+                        "name": str(command_name).strip(),
+                        **command_payload,
+                    }
+                )
+        structured_status = self._verification_event_outcome_status(source_event)
+        outcome = {
+            "task_key": session.task_key,
+            "source_event_id": source_event.id,
+            "source_event_type": source_event.event_type,
+            "status": structured_status,
+            "e2e_result": payload.get("e2e_result"),
+            "work_item_id": payload.get("work_item_id"),
+            "summary": str(payload.get("summary") or "").strip(),
+            "details": str(payload.get("details") or "").strip(),
+            "verification_status": str(payload.get("verification_status") or "").strip(),
+            "result": str(payload.get("result") or "").strip(),
+            "failures": normalized_failures,
+            "check_outputs": normalized_check_outputs,
+            "commands": normalized_commands,
+        }
+        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
+        target_path.write_text(content)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "verification",
+            "verification-outcome.json",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="verification",
+            artifact_type="verification_outcome_json",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": structured_status,
+                "source_event_id": source_event.id,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+
+    def _payload_work_item_id(self, payload: dict | object) -> int | None:
+        if not isinstance(payload, dict):
+            return None
+        raw_work_item_id = payload.get("work_item_id")
+        if isinstance(raw_work_item_id, int):
+            return raw_work_item_id
+        if isinstance(raw_work_item_id, str):
+            rendered = raw_work_item_id.strip()
+            if rendered.isdigit():
+                return int(rendered)
+        return None
+
+    def _verification_event_outcome_status(self, source_event: Event) -> str:
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        if source_event.event_type == "verification_failed":
+            return "failed"
+        if payload.get("e2e_result") == "accepted_with_warnings":
+            return "accepted_with_warnings"
+        explicit_result = str(payload.get("result") or "").strip().lower()
+        if explicit_result in {"passed", "failed"}:
+            return explicit_result
+        return "passed"
+
+    def _verification_outcome_status(self, session: Session) -> str | None:
+        if self.workdir_root is not None:
+            outcome_path = self.workdir_root / session.task_key / "spec" / "verification-outcome.json"
+            if outcome_path.is_file():
+                try:
+                    payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    payload = None
+                if isinstance(payload, dict):
+                    status = str(payload.get("status") or "").strip().lower()
+                    if status in {"passed", "failed", "accepted_with_warnings"}:
+                        return status
+        return None
+
+    def _doc_harvest_outcome_status(self, session: Session) -> str | None:
+        if self.workdir_root is None:
+            return None
+        outcome_path = self.workdir_root / session.task_key / "spec" / "doc-harvest-outcome.json"
+        if not outcome_path.is_file():
+            return None
+        try:
+            payload = json.loads(outcome_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        status = str(payload.get("status") or "").strip().lower()
+        return status or None
+
+    def _require_passed_verification_for_delivery(self, session: Session) -> None:
+        if not self._verification_gate_required_for_delivery(session):
+            return
+        if self._verification_outcome_status(session) not in {"passed", "accepted_with_warnings"}:
+            raise IntakeError(
+                f"Session {session.id} cannot enter delivery because workflow verification did not pass"
+            )
+
+    def _verification_gate_required_for_delivery(self, session: Session) -> bool:
+        return session.workflow_profile in {"oneshot", "story_full"}
+
+    def _materialize_dual_review_outcome_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+        lane: str,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        review_root = self.workdir_root / session.task_key / "review" / lane
+        review_root.mkdir(parents=True, exist_ok=True)
+        target_path = review_root / "outcome.json"
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        event_prefix = _DUAL_REVIEW_EVENT_PREFIX_BY_LANE[lane]
+        if source_event.event_type == f"{event_prefix}_passed":
+            status = "passed"
+        elif source_event.event_type == f"{event_prefix}_issues_found":
+            status = "issues_found"
+        else:
+            status = "blocked"
+        outcome = {
+            "task_key": session.task_key,
+            "review_lane": lane,
+            "source_event_id": source_event.id,
+            "source_event_type": source_event.event_type,
+            "status": status,
+            "summary": str(payload.get("summary") or "").strip(),
+            "details": str(payload.get("details") or "").strip(),
+            "issues_markdown": str(payload.get("issues_markdown") or "").strip(),
+            "work_item_id": payload.get("work_item_id"),
+        }
+        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
+        target_path.write_text(content, encoding="utf-8")
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            f"{lane}-review",
+            "outcome.json",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name=f"{lane}-review",
+            artifact_type=_DUAL_REVIEW_OUTCOME_ARTIFACT_BY_LANE[lane],
+            path=str(artifact_path),
+            metadata=self._review_outcome_metadata(
+                task_key=session.task_key,
+                source_path=str(target_path),
+                review_lane=lane,
+                status=status,
+                source_event_id=source_event.id,
+                work_item_id=payload.get("work_item_id"),
+            ),
+        )
+
+    def _materialize_story_planning_outcome_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+        work_type: str,
+        status: str,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / f"{work_type}-outcome.json"
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+
+        def _normalize_list(value: object) -> list[str]:
+            return [str(item).strip() for item in value if str(item).strip()] if isinstance(value, list) else []
+
+        outcome = {
+            "task_key": session.task_key,
+            "source_event_id": source_event.id,
+            "source_event_type": source_event.event_type,
+            "work_type": work_type,
+            "status": status,
+            "summary": str(payload.get("summary") or "").strip(),
+            "details": str(payload.get("details") or "").strip(),
+            "assumptions": str(payload.get("assumptions") or "").strip(),
+            "context_findings": str(payload.get("context_findings") or "").strip(),
+            "highlighted_cases": str(payload.get("highlighted_cases") or "").strip(),
+            "key_constraints": str(payload.get("key_constraints") or "").strip(),
+            "next_step": str(payload.get("next_step") or "").strip(),
+            "failures": _normalize_list(payload.get("failures")),
+            "missing_inputs": _normalize_list(payload.get("missing_inputs")),
+            "pending_decisions": _normalize_list(payload.get("pending_decisions")),
+            "blocker_questions": _normalize_list(payload.get("blocker_questions")),
+            "work_item_id": payload.get("work_item_id"),
+        }
+        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
+        target_path.write_text(content)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            work_type.replace("_", "-"),
+            f"{work_type}-outcome.json",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name=work_type.replace("_", "-"),
+            artifact_type=f"{work_type}_outcome_json",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": status,
+                "source_event_id": source_event.id,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+
+    def _materialize_spec_verification_outcome_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / "spec-verification-outcome.json"
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        status = "completed" if source_event.event_type == "spec_verification_completed" else "blocked"
+        blocker_questions = payload.get("blocker_questions")
+        normalized_questions = (
+            [str(item).strip() for item in blocker_questions if str(item).strip()]
+            if isinstance(blocker_questions, list)
+            else []
+        )
+        outcome = {
+            "task_key": session.task_key,
+            "source_event_id": source_event.id,
+            "source_event_type": source_event.event_type,
+            "status": status,
+            "summary": str(payload.get("summary") or "").strip(),
+            "details": str(payload.get("details") or "").strip(),
+            "verified_focus": str(payload.get("verified_focus") or "").strip(),
+            "blocker_questions": normalized_questions,
+            "work_item_id": payload.get("work_item_id"),
+        }
+        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
+        target_path.write_text(content)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "spec-verification",
+            "spec-verification-outcome.json",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="spec-verification",
+            artifact_type="spec_verification_outcome_json",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": status,
+                "source_event_id": source_event.id,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+
+    def _materialize_doc_harvest_outcome_file(
+        self,
+        *,
+        session: Session,
+        source_event: Event,
+        status: str,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        target_path = spec_root / "doc-harvest-outcome.json"
+        payload = source_event.payload if isinstance(source_event.payload, dict) else {}
+        documentation_updates = payload.get("documentation_updates")
+        outcome = {
+            "task_key": session.task_key,
+            "source_event_id": source_event.id,
+            "source_event_type": source_event.event_type,
+            "status": status,
+            "summary": str(payload.get("summary") or "").strip(),
+            "details": str(payload.get("details") or "").strip(),
+            "documentation_updates": documentation_updates if isinstance(documentation_updates, dict) else {},
+            "work_item_id": payload.get("work_item_id"),
+        }
+        content = json.dumps(outcome, indent=2, sort_keys=True) + "\n"
+        target_path.write_text(content)
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "doc-harvest",
+            "doc-harvest-outcome.json",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="doc-harvest",
+            artifact_type="doc_harvest_outcome_json",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": status,
+                "source_event_id": source_event.id,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+
+    def _materialize_documentation_review_report(
+        self,
+        *,
+        session: Session,
+        output_type: str,
+        payload: dict,
+    ) -> Path:
+        if self.workdir_root is None or self.artifacts_root is None:
+            raise IntakeError("Coordinator is missing workdir or artifact root")
+
+        spec_root = self.workdir_root / session.task_key / "spec"
+        spec_root.mkdir(parents=True, exist_ok=True)
+        status = "passed" if output_type in {"passed", "completed", "skipped_not_needed"} else "failed"
+        target_path = spec_root / "documentation-review.md"
+        summary = str(payload.get("summary") or "").strip()
+        details = str(payload.get("details") or "").strip()
+        issues_markdown = str(payload.get("issues_markdown") or "").strip()
+        lines = [
+            f"# Documentation Review: {session.task_key}",
+            "",
+            f"Status: {status}",
+            "",
+        ]
+        if summary:
+            lines.extend(["## Summary", "", summary, ""])
+        if details:
+            lines.extend(["## Details", "", details, ""])
+        if issues_markdown:
+            lines.extend(["## Issues", "", issues_markdown, ""])
+        if not any((summary, details, issues_markdown)):
+            lines.extend(["## Summary", "", "Documentation review completed.", ""])
+        content = "\n".join(lines).rstrip() + "\n"
+        target_path.write_text(content, encoding="utf-8")
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "documentation-review",
+            "documentation-review.md",
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="documentation-review",
+            artifact_type="documentation_review_report_markdown",
+            path=str(artifact_path),
+            metadata={
+                "task_key": session.task_key,
+                "source_path": str(target_path),
+                "status": status,
+                "work_item_id": payload.get("work_item_id"),
+            },
+        )
+        return target_path
+
+    def _materialize_dual_review_report(
+        self,
+        *,
+        session: Session,
+        output_type: str,
+        payload: dict,
+        lane: str,
+    ) -> None:
+        if self.workdir_root is None or self.artifacts_root is None:
+            return
+
+        target_path = self._next_dual_review_report_target_path(session, lane=lane)
+        if target_path is None:
+            return
+        explicit_markdown = str(payload.get("review_markdown") or "").strip()
+        if explicit_markdown:
+            content = explicit_markdown.rstrip() + "\n"
+        else:
+            summary = str(payload.get("summary") or "").strip()
+            issues_markdown = str(payload.get("issues_markdown") or "").strip()
+            issues = payload.get("issues")
+            lines: list[str] = []
+            if output_type in {"passed", "completed", "skipped_not_needed"}:
+                lines.extend(["REVIEW_RESULT: clean"])
+                if summary:
+                    lines.extend(["", "## Summary", "", summary])
+            else:
+                lines.extend(["REVIEW_RESULT: issues_found"])
+                if issues_markdown:
+                    lines.extend(["", issues_markdown])
+                elif isinstance(issues, list) and issues:
+                    lines.extend(["", self._render_review_issues_markdown(issues)])
+                elif summary:
+                    lines.extend(["", "## Issues", "", f"- {summary}"])
+            content = "\n".join(lines).rstrip() + "\n"
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text(content, encoding="utf-8")
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            f"{lane}-review",
+            target_path.name,
+            content,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name=f"{lane}-review",
+            artifact_type=_DUAL_REVIEW_REPORT_ARTIFACT_BY_LANE[lane],
+            path=str(artifact_path),
+            metadata=self._review_report_metadata(
+                task_key=session.task_key,
+                source_path=str(target_path),
+                review_lane=lane,
+                status=self._review_report_status(output_type),
+                work_item_id=payload.get("work_item_id"),
+                output_type=output_type,
+            ),
+        )
+
+    def _review_report_status(self, output_type: str) -> str:
+        if output_type == "passed":
+            return "clean"
+        if output_type == "blocked_review_cycle":
+            return "blocked"
+        return "issues_found"
+
+    def _review_report_metadata(
+        self,
+        *,
+        task_key: str,
+        source_path: str,
+        review_lane: str,
+        status: str,
+        work_item_id: object | None = None,
+        source_event_id: int | None = None,
+        output_type: str | None = None,
+    ) -> dict[str, object]:
+        metadata: dict[str, object] = {
+            "task_key": task_key,
+            "source_path": source_path,
+            "report_family": "internal_review",
+            "review_lane": review_lane,
+            "artifact_role": "report",
+            "status": status,
+            "work_item_id": work_item_id,
+        }
+        if source_event_id is not None:
+            metadata["source_event_id"] = source_event_id
+        if output_type is not None:
+            metadata["output_type"] = output_type
+        return metadata
+
+    def _review_outcome_metadata(
+        self,
+        *,
+        task_key: str,
+        source_path: str,
+        review_lane: str,
+        status: str,
+        source_event_id: int,
+        work_item_id: object | None = None,
+    ) -> dict[str, object]:
+        return {
+            "task_key": task_key,
+            "source_path": source_path,
+            "report_family": "internal_review",
+            "review_lane": review_lane,
+            "artifact_role": "outcome",
+            "status": status,
+            "source_event_id": source_event_id,
+            "work_item_id": work_item_id,
+        }
+
+    def _internal_review_artifact_paths(
+        self,
+        session_id: int,
+        *,
+        review_lane: str,
+        artifact_role: str,
+        fallback_artifact_types: set[str],
+    ) -> list[str]:
+        paths: list[str] = []
+        for artifact in self.artifact_repository.list_for_session(session_id):
+            metadata = artifact.metadata if isinstance(artifact.metadata, dict) else {}
+            if (
+                str(metadata.get("report_family") or "").strip() == "internal_review"
+                and str(metadata.get("review_lane") or "").strip() == review_lane
+                and str(metadata.get("artifact_role") or "").strip() == artifact_role
+            ):
+                paths.append(artifact.path)
+                continue
+            if artifact.artifact_type in fallback_artifact_types:
+                paths.append(artifact.path)
+        return paths
+
+    def _latest_internal_review_artifact_path(
+        self,
+        session_id: int,
+        *,
+        review_lane: str,
+        artifact_role: str,
+        fallback_artifact_types: set[str],
+    ) -> str | None:
+        latest_path: str | None = None
+        for path in self._internal_review_artifact_paths(
+            session_id,
+            review_lane=review_lane,
+            artifact_role=artifact_role,
+            fallback_artifact_types=fallback_artifact_types,
+        ):
+            latest_path = path
+        return latest_path
+
+    def _next_dual_review_report_target_path(self, session: Session, *, lane: str) -> Path | None:
+        if self.workdir_root is None:
+            return None
+        review_dir = self.workdir_root / session.task_key / "review" / lane
+        pass_count = len(
+            self._internal_review_artifact_paths(
+                session.id,
+                review_lane=lane,
+                artifact_role="report",
+                fallback_artifact_types={_DUAL_REVIEW_REPORT_ARTIFACT_BY_LANE[lane]},
+            )
+        )
+        return review_dir / f"pass-{pass_count + 1:02d}.md"
+
+    def _write_task_decomposition_plan_package(
+        self,
+        *,
+        session: Session,
+        plan_index_markdown: str,
+        raw_plan_task_files: object,
+        plan_manifest: dict[str, object],
+    ) -> None:
+        if self.workdir_root is None:
+            raise IntakeError("Coordinator is missing workdir root")
+
+        plan_dir = self.workdir_root / session.task_key / "plan"
+        plan_dir.mkdir(parents=True, exist_ok=True)
+
+        index_path = plan_dir / "index.md"
+        index_path.write_text(plan_index_markdown.rstrip() + "\n")
+        manifest_path = plan_dir / "tasks.json"
+        manifest_path.write_text(json.dumps(plan_manifest, indent=2, sort_keys=True) + "\n")
+
+        normalized_task_files: list[str] = []
+        if isinstance(raw_plan_task_files, list):
+            for item in raw_plan_task_files:
+                if not isinstance(item, dict):
+                    continue
+                filename = str(item.get("filename") or "").strip()
+                content = str(item.get("content") or "").strip()
+                if not filename or not content:
+                    continue
+                safe_name = Path(filename).name
+                if safe_name != filename or not safe_name.endswith(".md"):
+                    continue
+                file_path = plan_dir / safe_name
+                file_path.write_text(content.rstrip() + "\n")
+                normalized_task_files.append(safe_name)
+
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="planning",
+            artifact_type="task_decomposition_plan_manifest",
+            path=str(manifest_path),
+            metadata={
+                "task_key": session.task_key,
+                "task_file_count": len(plan_manifest.get("tasks", [])) if isinstance(plan_manifest.get("tasks"), list) else 0,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="planning",
+            artifact_type="task_decomposition_plan_index",
+            path=str(index_path),
+            metadata={
+                "task_key": session.task_key,
+                "task_file_count": len(normalized_task_files),
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="planning",
+            artifact_type="task_decomposition_plan_package",
+            path=str(plan_dir),
+            metadata={
+                "task_key": session.task_key,
+                "task_files": normalized_task_files,
+            },
+        )
+
+    def _build_task_decomposition_manifest(
+        self,
+        *,
+        plan_task_files: list[dict[str, str]],
+        raw_manifest: object | None = None,
+    ) -> dict[str, object]:
+        tasks: list[dict[str, object]] = []
+        manifest_by_filename: dict[str, dict[str, object]] = {}
+        if isinstance(raw_manifest, dict):
+            raw_tasks = raw_manifest.get("tasks")
+            if isinstance(raw_tasks, list):
+                for item in raw_tasks:
+                    if not isinstance(item, dict):
+                        continue
+                    filename = str(item.get("filename") or "").strip()
+                    title = str(item.get("title") or "").strip()
+                    if not filename or not title:
+                        continue
+                    manifest_by_filename[filename] = {"filename": filename, "title": title}
+
+        for index, item in enumerate(plan_task_files, start=1):
+            filename = str(item.get("filename") or "").strip()
+            content = str(item.get("content") or "").strip()
+            if not filename or not content:
+                continue
+            safe_name = Path(filename).name
+            if safe_name != filename or not safe_name.endswith(".md"):
+                continue
+            title = ""
+            manifest_task = manifest_by_filename.get(safe_name)
+            if manifest_task is not None:
+                title = str(manifest_task.get("title") or "").strip()
+            if not title:
+                first_heading = next(
+                    (line[2:].strip() for line in content.splitlines() if line.startswith("# ")),
+                    "",
+                )
+                title = first_heading or safe_name.removesuffix(".md")
+            tasks.append(
+                {
+                    "order": index,
+                    "filename": safe_name,
+                    "title": title,
+                }
+            )
+
+        if not tasks:
+            raise IntakeError("Task decomposition package must contain at least one task markdown file")
+
+        return {
+            "version": 1,
+            "tasks": tasks,
+        }
+
+    def _normalize_task_decomposition_plan_package(
+        self,
+        *,
+        session: Session,
+        payload: dict[str, object],
+    ) -> tuple[str, list[dict[str, str]], dict[str, object]]:
+        if self.workdir_root is None:
+            raise IntakeError("Coordinator is missing workdir root")
+
+        plan_dir = self.workdir_root / session.task_key / "plan"
+        role_plan_dir: Path | None = None
+        if self.role_workspace_manager is not None:
+            candidate = self.role_workspace_manager.role_directory(
+                session.task_key,
+                TASK_DECOMPOSER_WORKER_ROLE,
+            ) / "plan"
+            if candidate.is_dir():
+                role_plan_dir = candidate
+        source_plan_dir = role_plan_dir if role_plan_dir is not None else (plan_dir if plan_dir.is_dir() else None)
+        if source_plan_dir is None:
+            plan_index_markdown = str(payload.get("plan_index_markdown") or "").strip()
+            raw_plan_task_files = payload.get("plan_task_files")
+            raw_plan_manifest = payload.get("plan_tasks_manifest")
+            normalized_task_files: list[dict[str, str]] = []
+            if isinstance(raw_plan_task_files, list):
+                for item in raw_plan_task_files:
+                    if not isinstance(item, dict):
+                        continue
+                    filename = str(item.get("filename") or "").strip()
+                    content = str(item.get("content") or "").strip()
+                    if not filename or not content:
+                        continue
+                    normalized_task_files.append(
+                        {
+                            "filename": filename,
+                            "content": content,
+                        }
+                    )
+            if not plan_index_markdown:
+                raise IntakeError(
+                    f"Temporary plan package is missing for session {session.task_key}"
+                )
+            if not normalized_task_files:
+                raise IntakeError(
+                    "Task decomposition payload must include at least one plan_task_files entry"
+                )
+            return (
+                plan_index_markdown,
+                normalized_task_files,
+                self._build_task_decomposition_manifest(
+                    plan_task_files=normalized_task_files,
+                    raw_manifest=raw_plan_manifest,
+                ),
+            )
+
+        index_path = source_plan_dir / "index.md"
+        if not index_path.is_file():
+            raise IntakeError("Task decomposition package is missing plan/index.md")
+        plan_index_markdown = index_path.read_text().strip()
+        if not plan_index_markdown:
+            raise IntakeError("Task decomposition package contains an empty plan/index.md")
+        manifest_path = source_plan_dir / "tasks.json"
+        raw_manifest: object | None = None
+        if manifest_path.is_file():
+            try:
+                raw_manifest = json.loads(manifest_path.read_text())
+            except json.JSONDecodeError as exc:
+                raise IntakeError(f"Task decomposition package contains invalid plan/tasks.json: {exc}") from exc
+
+        normalized_task_files: list[dict[str, str]] = []
+        for file_path in sorted(source_plan_dir.glob("*.md")):
+            if file_path.name == "index.md":
+                continue
+            content = file_path.read_text().strip()
+            if not content:
+                continue
+            normalized_task_files.append(
+                {
+                    "filename": file_path.name,
+                    "content": content,
+                }
+            )
+
+        return (
+            plan_index_markdown,
+            normalized_task_files,
+            self._build_task_decomposition_manifest(
+                plan_task_files=normalized_task_files,
+                raw_manifest=raw_manifest,
+            ),
+        )
+
+    def _cleanup_temporary_plan_package(self, session: Session) -> None:
+        if self.workdir_root is None:
+            raise IntakeError("Coordinator is missing workdir root")
+
+        plan_dir = self.workdir_root / session.task_key / "plan"
+        if not plan_dir.exists():
+            return
+        shutil.rmtree(plan_dir)
+
+    def _jira_subtasks_summary_markdown(self, subtask_keys: list[str]) -> str:
+        lines = ["# Created Jira Subtasks", ""]
+        for key in subtask_keys:
+            lines.append(f"- {key}")
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _extract_created_subtask_keys(self, stdout: str) -> list[str]:
+        keys: list[str] = []
+        seen: set[str] = set()
+        for line in stdout.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and "-" in parts[1]:
+                candidate = parts[1].strip()
+                prefix, _, suffix = candidate.partition("-")
+                if prefix.isalpha() and suffix.isdigit() and candidate not in seen:
+                    keys.append(candidate)
+                    seen.add(candidate)
+        return keys
+
+    def _extract_mr_url(self, stdout: str) -> str | None:
+        for line in stdout.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("http://") or stripped.startswith("https://"):
+                return stripped
+            marker = "MR already exists: "
+            if stripped.startswith(marker):
+                return stripped.removeprefix(marker).strip() or None
+        return None
+
+    def _extract_snapshot_explicit_links(self, task_key: str) -> list[str]:
+        if self.workdir_root is None:
+            return []
+        task_root = self.workdir_root / task_key
+        links: list[str] = []
+        seen: set[str] = set()
+        for relative_path in ("description.md", "comments.md"):
+            candidate = task_root / relative_path
+            if not candidate.is_file():
+                continue
+            for match in _EXPLICIT_URL_PATTERN.findall(candidate.read_text(encoding="utf-8")):
+                if match in seen:
+                    continue
+                seen.add(match)
+                links.append(match)
+        return links
+
+    def _emit_proposal_context_link_warning(self, session: Session) -> None:
+        if self.artifacts_root is None:
+            return
+        explicit_links = self._extract_snapshot_explicit_links(session.task_key)
+        if not explicit_links:
+            return
+
+        artifact_body = "\n".join(
+            [
+                "# Proposal Context External Links Warning",
+                "",
+                "The snapshot includes external links whose contents are not automatically fetched into `spec/proposal.md`.",
+                "Treat them as operator-provided references unless they are manually incorporated later.",
+                "",
+                "## Links",
+                "",
+                *[f"- {link}" for link in explicit_links],
+                "",
+            ]
+        )
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "story-planning",
+            "proposal-external-links-warning.md",
+            artifact_body,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            stage_name="story-planning",
+            artifact_type="proposal_external_links_warning",
+            path=str(artifact_path),
+            metadata={"link_count": len(explicit_links)},
+        )
+        self._append_event(
+            session_id=session.id,
+            event_type="proposal_external_links_detected",
+            producer_type="coordinator",
+            payload={
+                "task_key": session.task_key,
+                "link_count": len(explicit_links),
+                "summary": (
+                    "External links were found in the snapshot; their contents are not automatically included "
+                    "in the proposal."
+                ),
+            },
+        )
+
+    def _platform_for_task_key(self, task_key: str) -> str:
+        if task_key.startswith("QA-"):
+            return "e2e"
+        if task_key.startswith("IOS-"):
+            return "ios"
+        if task_key.startswith("ANDR-"):
+            return "android"
+        return "unknown"
+
+    def _dispatch_role_work(
+        self,
+        session: Session,
+        role: Role,
+        work_item: WorkItem,
+        stage_name: str,
+        instruction: str,
+        extra_hydration: dict[str, str | int | None] | None = None,
+        *,
+        force_redispatch: bool = False,
+    ) -> Event:
+        lock_key = (session.id, role.id, work_item.id, stage_name)
+        lock = self._dispatch_locks.setdefault(lock_key, threading.Lock())
+        with lock:
+            return self._dispatch_role_work_unlocked(
+                session=session,
+                role=role,
+                work_item=work_item,
+                stage_name=stage_name,
+                instruction=instruction,
+                extra_hydration=extra_hydration,
+                force_redispatch=force_redispatch,
+            )
+
+    def _dispatch_role_work_unlocked(
+        self,
+        session: Session,
+        role: Role,
+        work_item: WorkItem,
+        stage_name: str,
+        instruction: str,
+        extra_hydration: dict[str, str | int | None] | None = None,
+        *,
+        force_redispatch: bool = False,
+    ) -> Event:
+        merged_hydration = self._default_extra_hydration_for_dispatch(
+            session,
+            role,
+            stage_name,
+        )
+        if work_item.work_type == "subtask_implementation" and "subtask_key" not in merged_hydration:
+            merged_hydration["subtask_key"] = self._parse_subtask_work_item_title(work_item.title)["key"]
+        if extra_hydration:
+            merged_hydration.update(extra_hydration)
+        merged_hydration = self._sanitize_dispatch_hydration(merged_hydration)
+        prompt_mode = self._prompt_mode_for_dispatch(session, role)
+        role = self._ensure_dispatchable_role(session, role)
+        if self.dispatch_repository is not None and not force_redispatch:
+            active_dispatch = self.dispatch_repository.get_latest_active_for_target(
+                session_id=session.id,
+                role_id=role.id,
+                work_item_id=work_item.id,
+                stage_name=stage_name,
+            )
+            if active_dispatch is not None:
+                existing_event = self._latest_dispatch_event_for_target(
+                    session_id=session.id,
+                    role_name=role.role_name,
+                    work_item_id=work_item.id,
+                    stage_name=stage_name,
+                )
+                if existing_event is not None:
+                    return existing_event
+        updated_role = self.role_repository.increment_hydration_version(role.id)
+        workspace = self.role_workspace_manager.ensure_role_workspace(session.task_key, role.role_name)
+        hydration_version = updated_role.last_hydration_version
+        merged_hydration["hydration_version"] = hydration_version
+        dispatch_token = f"hv{hydration_version}-wi{work_item.id}"
+        merged_hydration["dispatch_token"] = dispatch_token
+        hydration = build_role_hydration(
+            role_name=updated_role.role_name,
+            task_key=session.task_key,
+            current_stage=session.current_stage,
+            active_work_item=work_item,
+            extra_payload=merged_hydration or None,
+        )
+        prompt_text = role_handoff_prompt(
+            role_name=updated_role.role_name,
+            instruction=instruction,
+            hydration_payload=hydration,
+            prompt_mode=prompt_mode,
+        )
+        hydration_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            stage_name,
+            f"{updated_role.role_name}.hydration.json",
+            json.dumps(hydration, indent=2, sort_keys=True),
+        )
+        workspace_hydration_path = workspace.directory / "HYDRATION.json"
+        workspace_hydration_path.write_text(json.dumps(hydration, indent=2, sort_keys=True))
+        prompt_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            stage_name,
+            f"{updated_role.role_name}.prompt.txt",
+            prompt_text,
+        )
+        runtime_role = RuntimeRoleHandle(
+            role_id=updated_role.runtime_handle or f"{updated_role.runtime_backend}:{updated_role.role_name}",
+            session_id=self._runtime_session_id_for_role(updated_role, session),
+            backend_name=updated_role.runtime_backend,
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=updated_role.id,
+            stage_name=stage_name,
+            artifact_type="hydration_payload",
+            path=str(hydration_path),
+            metadata={
+                "role_name": updated_role.role_name,
+                "work_item_id": work_item.id,
+                "hydration_version": hydration_version,
+                "prompt_mode": prompt_mode,
+                "dispatch_token": dispatch_token,
+            },
+        )
+        self.artifact_repository.create(
+            session_id=session.id,
+            role_id=updated_role.id,
+            stage_name=stage_name,
+            artifact_type="role_prompt",
+            path=str(prompt_path),
+            metadata={
+                "role_name": updated_role.role_name,
+                "work_item_id": work_item.id,
+                "hydration_version": hydration_version,
+                "prompt_mode": prompt_mode,
+                "dispatch_token": dispatch_token,
+            },
+        )
+        if self.dispatch_repository is not None:
+            self.dispatch_repository.supersede_active_for_target(
+                session_id=session.id,
+                role_id=updated_role.id,
+                work_item_id=work_item.id,
+                stage_name=stage_name,
+            )
+            self.dispatch_repository.create(
+                session_id=session.id,
+                role_id=updated_role.id,
+                work_item_id=work_item.id,
+                stage_name=stage_name,
+                dispatch_token=dispatch_token,
+                hydration_version=hydration_version,
+                runtime_handle=runtime_role.role_id,
+                status=DispatchStatus.DISPATCHING,
+            )
+        try:
+            self.session_backend.send_input(runtime_role, prompt_text)
+        except Exception as exc:
+            if self.dispatch_repository is not None:
+                self.dispatch_repository.update_status(
+                    dispatch_token,
+                    status=DispatchStatus.STALLED,
+                    error_text=str(exc),
+                )
+            self._append_event(
+                session_id=session.id,
+                event_type="role_input_delivery_stalled",
+                producer_type="coordinator",
+                payload={
+                    "role_name": updated_role.role_name,
+                    "work_item_id": work_item.id,
+                    "stage_name": stage_name,
+                    "runtime_backend": updated_role.runtime_backend,
+                    "runtime_handle": runtime_role.role_id,
+                    "dispatch_token": dispatch_token,
+                    "error": str(exc),
+                },
+            )
+            raise
+        latest_submit_trace = self._latest_runtime_submit_trace(runtime_role.role_id)
+        delivery_state = latest_submit_trace.get("delivery_state") if latest_submit_trace else None
+        delivery_error = self._launcher_dispatch_delivery_errors().get(str(delivery_state or ""))
+        if self.dispatch_repository is not None:
+            self.dispatch_repository.update_status(
+                dispatch_token,
+                status=(
+                    DispatchStatus.STALLED
+                    if delivery_error is not None
+                    else DispatchStatus.DELIVERED
+                ),
+                error_text=delivery_error,
+            )
+        self._record_role_input_delivery_event(
+            session=session,
+            role=updated_role,
+            runtime_role=runtime_role,
+            work_item=work_item,
+            stage_name=stage_name,
+            dispatch_token=dispatch_token,
+        )
+        return self._append_event(
+            session_id=session.id,
+            event_type="role_input_dispatched",
+            producer_type="coordinator",
+            payload={
+                "role_name": updated_role.role_name,
+                "work_item_id": work_item.id,
+                "stage_name": stage_name,
+                "hydration_version": hydration_version,
+                "dispatch_token": dispatch_token,
+                "prompt_mode": prompt_mode,
+            },
+        )
+
+    def _latest_runtime_submit_trace(self, runtime_role_id: str) -> dict[str, str] | None:
+        if not hasattr(self.session_backend, "get_tmux_submit_traces"):
+            return None
+        traces = self.session_backend.get_tmux_submit_traces(runtime_role_id)
+        return traces[-1] if traces else None
+
+    def _record_role_input_delivery_event(
+        self,
+        *,
+        session: Session,
+        role: Role,
+        runtime_role: RuntimeRoleHandle,
+        work_item: WorkItem,
+        stage_name: str,
+        dispatch_token: str,
+    ) -> None:
+        payload = {
+            "role_name": role.role_name,
+            "work_item_id": work_item.id,
+            "stage_name": stage_name,
+            "runtime_backend": role.runtime_backend,
+            "runtime_handle": runtime_role.role_id,
+            "dispatch_token": dispatch_token,
+        }
+        event_type = "role_input_delivery_confirmed"
+        latest = self._latest_runtime_submit_trace(runtime_role.role_id)
+        if latest:
+            payload.update(
+                {
+                    "submission_source": latest.get("source"),
+                    "submit_style": latest.get("submit_style"),
+                    "submit_key": latest.get("submit_key"),
+                    "runner": latest.get("runner"),
+                    "retry_count": int(latest.get("retry_count", "0") or "0"),
+                    "delivery_state": latest.get("delivery_state"),
+                }
+            )
+            delivery_error = self._launcher_dispatch_delivery_errors().get(
+                str(latest.get("delivery_state") or "")
+            )
+            if delivery_error is not None:
+                event_type = "role_input_delivery_stalled"
+                payload["error"] = delivery_error
+            elif payload["retry_count"] > 0:
+                event_type = "role_input_delivery_retried"
+        self._append_event(
+            session_id=session.id,
+            event_type=event_type,
+            producer_type="coordinator",
+            payload=payload,
+        )
+
+    def _runtime_session_id_for_role(self, role: Role, session: Session) -> str:
+        runtime_handle = role.runtime_handle
+        if runtime_handle and ":" in runtime_handle:
+            return runtime_handle.split(":", 1)[0]
+        return f"session:{session.id}"
+
+    def _prompt_mode_for_dispatch(self, session: Session, role: Role) -> str:
+        role_runtime_config = (session.role_config or {}).get(role.role_name, {})
+        is_live_launcher_role = role.runtime_backend == "tmux" and role_runtime_config.get("runner") in {
+            "claude",
+            "codex",
+        }
+        if is_live_launcher_role:
+            return "live_bootstrap" if role.last_hydration_version == 0 else "live_continuation"
+        return "bootstrap" if role.last_hydration_version == 0 else "continuation"
+
+    def _get_jira_status_name(self, task_key: str) -> str | None:
+        if self.jira_adapter is None:
+            return None
+        result = self.jira_adapter.get_issue_status(task_key)
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return None
+        return payload.get("fields", {}).get("status", {}).get("name")
+
+    def _stop_and_clear_runtime_handles(self, session: Session) -> list[str]:
+        removed_paths: list[str] = []
+        runtime_session_id = None
+        try:
+            runtime_session_id = self._runtime_session_handle_for_session(session).session_id
+        except IntakeError:
+            runtime_session_id = None
+
+        if runtime_session_id is not None:
+            self.session_backend.stop_session(RuntimeSessionHandle(session_id=runtime_session_id))
+            removed_paths.append(f"runtime-session:{runtime_session_id}")
+
+        updated_any = False
+        for role in self.role_repository.list_for_session(session.id):
+            if role.runtime_handle is not None or role.status != RoleStatus.STOPPED:
+                self.role_repository.update_runtime(
+                    role.id,
+                    runtime_backend=role.runtime_backend,
+                    runtime_handle=None,
+                    status=RoleStatus.STOPPED,
+                )
+                updated_any = True
+
+        if updated_any and session.status in {
+            SessionStatus.ACTIVE,
+            SessionStatus.WAITING_FOR_OPERATOR,
+        }:
+            self.session_repository.update_status(session.id, SessionStatus.PAUSED)
+        return removed_paths
+
+    def _remove_task_runtime_residue(self, task_key: str) -> list[str]:
+        if self.workdir_root is None:
+            return []
+        removed: list[str] = []
+        for path in (
+            self.workdir_root / task_key / "runtime",
+            self.workdir_root / task_key / "tmp",
+        ):
+            if path.exists():
+                shutil.rmtree(path, ignore_errors=True)
+                removed.append(str(path))
+        return removed
+
+    def _remove_task_verification_residue(self, task_key: str) -> list[str]:
+        if self.workdir_root is None:
+            return []
+        path = self.workdir_root / task_key / "tmp" / "verification"
+        if not path.exists():
+            return []
+        shutil.rmtree(path, ignore_errors=True)
+        return [str(path)]
+
+    def _remove_task_artifacts(self, task_key: str) -> list[str]:
+        if self.workdir_root is None:
+            return []
+        path = self.workdir_root / "factory-artifacts" / task_key
+        if not path.exists():
+            return []
+        shutil.rmtree(path, ignore_errors=True)
+        return [str(path)]
+
+    def _remove_runner_private_residue(self, task_key: str) -> list[str]:
+        removed: list[str] = []
+        task_key_lower = task_key.lower()
+        if self.workdir_root is not None:
+            removed.extend(
+                remove_task_role_workspace_trust(
+                    task_key,
+                    workdir_root=self.workdir_root,
+                )
+            )
+        claude_projects_root = Path.home() / ".claude" / "projects"
+        if claude_projects_root.exists() and claude_projects_root.is_dir():
+            for child in claude_projects_root.iterdir():
+                if task_key_lower not in child.name.lower():
+                    continue
+                if child.is_dir():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
+                removed.append(str(child))
+
+        codex_sessions_root = Path.home() / ".codex" / "sessions"
+        codex_session_ids: set[str] = set()
+        if codex_sessions_root.exists() and codex_sessions_root.is_dir():
+            for session_file in codex_sessions_root.rglob("*.jsonl"):
+                codex_session_id = self._codex_session_id_if_matches_task(session_file, task_key_lower)
+                if codex_session_id is None:
+                    continue
+                session_file.unlink(missing_ok=True)
+                removed.append(str(session_file))
+                if codex_session_id:
+                    codex_session_ids.add(codex_session_id)
+                self._prune_empty_parents(session_file.parent, stop_root=codex_sessions_root)
+        codex_snapshots_root = Path.home() / ".codex" / "shell_snapshots"
+        if codex_session_ids and codex_snapshots_root.exists() and codex_snapshots_root.is_dir():
+            for session_id in sorted(codex_session_ids):
+                for snapshot_file in codex_snapshots_root.glob(f"{session_id}.*"):
+                    if not snapshot_file.is_file():
+                        continue
+                    snapshot_file.unlink(missing_ok=True)
+                    removed.append(str(snapshot_file))
+        return removed
+
+    def _codex_session_file_matches_task(self, session_file: Path, task_key_lower: str) -> bool:
+        return self._codex_session_id_if_matches_task(session_file, task_key_lower) is not None
+
+    def _codex_session_id_if_matches_task(self, session_file: Path, task_key_lower: str) -> str | None:
+        try:
+            with session_file.open("r", encoding="utf-8") as handle:
+                for _ in range(20):
+                    line = handle.readline()
+                    if not line:
+                        break
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    cwd = (
+                        payload.get("payload", {}).get("cwd")
+                        if isinstance(payload, dict)
+                        else None
+                    )
+                    if not isinstance(cwd, str) or task_key_lower not in cwd.lower():
+                        continue
+                    session_id = payload.get("payload", {}).get("id")
+                    return str(session_id).strip() if session_id is not None else ""
+        except OSError:
+            return None
+        return None
+
+    def _runner_private_residue_task_keys(self) -> set[str]:
+        task_keys: set[str] = set()
+        claude_projects_root = Path.home() / ".claude" / "projects"
+        if claude_projects_root.exists() and claude_projects_root.is_dir():
+            for child in claude_projects_root.iterdir():
+                task_keys.update(match.upper() for match in _INLINE_TASK_KEY_PATTERN.findall(child.name))
+
+        codex_sessions_root = Path.home() / ".codex" / "sessions"
+        if codex_sessions_root.exists() and codex_sessions_root.is_dir():
+            for session_file in codex_sessions_root.rglob("*.jsonl"):
+                try:
+                    with session_file.open("r", encoding="utf-8") as handle:
+                        for _ in range(20):
+                            line = handle.readline()
+                            if not line:
+                                break
+                            try:
+                                payload = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            cwd = (
+                                payload.get("payload", {}).get("cwd")
+                                if isinstance(payload, dict)
+                                else None
+                            )
+                            if not isinstance(cwd, str):
+                                continue
+                            task_keys.update(match.upper() for match in _INLINE_TASK_KEY_PATTERN.findall(cwd))
+                            break
+                except OSError:
+                    continue
+        return task_keys
+
+    def _prune_empty_parents(self, path: Path, *, stop_root: Path) -> None:
+        current = path
+        while current != stop_root and current.is_dir():
+            try:
+                next(current.iterdir())
+                break
+            except StopIteration:
+                current.rmdir()
+                current = current.parent
+            except OSError:
+                break
+
+    def _remove_task_worktree_and_directory(self, task_key: str) -> list[str]:
+        if self.workdir_root is None:
+            return []
+        removed: list[str] = []
+        task_root = self.workdir_root / task_key
+        repo_dir = task_root / "repo"
+
+        if repo_dir.exists():
+            git_file = repo_dir / ".git"
+            if git_file.is_file():
+                try:
+                    common_git_dir = (
+                        subprocess.run(
+                            ["git", "-C", str(repo_dir), "rev-parse", "--git-common-dir"],
+                            check=True,
+                            capture_output=True,
+                            text=True,
+                        )
+                        .stdout.strip()
+                    )
+                    main_repo = Path(common_git_dir).resolve().parent
+                    subprocess.run(
+                        ["git", "-C", str(main_repo), "worktree", "remove", "--force", str(repo_dir)],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                    for branch in (f"feature/{task_key}", f"bugfix/{task_key}"):
+                        branch_exists = subprocess.run(
+                            ["git", "-C", str(main_repo), "rev-parse", "--verify", branch],
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                        )
+                        if branch_exists.returncode == 0:
+                            subprocess.run(
+                                ["git", "-C", str(main_repo), "branch", "-D", branch],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                            )
+                except subprocess.CalledProcessError:
+                    pass
+            if repo_dir.exists():
+                shutil.rmtree(repo_dir, ignore_errors=True)
+            removed.append(str(repo_dir))
+
+        if task_root.exists():
+            shutil.rmtree(task_root, ignore_errors=True)
+            removed.append(str(task_root))
+        return removed
+
+    def _repo_root(self) -> Path:
+        if self.role_launcher_manager is not None:
+            return self.role_launcher_manager.repo_root
+        if self.role_workspace_manager is not None:
+            return self.role_workspace_manager.repo_root
+        if self.workdir_root is not None:
+            return self.workdir_root.parent
+        return Path(__file__).resolve().parents[2]
+
+    def _append_event(
+        self,
+        session_id: int,
+        event_type: str,
+        producer_type: str,
+        payload: dict,
+        producer_id: str | None = None,
+        correlation_id: str | None = None,
+    ) -> Event:
+        event = self.event_repository.append(
+            session_id=session_id,
+            event_type=event_type,
+            producer_type=producer_type,
+            producer_id=producer_id,
+            payload=payload,
+            correlation_id=correlation_id,
+        )
+        if self.event_bus is not None:
+            self.event_bus.publish(event)
+        if event_type in _INTERNAL_REVIEW_METRIC_EVENT_TYPES:
+            self._refresh_internal_review_metrics_artifact(session_id)
+        return event
+
+    def _refresh_internal_review_metrics_artifact(self, session_id: int) -> None:
+        if self.artifacts_root is None:
+            return
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            return
+        summary = self._internal_review_metrics_summary(session_id)
+        rendered = json.dumps(summary, indent=2, sort_keys=True) + "\n"
+        artifact_path = write_text_artifact(
+            self.artifacts_root,
+            session.task_key,
+            "internal-review",
+            "metrics.json",
+            rendered,
+        )
+        existing_path = self._latest_artifact_path(session_id, "internal_review_metrics_json")
+        if existing_path is None:
+            self.artifact_repository.create(
+                session_id=session_id,
+                stage_name="internal-review",
+                artifact_type="internal_review_metrics_json",
+                path=str(artifact_path),
+                metadata={"report_family": "internal_review", "artifact_role": "metrics"},
+            )
+
+    def _internal_review_metrics_summary(self, session_id: int) -> dict[str, object]:
+        session = self.session_repository.get_by_id(session_id)
+        if session is None:
+            raise IntakeError(f"Session {session_id} does not exist")
+        events = self.event_repository.list_for_session(session_id)
+        work_items = self.work_item_repository.list_for_session(session_id)
+
+        internal_review_escalations = [
+            event
+            for event in events
+            if event.event_type == "session_escalated_to_operator"
+            and self._interactive_review_context(event.payload)[0] == "internal_review"
+        ]
+        structured_escalations = [
+            event
+            for event in internal_review_escalations
+            if str((event.payload or {}).get("details") or "").strip()
+        ]
+        def review_lane_summary(lane: str) -> dict[str, int]:
+            prefix = _DUAL_REVIEW_EVENT_PREFIX_BY_LANE[lane]
+            work_type = _DUAL_REVIEW_WORK_TYPE_BY_LANE[lane]
+            return {
+                "report_count": sum(
+                    1
+                    for event in events
+                    if event.event_type
+                    in {f"{prefix}_passed", f"{prefix}_issues_found", f"{prefix}_blocked"}
+                ),
+                "clean_count": sum(1 for event in events if event.event_type == f"{prefix}_passed"),
+                "issues_found_count": sum(1 for event in events if event.event_type == f"{prefix}_issues_found"),
+                "blocked_count": sum(1 for event in events if event.event_type == f"{prefix}_blocked"),
+                "correction_round_count": sum(
+                    1
+                    for item in work_items
+                    if item.work_type == _DUAL_REVIEW_CORRECTION_WORK_TYPE_BY_LANE[lane]
+                ),
+                "cycle_review_count": sum(
+                    1
+                    for item in work_items
+                    if item.work_type == f"{work_type}_cycle_review"
+                ),
+            }
+
+        return {
+            "task_key": session.task_key,
+            "reviews": {
+                "convention": review_lane_summary("convention"),
+                "requirements": review_lane_summary("requirements"),
+            },
+            "operator_escalations": {
+                "internal_review_count": len(internal_review_escalations),
+                "structured_details_count": len(structured_escalations),
+                "unstructured_details_count": len(internal_review_escalations) - len(structured_escalations),
+            },
+        }

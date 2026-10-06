@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Extracts a mobile or QA Jira key from a GitLab MR title/description.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  get-mr-jira-key.sh <ios|android|e2e> <mr_iid>
+
+Prints the first Jira key found in the MR title or description to stdout.
+
+Environment:
+  IOS_DIR        Path to iOS repo (required for ios)
+  ANDROID_DIR    Path to Android repo (required for android)
+  E2E_DIR        Path to mobile-tests repo (required for e2e)
+  SDD_GITLAB_IOS_PROJECT_PATH      URL-encoded GitLab iOS project path
+  SDD_GITLAB_ANDROID_PROJECT_PATH  URL-encoded GitLab Android project path
+  SDD_GITLAB_E2E_PROJECT_PATH      URL-encoded GitLab mobile-tests project path
+
+Exit codes:
+  0  Success — key printed to stdout
+  1  Fatal error (bad args, missing env, API failure, key not found)
+EOF
+}
+
+err() { echo "ERROR: $*" >&2; }
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage; exit 0
+fi
+
+platform="${1:-}"
+mr_iid="${2:-}"
+
+if [ -z "$platform" ] || [ -z "$mr_iid" ]; then
+  usage >&2; exit 1
+fi
+
+command -v glab >/dev/null 2>&1 || { err "glab is not installed or not on PATH"; exit 1; }
+command -v jq   >/dev/null 2>&1 || { err "jq is not installed or not on PATH";   exit 1; }
+
+case "$platform" in
+  e2e)
+    : "${E2E_DIR:?E2E_DIR is not set}"
+    : "${SDD_GITLAB_E2E_PROJECT_PATH:?SDD_GITLAB_E2E_PROJECT_PATH is not set}"
+    project_dir="$E2E_DIR"
+    encoded_path="$SDD_GITLAB_E2E_PROJECT_PATH"
+    ;;
+  ios)
+    : "${IOS_DIR:?IOS_DIR is not set}"
+    : "${SDD_GITLAB_IOS_PROJECT_PATH:?SDD_GITLAB_IOS_PROJECT_PATH is not set}"
+    [ -d "$IOS_DIR" ] || { err "IOS_DIR is not a directory: $IOS_DIR"; exit 1; }
+    project_dir="$IOS_DIR"
+    encoded_path="$SDD_GITLAB_IOS_PROJECT_PATH"
+    ;;
+  android)
+    : "${ANDROID_DIR:?ANDROID_DIR is not set}"
+    : "${SDD_GITLAB_ANDROID_PROJECT_PATH:?SDD_GITLAB_ANDROID_PROJECT_PATH is not set}"
+    [ -d "$ANDROID_DIR" ] || { err "ANDROID_DIR is not a directory: $ANDROID_DIR"; exit 1; }
+    project_dir="$ANDROID_DIR"
+    encoded_path="$SDD_GITLAB_ANDROID_PROJECT_PATH"
+    ;;
+  *)
+    err "platform must be 'ios', 'android' or 'e2e' (got: $platform)"; exit 1
+    ;;
+esac
+
+mr_json="$(
+  (cd "$project_dir" && glab api "projects/$encoded_path/merge_requests/$mr_iid" 2>/dev/null) \
+    || { err "failed to fetch MR (check auth and MR id)"; exit 1; }
+)"
+
+# Search title first, then description
+title="$(printf '%s' "$mr_json" | jq -r '.title // ""')"
+description="$(printf '%s' "$mr_json" | jq -r '.description // ""')"
+
+key="$(printf '%s\n%s' "$title" "$description" \
+  | grep -oE '(IOS|ANDR|QA)-[0-9]+' \
+  | head -1 || true)"
+
+if [ -z "$key" ]; then
+  err "no Jira key (IOS-XXXX, ANDR-XXXX or QA-XXXX) found in MR !$mr_iid title or description"
+  exit 1
+fi
+
+echo "$key"

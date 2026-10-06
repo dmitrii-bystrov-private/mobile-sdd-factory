@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(glab *)",
+      "Bash(twg *)",
+      "Bash(git *)",
+      "Bash(jq *)",
+      "Bash(bash *)",
+      "Bash(cat *)",
+      "Bash(chmod *)",
+      "Bash(find *)",
+      "Bash(mise *)",
+      "Bash(pod *)",
+      "Bash(ls *)",
+      "Bash(rm *)",
+      "Bash(echo *)",
+      "Bash(mkdir *)",
+      "Bash(wait)",
+      "WebSearch",
+      "WebFetch"
+    ],
+    "ask": [
+      "Bash(brew *)",
+      "Bash(npm *)",
+      "Bash(curl *)",
+      "Bash(python3 *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(rm -r *)",
+      "Bash(git push --force *)",
+      "Bash(glab mr merge *)",
+      "Bash(glab mr close *)",
+      "Bash(twg jira workitem delete *)"
+    ],
+    "defaultMode": "auto"
+  }
+}

@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Usage: bash scripts/create-mr.sh <TASK-KEY>
+#
+# Pushes the current branch and opens a GitLab MR to master.
+# Determines the project directory from the task worktree or platform env vars.
+#
+# Required env: SDD_WORKDIR, platform repo ENV for non-QA fallback; E2E_DIR for QA
+# Required CLI: twg, glab, jq, git
+set -euo pipefail
+
+KEY="${1:?Usage: create-mr.sh <TASK-KEY>}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+command -v twg >/dev/null 2>&1 || { echo "Missing required command: twg" >&2; exit 1; }
+command -v glab >/dev/null 2>&1 || { echo "Missing required command: glab" >&2; exit 1; }
+command -v jq   >/dev/null 2>&1 || { echo "Missing required command: jq"   >&2; exit 1; }
+[[ -n "${SDD_WORKDIR:-}" ]] || { echo "SDD_WORKDIR is not set" >&2; exit 1; }
+
+source "$SCRIPT_DIR/twg-utils.sh"
+
+# Resolve story key (parent for subtasks, self otherwise)
+tmp_json="$(mktemp)"
+trap 'rm -f "$tmp_json"' EXIT
+
+twg_get_issue_legacy_json "$tmp_json" "$KEY" "summary,issuetype,parent"
+json="$(cat "$tmp_json")"
+title="$(printf '%s' "$json"      | jq -r '.fields.summary')"
+is_subtask="$(printf '%s' "$json" | jq -r '.fields.issuetype.subtask')"
+
+if [[ "$is_subtask" == "true" ]]; then
+  story_key="$(printf '%s' "$json" | jq -r '.fields.parent.key')"
+else
+  story_key="$KEY"
+fi
+
+# Determine project directory: worktree first, then platform fallback
+worktree="$SDD_WORKDIR/$story_key/repo"
+if [[ -d "$worktree" ]]; then
+  project_dir="$worktree"
+elif [[ "$KEY" == IOS-* ]]; then
+  : "${IOS_DIR:?IOS_DIR is not set}"
+  project_dir="$IOS_DIR"
+elif [[ "$KEY" == ANDR-* ]]; then
+  : "${ANDROID_DIR:?ANDROID_DIR is not set}"
+  project_dir="$ANDROID_DIR"
+else
+  echo "Cannot determine project directory for key: $KEY" >&2
+  exit 1
+fi
+
+branch="$(git -C "$project_dir" branch --show-current)"
+
+if [[ "$branch" == "master" ]]; then
+  echo "ERROR: currently on master — refusing to push directly to master." >&2
+  exit 1
+fi
+
+echo "Checking for uncommitted changes in $project_dir..."
+if [[ -n "$(git -C "$project_dir" status --porcelain)" ]]; then
+  echo "ERROR: uncommitted changes remain in $project_dir." >&2
+  echo "Create workflow checkpoint commits before MR handoff." >&2
+  exit 1
+fi
+
+# Materialize a reviewable QA description from verified receipts before publishing.
+description=""
+if [[ "$KEY" == QA-* ]]; then
+  description="$(cd "$SCRIPT_DIR/.." && ./.venv/bin/python -m factory.e2e.runner mr-description "$story_key")"
+fi
+
+# Push
+echo "Pushing $branch to origin..."
+git -C "$project_dir" push -u origin "$branch"
+
+# Create MR (or print existing one if already open)
+existing_mr="$(cd "$project_dir" && glab mr list --source-branch "$branch" --output json 2>/dev/null | jq -r '.[0].web_url // empty' 2>/dev/null || true)"
+
+if [[ -n "$existing_mr" ]]; then
+  if [[ "$KEY" == QA-* ]]; then
+    (cd "$project_dir" && glab mr update "$branch" --description "$description")
+  fi
+  echo "MR already exists: $existing_mr"
+else
+  echo "Creating MR: $KEY: $title"
+  (
+    cd "$project_dir"
+    glab mr create \
+      --title "$KEY: $title" \
+      --description "$description" \
+      --target-branch master \
+      --remove-source-branch \
+      --yes
+  )
+fi

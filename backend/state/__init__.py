@@ -1,0 +1,2 @@
+"""SQLite-backed persistence layer."""
+

@@ -1,0 +1,294 @@
+from __future__ import annotations
+
+from pathlib import Path
+import tempfile
+import unittest
+
+from backend.roles.prompts import role_handoff_prompt
+from backend.roles.workspace import build_role_agents_md
+
+
+class RolePromptTests(unittest.TestCase):
+    def test_live_bootstrap_prompt_points_to_durable_role_files(self) -> None:
+        text = role_handoff_prompt(
+            role_name="implementer",
+            instruction="Start implementation work for IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "implementation_requested",
+                "work_item_id": 1,
+            },
+            prompt_mode="live_bootstrap",
+        )
+
+        self.assertIn("Read AGENTS.md/CLAUDE.md in the current directory once now", text)
+        self.assertIn("Read HYDRATION.json for machine-readable routed IDs and paths.", text)
+        self.assertIn("Current routed work:\nStart implementation work for IOS-123.", text)
+        self.assertNotIn("Role-specific rules:", text)
+        self.assertNotIn("Hydration payload:", text)
+        self.assertNotIn('"task_key": "IOS-123"', text)
+
+    def test_live_continuation_prompt_reuses_existing_agents_context(self) -> None:
+        text = role_handoff_prompt(
+            role_name="verification-coordinator",
+            instruction="Run deterministic verification for IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "verification_requested",
+                "work_item_id": 2,
+            },
+            prompt_mode="live_continuation",
+        )
+
+        self.assertIn("Continue from your existing role context.", text)
+        self.assertNotIn("AGENTS.md/CLAUDE.md role context", text)
+        self.assertIn("same work item that was already in progress", text)
+        self.assertIn("If the routed work_item_id changed", text)
+        self.assertIn("re-evaluate the current files instead of reusing a prior result", text)
+        self.assertIn("Read the updated HYDRATION.json", text)
+        self.assertIn("Run deterministic verification for IOS-123.", text)
+        self.assertNotIn("Role-specific rules:", text)
+        self.assertNotIn('"current_stage": "verification_requested"', text)
+
+    def test_full_prompt_is_current_work_only_not_role_contract(self) -> None:
+        text = role_handoff_prompt(
+            role_name="convention-reviewer",
+            instruction="Run convention review for IOS-123.",
+            hydration_payload={
+                "task_key": "IOS-123",
+                "current_stage": "convention_review_requested",
+                "work_item_id": 14,
+            },
+            prompt_mode="full",
+        )
+
+        self.assertIn("Read AGENTS.md/CLAUDE.md and HYDRATION.json", text)
+        self.assertIn("Routed work item: 14.", text)
+        self.assertIn("Current routed work:\nRun convention review for IOS-123.", text)
+        self.assertNotIn("Role-specific rules:", text)
+        self.assertNotIn("Primary project guidance", text)
+        self.assertNotIn("Submit the terminal result", text)
+        self.assertNotIn("Hydration payload:", text)
+
+    def test_coding_roles_have_strict_verification_boundary_in_agents(self) -> None:
+        implementer = self._agents("implementer")
+
+        expected = (
+            "Do not run build, test, or lint verification. "
+            "Submit your implementation result; verification happens after this role finishes."
+        )
+        self.assertIn(expected, implementer)
+        self.assertNotIn("run-test.sh", implementer)
+        self.assertNotIn("run-lint.sh", implementer)
+        self.assertNotIn("run-build.sh", implementer)
+        self.assertNotIn("verifier lane", implementer)
+        self.assertNotIn("coordinator", implementer.lower())
+
+    def test_review_roles_have_strict_verification_boundary_without_tool_lists(self) -> None:
+        for role_name in ("convention-reviewer", "requirements-reviewer"):
+            agents = self._agents(role_name)
+            self.assertIn(
+                "Do not run build, test, or lint verification. "
+                "Submit your review result; verification happens after this role finishes.",
+                agents,
+            )
+            self.assertNotIn("run-test.sh", agents)
+            self.assertNotIn("run-lint.sh", agents)
+            self.assertNotIn("run-build.sh", agents)
+            self.assertNotIn("ios-verify.sh", agents)
+            self.assertNotIn("android-verify.sh", agents)
+            self.assertNotIn("verification lane", agents)
+
+    def test_planning_and_docs_roles_do_not_mention_code_verification(self) -> None:
+        for role_name in (
+            "proposal-context-worker",
+            "requirements-clarifier-worker",
+            "acceptance-criteria-worker",
+            "constraints-worker",
+            "task-decomposer-worker",
+            "doc-harvest-worker",
+            "documentation-reviewer",
+        ):
+            agents = self._agents(role_name).lower()
+            self.assertNotIn("build, test, or lint", agents)
+            self.assertNotIn("run-test.sh", agents)
+            self.assertNotIn("run-lint.sh", agents)
+            self.assertNotIn("run-build.sh", agents)
+            self.assertNotIn("ios-verify.sh", agents)
+            self.assertNotIn("android-verify.sh", agents)
+
+    def test_verifier_agents_owns_verification_commands(self) -> None:
+        agents = self._agents("verification-coordinator")
+
+        self.assertIn("Start from the routed verification strategy file", agents)
+        self.assertIn('bash scripts/ios-verify.sh "$SDD_FACTORY_TASK_KEY"', agents)
+        self.assertIn('bash scripts/android-verify.sh "$SDD_FACTORY_TASK_KEY"', agents)
+        self.assertIn("run-test.sh", agents)
+        self.assertIn("run-lint.sh", agents)
+        self.assertIn("Final verification report target:", agents)
+        self.assertIn("Do not modify product code.", agents)
+
+    def test_review_agents_include_terminal_result_cheat_sheet(self) -> None:
+        agents = self._agents("convention-reviewer")
+
+        self.assertIn("## Terminal Result Contract", agents)
+        self.assertIn("--output-type passed", agents)
+        self.assertIn("--output-type failed", agents)
+        self.assertIn("--issues-markdown-file <path>", agents)
+        self.assertIn("--output-type blocked_review_cycle", agents)
+        self.assertIn("HYDRATION.json", agents)
+
+    def test_agents_use_universal_repository_guidance_entrypoints(self) -> None:
+        for role_name in (
+            "implementer",
+            "convention-reviewer",
+            "requirements-reviewer",
+            "doc-harvest-worker",
+            "documentation-reviewer",
+            "proposal-context-worker",
+            "requirements-clarifier-worker",
+            "acceptance-criteria-worker",
+            "constraints-worker",
+            "spec-verifier-worker",
+            "task-decomposer-worker",
+        ):
+            agents = self._agents(role_name)
+            self.assertIn("Repository guidance", agents)
+            self.assertIn("AGENTS.md", agents)
+            self.assertIn("CLAUDE.md", agents)
+            self.assertIn("README.md", agents)
+            self.assertNotIn("DOCUMENTATION_GUIDE.md", agents)
+            self.assertNotIn("/.claude/", agents)
+
+    def test_documentation_reviewer_requires_fresh_review_per_work_item(self) -> None:
+        agents = self._agents("documentation-reviewer")
+
+        self.assertIn("For each routed work item, perform a fresh review", agents)
+        self.assertIn("Do not reuse prior findings files", agents)
+        self.assertIn("a local notes file is not delivered unless it is passed to the helper", agents)
+        self.assertIn("--issues-markdown-file <path>", agents)
+        self.assertIn("do not rely on shell variables from earlier tool calls", agents)
+
+    def test_implementer_agents_include_completion_and_subtask_result_templates(self) -> None:
+        agents = self._agents("implementer")
+
+        self.assertIn("## Terminal Result Contract", agents)
+        self.assertIn("--output-type completed", agents)
+        self.assertIn("--subtask-key <subtask_key>", agents)
+        self.assertIn("Use the subtask completion command only for routed subtask implementation work", agents)
+        self.assertIn("no source change is needed", agents)
+        self.assertIn("submit `completed`", agents)
+        self.assertIn("hand work back to a downstream gate", agents)
+        self.assertIn("--output-type failed", agents)
+        self.assertIn("--needs-operator-input", agents)
+        self.assertIn("do not use `SDD_ERROR` as routed work delivery", agents)
+        self.assertIn("--conflict-point \"<what conflicts>\"", agents)
+        self.assertIn("--reviewer-premise \"<premise being challenged>\"", agents)
+        self.assertIn("--preferred-direction \"<recommended direction>\"", agents)
+        self.assertIn("--requested-decision \"<decision needed>\"", agents)
+        self.assertNotIn("also include `conflict_point`", agents)
+
+    def test_non_implementer_agents_do_not_mention_subtask_key(self) -> None:
+        for role_name in (
+            "convention-reviewer",
+            "requirements-reviewer",
+            "documentation-reviewer",
+            "verification-coordinator",
+            "doc-harvest-worker",
+            "proposal-context-worker",
+            "requirements-clarifier-worker",
+            "acceptance-criteria-worker",
+            "constraints-worker",
+            "spec-verifier-worker",
+            "task-decomposer-worker",
+        ):
+            with self.subTest(role_name=role_name):
+                agents = self._agents(role_name)
+                self.assertNotIn("subtask_key", agents)
+                self.assertNotIn("<subtask_key>", agents)
+
+    def test_agents_require_successful_helper_exit_before_claiming_submission(self) -> None:
+        agents = self._agents("implementer")
+
+        self.assertIn("exited 0", agents)
+        self.assertIn("Do not say or imply that work was submitted", agents)
+        self.assertIn("If you realize you described completion but did not run the helper", agents)
+
+    def test_agents_define_structured_terminal_marker_schema(self) -> None:
+        agents = self._agents("requirements-reviewer")
+
+        self.assertIn("## Structured Terminal Markers", agents)
+        self.assertIn("Replace example `work_item_id` value `123`", agents)
+        self.assertIn('SDD_PROGRESS: {"status":"in_progress","message":"<short status>","work_item_id":123}', agents)
+        self.assertIn('SDD_ERROR: {"summary":"<short summary>","details":"<specific failure>","needs_operator_input":false,"work_item_id":123}', agents)
+        self.assertIn("Do not invent marker names, wrapper keys, markdown formats, or extra schema variants.", agents)
+        self.assertIn("Do not use terminal markers for normal pass/fail/completed/skipped outcomes", agents)
+        self.assertNotIn("You may emit `SDD_PROGRESS`", agents)
+        self.assertNotIn("exact `SDD_OUTPUT: {...}`", agents)
+
+    def test_verifier_agents_include_result_payload_templates(self) -> None:
+        agents = self._agents("verification-coordinator")
+
+        self.assertIn("## Terminal Result Contract", agents)
+        self.assertIn("--result passed", agents)
+        self.assertIn("--result failed", agents)
+        self.assertIn("--failure \"<failed check>\"", agents)
+        self.assertIn("--output-type blocked_verification_cycle", agents)
+
+    def test_requirements_reviewer_does_not_treat_derived_exact_values_as_authoritative(self) -> None:
+        agents = self._agents("requirements-reviewer")
+
+        self.assertIn("downstream specs/decomposition as derived guidance", agents)
+        self.assertIn("explicitly present in Jira/operator input", agents)
+        self.assertIn("conflicts with local repository convention", agents)
+        self.assertIn("review the requirement at the semantic level", agents)
+
+    def test_spec_text_does_not_silently_override_code_conventions(self) -> None:
+        implementer = self._agents("implementer")
+        convention_reviewer = self._agents("convention-reviewer")
+        requirements_reviewer = self._agents("requirements-reviewer")
+
+        self.assertIn("repository conventions as the default implementation contract", implementer)
+        self.assertIn("explicitly states that this task is intentionally changing that convention", implementer)
+        self.assertIn("local repository convention sources and stable nearby precedent as authoritative", convention_reviewer)
+        self.assertIn("update the relevant convention source or adjacent canonical examples", convention_reviewer)
+        self.assertIn("Do not treat spec/decomposition wording as an implicit override", requirements_reviewer)
+        self.assertIn("semantic requirement can be satisfied while following local convention", requirements_reviewer)
+
+    def test_planning_roles_are_told_not_to_invent_literal_identifiers(self) -> None:
+        for role_name in (
+            "requirements-clarifier-worker",
+            "constraints-worker",
+            "spec-verifier-worker",
+            "task-decomposer-worker",
+        ):
+            agents = self._agents(role_name)
+            self.assertIn("names, tags, string constants, analytics keys", agents)
+            self.assertIn("identifiers", agents)
+            self.assertIn("repository convention", agents)
+
+    def test_planning_roles_do_not_create_implicit_convention_overrides(self) -> None:
+        expectations = {
+            "requirements-clarifier-worker": "Do not phrase a requirement as a convention override",
+            "constraints-worker": "State convention changes only when Jira/operator input explicitly requests them",
+            "spec-verifier-worker": "silently override local repository conventions without explicit Jira/operator authority",
+            "task-decomposer-worker": "Do not convert a semantic requirement into a convention override",
+        }
+        for role_name, expected in expectations.items():
+            agents = self._agents(role_name)
+            self.assertIn(expected, agents)
+
+    def _agents(self, role_name: str) -> str:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            return build_role_agents_md(
+                role_name=role_name,
+                task_key="IOS-123",
+                repo_root=root / "factory",
+                workdir_root=root / "workdir",
+                role_directory=root / "workdir" / "IOS-123" / "runtime" / "role-workspaces" / role_name,
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

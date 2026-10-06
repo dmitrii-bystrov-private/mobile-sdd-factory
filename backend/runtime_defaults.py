@@ -1,0 +1,138 @@
+"""Project-local operator defaults for runtime role configuration."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+from backend.role_baselines import known_role_names
+from backend.session_policy import FIELD_ALLOWED_VALUES, PROFILE_POLICY_FIELDS, WORKFLOW_PROFILES
+from factory.e2e.config import normalize_defaults
+
+
+SETTINGS_DIR_NAME = ".sdd-factory"
+LOCAL_SETTINGS_FILENAME = "settings.local.json"
+
+def settings_file_path(repo_root: Path) -> Path:
+    return repo_root / SETTINGS_DIR_NAME / LOCAL_SETTINGS_FILENAME
+
+
+def load_runtime_defaults(repo_root: Path) -> dict[str, Any]:
+    path = settings_file_path(repo_root)
+    payload = _load_json_dict(path)
+    runtime_defaults = payload.get("runtime_defaults") if isinstance(payload, dict) else None
+    if not isinstance(runtime_defaults, dict):
+        runtime_defaults = {}
+    role_defaults = runtime_defaults.get("role_defaults")
+    if not isinstance(role_defaults, dict):
+        role_defaults = {}
+    policy_defaults = runtime_defaults.get("policy_defaults")
+    if not isinstance(policy_defaults, dict):
+        policy_defaults = {}
+    normalized_role_defaults: dict[str, dict[str, str | None]] = {}
+    for role_name, value in role_defaults.items():
+        if not isinstance(role_name, str) or not isinstance(value, dict):
+            continue
+        normalized_role_defaults[role_name] = {
+            "runner": _string_or_none(value.get("runner")),
+            "model": _string_or_none(value.get("model")),
+            "effort": _string_or_none(value.get("effort")),
+        }
+    normalized_policy_defaults: dict[str, dict[str, str]] = {}
+    for workflow_profile, value in policy_defaults.items():
+        if workflow_profile not in WORKFLOW_PROFILES or not isinstance(value, dict):
+            continue
+        allowed_fields = set(PROFILE_POLICY_FIELDS[workflow_profile])
+        normalized_workflow_defaults: dict[str, str] = {}
+        for field_name, raw_value in value.items():
+            if field_name not in allowed_fields:
+                continue
+            normalized_value = _string_or_none(raw_value)
+            if normalized_value is None:
+                continue
+            allowed_values = FIELD_ALLOWED_VALUES.get(field_name, set())
+            if normalized_value not in allowed_values:
+                continue
+            normalized_workflow_defaults[field_name] = normalized_value
+        normalized_policy_defaults[workflow_profile] = normalized_workflow_defaults
+    return {
+        "default_runner": _string_or_none(runtime_defaults.get("default_runner")),
+        "role_defaults": normalized_role_defaults,
+        "policy_defaults": normalized_policy_defaults,
+        "known_roles": known_role_names(),
+        "source_path": str(path),
+        "e2e_defaults": normalize_defaults(runtime_defaults.get("e2e_defaults")),
+    }
+
+
+def save_runtime_defaults(
+    repo_root: Path,
+    *,
+    default_runner: str | None,
+    role_defaults: dict[str, dict[str, str | None]],
+    policy_defaults: dict[str, dict[str, str | None]],
+    e2e_defaults: dict | None = None,
+) -> dict[str, Any]:
+    path = settings_file_path(repo_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    normalized_role_defaults: dict[str, dict[str, str]] = {}
+    for role_name, value in role_defaults.items():
+        if role_name not in known_role_names() or not isinstance(value, dict):
+            continue
+        normalized_value = {
+            "runner": _string_or_none(value.get("runner")) or "",
+            "model": _string_or_none(value.get("model")) or "",
+            "effort": _string_or_none(value.get("effort")) or "",
+        }
+        if any(normalized_value.values()):
+            normalized_role_defaults[role_name] = normalized_value
+    normalized_policy_defaults: dict[str, dict[str, str]] = {}
+    for workflow_profile, value in policy_defaults.items():
+        if workflow_profile not in WORKFLOW_PROFILES or not isinstance(value, dict):
+            continue
+        allowed_fields = set(PROFILE_POLICY_FIELDS[workflow_profile])
+        normalized_workflow_defaults: dict[str, str] = {}
+        for field_name, raw_value in value.items():
+            if field_name not in allowed_fields:
+                continue
+            normalized_value = _string_or_none(raw_value)
+            if normalized_value is None:
+                continue
+            allowed_values = FIELD_ALLOWED_VALUES.get(field_name, set())
+            if normalized_value not in allowed_values:
+                continue
+            normalized_workflow_defaults[field_name] = normalized_value
+        if normalized_workflow_defaults:
+            normalized_policy_defaults[workflow_profile] = normalized_workflow_defaults
+    payload = _load_json_dict(path)
+    previous = payload.get("runtime_defaults")
+    if not isinstance(previous, dict):
+        previous = {}
+    payload.update({
+        "runtime_defaults": {
+            "default_runner": _string_or_none(default_runner),
+            "role_defaults": normalized_role_defaults,
+            "policy_defaults": normalized_policy_defaults,
+            "e2e_defaults": normalize_defaults(e2e_defaults if e2e_defaults is not None else previous.get("e2e_defaults")),
+        }
+    })
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return load_runtime_defaults(repo_root)
+
+
+def _load_json_dict(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _string_or_none(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None

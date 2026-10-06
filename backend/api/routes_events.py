@@ -1,0 +1,88 @@
+"""Event API routes."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
+
+from backend.api.routes_sessions import to_session_response
+from backend.api.schemas import EventResponse, EventsResponse, InjectEventRequest, InjectEventResponse
+from backend.api.sse import sse_event_generator
+from backend.coordinator.intake import IntakeError
+from backend.dependencies import AppDependencies
+from backend.state.event_repository import DEFAULT_UI_EXCLUDED_EVENT_TYPES
+
+router = APIRouter(prefix="/events", tags=["events"])
+
+
+def get_dependencies(request: Request) -> AppDependencies:
+    return request.app.state.dependencies
+
+
+@router.get("", response_model=EventsResponse)
+def list_events(
+    session_id: int = Query(...),
+    include_telemetry: bool = Query(default=True),
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> EventsResponse:
+    events = (
+        dependencies.event_repository.list_for_session(session_id)
+        if include_telemetry
+        else dependencies.event_repository.list_for_session_excluding(
+            session_id,
+            DEFAULT_UI_EXCLUDED_EVENT_TYPES,
+        )
+    )
+    return EventsResponse(
+        items=[
+            EventResponse(
+                id=event.id,
+                session_id=event.session_id,
+                event_type=event.event_type,
+                producer_type=event.producer_type,
+                producer_id=event.producer_id,
+                payload=event.payload,
+                correlation_id=event.correlation_id,
+                created_at=event.created_at,
+            )
+            for event in events
+        ]
+    )
+
+
+@router.get("/stream")
+def stream_events(
+    request: Request,
+    session_id: int | None = Query(default=None),
+    since_event_id: int | None = Query(default=None),
+) -> StreamingResponse:
+    dependencies: AppDependencies = request.app.state.dependencies
+    generator = sse_event_generator(
+        dependencies.event_repository,
+        dependencies.event_bus,
+        session_id=session_id,
+        since_event_id=since_event_id,
+    )
+    return StreamingResponse(generator, media_type="text/event-stream")
+
+
+@router.post("", response_model=InjectEventResponse, include_in_schema=False)
+def inject_event(
+    payload: InjectEventRequest,
+    dependencies: AppDependencies = Depends(get_dependencies),
+) -> InjectEventResponse:
+    try:
+        session, followup_event = dependencies.coordinator_service.handle_operator_event(
+            session_id=payload.session_id,
+            event_type=payload.event_type,
+            payload=payload.payload,
+        )
+    except IntakeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return InjectEventResponse(
+        accepted=True,
+        event_type=payload.event_type,
+        followup_event_type=followup_event.event_type if followup_event else None,
+        session=to_session_response(session),
+    )

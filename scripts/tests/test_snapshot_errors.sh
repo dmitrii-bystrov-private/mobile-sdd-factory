@@ -1,0 +1,637 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SNAPSHOT="$SCRIPT_DIR/../snapshot.sh"
+FIXTURES="$SCRIPT_DIR/fixtures"
+
+PASS=0
+FAIL=0
+
+# ---------------------------------------------------------------------------
+# Test harness
+# ---------------------------------------------------------------------------
+
+assert_exit_nonzero() {
+  local name="$1"; shift
+  if "$@" > /dev/null 2>&1; then
+    echo "  FAIL  $name (expected non-zero exit, got 0)"
+    (( FAIL++ )) || true
+  else
+    echo "  PASS  $name"
+    (( PASS++ )) || true
+  fi
+}
+
+assert_exit_code() {
+  local name="$1" expected="$2"; shift 2
+  local actual=0
+  "$@" > /dev/null 2>&1 || actual=$?
+  if [[ "$actual" -eq "$expected" ]]; then
+    echo "  PASS  $name"
+    (( PASS++ )) || true
+  else
+    echo "  FAIL  $name (expected exit $expected, got $actual)"
+    (( FAIL++ )) || true
+  fi
+}
+
+assert_stderr_contains() {
+  local name="$1" pattern="$2" stderr_file="$3"
+  if grep -q "$pattern" "$stderr_file" 2>/dev/null; then
+    echo "  PASS  $name"
+    (( PASS++ )) || true
+  else
+    echo "  FAIL  $name (stderr does not contain '$pattern')"
+    echo "        stderr: $(cat "$stderr_file" 2>/dev/null || echo '(empty)')"
+    (( FAIL++ )) || true
+  fi
+}
+
+assert_file_contains() {
+  local name="$1" pattern="$2" file="$3"
+  if grep -q "$pattern" "$file" 2>/dev/null; then
+    echo "  PASS  $name"
+    (( PASS++ )) || true
+  else
+    echo "  FAIL  $name (file does not contain '$pattern')"
+    echo "        file: $(cat "$file" 2>/dev/null || echo '(empty)')"
+    (( FAIL++ )) || true
+  fi
+}
+
+assert_file_exists() {
+  local name="$1" file="$2"
+  if [[ -f "$file" ]]; then
+    echo "  PASS  $name"
+    (( PASS++ )) || true
+  else
+    echo "  FAIL  $name (expected file: $file)"
+    (( FAIL++ )) || true
+  fi
+}
+
+assert_no_files_under() {
+  local name="$1" dir="$2"
+  local count
+  count="$(find "$dir" -type f 2>/dev/null | wc -l | tr -d ' ')"
+  if [[ "$count" -eq 0 ]]; then
+    echo "  PASS  $name"
+    (( PASS++ )) || true
+  else
+    echo "  FAIL  $name (expected no files under $dir, found $count)"
+    find "$dir" -type f | sed 's/^/        /'
+    (( FAIL++ )) || true
+  fi
+}
+
+assert_no_such_file() {
+  local name="$1" file="$2"
+  if [[ ! -f "$file" ]]; then
+    echo "  PASS  $name"
+    (( PASS++ )) || true
+  else
+    echo "  FAIL  $name (file should not exist: $file)"
+    (( FAIL++ )) || true
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Mock setup helpers
+# ---------------------------------------------------------------------------
+
+# Create a temp workspace and populate mock_bin with fake git and twg.
+# Sets globals: TMP_ROOT, MOCK_WORKDIR, MOCK_IOS_DIR, MOCK_BIN, MOCK_FIXTURES.
+setup_workspace() {
+  TMP_ROOT="$(mktemp -d)"
+  MOCK_WORKDIR="$TMP_ROOT/workdir"
+  MOCK_IOS_DIR="$TMP_ROOT/ios"
+  MOCK_BIN="$TMP_ROOT/bin"
+  MOCK_FIXTURES="$TMP_ROOT/fixtures"
+  mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR" "$MOCK_BIN" "$MOCK_FIXTURES"
+  trap 'rm -rf "$TMP_ROOT"' RETURN
+
+  # Populate mock fixtures (key-named copies for mock twg lookup)
+  cp "$FIXTURES/parent_core.json"            "$MOCK_FIXTURES/IOS-100_core.json"
+  cp "$FIXTURES/parent_comments.json"        "$MOCK_FIXTURES/IOS-100_comments.json"
+  cp "$FIXTURES/subtasks_list.json"          "$MOCK_FIXTURES/subtasks_list.json"
+  cp "$FIXTURES/subtask_IOS-101_core.json"   "$MOCK_FIXTURES/IOS-101_core.json"
+  cp "$FIXTURES/subtask_IOS-101_comments.json" "$MOCK_FIXTURES/IOS-101_comments.json"
+  cp "$FIXTURES/subtask_IOS-102_core.json"   "$MOCK_FIXTURES/IOS-102_core.json"
+  cp "$FIXTURES/subtask_IOS-102_comments.json" "$MOCK_FIXTURES/IOS-102_comments.json"
+}
+
+# Write a mock git that always reports the worktree already exists.
+write_mock_git() {
+  cat > "$MOCK_BIN/git" << 'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"rev-parse --is-inside-work-tree"*) echo "true"; exit 0 ;;
+  *) exit 0 ;;
+esac
+EOF
+  chmod +x "$MOCK_BIN/git"
+}
+
+write_mock_git_new_worktree() {
+  local log_path="$1"
+  cat > "$MOCK_BIN/git" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "\$*" >>"$log_path"
+if [[ "\${1:-}" == "-C" ]]; then
+  shift 2
+fi
+case "\${1:-}" in
+  rev-parse)
+    if [[ "\${2:-}" == "--verify" && "\${3:-}" == "origin/master" ]]; then
+      exit 0
+    fi
+    exit 1
+    ;;
+  fetch|checkout|pull)
+    exit 0
+    ;;
+  worktree)
+    if [[ "\${2:-}" == "add" ]]; then
+      for arg in "\$@"; do
+        if [[ "\$arg" == "$MOCK_WORKDIR/"*"/repo" ]]; then
+          mkdir -p "\$arg/Tuist"
+          cp -R "$MOCK_IOS_DIR/bin" "\$arg/bin"
+          cp "$MOCK_IOS_DIR/.env.local" "\$arg/.env.local"
+          exit 0
+        fi
+      done
+    fi
+    exit 0
+    ;;
+esac
+exit 0
+EOF
+  chmod +x "$MOCK_BIN/git"
+}
+
+# Write a mock twg. Modes:
+#   fail_parent          — exit 1 immediately (before any output)
+#   fail_subtask_IOS-102 — succeed for parent/IOS-101, fail for IOS-102
+#   fail_transition      — fail only the optional transition to In Progress
+#   succeed              — route all calls to fixture files
+write_mock_twg() {
+  local mode="${1:-succeed}" fixtures="${MOCK_FIXTURES}"
+  local log_path="${2:-}"
+  cat > "$MOCK_BIN/twg" << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+_MODE="${mode}"
+_FIXTURES="${fixtures}"
+_LOG_PATH="${log_path}"
+
+if [[ -n "\$_LOG_PATH" ]]; then
+  printf '%s\n' "\$*" >>"\$_LOG_PATH"
+fi
+
+# Extract the first argument matching a Jira key pattern
+_KEY=""
+for _arg in "\$@"; do
+  [[ "\$_arg" =~ ^[A-Z]+-[0-9]+\$ ]] && _KEY="\$_arg" && break
+done
+
+case "\$_MODE" in
+  fail_parent)
+    echo "mock twg: parent retrieval failed" >&2
+    exit 1
+    ;;
+  fail_transition)
+    if echo "\$*" | grep -q "workitem transition"; then
+      echo "mock twg: transition failed" >&2
+      exit 1
+    fi
+    ;;
+  fail_subtask_IOS-102)
+    if [[ "\$_KEY" == "IOS-102" ]]; then
+      echo "mock twg: subtask IOS-102 retrieval failed" >&2
+      exit 1
+    fi
+    ;;
+esac
+
+# Route to fixture files
+if echo "\$*" | grep -q "workitem field update-metadata"; then
+  cat <<'JSON'
+{"data":{"fields":[{"id":"customfield_10107","name":"Dev finish date","required":false,"schema":{"type":"date"},"operations":["set"]},{"id":"customfield_10023","name":"Story Points","required":false,"schema":{"type":"number"},"operations":["set"]}]}}
+JSON
+elif echo "\$*" | grep -q -- "--field customfield_10107"; then
+  cat <<'JSON'
+{"data":[{"key":"IOS-100","customfield_10107":null,"customfield_10023":null,"status":{"name":"To Do"}}]}
+JSON
+elif echo "\$*" | grep -q "workitem update"; then
+  cat <<'JSON'
+{"data":{"key":"IOS-100"}}
+JSON
+elif echo "\$*" | grep -q "workitem transition --id .*--transition-id"; then
+  cat <<'JSON'
+{"data":{"key":"IOS-100","status":{"name":"In Progress"}}}
+JSON
+elif echo "\$*" | grep -q "workitem transition"; then
+  cat <<'JSON'
+{"data":{"transitions":[{"id":"461","name":"In Progress","toName":"In Progress","requirements":[],"fields":[]}]}}
+JSON
+elif echo "\$*" | grep -q "workitem get"; then
+  if echo "\$*" | grep -q "comment"; then
+    cat "\$_FIXTURES/\${_KEY}_comments.json"
+  else
+    cat "\$_FIXTURES/\${_KEY}_core.json"
+  fi
+elif echo "\$*" | grep -q "workitem query"; then
+  cat "\$_FIXTURES/subtasks_list.json"
+else
+  echo "unexpected twg command: \$*" >&2
+  exit 1
+fi
+EOF
+  chmod +x "$MOCK_BIN/twg"
+}
+
+write_mock_date_today() {
+  local today="$1"
+  cat > "$MOCK_BIN/date" << EOF
+#!/usr/bin/env bash
+if [[ "\${1:-}" == "+%F" ]]; then
+  printf '%s\n' "$today"
+  exit 0
+fi
+/bin/date "\$@"
+EOF
+  chmod +x "$MOCK_BIN/date"
+}
+
+# Run snapshot.sh with the given extra env vars (key=value pairs after the key arg).
+# Captures stderr to TMP_STDERR. Returns snapshot.sh exit code.
+run_snapshot() {
+  local key="$1"; shift
+  TMP_STDERR="$(mktemp)"
+  PATH="$MOCK_BIN:$PATH" \
+    SDD_WORKDIR="$MOCK_WORKDIR" \
+    IOS_DIR="$MOCK_IOS_DIR" \
+    "$@" \
+    bash "$SNAPSHOT" "$key" 2>"$TMP_STDERR" || true
+  # Return the actual exit code
+  PATH="$MOCK_BIN:$PATH" \
+    SDD_WORKDIR="$MOCK_WORKDIR" \
+    IOS_DIR="$MOCK_IOS_DIR" \
+    "$@" \
+    bash "$SNAPSHOT" "$key" > /dev/null 2>&1; echo $?
+}
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+echo "=== Snapshot error-handling tests ==="
+echo ""
+
+# ---------------------------------------------------------------------------
+# ENV validation: missing SDD_WORKDIR
+# ---------------------------------------------------------------------------
+echo "--- env validation ---"
+
+STDERR="$(mktemp)"
+if SDD_WORKDIR="" IOS_DIR="/tmp" bash "$SNAPSHOT" IOS-100 2>"$STDERR" > /dev/null; then
+  echo "  FAIL  missing SDD_WORKDIR: expected non-zero exit"
+  (( FAIL++ )) || true
+else
+  echo "  PASS  missing SDD_WORKDIR: exits non-zero"
+  (( PASS++ )) || true
+fi
+assert_stderr_contains "missing SDD_WORKDIR: stderr mentions SDD_WORKDIR" "SDD_WORKDIR" "$STDERR"
+rm -f "$STDERR"
+
+# ENV validation: both IOS_DIR and ANDROID_DIR set is allowed
+STDERR="$(mktemp)"
+if SDD_WORKDIR="/tmp" IOS_DIR="/tmp/ios" ANDROID_DIR="/tmp/android" bash "$SNAPSHOT" IOS-100 > /dev/null 2>"$STDERR"; then
+  echo "  PASS  both IOS_DIR+ANDROID_DIR set: supported"
+  (( PASS++ )) || true
+else
+  echo "  FAIL  both dirs set: expected success"
+  echo "        stderr: $(cat "$STDERR" 2>/dev/null || echo '(empty)')"
+  (( FAIL++ )) || true
+fi
+rm -f "$STDERR"
+
+# ENV validation: neither IOS_DIR nor ANDROID_DIR set
+STDERR="$(mktemp)"
+if SDD_WORKDIR="/tmp" IOS_DIR="" ANDROID_DIR="" bash "$SNAPSHOT" IOS-100 2>"$STDERR" > /dev/null; then
+  echo "  FAIL  neither dir set: expected non-zero exit"
+  (( FAIL++ )) || true
+else
+  echo "  PASS  neither IOS_DIR nor ANDROID_DIR: exits non-zero"
+  (( PASS++ )) || true
+fi
+assert_stderr_contains "neither dir set: stderr mentions IOS_DIR"     "IOS_DIR"     "$STDERR"
+rm -f "$STDERR"
+
+# ---------------------------------------------------------------------------
+# Parent retrieval failure: no artifacts written
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- parent retrieval failure ---"
+
+TMP_ROOT="$(mktemp -d)"
+MOCK_WORKDIR="$TMP_ROOT/workdir"
+MOCK_IOS_DIR="$TMP_ROOT/ios"
+MOCK_BIN="$TMP_ROOT/bin"
+MOCK_FIXTURES="$TMP_ROOT/fixtures"
+mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR" "$MOCK_BIN" "$MOCK_FIXTURES"
+
+cp "$FIXTURES/subtasks_list.json" "$MOCK_FIXTURES/"
+write_mock_git
+write_mock_twg "fail_parent"
+
+STDERR="$(mktemp)"
+if PATH="$MOCK_BIN:$PATH" SDD_WORKDIR="$MOCK_WORKDIR" IOS_DIR="$MOCK_IOS_DIR" \
+    bash "$SNAPSHOT" IOS-100 > /dev/null 2>"$STDERR"; then
+  echo "  FAIL  parent failure: expected non-zero exit"
+  (( FAIL++ )) || true
+else
+  echo "  PASS  parent failure: exits non-zero"
+  (( PASS++ )) || true
+fi
+assert_stderr_contains "parent failure: stderr mentions error" "ERROR" "$STDERR"
+assert_no_files_under "parent failure: no snapshot artifacts written" "$MOCK_WORKDIR"
+rm -f "$STDERR"
+rm -rf "$TMP_ROOT"
+
+# ---------------------------------------------------------------------------
+# Transition failure: snapshot still renders artifacts
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- transition failure ---"
+
+TMP_ROOT="$(mktemp -d)"
+MOCK_WORKDIR="$TMP_ROOT/workdir"
+MOCK_IOS_DIR="$TMP_ROOT/ios"
+MOCK_BIN="$TMP_ROOT/bin"
+MOCK_FIXTURES="$TMP_ROOT/fixtures"
+mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR" "$MOCK_BIN" "$MOCK_FIXTURES"
+
+jq '.fields.status.name = "To Do" | .fields.issuetype.name = "Bug"' "$FIXTURES/parent_core.json" > "$MOCK_FIXTURES/IOS-100_core.json"
+cp "$FIXTURES/parent_comments.json"        "$MOCK_FIXTURES/IOS-100_comments.json"
+cp "$FIXTURES/subtasks_list.json"          "$MOCK_FIXTURES/subtasks_list.json"
+cp "$FIXTURES/subtask_IOS-101_core.json"   "$MOCK_FIXTURES/IOS-101_core.json"
+cp "$FIXTURES/subtask_IOS-101_comments.json" "$MOCK_FIXTURES/IOS-101_comments.json"
+cp "$FIXTURES/subtask_IOS-102_core.json"   "$MOCK_FIXTURES/IOS-102_core.json"
+cp "$FIXTURES/subtask_IOS-102_comments.json" "$MOCK_FIXTURES/IOS-102_comments.json"
+
+write_mock_git
+write_mock_twg "fail_transition"
+
+STDERR="$(mktemp)"
+ACTUAL_EXIT=0
+PATH="$MOCK_BIN:$PATH" SDD_WORKDIR="$MOCK_WORKDIR" IOS_DIR="$MOCK_IOS_DIR" \
+  bash "$SNAPSHOT" IOS-100 > /dev/null 2>"$STDERR" || ACTUAL_EXIT=$?
+if [[ "$ACTUAL_EXIT" -eq 0 ]]; then
+  echo "  PASS  transition failure: snapshot continues"
+  (( PASS++ )) || true
+else
+  echo "  FAIL  transition failure: expected exit 0, got $ACTUAL_EXIT"
+  echo "        stderr: $(cat "$STDERR" 2>/dev/null || echo '(empty)')"
+  (( FAIL++ )) || true
+fi
+assert_stderr_contains "transition failure: warning logged" "could not transition IOS-100" "$STDERR"
+assert_stderr_contains "transition failure: twg output logged" "mock twg: transition failed" "$STDERR"
+
+WDIR="$MOCK_WORKDIR/IOS-100"
+assert_file_exists "transition failure: parent description.md written" "$WDIR/description.md"
+assert_file_exists "transition failure: parent comments.md written" "$WDIR/comments.md"
+assert_file_exists "transition failure: IOS-101 description.md written" "$WDIR/IOS-101/description.md"
+assert_file_exists "transition failure: IOS-102 description.md written" "$WDIR/IOS-102/description.md"
+
+rm -f "$STDERR"
+rm -rf "$TMP_ROOT"
+
+# ---------------------------------------------------------------------------
+# Story transition: fill required fields and move to In Progress with twg
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- story transition via twg ---"
+
+TMP_ROOT="$(mktemp -d)"
+MOCK_WORKDIR="$TMP_ROOT/workdir"
+MOCK_IOS_DIR="$TMP_ROOT/ios"
+MOCK_BIN="$TMP_ROOT/bin"
+MOCK_FIXTURES="$TMP_ROOT/fixtures"
+mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR" "$MOCK_BIN" "$MOCK_FIXTURES"
+
+jq '.fields.status.name = "To Do" | .fields.issuetype.name = "Story"' "$FIXTURES/parent_core.json" > "$MOCK_FIXTURES/IOS-100_core.json"
+cp "$FIXTURES/parent_comments.json"        "$MOCK_FIXTURES/IOS-100_comments.json"
+cp "$FIXTURES/subtasks_list.json"          "$MOCK_FIXTURES/subtasks_list.json"
+cp "$FIXTURES/subtask_IOS-101_core.json"   "$MOCK_FIXTURES/IOS-101_core.json"
+cp "$FIXTURES/subtask_IOS-101_comments.json" "$MOCK_FIXTURES/IOS-101_comments.json"
+cp "$FIXTURES/subtask_IOS-102_core.json"   "$MOCK_FIXTURES/IOS-102_core.json"
+cp "$FIXTURES/subtask_IOS-102_comments.json" "$MOCK_FIXTURES/IOS-102_comments.json"
+
+TWG_LOG="$TMP_ROOT/twg.log"
+write_mock_git
+write_mock_twg "succeed" "$TWG_LOG"
+write_mock_date_today "2026-09-03"
+
+STDERR="$(mktemp)"
+ACTUAL_EXIT=0
+PATH="$MOCK_BIN:$PATH" \
+  SDD_WORKDIR="$MOCK_WORKDIR" \
+  IOS_DIR="$MOCK_IOS_DIR" \
+  SDD_JIRA_STORY_POINTS_VALUE="1" \
+  bash "$SNAPSHOT" IOS-100 > /dev/null 2>"$STDERR" || ACTUAL_EXIT=$?
+if [[ "$ACTUAL_EXIT" -eq 0 ]]; then
+  echo "  PASS  story transition via twg: snapshot succeeds"
+  (( PASS++ )) || true
+else
+  echo "  FAIL  story transition via twg: expected exit 0, got $ACTUAL_EXIT"
+  echo "        stderr: $(cat "$STDERR" 2>/dev/null || echo '(empty)')"
+  (( FAIL++ )) || true
+fi
+assert_file_contains "story transition via twg: metadata read" "jira workitem field update-metadata --id IOS-100 -o json" "$TWG_LOG"
+assert_file_contains "story transition via twg: current values read" "jira workitem get IOS-100 --field customfield_10107 --field customfield_10023" "$TWG_LOG"
+assert_file_contains "story transition via twg: missing fields updated" "jira workitem update --id IOS-100 --field customfield_10107=2026-09-03 --field customfield_10023=1 -o json" "$TWG_LOG"
+assert_file_contains "story transition via twg: transitions discovered" "jira workitem transition --id IOS-100 -o json" "$TWG_LOG"
+assert_file_contains "story transition via twg: transition executed" "jira workitem transition --id IOS-100 --transition-id 461 -o json" "$TWG_LOG"
+
+rm -f "$STDERR"
+rm -rf "$TMP_ROOT"
+
+# ---------------------------------------------------------------------------
+# Bug transition: fill required fields and move to In Progress with twg
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- bug transition via twg ---"
+
+TMP_ROOT="$(mktemp -d)"
+MOCK_WORKDIR="$TMP_ROOT/workdir"
+MOCK_IOS_DIR="$TMP_ROOT/ios"
+MOCK_BIN="$TMP_ROOT/bin"
+MOCK_FIXTURES="$TMP_ROOT/fixtures"
+mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR" "$MOCK_BIN" "$MOCK_FIXTURES"
+
+jq '.fields.status.name = "To Do" | .fields.issuetype.name = "Bug"' "$FIXTURES/parent_core.json" > "$MOCK_FIXTURES/IOS-100_core.json"
+cp "$FIXTURES/parent_comments.json"        "$MOCK_FIXTURES/IOS-100_comments.json"
+cp "$FIXTURES/subtasks_list.json"          "$MOCK_FIXTURES/subtasks_list.json"
+cp "$FIXTURES/subtask_IOS-101_core.json"   "$MOCK_FIXTURES/IOS-101_core.json"
+cp "$FIXTURES/subtask_IOS-101_comments.json" "$MOCK_FIXTURES/IOS-101_comments.json"
+cp "$FIXTURES/subtask_IOS-102_core.json"   "$MOCK_FIXTURES/IOS-102_core.json"
+cp "$FIXTURES/subtask_IOS-102_comments.json" "$MOCK_FIXTURES/IOS-102_comments.json"
+
+TWG_LOG="$TMP_ROOT/twg.log"
+write_mock_git
+write_mock_twg "succeed" "$TWG_LOG"
+write_mock_date_today "2026-09-04"
+
+STDERR="$(mktemp)"
+ACTUAL_EXIT=0
+PATH="$MOCK_BIN:$PATH" \
+  SDD_WORKDIR="$MOCK_WORKDIR" \
+  IOS_DIR="$MOCK_IOS_DIR" \
+  SDD_JIRA_STORY_POINTS_VALUE="2" \
+  bash "$SNAPSHOT" IOS-100 > /dev/null 2>"$STDERR" || ACTUAL_EXIT=$?
+if [[ "$ACTUAL_EXIT" -eq 0 ]]; then
+  echo "  PASS  bug transition via twg: snapshot succeeds"
+  (( PASS++ )) || true
+else
+  echo "  FAIL  bug transition via twg: expected exit 0, got $ACTUAL_EXIT"
+  echo "        stderr: $(cat "$STDERR" 2>/dev/null || echo '(empty)')"
+  (( FAIL++ )) || true
+fi
+assert_file_contains "bug transition via twg: metadata read" "jira workitem field update-metadata --id IOS-100 -o json" "$TWG_LOG"
+assert_file_contains "bug transition via twg: current values read" "jira workitem get IOS-100 --field customfield_10107 --field customfield_10023" "$TWG_LOG"
+assert_file_contains "bug transition via twg: missing fields updated" "jira workitem update --id IOS-100 --field customfield_10107=2026-09-04 --field customfield_10023=2 -o json" "$TWG_LOG"
+assert_file_contains "bug transition via twg: transitions discovered" "jira workitem transition --id IOS-100 -o json" "$TWG_LOG"
+assert_file_contains "bug transition via twg: transition executed" "jira workitem transition --id IOS-100 --transition-id 461 -o json" "$TWG_LOG"
+
+rm -f "$STDERR"
+rm -rf "$TMP_ROOT"
+
+# ---------------------------------------------------------------------------
+# Subtask retrieval failure: partial success
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- subtask retrieval failure (IOS-102) ---"
+
+TMP_ROOT="$(mktemp -d)"
+MOCK_WORKDIR="$TMP_ROOT/workdir"
+MOCK_IOS_DIR="$TMP_ROOT/ios"
+MOCK_BIN="$TMP_ROOT/bin"
+MOCK_FIXTURES="$TMP_ROOT/fixtures"
+mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR" "$MOCK_BIN" "$MOCK_FIXTURES"
+
+cp "$FIXTURES/parent_core.json"            "$MOCK_FIXTURES/IOS-100_core.json"
+cp "$FIXTURES/parent_comments.json"        "$MOCK_FIXTURES/IOS-100_comments.json"
+cp "$FIXTURES/subtasks_list.json"          "$MOCK_FIXTURES/subtasks_list.json"
+cp "$FIXTURES/subtask_IOS-101_core.json"   "$MOCK_FIXTURES/IOS-101_core.json"
+cp "$FIXTURES/subtask_IOS-101_comments.json" "$MOCK_FIXTURES/IOS-101_comments.json"
+
+write_mock_git
+write_mock_twg "fail_subtask_IOS-102"
+
+STDERR="$(mktemp)"
+ACTUAL_EXIT=0
+PATH="$MOCK_BIN:$PATH" SDD_WORKDIR="$MOCK_WORKDIR" IOS_DIR="$MOCK_IOS_DIR" \
+  bash "$SNAPSHOT" IOS-100 > /dev/null 2>"$STDERR" || ACTUAL_EXIT=$?
+if [[ "$ACTUAL_EXIT" -eq 2 ]]; then
+  echo "  PASS  subtask failure: exits with code 2"
+  (( PASS++ )) || true
+else
+  echo "  FAIL  subtask failure: expected exit 2, got $ACTUAL_EXIT"
+  (( FAIL++ )) || true
+fi
+assert_stderr_contains "subtask failure: failed key reported" "IOS-102" "$STDERR"
+
+WDIR="$MOCK_WORKDIR/IOS-100"
+assert_file_exists  "subtask failure: parent description.md written"     "$WDIR/description.md"
+assert_file_exists  "subtask failure: parent comments.md written"        "$WDIR/comments.md"
+assert_file_exists  "subtask failure: IOS-101 description.md written"    "$WDIR/IOS-101/description.md"
+assert_file_exists  "subtask failure: IOS-101 comments.md written"       "$WDIR/IOS-101/comments.md"
+assert_no_such_file "subtask failure: IOS-102 description.md not written" "$WDIR/IOS-102/description.md"
+
+rm -f "$STDERR"
+rm -rf "$TMP_ROOT"
+
+# ---------------------------------------------------------------------------
+# iOS bootstrap: SPM-only Tuist setup, no CocoaPods step
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- iOS SPM bootstrap ---"
+
+TMP_ROOT="$(mktemp -d)"
+MOCK_WORKDIR="$TMP_ROOT/workdir"
+MOCK_IOS_DIR="$TMP_ROOT/ios"
+MOCK_BIN="$TMP_ROOT/bin"
+MOCK_FIXTURES="$TMP_ROOT/fixtures"
+mkdir -p "$MOCK_WORKDIR" "$MOCK_IOS_DIR/bin" "$MOCK_IOS_DIR/Tuist/.build/cache" "$MOCK_BIN" "$MOCK_FIXTURES"
+
+cp "$FIXTURES/parent_core.json"            "$MOCK_FIXTURES/IOS-100_core.json"
+cp "$FIXTURES/parent_comments.json"        "$MOCK_FIXTURES/IOS-100_comments.json"
+cp "$FIXTURES/subtasks_list.json"          "$MOCK_FIXTURES/subtasks_list.json"
+cp "$FIXTURES/subtask_IOS-101_core.json"   "$MOCK_FIXTURES/IOS-101_core.json"
+cp "$FIXTURES/subtask_IOS-101_comments.json" "$MOCK_FIXTURES/IOS-101_comments.json"
+cp "$FIXTURES/subtask_IOS-102_core.json"   "$MOCK_FIXTURES/IOS-102_core.json"
+cp "$FIXTURES/subtask_IOS-102_comments.json" "$MOCK_FIXTURES/IOS-102_comments.json"
+
+printf 'seed\n' > "$MOCK_IOS_DIR/Tuist/.build/cache/source.txt"
+printf 'TOKEN=fixture\n' > "$MOCK_IOS_DIR/.env.local"
+MISE_LOG="$TMP_ROOT/mise.log"
+cat > "$MOCK_IOS_DIR/bin/mise" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "\$*" >>"$MISE_LOG"
+exit 0
+EOF
+chmod +x "$MOCK_IOS_DIR/bin/mise"
+
+GIT_LOG="$TMP_ROOT/git.log"
+write_mock_git_new_worktree "$GIT_LOG"
+write_mock_twg "succeed"
+
+STDERR="$(mktemp)"
+ACTUAL_EXIT=0
+PATH="$MOCK_BIN:$PATH" SDD_WORKDIR="$MOCK_WORKDIR" IOS_DIR="$MOCK_IOS_DIR" \
+  bash "$SNAPSHOT" IOS-100 > "$TMP_ROOT/snapshot.stdout" 2>"$STDERR" || ACTUAL_EXIT=$?
+if [[ "$ACTUAL_EXIT" -eq 0 ]]; then
+  echo "  PASS  iOS bootstrap: snapshot succeeds"
+  (( PASS++ )) || true
+else
+  echo "  FAIL  iOS bootstrap: expected exit 0, got $ACTUAL_EXIT"
+  echo "        stderr: $(cat "$STDERR" 2>/dev/null || echo '(empty)')"
+  (( FAIL++ )) || true
+fi
+assert_file_exists "iOS bootstrap: Tuist cache seeded" "$MOCK_WORKDIR/IOS-100/repo/Tuist/.build/cache/source.txt"
+grep -q '^trust$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: mise trust ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: mise trust missing"; (( FAIL++ )) || true; }
+grep -q '^install$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: mise install ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: mise install missing"; (( FAIL++ )) || true; }
+grep -q '^exec -- tuist install$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: tuist install ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: tuist install missing"; (( FAIL++ )) || true; }
+grep -q '^exec -- tuist generate --no-open$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: tuist generate ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: tuist generate missing"; (( FAIL++ )) || true; }
+if grep -q "worktree add $MOCK_WORKDIR/IOS-100/repo -b feature/IOS-100 origin/master" "$GIT_LOG"; then
+  echo "  PASS  iOS bootstrap: new branch starts from origin/master"
+  (( PASS++ )) || true
+else
+  echo "  FAIL  iOS bootstrap: expected new branch to start from origin/master"
+  echo "        git log: $(cat "$GIT_LOG")"
+  (( FAIL++ )) || true
+fi
+if grep -q 'pod install' "$TMP_ROOT/snapshot.stdout" "$STDERR" "$MISE_LOG" 2>/dev/null; then
+  echo "  FAIL  iOS bootstrap: pod install should not run"
+  (( FAIL++ )) || true
+else
+  echo "  PASS  iOS bootstrap: no pod install"
+  (( PASS++ )) || true
+fi
+
+rm -f "$STDERR"
+rm -rf "$TMP_ROOT"
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "Results: $PASS passed, $FAIL failed"
+if (( FAIL > 0 )); then
+  exit 1
+fi

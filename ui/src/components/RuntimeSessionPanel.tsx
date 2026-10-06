@@ -1,0 +1,249 @@
+import { useState } from "react";
+
+import { apiClient } from "../api/client";
+import { roleDescription, roleDisplayName } from "../roleDisplay";
+import { isOnDemandDashboardRole, shouldShowRuntimeRoleByDefault } from "../roleVisibility";
+import { stageDisplayName } from "../stageDisplay";
+import { useToast } from "./ToastProvider";
+import type { RuntimeSessionStateSummary, Session } from "../types";
+
+type RuntimeSessionPanelProps = {
+  runtimeStateSummary: RuntimeSessionStateSummary | null;
+  session: Session;
+  onRefresh: () => Promise<void>;
+};
+
+function roleFlowOrder(roleName: string, workflowProfile: Session["workflow_profile"]): number {
+  const oneshotOrder = [
+    "implementer",
+    "convention-reviewer",
+    "requirements-reviewer",
+    "verification-coordinator",
+    "doc-harvest-worker",
+    "documentation-reviewer",
+  ];
+  const storyFullOrder = [
+    "proposal-context-worker",
+    "requirements-clarifier-worker",
+    "acceptance-criteria-worker",
+    "constraints-worker",
+    "spec-verifier-worker",
+    "task-decomposer-worker",
+    "implementer",
+    "convention-reviewer",
+    "requirements-reviewer",
+    "verification-coordinator",
+    "doc-harvest-worker",
+    "documentation-reviewer",
+  ];
+
+  const orderedRoles =
+    workflowProfile === "story_full"
+      ? storyFullOrder
+      : oneshotOrder;
+
+  const index = orderedRoles.indexOf(roleName);
+  return index === -1 ? orderedRoles.length + 1 : index;
+}
+
+function runtimeRoleStatusLabel(status: string): string {
+  switch (status) {
+    case "running":
+      return "Live";
+    case "stopped":
+      return "Stopped";
+    case "waiting":
+      return "Waiting";
+    default:
+      return status;
+  }
+}
+
+function runtimeRoleDisplayLabel(
+  role: RuntimeSessionStateSummary["roles"][number],
+): string {
+  if (isOnDemandDashboardRole(role.roleName)) {
+    if (role.status === "stopped") {
+      return "Sleeping";
+    }
+    return "On-demand";
+  }
+  switch (role.liveState) {
+    case "owner-active":
+      return "Active owner";
+    case "live-idle":
+      return "Standing by";
+    case "dead-stale":
+      return "Stale";
+    default:
+      return runtimeRoleStatusLabel(role.status);
+  }
+}
+
+export function RuntimeSessionPanel({
+  runtimeStateSummary,
+  session,
+  onRefresh,
+}: RuntimeSessionPanelProps): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
+
+  async function run(action: () => Promise<unknown>): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+      await onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown request error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyDebugCommand(
+    command: string | null | undefined,
+    successMessage: string,
+  ): Promise<void> {
+    if (!command) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(command);
+      showToast(successMessage);
+    } catch {
+      showToast("Copy failed", "error");
+    }
+  }
+
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Runtime</p>
+          <h3>Runtime Controls</h3>
+        </div>
+      </div>
+
+      {runtimeStateSummary === null || !runtimeStateSummary.available ? (
+        <p className="path-label">Runtime session state is not available.</p>
+      ) : (
+        <>
+          {(() => {
+            const visibleRoles = runtimeStateSummary.roles.filter(shouldShowRuntimeRoleByDefault);
+            const sortedRoles = [...visibleRoles].sort((left, right) => {
+              const orderDelta =
+                roleFlowOrder(left.roleName, session.workflow_profile) -
+                roleFlowOrder(right.roleName, session.workflow_profile);
+              if (orderDelta !== 0) {
+                return orderDelta;
+              }
+              return left.roleName.localeCompare(right.roleName);
+            });
+            return (
+              <>
+                <div className="runtime-controls-stack">
+                  <div className="table-list runtime-summary-list">
+                    <div className="table-row">
+                      <span>Live lanes</span>
+                      <strong>
+                        {visibleRoles.filter((role) => role.status === "running").length}/
+                        {visibleRoles.length}
+                      </strong>
+                    </div>
+                    <div className="table-row">
+                      <span>Stopped lanes</span>
+                      <strong>{visibleRoles.filter((role) => role.status === "stopped").length}</strong>
+                    </div>
+                  </div>
+
+                  {runtimeStateSummary.lastAutoRecovery ? (
+                    <div className="artifact-card runtime-note-card">
+                      <div className="artifact-meta">
+                        <span>auto recovery</span>
+                        <strong>{roleDisplayName(runtimeStateSummary.lastAutoRecovery.roleName)}</strong>
+                      </div>
+                      <p className="artifact-path">
+                        Runtime recovery already happened at {stageDisplayName(runtimeStateSummary.lastAutoRecovery.currentStage)}.
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="artifact-stack runtime-role-stack">
+                    {sortedRoles.map((role) => (
+                      <article className="artifact-card runtime-role-card" key={role.roleName}>
+                        <div className="artifact-meta">
+                          <span>{runtimeRoleDisplayLabel(role)}</span>
+                          <strong>{roleDisplayName(role.roleName)}</strong>
+                        </div>
+                        <p className="artifact-path">
+                          {role.liveState === "owner-active"
+                            ? "This lane currently owns the active workflow stage."
+                            : role.liveState === "dead-stale"
+                              ? "This lane has stale runtime state and may need restart."
+                              : isOnDemandDashboardRole(role.roleName) && role.status === "stopped"
+                                ? "This on-demand lane stays sleeping until its workflow stage is requested."
+                                : roleDescription(role.roleName)}
+                        </p>
+                        <div className="actions-grid runtime-role-actions">
+                          <button
+                            className="action-button"
+                            disabled={busy || role.runtimeHandle === null || role.status === "stopped"}
+                            onClick={() => run(() => apiClient.stopRuntimeRole(session.id, role.roleName))}
+                            title={`Stop the live runtime for ${roleDisplayName(role.roleName)} without stopping the whole session.`}
+                            type="button"
+                          >
+                            Stop this runtime
+                          </button>
+                          <button
+                            className="action-button"
+                            disabled={busy || role.status !== "stopped"}
+                            onClick={() => run(() => apiClient.restartRuntimeRole(session.id, role.roleName))}
+                            title={`Restart the stopped runtime for ${roleDisplayName(role.roleName)} inside this session.`}
+                            type="button"
+                          >
+                            Restart this runtime
+                          </button>
+                          {role.tmuxAttachCommand ? (
+                            <button
+                              className="action-button"
+                              onClick={() =>
+                                void copyDebugCommand(
+                                  role.tmuxAttachCommand,
+                                  `${roleDisplayName(role.roleName)} console command copied`,
+                                )
+                              }
+                              type="button"
+                            >
+                              Copy console command
+                            </button>
+                          ) : null}
+                          {role.tmuxCaptureCommand ? (
+                            <button
+                              className="action-button"
+                              onClick={() =>
+                                void copyDebugCommand(
+                                  role.tmuxCaptureCommand,
+                                  `${roleDisplayName(role.roleName)} output command copied`,
+                                )
+                              }
+                              type="button"
+                            >
+                              Copy output command
+                            </button>
+                          ) : null}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+        </>
+      )}
+      {error ? <p className="error-banner">{error}</p> : null}
+    </section>
+  );
+}

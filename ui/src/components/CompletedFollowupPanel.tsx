@@ -1,0 +1,283 @@
+import { useEffect, useMemo, useState } from "react";
+
+import { apiClient } from "../api/client";
+import { useToast } from "./ToastProvider";
+import type { Artifact, EventItem, Session } from "../types";
+
+type CompletedFollowupPanelProps = {
+  session: Session;
+  artifacts: Artifact[];
+  events: EventItem[];
+  onRefresh: () => Promise<void>;
+};
+
+const reviewMessagePreviewCache = new Map<string, string>();
+
+function previewCacheKey(sessionId: number, mrId: string): string {
+  return `${sessionId}:${mrId}`;
+}
+
+function latestMrUrl(artifacts: Artifact[], events: EventItem[]): string | null {
+  for (const artifact of [...artifacts].reverse()) {
+    const value = artifact.metadata?.mr_url;
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  for (const event of [...events].reverse()) {
+    const value = event.payload?.mr_url;
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function mrIdFromUrl(mrUrl: string | null): string {
+  if (!mrUrl) {
+    return "";
+  }
+  const match = mrUrl.match(/merge_requests\/(\d+)/);
+  return match?.[1] ?? "";
+}
+
+function latestCachedReviewMessagePreview(
+  artifacts: Artifact[],
+  platform: string,
+  mrId: string,
+): string | null {
+  for (const artifact of [...artifacts].reverse()) {
+    if (artifact.artifact_type !== "review_message_preview") {
+      continue;
+    }
+    const metadata = artifact.metadata ?? {};
+    if (metadata.platform !== platform || metadata.mr_id !== mrId) {
+      continue;
+    }
+    const value = metadata.preview_text;
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function latestDeliveryEventCreatedAt(events: EventItem[]): string | null {
+  for (const event of [...events].reverse()) {
+    if (
+      event.event_type === "mr_handoff_completed" ||
+      event.event_type === "send_to_test_completed"
+    ) {
+      return event.created_at;
+    }
+  }
+  return null;
+}
+
+function isAfter(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (!left || !right) {
+    return false;
+  }
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  if (Number.isNaN(leftTime) || Number.isNaN(rightTime)) {
+    return false;
+  }
+  return leftTime > rightTime;
+}
+
+export function CompletedFollowupPanel({
+  session,
+  artifacts,
+  events,
+  onRefresh,
+}: CompletedFollowupPanelProps): JSX.Element | null {
+  const { showToast, showActivity, clearActivity } = useToast();
+  const mrUrl = useMemo(() => latestMrUrl(artifacts, events), [artifacts, events]);
+  const inferredMrId = useMemo(() => mrIdFromUrl(mrUrl), [mrUrl]);
+  const platform = session.task_key.startsWith("QA-") ? "e2e" : session.task_key.startsWith("ANDR-") ? "android" : "ios";
+  const cachedArtifactPreview = useMemo(
+    () => latestCachedReviewMessagePreview(artifacts, platform, inferredMrId),
+    [artifacts, inferredMrId, platform],
+  );
+  const latestDeliveryCreatedAt = useMemo(() => latestDeliveryEventCreatedAt(events), [events]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewText, setPreviewText] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (inferredMrId.length === 0) {
+      setPreviewText(null);
+      setPreviewLoading(false);
+      return undefined;
+    }
+
+    const cacheKey = previewCacheKey(session.id, inferredMrId);
+    const cachedPreview = reviewMessagePreviewCache.get(cacheKey) ?? cachedArtifactPreview;
+    if (cachedPreview) {
+      reviewMessagePreviewCache.set(cacheKey, cachedPreview);
+      setPreviewText(cachedPreview);
+      setPreviewLoading(false);
+    } else {
+      setPreviewText(null);
+      setPreviewLoading(true);
+    }
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await apiClient.getReviewMessagePreview(session.id, inferredMrId);
+          if (!cancelled) {
+            reviewMessagePreviewCache.set(cacheKey, response.text);
+            setPreviewText(response.text);
+            setPreviewLoading(false);
+          }
+          const shouldRefresh =
+            response.stale || isAfter(latestDeliveryCreatedAt, response.refreshed_at);
+          if (shouldRefresh) {
+            try {
+              const refreshed = await apiClient.refreshReviewMessagePreview(session.id, inferredMrId);
+              if (!cancelled) {
+                reviewMessagePreviewCache.set(cacheKey, refreshed.text);
+                setPreviewText(refreshed.text);
+              }
+            } catch {
+              // Keep the cached preview visible when the background refresh fails.
+            }
+          }
+        } catch {
+          if (!cancelled) {
+            setPreviewText(null);
+          }
+        } finally {
+          if (!cancelled) {
+            setPreviewLoading(false);
+          }
+        }
+      })();
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [cachedArtifactPreview, inferredMrId, latestDeliveryCreatedAt, session.id]);
+
+  async function run(action: () => Promise<void>, activityLabel?: string): Promise<void> {
+    setBusy(true);
+    setError(null);
+    if (activityLabel) {
+      showActivity(activityLabel);
+    }
+    try {
+      await action();
+      await onRefresh();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown request error";
+      setError(message);
+      showToast(message, "error");
+    } finally {
+      if (activityLabel) {
+        clearActivity();
+      }
+      setBusy(false);
+    }
+  }
+
+  async function copyPreview(): Promise<void> {
+    if (!previewText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(previewText);
+      showToast("Review message copied");
+    } catch {
+      showToast("Copy failed", "error");
+    }
+  }
+
+  async function handleRefreshSnapshot(): Promise<void> {
+    await run(async () => {
+      await apiClient.refreshSnapshot(session.id);
+    }, "Refreshing snapshot and resuming subtasks…");
+  }
+
+  async function handleLaunchIosApp(): Promise<void> {
+    await run(async () => {
+      const response = await apiClient.launchIosApp(session.id);
+      if (!response.launched) {
+        throw new Error(`iOS app launch failed: ${response.event_type}`);
+      }
+      showToast("iOS app launched");
+    }, "Launching iOS app on simulator…");
+  }
+
+  if (session.status !== "completed") {
+    return null;
+  }
+
+  return (
+    <section className="panel completed-followup-panel">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Follow-up</p>
+          <h3>Completed Session Recovery</h3>
+        </div>
+        {mrUrl ? (
+          <a className="hero-link-button completed-followup-link" href={mrUrl} rel="noreferrer" target="_blank">
+            Open MR
+          </a>
+        ) : null}
+      </div>
+
+      <div className="completed-followup-stack">
+        <div className="completed-followup-preview">
+          <strong className="completed-followup-preview-title">Review Message</strong>
+          <button
+            aria-label="Copy review message"
+            className="completed-followup-copy"
+            disabled={!previewText}
+            onClick={() => void copyPreview()}
+            title="Copy review message"
+            type="button"
+          >
+            <span className="completed-followup-copy-icon" aria-hidden="true">
+              <span />
+              <span />
+            </span>
+          </button>
+          <pre className="completed-followup-preview-body">
+            {previewLoading
+              ? "Loading review message..."
+              : previewText ?? "MR data is not available for this session yet."}
+          </pre>
+        </div>
+
+        <div className="completed-followup-actions">
+          <button
+            className="action-button"
+            disabled={busy}
+            onClick={() => void handleRefreshSnapshot()}
+            type="button"
+          >
+            Refresh snapshot and resume subtasks
+          </button>
+          {session.task_key.startsWith("IOS-") ? (
+            <button
+              className="action-button"
+              disabled={busy}
+              onClick={() => void handleLaunchIosApp()}
+              type="button"
+            >
+              Launch on iOS simulator
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {error ? <p className="error-banner">{error}</p> : null}
+    </section>
+  );
+}

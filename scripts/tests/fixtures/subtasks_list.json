@@ -1,0 +1,18 @@
+[
+  {
+    "key": "IOS-101",
+    "fields": {
+      "issuetype": {"name": "Sub-task"},
+      "summary": "Create login screen",
+      "status": {"name": "To Do"}
+    }
+  },
+  {
+    "key": "IOS-102",
+    "fields": {
+      "issuetype": {"name": "Sub-task"},
+      "summary": "Add token storage",
+      "status": {"name": "In Progress"}
+    }
+  }
+]

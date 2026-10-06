@@ -1,0 +1,9 @@
+{
+  "key": "IOS-300",
+  "fields": {
+    "issuetype": {"name": "Story"},
+    "summary": "Single issue",
+    "status": {"name": "To Do"},
+    "description": null
+  }
+}

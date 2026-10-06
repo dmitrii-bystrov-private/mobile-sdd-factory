@@ -1,0 +1,17 @@
+{
+  "key": "IOS-101",
+  "fields": {
+    "issuetype": {"name": "Sub-task"},
+    "summary": "Create login screen",
+    "status": {"name": "To Do"},
+    "description": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [{"type": "text", "text": "Design and implement the login UI."}]
+        }
+      ]
+    }
+  }
+}
