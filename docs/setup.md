@@ -16,6 +16,7 @@ The supported platform expects these tools locally:
 - `glab`
 - `twg`
 - Python environment for the backend and factory tooling
+- Node/npm for the operator UI
 - at least one supported live runner host:
   - Claude Code
   - Codex CLI

@@ -143,6 +143,11 @@ For live acceptance:
 
 ## Documentation Expectations
 
+Keep the root README focused on the product overview, quick start, workflow profiles and documentation
+navigation. Put configuration, verification, protocol and recovery details in their topical guides.
+Align the README through concise capability summaries and links; avoid appending individual fixes or
+regression scenarios to it.
+
 Keep these files aligned with supported behavior:
 
 - `README.md`

@@ -11,6 +11,9 @@ The supported platform is built around:
 - operator UI as the primary control surface
 - long-running quality lanes instead of repeated stateless one-shot passes
 
+The coordinator routes work, records artifacts, owns state transitions and runtime recovery, and runs
+deterministic helper scripts. Product code is edited by the implementation role.
+
 ## Sessions
 
 A session is the top-level unit of execution for a Jira task.
@@ -28,21 +31,38 @@ A session includes:
 
 Supported workflow profiles:
 
-- `story_full`
-- `oneshot`
+- `story_full`: context, requirements, acceptance criteria, constraints, specification verification
+  and Jira subtask decomposition before implementation.
+- `oneshot`: direct implementation for small, self-contained tasks.
+
+Both profiles route implementation through convention/requirements review and workflow verification.
+Documentation harvest/review runs after verification when configured, followed by MR and Jira handoff.
+After decomposition, Jira subtask state is the execution source of truth; follow-ups can re-enter it.
+
+Task snapshots and worktrees live under `$SDD_WORKDIR/<TASK-KEY>/`. The snapshot holds Jira metadata,
+specifications, review reports and verification evidence; `repo/` holds the task worktree. Role
+workspaces and routed input live under the task's `runtime/`. Roles receive current work through
+`ROUTED_WORK.md` and `HYDRATION.json`. Subtask execution reuses the parent worktree. Planning files are
+temporary decomposition artifacts; Jira governs later follow-up ordering.
 
 ## Roles
 
 The platform routes work to specialized roles.
 
-Important roles include:
-
-- `implementer`
-- `convention-reviewer`
-- `requirements-reviewer`
-- `verification-coordinator`
-- planning workers such as `proposal-context-worker`, `requirements-clarifier-worker`, `spec-verifier-worker`, and `task-decomposer-worker`
-- documentation workers such as `doc-harvest-worker` and `documentation-reviewer`
+| Role | Responsibility |
+| --- | --- |
+| `proposal-context-worker` | Collects grounded task context from Jira and repository documentation/code. |
+| `requirements-clarifier-worker` | Clarifies requirements and asks the operator when ambiguity blocks progress. |
+| `acceptance-criteria-worker` | Writes explicit, testable acceptance criteria. |
+| `constraints-worker` | Extracts task-specific technical and architectural constraints. |
+| `spec-verifier-worker` | Checks the planning package before decomposition. |
+| `task-decomposer-worker` | Produces temporary planning files for Jira subtasks. |
+| `implementer` | Implements tasks, subtasks, follow-ups and corrections. |
+| `convention-reviewer` | Reviews local conventions, nearby patterns and test style. |
+| `requirements-reviewer` | Reviews Jira scope, follow-up priority, regressions, edge cases and coverage. |
+| `doc-harvest-worker` | Updates durable documentation when the completed diff justifies it. |
+| `documentation-reviewer` | Reviews documentation and source comments after documentation changes. |
+| `verification-coordinator` | Runs workflow verification and routes corrections when it fails. |
 
 Some roles are short planning lanes.
 Some roles are persistent long-runners.

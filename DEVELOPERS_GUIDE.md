@@ -233,6 +233,10 @@ If a test requires a separate process to validate a crash contract, that harness
 
 ## Documentation Hygiene
 
+The root README is the product overview, quick start and documentation entry point. Detailed setup,
+verification, protocol and recovery behavior belongs in the corresponding guides/contracts. Keep its
+summaries and links current without adding a paragraph for every fix or regression.
+
 If you change supported behavior, keep these aligned:
 
 - `README.md`
