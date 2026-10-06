@@ -152,6 +152,8 @@ Per-session overrides in the session creation form only affect the session being
 ## Recovery Actions
 
 Use recovery actions only when the workflow is blocked, paused, or failed at a specific operational seam.
+Repeated implementer completion for a closed work item is ignored and does not need operator input.
+The current correction stays active and still goes through its required review.
 An iOS verification waiting for another task's simulator stays active and reports the resource owner.
 The worker must keep waiting for that command. Multiple nested shell processes are normal lock
 wrappers. A live native gate defers premature blocker/results; actual completion errors remain visible.

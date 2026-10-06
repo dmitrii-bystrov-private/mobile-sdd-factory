@@ -109,6 +109,8 @@ changes invalidate delivery. Verification and baseline decisions retain exact so
 Factory iOS gates record native execution state. Resource waits preserve the active work item and
 terminal; defer premature role results while its bound runner is alive. Nested shell lock wrappers
 are expected; only owner ancestry proves recursive acquisition. Never remove another live owner's lock.
+Completed coding work-item replays are stale/idempotent even when the same implementer owns a new
+correction. Never advance the new stage or mark its dispatch complete from an earlier work-item ID.
 Start shared Appium with --allow-insecure uiautomator2:chromedriver_autodownload. Check its version
 and explicit launch flags before reuse; report mismatches without stopping other users' server.
 Project commands, environment, collection scope, smoke checks and application IDs are task data in

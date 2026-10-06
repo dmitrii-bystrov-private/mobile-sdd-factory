@@ -1961,6 +1961,15 @@ class CoordinatorService:
         payload: dict,
     ) -> tuple[Session, Event, Event | None]:
         session = self._get_session_or_raise(session_id)
+        if role_name == IMPLEMENTER_ROLE and output_type == "completed":
+            work_item_id = payload.get("work_item_id")
+            item = self.work_item_repository.get_by_id(work_item_id) if isinstance(work_item_id, int) else None
+            if item is not None and item.session_id == session.id and item.status == WorkItemStatus.COMPLETED:
+                accepted = self._accepted_mapped_event_for_work_item(session_id=session.id, work_item_id=item.id)
+                if (accepted is not None and accepted.producer_id == role_name
+                        and accepted.event_type in {"implementation_completed", "subtask_completed"}):
+                    return session, accepted, None
+                raise IntakeError(f"Work item {item.id} is already completed")
         payload = self._normalize_role_output_payload(
             session=session,
             role_name=role_name,
@@ -3180,6 +3189,11 @@ class CoordinatorService:
                 ),
                 None,
             )
+
+        if target_item is not None and target_item.status == WorkItemStatus.COMPLETED:
+            current_item = self._find_active_primary_coding_work_item(session)
+            return {"reason": "work_item_already_completed", "payload_work_item_id": target_item.id,
+                    "expected_work_item_id": current_item.id if current_item is not None else None}
 
         active_item = target_item or self._find_active_primary_coding_work_item(session)
         if active_item is None or target_item is None and payload_work_item_id is None:

@@ -350,6 +350,11 @@ Minimal example:
 
 ### Coding And Follow-Up Roles
 
+Completion addressed to an already-completed coding work item is a stale/idempotent replay, including
+when the same implementer owns a newer correction. Ingress returns ignored=true and preserves the
+current stage/work item/dispatch; it does not create another commit or advance the new correction.
+Direct completion calls return the originally accepted completion without repeating its side effects.
+
 QA MR handoff may retain the native verification result after committed regular documentation-only
 changes, recording both verified and delivery SHAs. This does not relax exact-source checks for
 verification terminal submissions or baseline decisions, rewrite receipts or remove accepted warnings.

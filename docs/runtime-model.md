@@ -160,6 +160,10 @@ Manual delivery actions remain as recovery tools only when automatic delivery fa
 
 ## Recovery Model
 
+Coding results for already-completed work items are stale/idempotent regardless of the current owner.
+The current correction, its dispatch and required review remain active. An old result cannot send a
+documentation correction into verification or turn the following valid result into schema recovery.
+
 Factory iOS verification records its command lifecycle under the task's `tmp/verification/ios/`.
 Waiting for a shared task/simulator lock is an active gate. The coordinator verifies the current work
 item, dispatch time, source and runner process before deferring a premature error/terminal result.

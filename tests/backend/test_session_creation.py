@@ -10635,6 +10635,57 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("documentation_review_requested", followup_event.event_type)
         self.assertEqual("documentation_review_requested", updated_session.current_stage)
 
+    def prepare_documentation_correction_after_verification_fix(self, task_key):
+        session, _, _ = self.coordinator.create_task_session(
+            task_key, workflow_profile="oneshot", policy={"doc_harvest_policy": "required"})
+        self.coordinator.prepare_task_session(task_key)
+        self.coordinator.handle_operator_event(session.id, "implementation_completed", {"summary": "done"})
+        self.coordinator.handle_operator_event(session.id, "verification_failed", {"summary": "command failed", "failures": ["command"]})
+        old_item = next(item for item in self.work_item_repository.list_for_session(session.id)
+                        if item.work_type == "verification_correction" and item.status == WorkItemStatus.ASSIGNED)
+        self.coordinator.submit_role_result_document(document={"output_type": "completed", "payload": {
+            "work_item_id": old_item.id, "summary": "Verification correction completed"}})
+        self.coordinator.handle_operator_event(session.id, "verification_passed", {"summary": "passed"})
+        self.coordinator.handle_role_output(session.id, DOC_HARVEST_ROLE, "completed", {"summary": "Docs updated"})
+        session, _, _ = self.coordinator.handle_role_output(session.id, DOCUMENTATION_REVIEWER_ROLE, "failed", {
+            "summary": "Documentation comment needs correction", "issues_markdown": "Correct the documentation comment."})
+        current_item = next(item for item in self.work_item_repository.list_for_session(session.id)
+                            if item.work_type == "documentation_review_correction" and item.status == WorkItemStatus.ASSIGNED)
+        return session, old_item, current_item
+
+    def test_completed_correction_replay_cannot_skip_current_documentation_correction(self) -> None:
+        session, old_item, current_item = self.prepare_documentation_correction_after_verification_fix("IOS-30021DOCDUP")
+        work_count = len(self.work_item_repository.list_for_session(session.id))
+        commits = list(self.gitlab_adapter.commit_requests)
+        updated, _, mapped, _, ignored = self.coordinator.submit_role_result_document(document={
+            "output_type": "completed", "payload": {"work_item_id": old_item.id, "summary": "Duplicate"}})
+        self.assertTrue(ignored)
+        self.assertIsNone(mapped)
+        self.assertEqual("documentation_review_correction_requested", updated.current_stage)
+        self.assertEqual(IMPLEMENTER_ROLE, updated.current_owner)
+        self.assertEqual(work_count, len(self.work_item_repository.list_for_session(session.id)))
+        self.assertEqual(commits, self.gitlab_adapter.commit_requests)
+        self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(current_item.id).status)
+        updated, _, mapped, followup, ignored = self.coordinator.submit_role_result_document(document={
+            "output_type": "completed", "payload": {"work_item_id": current_item.id, "summary": "Documentation corrected"}})
+        self.assertFalse(ignored)
+        self.assertEqual("implementation_completed", mapped)
+        self.assertEqual("documentation_review_requested", followup)
+        self.assertEqual("documentation_review_requested", updated.current_stage)
+        self.assertFalse(any(event.event_type == "role_result_protocol_violation_reported"
+                             for event in self.event_repository.list_for_session(session.id)))
+
+    def test_direct_completed_correction_replay_is_idempotent(self) -> None:
+        session, old_item, current_item = self.prepare_documentation_correction_after_verification_fix("IOS-30021DOCDIRECTDUP")
+        events_before = len(self.event_repository.list_for_session(session.id))
+        updated, accepted, followup = self.coordinator.handle_role_output(
+            session.id, IMPLEMENTER_ROLE, "completed", {"work_item_id": old_item.id, "summary": "Duplicate"})
+        self.assertIsNone(followup)
+        self.assertEqual("implementation_completed", accepted.event_type)
+        self.assertEqual(events_before, len(self.event_repository.list_for_session(session.id)))
+        self.assertEqual("documentation_review_correction_requested", updated.current_stage)
+        self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(current_item.id).status)
+
     def test_documentation_correction_can_request_operator_input_through_terminal_ingress(self) -> None:
         for index, preferred_direction in enumerate(("Follow the fundamental rule.", "Follow the task requirement.")):
             with self.subTest(preferred_direction=preferred_direction):

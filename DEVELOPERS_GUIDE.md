@@ -147,6 +147,10 @@ Live tests should run in isolated task-like environments, not against dirty stat
 
 ## Behavioral Rules Worth Preserving
 
+Completed coding work-item results are idempotent. Check the addressed work item's status before
+mapping against the current stage; sharing an implementer across rounds does not make an old result
+current. Ignore the replay without committing again, rerouting the stage or completing the new dispatch.
+
 iOS verification records `tmp/verification/ios/execution-state.json` with run/work-item/source binding,
 runner PID, phase, resource wait and completion exit code. The coordinator defers premature terminal
 results/errors only for the current live native runner and sends bounded continuation feedback.

@@ -210,6 +210,9 @@ These are the supported way to verify that:
 
 ## Starting the Local Platform
 
+After upgrading result-ingress code, restart the existing backend to load completed-work-item replay
+protection. Repeated completion for a closed coding item must not advance another correction stage.
+
 iOS resource queues need no additional machine settings. Task/simulator lock paths retain their ENV
 configuration. Native execution-state files are task-local runtime artifacts. Restart the existing
 backend after upgrading coordinator code so live-run deferral is active; do not launch a second stack.
