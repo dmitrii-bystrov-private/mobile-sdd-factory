@@ -1961,13 +1961,14 @@ class CoordinatorService:
         payload: dict,
     ) -> tuple[Session, Event, Event | None]:
         session = self._get_session_or_raise(session_id)
-        if role_name == IMPLEMENTER_ROLE and output_type == "completed":
+        if ((role_name == IMPLEMENTER_ROLE and output_type == "completed")
+                or (role_name == VERIFICATION_COORDINATOR_ROLE
+                    and output_type in {"passed", "completed", "failed", "blocked_verification_cycle"})):
             work_item_id = payload.get("work_item_id")
             item = self.work_item_repository.get_by_id(work_item_id) if isinstance(work_item_id, int) else None
             if item is not None and item.session_id == session.id and item.status == WorkItemStatus.COMPLETED:
                 accepted = self._accepted_mapped_event_for_work_item(session_id=session.id, work_item_id=item.id)
-                if (accepted is not None and accepted.producer_id == role_name
-                        and accepted.event_type in {"implementation_completed", "subtask_completed"}):
+                if accepted is not None and accepted.producer_id == role_name:
                     return session, accepted, None
                 raise IntakeError(f"Work item {item.id} is already completed")
         payload = self._normalize_role_output_payload(
@@ -3165,6 +3166,14 @@ class CoordinatorService:
         output_type: str,
         output_payload: dict,
     ) -> dict[str, str | int | None] | None:
+        if role_name == VERIFICATION_COORDINATOR_ROLE:
+            work_item_id = output_payload.get("work_item_id")
+            item = self.work_item_repository.get_by_id(work_item_id) if isinstance(work_item_id, int) else None
+            if item is not None and item.session_id == session.id and item.status == WorkItemStatus.COMPLETED:
+                role = self.role_repository.get_by_name(session.id, role_name)
+                current = self._find_active_work_item_for_role(session.id, role.id) if role is not None else None
+                return {"reason": "work_item_already_completed", "payload_work_item_id": item.id,
+                        "expected_work_item_id": current.id if current is not None else None}
         if role_name != IMPLEMENTER_ROLE or output_type != "completed":
             return None
 
@@ -4211,7 +4220,8 @@ class CoordinatorService:
             raise IntakeError(
                 f"Owner role {previous_work_item.owner_role_id} is missing for session {session_id}"
             )
-        if session.task_key.startswith("QA-") and previous_work_item.work_type in {"verification", "verification_cycle_review"}:
+        if (session.current_stage == "verification_requested"
+                and previous_work_item.work_type in {"verification", "verification_cycle_review"}):
             self._consume_role_result_file(session, role)
             self._drain_e2e_runtime_history(session, role)
 
@@ -4280,6 +4290,11 @@ class CoordinatorService:
                 repo_root=self._repo_root(), work_item_id=retry_item.id,
             )
             instruction += f" Read {strategy_path} and execute its commands for the new verification work item. "
+            instruction += (
+                f"The current work item is {retry_item.id}, replacing closed work item {previous_work_item.id}. "
+                "Queued continuation messages for earlier work items are obsolete. If the earlier command has "
+                "finished, execute a fresh gate for this current work item; do not submit its old outcome again. "
+            )
             if session.task_key.startswith("QA-"):
                 instruction += "Submit the result from spec/e2e-verdict.json; earlier receipts cannot satisfy this retry."
         dispatch_event = self._dispatch_role_work(

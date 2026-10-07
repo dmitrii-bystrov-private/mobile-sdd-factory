@@ -130,6 +130,8 @@ ignored after completion; the role must inspect the command's final output and s
 The original deferred report is retained in artifacts/events. Log markers alone do not establish
 command completion. The test phase clears prior logs/results before cache pruning or simulator waits;
 the native `step` distinguishes preparation from `xcodebuild` execution.
+Terminal responses for closed verifier work items cannot affect a fresh gate. Retry drains previous
+terminal output and explicitly supersedes queued continuation instructions for the earlier work item.
 
 Required:
 - `output_type`

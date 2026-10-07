@@ -160,6 +160,7 @@ wrappers. A live native gate defers premature blocker/results; actual completion
 Previously deferred responses cannot be replayed after completion to block or pass the gate. The worker
 must inspect the final command output and submit fresh evidence. Cache pruning can precede testing;
 the native run's preparation step and terminal exit govern progress, not a log success marker alone.
+Retry starts a new work item; a delayed response for the closed gate cannot pass it or request code fixes.
 QA documentation corrections after successful E2E verification do not require another run when only
 committed regular documentation files changed. MR handoff validates this and keeps the original report.
 If it fails, the Recovery card shows the MR-description error. Changes to execution inputs require

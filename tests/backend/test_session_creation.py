@@ -1570,6 +1570,46 @@ class SessionCreationTests(unittest.TestCase):
         self.assertNotEqual(item.id, retry_item.id)
         self.assertEqual(retry_item.id, strategy["work_item_id"])
         self.assertEqual(SessionStatus.ACTIVE, updated.status)
+        self.assertIn(f"current work item is {retry_item.id}", self.session_backend.get_sent_inputs(role.runtime_handle)[-1])
+        self.assertIn(f"closed work item {item.id}", self.session_backend.get_sent_inputs(role.runtime_handle)[-1])
+
+    def test_closed_verification_responses_cannot_change_a_fresh_retry(self) -> None:
+        session, role, old, _ = self.prepare_native_ios_run("IOS-30003CLOSEDVERIFIER", state="finished")
+        self.session_backend.simulate_output(role.runtime_handle, "SDD_ERROR: " + json.dumps({
+            "work_item_id": old.id, "summary": "Interrupted native gate", "needs_operator_input": True}))
+        self.coordinator.collect_role_output(session.id, role.role_name)
+        self.coordinator.retry_session(session.id)
+        current = next(item for item in self.work_item_repository.list_for_session(session.id)
+                       if item.work_type == "verification" and item.status == WorkItemStatus.ASSIGNED)
+        count = len(self.work_item_repository.list_for_session(session.id))
+        for output_type in ("completed", "failed", "passed", "blocked_verification_cycle"):
+            updated, _, mapped, _, ignored = self.coordinator.submit_role_result_document(document={
+                "output_type": output_type,
+                "payload": {"work_item_id": old.id, "result": "failed", "summary": "Old gate outcome"}})
+            self.assertTrue(ignored)
+            self.assertIsNone(mapped)
+            self.assertEqual("verification_requested", updated.current_stage)
+            self.assertEqual(VERIFICATION_COORDINATOR_ROLE, updated.current_owner)
+            self.assertEqual(count, len(self.work_item_repository.list_for_session(session.id)))
+            self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(current.id).status)
+            self.assertIsNotNone(self.dispatch_repository.get_latest_active_for_target(
+                session_id=session.id, role_id=role.id, work_item_id=current.id, stage_name="verification_requested"))
+        self.session_backend.simulate_output(role.runtime_handle, 'SDD_OUTPUT: ' + json.dumps({
+            'output_type': 'completed', 'payload': {'work_item_id': old.id, 'result': 'failed', 'summary': 'Old gate'}}))
+        updated, _, _ = self.coordinator.collect_role_output(session.id, role.role_name)
+        self.assertEqual("verification_requested", updated.current_stage)
+
+    def test_direct_closed_verification_response_preserves_the_accepted_outcome(self) -> None:
+        session, role, item, _ = self.prepare_native_ios_run("IOS-30003DIRECTVERIFIER", state="finished")
+        updated, accepted, _ = self.coordinator.handle_role_output(
+            session.id, role.role_name, "completed", {"work_item_id": item.id, "result": "failed", "summary": "Native failed"})
+        count = len(self.event_repository.list_for_session(session.id))
+        replayed, original, followup = self.coordinator.handle_role_output(
+            session.id, role.role_name, "passed", {"work_item_id": item.id, "summary": "Old conflicting replay"})
+        self.assertEqual(updated.current_stage, replayed.current_stage)
+        self.assertEqual(accepted.id, original.id)
+        self.assertIsNone(followup)
+        self.assertEqual(count, len(self.event_repository.list_for_session(session.id)))
 
     def test_get_interactive_state_summary_uses_latest_runtime_error(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

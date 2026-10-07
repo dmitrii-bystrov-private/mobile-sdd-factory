@@ -156,6 +156,8 @@ runner PID, phase, resource wait and completion exit code. The coordinator defer
 results/errors only for the current live native runner and sends bounded continuation feedback.
 Completed bound runs still reject exact replays of their deferred responses and request fresh evidence
 once; fresh failures remain visible. Dead/stale/mismatched records do not suppress actual failures.
+Closed verifier work-item results are idempotent/stale before stage mapping, just like coding results.
+Verification retries drain old output and explicitly supersede earlier queued continuations.
 Clear prior test logs/results under the task lock before pruning or waiting for the simulator, and record
 the native preparation/execution step. A success marker is not a terminal exit. Shared resources wait normally;
 lock-owner ancestry, rather than nested shell count, detects recursive acquisition.

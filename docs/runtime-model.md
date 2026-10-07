@@ -188,6 +188,8 @@ Factory iOS verification records its command lifecycle under the task's `tmp/ver
 Native test steps distinguish cache pruning from execution and invalidate old evidence before either.
 Previously deferred responses remain invalid after the same bound command finishes; the verifier
 must inspect final output and submit fresh evidence. Log markers alone do not establish completion.
+Closed verifier results cannot advance a new round. Retry drains previous output and identifies the
+new work item explicitly, superseding queued continuation instructions from earlier rounds.
 Waiting for a shared task/simulator lock is an active gate. The coordinator verifies the current work
 item, dispatch time, source and runner process before deferring a premature error/terminal result.
 The worker continues its existing terminal; feedback is deduplicated per run/state. Fresh completed

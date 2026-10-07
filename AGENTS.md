@@ -126,6 +126,8 @@ When behavior changes:
 
 - iOS verification must invalidate prior test evidence before preparation and reject replayed deferred
   responses after native completion; fresh terminal evidence governs the verdict
+- closed verifier work-item results must not affect a fresh gate; retries supersede earlier queued
+  continuations and drain previous terminal output
 
 - capacity recovery must recognize the current Codex footer, preserve the configured model, and allow
   repeated capacity retries after cooldown without repeating generic idle pokes or pending results
