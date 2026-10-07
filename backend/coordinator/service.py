@@ -724,31 +724,42 @@ class CoordinatorService:
             details = self._spec_verification_operator_details_from_history(events, source_event.id)
         implement_now_count = source_event.payload.get("implement_now_count")
         tech_debt_candidate_count = source_event.payload.get("tech_debt_candidate_count")
+        source_reason = source_event.payload.get("reason")
+        summary = source_event.payload.get("summary") or source_reason
+        role_name = source_event.payload.get("role_name")
+        needs_operator_input = self._payload_truthy(source_event.payload.get("needs_operator_input"))
         e2e_decision = None
-        if session.task_key.startswith("QA-") and source_event.payload.get("reason") == "e2e_environment":
+        if session.task_key.startswith("QA-") and (source_reason == "e2e_environment" or (
+            source_reason == "runtime_error" and role_name == VERIFICATION_COORDINATOR_ROLE
+            and pending_operator_item is not None
+            and source_event.payload.get("work_item_id") == pending_operator_item.id
+        )):
             try:
                 from factory.e2e.runner import describe_verdict
                 _, verdict, _, e2e_decision = self._e2e_operator_context(session)
                 diagnostics = describe_verdict(verdict)
+                source_reason = "e2e_environment"
+                summary = diagnostics["summary"]
                 details = diagnostics["details"]
+                needs_operator_input = False
             except IntakeError:
                 pass
         return {
             "available": True,
             "role_name": source_event.payload.get("role_name"),
             "current_stage": source_event.payload.get("current_stage", session.current_stage),
-            "summary": source_event.payload.get("summary") or source_event.payload.get("reason"),
+            "summary": summary,
             "details": details,
             "source_event_type": source_event.event_type,
-            "source_reason": source_event.payload.get("reason"),
+            "source_reason": source_reason,
             "review_family": review_family,
             "review_lane": review_lane,
-            "needs_operator_input": self._payload_truthy(source_event.payload.get("needs_operator_input")),
+            "needs_operator_input": needs_operator_input,
             "resume_strategy": source_event.payload.get("resume_strategy"),
             "implement_now_count": implement_now_count,
             "tech_debt_candidate_count": tech_debt_candidate_count,
             "e2e_decision": e2e_decision,
-            "e2e_continuation_available": source_event.payload.get("reason") == "e2e_environment"
+            "e2e_continuation_available": source_reason == "e2e_environment" and e2e_decision is None
                 and self._e2e_continuation_available(session, pending_operator_item),
         }
 
@@ -3622,6 +3633,12 @@ class CoordinatorService:
         if role is None:
             raise IntakeError(f"Owner role {work_item.owner_role_id} is missing for session {session.id}")
 
+        try:
+            self._e2e_operator_context(session)
+        except IntakeError:
+            pass
+        else:
+            raise IntakeError("Unresolved baseline findings require an explicit decision: accept selected findings, request corrections, or retry verification")
         e2e_continuation = self._e2e_continuation_available(session, work_item)
         if e2e_continuation:
             self._consume_role_result_file(session, role)
@@ -4000,13 +4017,19 @@ class CoordinatorService:
         task_root = self.workdir_root / session.task_key
         try:
             verdict = validate_verdict(task_root, item.id)
+            approval = self.event_repository.latest_for_session_by_type_and_payload(
+                session_id=session.id, event_type="e2e_baseline_accepted_by_operator",
+                payload_matches={"work_item_id": item.id})
+            verdict_digest = digest(task_root / "spec/e2e-verdict.json")
+            if approval is not None and verdict_digest == approval.payload.get("decision", {}).get("verdict_digest"):
+                raise E2EError("The reviewed verdict has already been accepted; wait for continuation evidence")
             strategy = read_json(task_root / "spec/verification-strategy.json")
             eligible = baseline_findings(verdict, strategy)
             if verdict["result"] != "blocked" or verdict.get("details") or not eligible:
                 raise E2EError("Only evidenced baseline test failures can be accepted; infrastructure blockers require recovery")
             validate_binding(task_root, verdict, item.id)
             validate_receipts(verdict)
-            decision = {"work_item_id": item.id, "verdict_digest": digest(task_root / "spec/e2e-verdict.json"),
+            decision = {"work_item_id": item.id, "verdict_digest": verdict_digest,
                         "findings": [{"id": finding_id(finding), "platform": finding["platform"],
                                       "test": finding["test"], "details": describe_verdict(dict(verdict, classifications=[finding], accepted_findings=[]))["details"]}
                                      for finding in eligible]}

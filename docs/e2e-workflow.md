@@ -199,6 +199,9 @@ SDK problem from the baseline/environment classification alone.
 
 For evidenced failures of a specific scenario on both revisions, the card provides checkboxes, an
 optional comment and "Continue with findings", "Request corrections" and "Retry verification".
+Unresolved findings keep these controls even if the verifier sends a generic runtime question after
+Resume. Resume cannot substitute for a baseline decision. Previously accepted evidence is not reopened;
+acceptance of an iOS check does not cover its Android counterpart or another scenario.
 Acceptance creates e2e_baseline_accepted_by_operator and an immutable evidence snapshot, recorded
 in spec/e2e-operator-decisions.json. It applies only to the current work item, source, execution strategy,
 support-file digests and app artifact. The runner recollects the selected scope and verifies every scenario outside those explicit

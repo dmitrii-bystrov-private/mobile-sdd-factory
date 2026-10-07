@@ -165,7 +165,7 @@ export function InteractiveStatePanel({
             </div>
           ) : null}
           <div className="operator-actions-toolbar">
-            {interactiveStateSummary.e2eContinuationAvailable ? (
+            {interactiveStateSummary.e2eContinuationAvailable && !baselineDecision ? (
               <button className="action-button" type="button" disabled={busy}
                 onClick={() => { void runRecoveryAction(() => apiClient.resumeSession(sessionId), "Retrying E2E continuation…"); }}>
                 Retry continuation

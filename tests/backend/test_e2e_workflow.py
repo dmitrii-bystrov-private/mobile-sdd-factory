@@ -305,6 +305,58 @@ class E2EWorkflowTests(unittest.TestCase):
         self.assertTrue(interactive["needs_operator_input"])
         self.assertEqual("A new operator question", interactive["summary"])
 
+    def test_later_platform_findings_keep_decision_controls_after_runtime_question(self):
+        _, android = self.multi_platform_plan()
+        service, session, _, ios_context = self.block_baseline()
+        self.decide(service, session, ios_context)
+        self.phase_failures = {("android", name): [android] for name in ("run", "rerun-1", "baseline-1")}
+        with patch.object(runner, "shutdown_android"):
+            verdict = self.run_gate()
+        self.assertEqual([self.node], [item["test"] for item in verdict["accepted_findings"]])
+        session, _, _ = service.handle_role_output(session.id, VERIFICATION_COORDINATOR_ROLE, "failed",
+            {"work_item_id": self.strategy["work_item_id"]})
+        context = service.get_interactive_state_summary(session.id)["e2e_decision"]
+        self.assertEqual([android], [item["test"] for item in context["findings"]])
+        before = len(service.event_repository.list_for_session(session.id))
+        with self.assertRaisesRegex(IntakeError, "explicit decision"):
+            service.resume_session(session.id)
+        self.assertEqual(before, len(service.event_repository.list_for_session(session.id)))
+        role = service.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        service.session_backend.simulate_output(role.runtime_handle, "SDD_ERROR: " + json.dumps({
+            "summary": "Verification blocked", "details": "Android checks failed; operator handling required",
+            "needs_operator_input": True, "work_item_id": self.strategy["work_item_id"]}))
+        # A generic question has no new run receipt; display the unresolved bound evidence.
+        with patch.object(service, "_fresh_e2e_runtime_verdict_available", return_value=False):
+            session, _, _ = service.collect_role_output(session.id, role.role_name)
+        self.assertIsNone(session.current_owner)
+        interactive = service.get_interactive_state_summary(session.id)
+        self.assertEqual("e2e_environment", interactive["source_reason"])
+        self.assertFalse(interactive["needs_operator_input"])
+        self.assertFalse(interactive["e2e_continuation_available"])
+        self.assertEqual(context, interactive["e2e_decision"])
+        self.assertIn("Android:", interactive["details"])
+        self.assertIn("Baseline failure accepted", interactive["details"])
+        self.decide(service, session, interactive["e2e_decision"])
+        with patch.object(runner, "shutdown_android"):
+            verdict = self.run_gate()
+        self.assertEqual("accepted_with_warnings", verdict["result"])
+        self.assertEqual({"ios", "android"}, {item["platform"] for item in verdict["accepted_findings"]})
+        runner.validate_verdict(self.task, self.strategy["work_item_id"])
+
+    def test_generic_runtime_question_cannot_offer_changed_baseline_evidence(self):
+        service, session, _, _ = self.block_baseline()
+        role = service.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        self.strategy["e2e"]["policy"]["run_timeout_seconds"] += 1
+        runner.write_json(self.task / "spec/verification-strategy.json", self.strategy)
+        service.session_backend.simulate_output(role.runtime_handle, "SDD_ERROR: " + json.dumps({
+            "summary": "Verification blocked", "needs_operator_input": True,
+            "work_item_id": self.strategy["work_item_id"]}))
+        with patch.object(service, "_fresh_e2e_runtime_verdict_available", return_value=False):
+            service.collect_role_output(session.id, role.role_name)
+        interactive = service.get_interactive_state_summary(session.id)
+        self.assertEqual("runtime_error", interactive["source_reason"])
+        self.assertIsNone(interactive["e2e_decision"])
+
     def test_missing_accepted_build_requires_a_new_gate_instead_of_retrying_continuation(self):
         service, session, _, context = self.block_baseline()
         self.decide(service, session, context)
