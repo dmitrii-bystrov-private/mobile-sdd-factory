@@ -152,6 +152,10 @@ Per-session overrides in the session creation form only affect the session being
 ## Recovery Actions
 
 Use recovery actions only when the workflow is blocked, paused, or failed at a specific operational seam.
+Completed sessions automatically stop idle agents after saving their conversations and task state.
+Their task files, reports and operator decisions remain available. Follow-up wakes the needed role;
+manual runtime wake has a grace period before automatic sleep. Active work and pending assignments
+are preserved; ambiguous or missing history defers sleep instead of losing context.
 Disk-full failures during preparation or result delivery show a recovery card with `Retry current stage`.
 Claude's decorated error markers are consumed even when terminal transcript writes fail. Free disk space
 before retrying; cache cleanup preserves active tasks and the original verification evidence.

@@ -420,4 +420,7 @@ Keep those in dedicated files under `spec/`, `review/`, `plan/`, or task-local v
 ## Supported Path
 
 The supported path is the shared writer helper plus backend ingress.
+Completed runtime sleep occurs after ingress/response grace and durable native/factory checkpoints.
+Waking a saved conversation does not authorize replaying its earlier terminal result: the current
+HYDRATION.json work item and freshly routed evidence still govern acceptance.
 New role guidance, tests, and runtime work should treat helper submission as the product behavior.

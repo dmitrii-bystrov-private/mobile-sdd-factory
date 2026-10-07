@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from backend.api.routes_artifacts import list_artifacts
 from backend.api.routes_events import inject_event, list_events
@@ -159,6 +160,12 @@ def main() -> None:
         assert verification_passed_response.followup_event_type == "send_to_test_completed"
         assert verification_passed_response.session.status == "completed"
 
+        with deps.database.connect() as connection:
+            connection.execute("UPDATE sessions SET updated_at='2020-01-01 00:00:00' WHERE id=?", (session_id,))
+            connection.execute("UPDATE roles SET updated_at='2020-01-01 00:00:00' WHERE session_id=?", (session_id,))
+        assert deps.coordinator_service.hibernate_completed_session(session_id)
+        assert all(role.status.value == "stopped" for role in deps.role_repository.list_for_session(session_id))
+
         reopen_response = reopen_from_qa(
             ReopenFromQaRequest(
                 session_id=session_id,
@@ -170,6 +177,11 @@ def main() -> None:
         assert reopen_response.followup_event_type == "qa_reopen_requested"
         assert reopen_response.session.current_stage == "qa_reopen_requested"
         assert reopen_response.session.status == "active"
+        implementer = deps.role_repository.get_by_name(session_id, "implementer")
+        assert implementer.status.value == "running"
+        resume_context = deps.coordinator_service.role_workspace_manager.role_directory(
+            reopen_response.session.task_key, "implementer") / "RESUME_CONTEXT.json"
+        assert json.loads(resume_context.read_text())["stage"] == "qa_reopen_requested"
 
         followup_response = inject_event(
             InjectEventRequest(
@@ -213,6 +225,7 @@ def main() -> None:
             "task_completed",
             "mr_handoff_completed",
             "send_to_test_completed",
+            "completed_runtimes_hibernated",
             "qa_reopened",
             "role_input_dispatched",
             "qa_reopen_requested",

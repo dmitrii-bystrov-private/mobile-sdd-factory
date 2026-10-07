@@ -811,6 +811,17 @@ class TmuxSessionBackend(SessionBackend):
             return result.returncode == 0
         return role.role_id in self.pending_outputs or role.role_id in self.sent_inputs or role.role_id in self.last_spawn_commands
 
+    def can_suspend_role(self, role: RuntimeRoleHandle) -> bool:
+        if self._effective_mode != "tmux":
+            return True
+        result = self._tmux(self._socket_path(role.session_id), "capture-pane", "-p", "-S", "-30", "-t", role.role_id)
+        if result.returncode:
+            return not self.is_role_alive(role)
+        text = self._normalize_terminal_text(result.stdout)
+        if "esc to interrupt" in text or "esc to cancel" in text:
+            return False
+        return self._contains_interactive_input_prompt(text)
+
     def stop_role(self, role: RuntimeRoleHandle) -> None:
         if self._effective_mode == "tmux":
             socket_path = self._socket_path(role.session_id)

@@ -3425,6 +3425,8 @@ class CoordinatorService:
         )
 
     def run_loop_once(self) -> tuple[Event | None, int, int]:
+        for completed in self.session_repository.list_by_status(SessionStatus.COMPLETED):
+            self.hibernate_completed_session(completed.id)
         active_sessions = self.session_repository.list_by_status(SessionStatus.ACTIVE)
         total_chunks = 0
         polled_sessions = 0
@@ -3454,6 +3456,70 @@ class CoordinatorService:
                 },
             )
         return summary_event, polled_sessions, total_chunks
+
+    @_serialize_session_transition
+    def hibernate_completed_session(self, session_id: int) -> bool:
+        """Stop completed-task agents only after every role has a durable checkpoint."""
+        session = self._get_session_or_raise(session_id)
+        if (session.status != SessionStatus.COMPLETED or session.current_owner is not None
+                or self.role_workspace_manager is None or self.workdir_root is None):
+            return False
+        updated_at = session.updated_at
+        if updated_at is None:
+            return False
+        if isinstance(updated_at, str):
+            updated_at = datetime.fromisoformat(updated_at)
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=UTC)
+        # Let ingress return and the final assistant response finish before closing its terminal.
+        if datetime.now(UTC) - updated_at < timedelta(seconds=60):
+            return False
+        if any(item.status in {WorkItemStatus.ASSIGNED, WorkItemStatus.WAITING_FOR_OPERATOR}
+               for item in self.work_item_repository.list_for_session(session.id)):
+            return False
+        roles = [role for role in self.role_repository.list_for_session(session.id)
+                 if role.status == RoleStatus.RUNNING and role.runtime_handle is not None]
+        if not roles:
+            return False
+        for role in roles:
+            changed = role.updated_at
+            if isinstance(changed, str):
+                changed = datetime.fromisoformat(changed)
+            if changed is not None:
+                if changed.tzinfo is None:
+                    changed = changed.replace(tzinfo=UTC)
+                if datetime.now(UTC) - changed < timedelta(seconds=60):
+                    return False
+        handles = {role.id: RuntimeRoleHandle(role_id=role.runtime_handle,
+            session_id=self._runtime_session_id_for_role(role, session), backend_name=role.runtime_backend) for role in roles}
+        can_suspend = getattr(self.session_backend, "can_suspend_role", None)
+        if can_suspend is not None and any(not can_suspend(handles[role.id]) for role in roles):
+            return False
+        from backend.coordinator.runtime_checkpoint import save
+        try:
+            checkpoints = [save(self, session, role) for role in roles]
+        except (OSError, RuntimeError, ValueError) as error:
+            previous = self.event_repository.latest_for_session_by_type(session.id, {"runtime_hibernation_deferred"})
+            if previous is None or previous.payload.get("details") != str(error):
+                self._append_event(session_id=session.id, event_type="runtime_hibernation_deferred", producer_type="coordinator",
+                    payload={"details": str(error), "summary": "Native history checkpoint could not be saved; runtimes remain live"})
+            return False
+        current = self._get_session_or_raise(session.id)
+        if (current.status != SessionStatus.COMPLETED or current.current_owner is not None
+                or current.current_stage != session.current_stage):
+            return False
+        for role in roles:
+            latest = self.role_repository.get_by_id(role.id)
+            if (latest.status != RoleStatus.RUNNING or latest.runtime_handle != role.runtime_handle
+                    or latest.last_hydration_version != role.last_hydration_version):
+                return False
+        for role in roles:
+            self.session_backend.stop_role(handles[role.id])
+            self.role_repository.update_status(role.id, RoleStatus.STOPPED)
+        self._append_event(session_id=session.id, event_type="completed_runtimes_hibernated", producer_type="coordinator",
+            payload={"role_names": [role.role_name for role in roles], "checkpoint_paths": [str(path) for path in checkpoints],
+                     "summary": "Completed task agents released; task state and native conversations retained"})
+        return True
 
     def _should_persist_poll_telemetry(self) -> bool:
         return os.environ.get(_PERSIST_POLL_TELEMETRY_ENV, "").strip().lower() in {
@@ -9974,14 +10040,25 @@ class CoordinatorService:
         if role.status == RoleStatus.RUNNING and role.runtime_handle is not None:
             return role
 
-        runtime_session = self._runtime_session_handle_for_session(session)
-        runtime_role = self._spawn_role_runtime(
-            runtime_session=runtime_session,
-            task_key=session.task_key,
-            role_name=role.role_name,
-            role_config=(session.role_config or {}).get(role.role_name),
-            resume_mode=self._preferred_runtime_resume_mode((session.role_config or {}).get(role.role_name)),
-        )
+        from backend.roles.session_history import SessionHistoryError
+        try:
+            if self.role_workspace_manager is not None and self.workdir_root is not None:
+                from backend.coordinator.runtime_checkpoint import refresh
+                refresh(self, session, role)
+            runtime_session = self._runtime_session_handle_for_session(session)
+            runtime_role = self._spawn_role_runtime(
+                runtime_session=runtime_session,
+                task_key=session.task_key,
+                role_name=role.role_name,
+                role_config=(session.role_config or {}).get(role.role_name),
+                resume_mode=self._preferred_runtime_resume_mode((session.role_config or {}).get(role.role_name)),
+            )
+        except SessionHistoryError as error:
+            item = self._find_active_work_item_for_role(session.id, role.id)
+            self._escalate_runtime_error(session, role, {"summary": "Native conversation recovery required",
+                "details": str(error), "needs_operator_input": False, "resume_strategy": "retry_current_stage",
+                "work_item_id": item.id if item else None})
+            raise IntakeError(str(error)) from error
         return self.role_repository.update_runtime(
             role.id,
             runtime_backend=runtime_role.backend_name,
@@ -10583,7 +10660,7 @@ class CoordinatorService:
     @staticmethod
     def _preferred_runtime_resume_mode(role_config: dict[str, str] | None) -> str | None:
         runner = str((role_config or {}).get("runner") or "").strip()
-        if runner == "codex":
+        if runner in {"codex", "claude"}:
             return "native"
         return None
 
@@ -12115,6 +12192,12 @@ class CoordinatorService:
         merged_hydration = self._sanitize_dispatch_hydration(merged_hydration)
         prompt_mode = self._prompt_mode_for_dispatch(session, role)
         role = self._ensure_dispatchable_role(session, role)
+        if self.role_workspace_manager is not None:
+            resume_context = self.role_workspace_manager.role_directory(session.task_key, role.role_name) / "RESUME_CONTEXT.json"
+            if resume_context.exists():
+                merged_hydration["resume_context_path"] = str(resume_context)
+                instruction += (" Read RESUME_CONTEXT.json for current factory state and recorded operator decisions. "
+                                "HYDRATION.json governs the current work item; prior conversation results are historical.")
         if self.dispatch_repository is not None and not force_redispatch:
             active_dispatch = self.dispatch_repository.get_latest_active_for_target(
                 session_id=session.id,

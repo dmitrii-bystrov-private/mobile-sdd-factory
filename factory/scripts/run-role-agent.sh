@@ -22,10 +22,33 @@ lifecycle="${SDD_FACTORY_ROLE_LIFECYCLE:-persistent}"
 role_model="${SDD_FACTORY_ROLE_MODEL:-}"
 role_effort="${SDD_FACTORY_ROLE_EFFORT:-}"
 resume_mode="${SDD_FACTORY_ROLE_RESUME_MODE:-}"
+native_session_id="${SDD_FACTORY_ROLE_SESSION_ID:-}"
+resume_prompt=""
 claude_settings_file="${SDD_FACTORY_CLAUDE_SETTINGS:-}"
 claude_mcp_config="${SDD_FACTORY_CLAUDE_MCP_CONFIG:-}"
 settings_file=""
 mcp_config_file=""
+
+# Older backend processes do not export native IDs; adopt only an exact validated binding.
+if [[ -z "$native_session_id" && -n "$repo_root" && -x "$repo_root/.venv/bin/python" ]] &&
+   [[ "$resume_mode" == native || -f RUNTIME_CHECKPOINT.json ]]; then
+  identity="$(PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" "$repo_root/.venv/bin/python" - "$launcher_name" <<'PY'
+from pathlib import Path
+import sys
+from backend.roles.session_history import launcher_identity
+identity, resume = launcher_identity(Path.cwd(), sys.argv[1], True)
+print((identity or "-") + " " + ("native" if resume else "fresh"))
+PY
+)"
+  read -r native_session_id native_state <<< "$identity"
+  [[ "$native_session_id" != - ]] || native_session_id=""
+  if [[ "$native_state" == native ]]; then resume_mode=native; else resume_mode=""; fi
+fi
+if [[ -f RUNTIME_CHECKPOINT.json && -n "$repo_root" && -x "$repo_root/.venv/bin/python" ]]; then
+  SDD_WORKDIR="$workdir_root" PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" \
+    "$repo_root/.venv/bin/python" -m backend.coordinator.runtime_checkpoint
+  resume_prompt="Read RESUME_CONTEXT.json for current factory state and recorded operator decisions. Wait for current routed work from HYDRATION.json; do not reuse earlier terminal results or start task actions from the resumed conversation."
+fi
 
 if [[ -n "$claude_settings_file" ]]; then
   settings_file="$claude_settings_file"
@@ -84,8 +107,16 @@ case "$launcher_name" in
       args+=("--mcp-config" "$mcp_config_file")
     fi
     if [[ "$resume_mode" == "native" ]]; then
-      exec claude -c "${args[@]}"
+      [[ -n "$native_session_id" ]] || { echo "Missing bound Claude session ID" >&2; exit 1; }
+      if [[ -n "$resume_prompt" ]]; then
+        exec claude --resume "$native_session_id" "${args[@]}" "$resume_prompt"
+      fi
+      exec claude --resume "$native_session_id" "${args[@]}"
     fi
+    if [[ -n "$native_session_id" ]]; then
+      args+=("--session-id" "$native_session_id")
+    fi
+    if [[ -n "$resume_prompt" ]]; then exec claude "${args[@]}" "$resume_prompt"; fi
     exec claude "${args[@]}"
     ;;
   codex)
@@ -108,8 +139,13 @@ case "$launcher_name" in
     args+=("-s" "danger-full-access")
     args+=("-a" "never")
     if [[ "$resume_mode" == "native" ]]; then
-      exec codex "${args[@]}" resume --last
+      [[ -n "$native_session_id" ]] || { echo "Missing bound Codex session ID" >&2; exit 1; }
+      if [[ -n "$resume_prompt" ]]; then
+        exec codex "${args[@]}" resume "$native_session_id" "$resume_prompt"
+      fi
+      exec codex "${args[@]}" resume "$native_session_id"
     fi
+    if [[ -n "$resume_prompt" ]]; then exec codex "${args[@]}" "$resume_prompt"; fi
     exec codex "${args[@]}"
     ;;
   sh)

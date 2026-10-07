@@ -12,6 +12,7 @@ import shlex
 from backend.role_runtime_config import resolve_role_mcp_servers
 from backend.roles.agent_trust import trust_role_workspace
 from backend.roles.workspace import RoleWorkspace
+from backend.roles.session_history import launcher_identity
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,13 +84,16 @@ class RoleLauncherManager:
             role_config=role_config,
         )
         launcher_script = workspace.directory / "launch-role.sh"
+        native_session_id, native_resume = launcher_identity(
+            workspace.directory, (role_config or {}).get("runner", ""), resume_mode == "native")
         launcher_script.write_text(
             self._build_launcher_script(
                 task_key=task_key,
                 role_name=workspace.role_name,
                 workspace=workspace,
                 role_config=role_config,
-                resume_mode=resume_mode,
+                resume_mode="native" if native_resume else None,
+                native_session_id=native_session_id,
                 claude_runtime_files=claude_runtime_files,
             )
         )
@@ -110,6 +114,7 @@ class RoleLauncherManager:
         role_config: dict[str, str] | None = None,
         resume_mode: str | None = None,
         claude_runtime_files: dict[str, Path] | None = None,
+        native_session_id: str = "",
     ) -> str:
         launcher_exec = " ".join(_shell_escape(part) for part in self.launcher_command)
         runner = (role_config or {}).get("runner", "")
@@ -143,6 +148,7 @@ class RoleLauncherManager:
                 f'export SDD_FACTORY_ROLE_MODEL={_shell_escape(model)}',
                 f'export SDD_FACTORY_ROLE_EFFORT={_shell_escape(effort)}',
                 f'export SDD_FACTORY_ROLE_RESUME_MODE={_shell_escape(resume_mode or "")}',
+                f'export SDD_FACTORY_ROLE_SESSION_ID={_shell_escape(native_session_id)}',
                 f'export SDD_FACTORY_CLAUDE_SETTINGS={_shell_escape(claude_settings)}',
                 f'export SDD_FACTORY_CLAUDE_MCP_CONFIG={_shell_escape(claude_mcp_config)}',
                 *pool_environment,

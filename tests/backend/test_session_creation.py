@@ -1611,6 +1611,85 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIsNone(followup)
         self.assertEqual(count, len(self.event_repository.list_for_session(session.id)))
 
+    def _completed_runtime_for_checkpoint(self):
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003SLEEP")
+        for item in self.work_item_repository.list_for_session(session.id):
+            self.work_item_repository.update_status(item.id, WorkItemStatus.COMPLETED)
+        self.session_repository.update_stage_and_owner(session.id, current_stage="send_to_test_completed", current_owner=None)
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        with self.database.connect() as connection:
+            connection.execute("UPDATE sessions SET updated_at='2020-01-01 00:00:00' WHERE id=?", (session.id,))
+            connection.execute("UPDATE roles SET updated_at='2020-01-01 00:00:00' WHERE session_id=?", (session.id,))
+        return self.session_repository.get_by_id(session.id)
+
+    def test_completed_runtime_checkpoints_preserve_operator_decisions_and_wake_current_work(self) -> None:
+        session = self._completed_runtime_for_checkpoint()
+        self.coordinator._append_event(session_id=session.id, event_type="operator_runtime_input_sent", producer_type="operator",
+            payload={"role_name": "implementer", "operator_reply": "Fundamental rule takes priority", "work_item_id": 1})
+        self.assertTrue(self.coordinator.hibernate_completed_session(session.id))
+        role = self.role_repository.get_by_name(session.id, "implementer")
+        self.assertEqual(RoleStatus.STOPPED, role.status)
+        workspace = self.coordinator.role_workspace_manager.role_directory(session.task_key, role.role_name)
+        checkpoint = json.loads((workspace / "RUNTIME_CHECKPOINT.json").read_text())
+        self.assertEqual("Fundamental rule takes priority", checkpoint["operator_event_history"][-1]["payload"]["operator_reply"])
+        self.assertEqual(session.role_config[role.role_name], checkpoint["role_config"])
+        self.assertFalse(self.coordinator.hibernate_completed_session(session.id))
+        session = self.session_repository.update_stage_and_owner(session.id, current_stage="verification_correction_requested", current_owner="implementer")
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        item = self.work_item_repository.create(session_id=session.id, work_type="verification_correction", title="Follow-up",
+            owner_role_id=role.id, source_event_id=None, status=WorkItemStatus.ASSIGNED)
+        self.coordinator._dispatch_role_work(session=session, role=role, work_item=item,
+            stage_name=session.current_stage, instruction="Apply the follow-up")
+        context = json.loads((workspace / "RESUME_CONTEXT.json").read_text())
+        hydration = json.loads((workspace / "HYDRATION.json").read_text())
+        self.assertEqual("verification_correction_requested", context["stage"])
+        self.assertEqual(item.id, hydration["work_item_id"])
+        self.assertEqual(str(workspace / "RESUME_CONTEXT.json"), hydration["resume_context_path"])
+        self.assertEqual(RoleStatus.RUNNING, self.role_repository.get_by_name(session.id, "implementer").status)
+
+    def test_checkpoint_write_failure_keeps_all_completed_runtimes_alive(self) -> None:
+        session = self._completed_runtime_for_checkpoint()
+        with patch("backend.coordinator.runtime_checkpoint.save", side_effect=OSError("No space left on device")):
+            self.assertFalse(self.coordinator.hibernate_completed_session(session.id))
+        self.assertTrue(all(role.status == RoleStatus.RUNNING for role in self.role_repository.list_for_session(session.id)))
+        self.assertIsNotNone(self.event_repository.latest_for_session_by_type(session.id, {"runtime_hibernation_deferred"}))
+
+    def test_active_or_busy_runtime_is_never_hibernated(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30003SLEEP")
+        self.assertFalse(self.coordinator.hibernate_completed_session(session.id))
+        session = self._completed_runtime_for_checkpoint()
+        with patch.object(self.session_backend, "can_suspend_role", return_value=False, create=True):
+            self.assertFalse(self.coordinator.hibernate_completed_session(session.id))
+        self.assertTrue(all(role.status == RoleStatus.RUNNING for role in self.role_repository.list_for_session(session.id)))
+
+    def test_recent_completion_waits_for_ingress_and_final_response(self) -> None:
+        session = self._completed_runtime_for_checkpoint()
+        self.session_repository.update_status(session.id, SessionStatus.COMPLETED)
+        self.assertFalse(self.coordinator.hibernate_completed_session(session.id))
+
+    def test_manual_wakeup_is_not_immediately_hibernated_again(self) -> None:
+        session = self._completed_runtime_for_checkpoint()
+        role = self.role_repository.get_by_name(session.id, "implementer")
+        self.role_repository.update_status(role.id, RoleStatus.RUNNING)
+        self.assertFalse(self.coordinator.hibernate_completed_session(session.id))
+
+    def test_corrupt_wakeup_checkpoint_routes_to_recovery_instead_of_new_dialog(self) -> None:
+        session = self._completed_runtime_for_checkpoint()
+        self.assertTrue(self.coordinator.hibernate_completed_session(session.id))
+        role = self.role_repository.get_by_name(session.id, "implementer")
+        workspace = self.coordinator.role_workspace_manager.role_directory(session.task_key, role.role_name)
+        (workspace / 'RUNTIME_CHECKPOINT.json').write_text('broken')
+        session = self.session_repository.update_stage_and_owner(session.id, current_stage='verification_correction_requested', current_owner=role.role_name)
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        item = self.work_item_repository.create(session_id=session.id, work_type='verification_correction', title='Follow-up',
+            owner_role_id=role.id, source_event_id=None, status=WorkItemStatus.ASSIGNED)
+        with self.assertRaisesRegex(IntakeError, 'not valid JSON'):
+            self.coordinator._dispatch_role_work(session=session, role=role, work_item=item, stage_name=session.current_stage, instruction='Follow-up')
+        self.assertEqual(RoleStatus.STOPPED, self.role_repository.get_by_id(role.id).status)
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+        self.assertEqual('retry_current_stage', summary['resume_strategy'])
+        self.assertFalse(summary['needs_operator_input'])
+
     def test_get_interactive_state_summary_uses_latest_runtime_error(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30003",
@@ -2281,22 +2360,76 @@ class SessionCreationTests(unittest.TestCase):
             workdir_root=Path(self.temp_dir.name),
         )
         workspace = workspace_manager.ensure_role_workspace("IOS-30000RESUME", "implementer")
-        launch_plan = launcher_manager.ensure_launch_plan(
-            task_key="IOS-30000RESUME",
-            workspace=workspace,
-            role_config={"runner": "claude", "model": "sonnet", "effort": "medium"},
-            resume_mode="native",
-        )
+        from backend.roles.session_history import atomic_json
+        identity = "ea49c055-1050-4a09-8d9a-a5624c81f71c"
+        native_root = Path(self.temp_dir.name) / "native-claude"
+        transcript = native_root / (identity + ".jsonl")
+        transcript.parent.mkdir()
+        transcript.write_text(json.dumps({"sessionId": identity, "cwd": str(workspace.directory.resolve())}) + "\n")
+        atomic_json(workspace.directory / "NATIVE_SESSION.json", {"version": 1, "runner": "claude",
+            "workspace": str(workspace.directory.resolve()), "session_id": identity, "transcript_path": str(transcript)})
+        with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(native_root)}):
+            launch_plan = launcher_manager.ensure_launch_plan(
+                task_key="IOS-30000RESUME",
+                workspace=workspace,
+                role_config={"runner": "claude", "model": "sonnet", "effort": "medium"},
+                resume_mode="native",
+            )
 
         script_text = launch_plan.launcher_script.read_text()
         self.assertIn("SDD_FACTORY_ROLE_RESUME_MODE=native", script_text)
 
-    def test_preferred_runtime_resume_mode_uses_native_only_for_codex(self) -> None:
+    def test_old_backend_launcher_wakes_bound_conversation_and_refreshes_operator_context(self) -> None:
+        import subprocess
+        from backend.coordinator.runtime_checkpoint import save
+        from backend.roles.session_history import atomic_json
+        session = self._completed_runtime_for_checkpoint()
+        role = self.role_repository.get_by_name(session.id, "implementer")
+        config = dict(session.role_config)
+        config[role.role_name] = {"runner": "claude", "model": "sonnet", "effort": "medium"}
+        session = self.session_repository.update_role_config(session.id, config)
+        workspace = self.coordinator.role_workspace_manager.role_directory(session.task_key, role.role_name)
+        native_root = Path(self.temp_dir.name) / "claude-history"
+        native_root.mkdir()
+        identity = "79acefe9-e03e-4c5c-a8c3-ac4fc6bdb8f7"
+        transcript = native_root / (identity + ".jsonl")
+        transcript.write_text(json.dumps({"sessionId": identity, "cwd": str(workspace.resolve())}) + "\n")
+        atomic_json(workspace / "NATIVE_SESSION.json", {"version": 1, "runner": "claude", "session_id": identity,
+            "workspace": str(workspace.resolve()), "transcript_path": str(transcript)})
+        with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(native_root)}):
+            save(self.coordinator, session, role)
+        self.coordinator._append_event(session_id=session.id, event_type="operator_runtime_input_sent", producer_type="operator",
+            payload={"role_name": role.role_name, "operator_reply": "Keep the recorded fundamental rule"})
+        bin_dir = Path(self.temp_dir.name) / "bin"
+        bin_dir.mkdir()
+        argv = Path(self.temp_dir.name) / "argv.json"
+        executable = bin_dir / "claude"
+        executable.write_text('#!/usr/bin/env python3\nimport os,sys,json\nopen(os.environ["ARGV_FILE"],"w").write(json.dumps(sys.argv[1:]))\n')
+        executable.chmod(0o755)
+        repo_root = Path(__file__).resolve().parents[2]
+        env = dict(os.environ, PATH=str(bin_dir) + ':' + os.environ['PATH'], ARGV_FILE=str(argv),
+            CLAUDE_CONFIG_DIR=str(native_root), SDD_FACTORY_ROLE_RUNNER="claude", SDD_FACTORY_ROLE_MODEL="sonnet",
+            SDD_FACTORY_ROLE_RESUME_MODE="", SDD_FACTORY_ROLE_SESSION_ID="", SDD_FACTORY_ROLE_NAME=role.role_name,
+            SDD_FACTORY_TASK_KEY=session.task_key, SDD_FACTORY_REPO_ROOT=str(repo_root),
+            SDD_FACTORY_WORKDIR_ROOT=self.temp_dir.name, SDD_FACTORY_DB_PATH=str(self.db_path),
+            SDD_FACTORY_USE_FAKE_ADAPTERS="true", SDD_FACTORY_RUNTIME_BACKEND="recording")
+        result = subprocess.run(['bash', str(repo_root / 'factory/scripts/run-role-agent.sh')],
+            cwd=workspace, env=env, text=True, capture_output=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        arguments = json.loads(argv.read_text())
+        self.assertIn('--resume', arguments)
+        self.assertIn(identity, arguments)
+        self.assertIn('sonnet', arguments)
+        self.assertTrue(any('RESUME_CONTEXT.json' in argument for argument in arguments))
+        context = json.loads((workspace / 'RESUME_CONTEXT.json').read_text())
+        self.assertEqual("Keep the recorded fundamental rule", context['operator_event_history'][-1]['payload']['operator_reply'])
+
+    def test_preferred_runtime_resume_mode_uses_native_for_both_supported_agents(self) -> None:
         self.assertEqual(
             "native",
             self.coordinator._preferred_runtime_resume_mode({"runner": "codex"}),
         )
-        self.assertIsNone(
+        self.assertEqual("native",
             self.coordinator._preferred_runtime_resume_mode({"runner": "claude"}),
         )
         self.assertIsNone(self.coordinator._preferred_runtime_resume_mode(None))

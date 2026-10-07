@@ -76,7 +76,15 @@ The most important supported long-running roles are:
 - `requirements-reviewer`
 - `verification-coordinator`
 
-The platform intentionally keeps these roles alive across rounds so they retain context.
+The platform keeps these roles alive across rounds while their task is active. Completed sessions
+release quiescent roles after a 60-second delivery/response grace period, provided no work remains pending.
+Every role first receives a durable checkpoint with its exact native conversation ID, transcript backup,
+model configuration and recorded operator events. If any checkpoint fails or history is ambiguous,
+all roles remain live. Manual wake has the same grace period.
+
+Follow-up dispatch wakes only the needed role, resumes the bound conversation (without selecting the
+latest unrelated chat), and writes RESUME_CONTEXT.json from current factory state. HYDRATION.json
+governs current work IDs; historical decisions retain their original evidence/scope bindings.
 
 This supports:
 

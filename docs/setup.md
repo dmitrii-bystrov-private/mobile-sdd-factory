@@ -118,6 +118,12 @@ The platform uses it for:
 
 If `tmux` is missing, the supported live runtime model is not available.
 
+Completed-role checkpoints live in each task's role workspace: `NATIVE_SESSION.json`,
+`RUNTIME_CHECKPOINT.json` and a private `native-transcript.jsonl` backup. On wake, `RESUME_CONTEXT.json`
+contains current factory state and recorded operator events. Native history uses the runner's existing
+local directories (`CODEX_HOME` / `CLAUDE_CONFIG_DIR` when configured); those optional machine paths
+belong in ENV and ~/.zshrc. Per-role conversation IDs are generated runtime data, not shell settings.
+
 ## MCP Availability
 
 The supported platform expects codebase MCP access to be available when the chosen runner/environment uses it.

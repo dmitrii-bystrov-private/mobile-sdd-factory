@@ -210,6 +210,11 @@ native QA verdicts govern runtime error recovery, and historical errors cannot r
 
 When changing orchestration:
 
+- completed sessions release quiescent agents after a 60-second ingress/response grace period;
+  checkpoint all roles before stopping any, preserve exact native conversation IDs and model configuration,
+  and refresh factory context on follow-up. Missing or ambiguous history keeps runtimes live; a failed
+  bound resume requires operator recovery rather than silently starting a different conversation.
+
 - preserve capacity recovery through both the tmux idle detector and coordinator retry guard;
   test real Codex shortcut/warning footers, cooldown retries and historical capacity text during work
 

@@ -45,6 +45,8 @@ Enter a Jira key or link in the UI and choose a profile:
 The backend prepares the task snapshot and worktree, routes implementation and review, runs
 verification, and performs documentation review when configured. Successful work proceeds to MR
 handoff and the Jira code-review status. Follow-up work can re-enter the same session.
+Completed tasks release idle agent processes after saving their conversations and factory state.
+Follow-up work wakes the required role with its saved context.
 
 Operators resolve requirements questions, review disagreements and recovery blockers through the UI.
 See the [runtime model](docs/runtime-model.md) for roles, stages, policies and lifecycle behavior.

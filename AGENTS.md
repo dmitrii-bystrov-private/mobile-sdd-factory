@@ -124,6 +124,9 @@ its lock, including failure, partial boot, timeout and graceful interruption. Pr
 
 When behavior changes:
 
+- completed runtime hibernation must checkpoint exact task/role conversations and operator decisions;
+  wake only the required role with current hydration, and retain live agents if checkpointing fails
+
 - iOS verification must invalidate prior test evidence before preparation and reject replayed deferred
   responses after native completion; fresh terminal evidence governs the verdict
 - closed verifier work-item results must not affect a fresh gate; retries supersede earlier queued
