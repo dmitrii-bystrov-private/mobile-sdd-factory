@@ -1518,6 +1518,46 @@ class SessionCreationTests(unittest.TestCase):
                 self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated.status)
                 self.assertEqual("Actual runner failure", self.coordinator.get_interactive_state_summary(session.id)["summary"])
 
+    def test_native_ios_deferred_responses_cannot_be_replayed_after_completion(self) -> None:
+        for index, output_type in enumerate(("error", "blocked_verification_cycle", "passed")):
+            with self.subTest(output_type=output_type):
+                session, role, item, path = self.prepare_native_ios_run(f"IOS-30003NATIVEREPLAY{index}", state="running")
+                payload = {"work_item_id": item.id, "summary": "Premature lock claim"}
+                with patch("factory.ios_verification_state.runner_is_alive", return_value=True), patch(
+                    "factory.ios_verification_state.source_sha", return_value="verified-sha"
+                ):
+                    if output_type == "error":
+                        self.session_backend.simulate_output(role.runtime_handle, "SDD_ERROR: " + json.dumps(payload))
+                        self.coordinator.collect_role_output(session.id, role.role_name)
+                    else:
+                        self.coordinator.submit_role_result_document(document={"output_type": output_type, "payload": payload})
+                    # A different intervening deferred output must not hide the original from replay detection.
+                    self.session_backend.simulate_output(role.runtime_handle, "SDD_ERROR: " + json.dumps({
+                        "work_item_id": item.id, "summary": "Second premature response"}))
+                    self.coordinator.collect_role_output(session.id, role.role_name)
+                    record = json.loads(path.read_text())
+                    record.update(state="finished", exit_code=1)
+                    path.write_text(json.dumps(record))
+                    before = len(self.session_backend.get_sent_inputs(role.runtime_handle))
+                    for _ in range(2):
+                        if output_type == "error":
+                            self.session_backend.simulate_output(role.runtime_handle, "SDD_ERROR: " + json.dumps(payload))
+                            updated, _, _ = self.coordinator.collect_role_output(session.id, role.role_name)
+                        else:
+                            updated, _, mapped, _, ignored = self.coordinator.submit_role_result_document(
+                                document={"output_type": output_type, "payload": payload})
+                            self.assertTrue(ignored)
+                            self.assertIsNone(mapped)
+                        self.assertEqual(SessionStatus.ACTIVE, updated.status)
+                        self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(item.id).status)
+                    self.assertEqual(before + 1, len(self.session_backend.get_sent_inputs(role.runtime_handle)))
+                    self.assertIn("finished with exit code 1", self.session_backend.get_sent_inputs(role.runtime_handle)[-1])
+                    self.session_backend.simulate_output(role.runtime_handle, "SDD_ERROR: " + json.dumps({
+                        "work_item_id": item.id, "summary": "Current xcodebuild was interrupted", "needs_operator_input": True}))
+                    updated, _, _ = self.coordinator.collect_role_output(session.id, role.role_name)
+                    self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, updated.status)
+                    self.assertEqual("Current xcodebuild was interrupted", self.coordinator.get_interactive_state_summary(session.id)["summary"])
+
     def test_native_ios_retry_refreshes_strategy_binding(self) -> None:
         session, role, item, _ = self.prepare_native_ios_run("IOS-30003NATIVERETRY", state="finished")
         self.session_backend.simulate_output(role.runtime_handle, "SDD_ERROR: " + json.dumps({

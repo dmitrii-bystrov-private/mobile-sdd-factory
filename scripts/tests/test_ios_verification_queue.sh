@@ -7,6 +7,7 @@ first_pid=""
 second_pid=""
 cleanup() {
   touch "$QUEUE_ROOT/release"
+  touch "$QUEUE_ROOT/release-prune"
   for queue_pid in "$first_pid" "$second_pid"; do
     if [[ -n "$queue_pid" ]]; then
       kill "$queue_pid" 2>/dev/null || true
@@ -41,15 +42,46 @@ fi
 printf 'finish %s\n' "$key" >>"$QUEUE_ROOT/order"
 if [[ -f "$QUEUE_ROOT/fail" ]]; then exit 65; fi
 SH
-chmod +x "$QUEUE_ROOT/bin/git" "$QUEUE_ROOT/bin/xcodebuild"
+cat >"$QUEUE_ROOT/bin/swiftlint" <<'SH'
+#!/usr/bin/env bash
+printf 'lint %s\n' "$(basename "$(dirname "$PWD")")" >>"$QUEUE_ROOT/order"
+SH
+chmod +x "$QUEUE_ROOT/bin/git" "$QUEUE_ROOT/bin/xcodebuild" "$QUEUE_ROOT/bin/swiftlint"
 for index in 1 2; do
   queue_task="$SDD_WORKDIR/IOS-QUEUE-$index"
   mkdir -p "$queue_task/repo/Tools/buildscripts" "$queue_task/spec"
-  printf '{"work_item_id":%s,"phases":["test_without_building"]}\n' "$index" >"$queue_task/spec/verification-strategy.json"
+  printf '{"work_item_id":%s,"phases":["test_without_building","lint"]}\n' "$index" >"$queue_task/spec/verification-strategy.json"
+  mkdir -p "$queue_task/tmp/verification/ios/logs" "$queue_task/tmp/verification/ios/xcresult/test-without-building.xcresult"
+  printf '** TEST EXECUTE SUCCEEDED **\n' >"$queue_task/tmp/verification/ios/logs/test-without-building.log"
+  touch "$queue_task/tmp/verification/ios/xcresult/test-without-building.xcresult/stale"
+  cat >"$queue_task/repo/Tools/buildscripts/load-tuist-env.sh" <<'SH'
+verification_prune_ios_derived_data_if_needed() {
+  [[ ! -s "$SDD_IOS_VERIFICATION_LOGS_PATH/test-without-building.log" ]] || exit 7
+  [[ ! -e "$SDD_IOS_XCRESULT_ROOT/test-without-building.xcresult/stale" ]] || exit 7
+  if [[ "$1" == "IOS-QUEUE-1" ]]; then
+    touch "$QUEUE_ROOT/prune-started"
+    while [[ ! -f "$QUEUE_ROOT/release-prune" ]]; do sleep 0.05; done
+  fi
+}
+SH
 done
 
 bash "$REPO_ROOT/scripts/ios-verify.sh" IOS-QUEUE-1 >"$QUEUE_ROOT/first.log" 2>&1 &
 first_pid=$!
+for _ in $(seq 1 200); do
+  [[ -f "$QUEUE_ROOT/prune-started" ]] && break
+  sleep 0.05
+done
+[[ -f "$QUEUE_ROOT/prune-started" ]]
+"$REPO_ROOT/.venv/bin/python" - <<'PY'
+import json, os
+from pathlib import Path
+task = Path(os.environ['SDD_WORKDIR']) / 'IOS-QUEUE-1'
+state = json.loads((task / 'tmp/verification/ios/execution-state.json').read_text())
+assert state['state'] == 'running' and state['step'] == 'prune_derived_data', state
+assert not (task / 'tmp/verification/ios/logs/test-without-building.log').read_text()
+PY
+touch "$QUEUE_ROOT/release-prune"
 for _ in $(seq 1 200); do
   [[ -f "$QUEUE_ROOT/first-started" ]] && break
   sleep 0.05
@@ -80,7 +112,10 @@ first_pid=""
 wait "$second_pid"
 second_pid=""
 expected=$'start IOS-QUEUE-1\nfinish IOS-QUEUE-1\nstart IOS-QUEUE-2\nfinish IOS-QUEUE-2'
-[[ "$(cat "$QUEUE_ROOT/order")" == "$expected" ]]
+[[ "$(sed '/^lint /d' "$QUEUE_ROOT/order")" == "$expected" ]]
+for index in 1 2; do
+  rg -q "^lint IOS-QUEUE-$index$" "$QUEUE_ROOT/order"
+done
 [[ ! -d "$SDD_WORKDIR/.locks/ios-simulator-SIM-QUEUE.lock" ]]
 touch "$QUEUE_ROOT/fail"
 if bash "$REPO_ROOT/scripts/ios-verify.sh" IOS-QUEUE-2 >"$QUEUE_ROOT/failed.log" 2>&1; then
@@ -93,6 +128,7 @@ from pathlib import Path
 for key, code in [('IOS-QUEUE-1', 0), ('IOS-QUEUE-2', 1)]:
  state=json.loads((Path(os.environ['SDD_WORKDIR']) / key / 'tmp/verification/ios/execution-state.json').read_text())
  assert state['state'] == 'finished' and state['exit_code'] == code, state
+ if code == 0: assert state['phase'] == 'lint' and 'step' not in state, state
 PY
 if bash -c 'source "$1/scripts/lib/verification_context.sh"; KEY=IOS-QUEUE-1; nested() { verification_run_with_ios_simulator_lock "$TESTING_DEVICE_ID" true; }; verification_run_with_ios_simulator_lock "$TESTING_DEVICE_ID" nested' _ "$REPO_ROOT" >"$QUEUE_ROOT/recursive.log" 2>&1; then
   echo 'Real recursive acquisition was not rejected' >&2
@@ -100,4 +136,4 @@ if bash -c 'source "$1/scripts/lib/verification_context.sh"; KEY=IOS-QUEUE-1; ne
 fi
 rg -q 'Recursive iOS simulator lock acquisition' "$QUEUE_ROOT/recursive.log"
 [[ ! -d "$SDD_WORKDIR/.locks/ios-simulator-SIM-QUEUE.lock" ]]
-echo 'iOS verification queue passed: serialized execution, native wait state, completion, failure and real recursion.'
+echo 'iOS verification queue passed: fresh evidence before pruning, serialization, lint, completion, failure and real recursion.'

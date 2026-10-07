@@ -53,6 +53,17 @@ class IOSVerificationStateTests(unittest.TestCase):
         finished = json.loads(native.state_path(self.task).read_text())
         self.assertEqual("finished", finished["state"])
         self.assertEqual(65, finished["exit_code"])
+        self.assertEqual(finished, native.read_bound_run(self.task, 7, self.dispatched))
+        self.assertIsNone(native.read_bound_run(self.task, 8, self.dispatched))
+        self.assertIsNone(native.read_bound_run(self.task, 7, datetime.now(UTC)))
+        with patch.object(native, "source_sha", return_value="changed-sha"):
+            self.assertIsNone(native.read_bound_run(self.task, 7, self.dispatched))
+
+    def test_phase_change_clears_preparation_step(self):
+        native.main(["running", "IOS-100", "--run-id", self.run_id, "--step", "prune_derived_data"])
+        self.assertEqual("prune_derived_data", json.loads(native.state_path(self.task).read_text())["step"])
+        native.main(["phase", "IOS-100", "--run-id", self.run_id, "--phase", "lint"])
+        self.assertNotIn("step", json.loads(native.state_path(self.task).read_text()))
 
     def test_dead_runner_stale_dispatch_work_item_and_changed_source_do_not_defer(self):
         with patch.object(native, "runner_is_alive", return_value=True):

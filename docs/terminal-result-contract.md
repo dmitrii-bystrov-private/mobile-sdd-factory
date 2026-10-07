@@ -125,7 +125,11 @@ terminal submissions and runtime error markers. The work item/dispatch stays act
 receives continuation feedback. An ingress submission can return `ignored=true` for this deferral;
 continue the existing terminal until it exits, then submit the actual result. Do not launch a duplicate
 gate or infer deadlock from resource waits/nested shells. Finished, dead or stale runner records do not
-defer recovery. The original deferred report is retained in artifacts/events.
+defer fresh recovery reports. Replays of responses already deferred for this same bound run remain
+ignored after completion; the role must inspect the command's final output and submit fresh evidence.
+The original deferred report is retained in artifacts/events. Log markers alone do not establish
+command completion. The test phase clears prior logs/results before cache pruning or simulator waits;
+the native `step` distinguishes preparation from `xcodebuild` execution.
 
 Required:
 - `output_type`

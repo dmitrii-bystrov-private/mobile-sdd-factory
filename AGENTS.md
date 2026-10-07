@@ -124,6 +124,9 @@ its lock, including failure, partial boot, timeout and graceful interruption. Pr
 
 When behavior changes:
 
+- iOS verification must invalidate prior test evidence before preparation and reject replayed deferred
+  responses after native completion; fresh terminal evidence governs the verdict
+
 - capacity recovery must recognize the current Codex footer, preserve the configured model, and allow
   repeated capacity retries after cooldown without repeating generic idle pokes or pending results
 

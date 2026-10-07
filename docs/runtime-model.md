@@ -185,10 +185,13 @@ The current correction, its dispatch and required review remain active. An old r
 documentation correction into verification or turn the following valid result into schema recovery.
 
 Factory iOS verification records its command lifecycle under the task's `tmp/verification/ios/`.
+Native test steps distinguish cache pruning from execution and invalidate old evidence before either.
+Previously deferred responses remain invalid after the same bound command finishes; the verifier
+must inspect final output and submit fresh evidence. Log markers alone do not establish completion.
 Waiting for a shared task/simulator lock is an active gate. The coordinator verifies the current work
 item, dispatch time, source and runner process before deferring a premature error/terminal result.
-The worker continues its existing terminal; feedback is deduplicated per run/state. Completion or a
-dead/stale runner restores normal result/recovery handling. Native scripts reject proven recursive
+The worker continues its existing terminal; feedback is deduplicated per run/state. Fresh completed
+results and dead/stale runners use normal result/recovery handling. Native scripts reject proven recursive
 lock acquisition by owner ancestry and leave other live owners alone.
 
 QA mobile e2e tasks use the same roles and lifecycle, with a factory-owned `e2e_gate` strategy. The runner

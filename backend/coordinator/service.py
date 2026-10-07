@@ -7830,16 +7830,65 @@ class CoordinatorService:
         item = self._find_active_work_item_for_role(session.id, role.id)
         if item is None:
             return False
-        from factory.ios_verification_state import read_active_run
-        run = read_active_run(
+        from factory.ios_verification_state import read_bound_run, runner_is_alive
+        run = read_bound_run(
             self.workdir_root / session.task_key, item.id,
             self._latest_role_dispatch_created_at(session=session, role=role, work_item_id=item.id),
         )
         if run is None:
             return False
+        worker_output = {"output_type": output_type, "payload": dict(payload)}
+        if run["state"] == "finished":
+            events = self.event_repository.list_for_session(session.id)
+            was_deferred = any(
+                event.event_type == "verification_result_deferred"
+                and event.payload.get("run_id") == run["run_id"]
+                and event.payload.get("work_item_id") == item.id
+                and event.payload.get("worker_output") == worker_output
+                for event in events
+            )
+            if not was_deferred:
+                return False
+            notified = any(
+                event.event_type == "verification_deferred_output_ignored"
+                and event.payload.get("run_id") == run["run_id"]
+                for event in events
+            )
+            if not notified:
+                self._append_event(
+                    session_id=session.id, event_type="verification_deferred_output_ignored",
+                    producer_type="coordinator", payload={
+                        "role_name": role.role_name, "work_item_id": item.id,
+                        "run_id": run["run_id"], "exit_code": run.get("exit_code"),
+                        "worker_output": worker_output,
+                        "summary": "Previously deferred response requires fresh completed-command evidence",
+                    },
+                )
+                if role.runtime_handle is not None:
+                    runtime_role = RuntimeRoleHandle(
+                        role_id=role.runtime_handle, session_id=self._runtime_session_id_for_role(role, session),
+                        backend_name=role.runtime_backend,
+                    )
+                    try:
+                        self.session_backend.send_input(
+                            runtime_role,
+                            f"The native iOS command for work item {item.id} has finished with exit code "
+                            f"{run.get('exit_code')}. Your previously deferred response was replayed and ignored. "
+                            "Inspect the existing terminal's final output and current native evidence, refresh the "
+                            "verification report, and submit a new result explaining the actual completion. "
+                            "Do not reuse the earlier lock/process claim or start another gate.",
+                        )
+                    except (RuntimeError, OSError) as exc:
+                        self._append_event(
+                            session_id=session.id, event_type="verification_wait_feedback_failed",
+                            producer_type="coordinator",
+                            payload={"role_name": role.role_name, "work_item_id": item.id, "error": str(exc)},
+                        )
+            return True
+        if not runner_is_alive(run.get("runner_pid"), session.task_key):
+            return False
         prior = self._latest_event_by_type(session.id, {"verification_result_deferred"})
         already_notified = prior is not None and prior.payload.get("run_id") == run["run_id"] and prior.payload.get("state") == run["state"]
-        worker_output = {"output_type": output_type, "payload": dict(payload)}
         if already_notified and prior.payload.get("worker_output") == worker_output:
             return True
         self._append_event(

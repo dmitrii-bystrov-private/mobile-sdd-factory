@@ -154,7 +154,10 @@ current. Ignore the replay without committing again, rerouting the stage or comp
 iOS verification records `tmp/verification/ios/execution-state.json` with run/work-item/source binding,
 runner PID, phase, resource wait and completion exit code. The coordinator defers premature terminal
 results/errors only for the current live native runner and sends bounded continuation feedback.
-Completed/dead/stale/mismatched records do not suppress actual failures. Shared resources wait normally;
+Completed bound runs still reject exact replays of their deferred responses and request fresh evidence
+once; fresh failures remain visible. Dead/stale/mismatched records do not suppress actual failures.
+Clear prior test logs/results under the task lock before pruning or waiting for the simulator, and record
+the native preparation/execution step. A success marker is not a terminal exit. Shared resources wait normally;
 lock-owner ancestry, rather than nested shell count, detects recursive acquisition.
 Run `bash scripts/tests/test_ios_verification_queue.sh` for isolated queue/recursion regression coverage.
 

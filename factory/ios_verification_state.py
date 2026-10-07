@@ -47,20 +47,27 @@ def lock_owner_is_ancestor(owner_pid: int) -> bool:
     return False
 
 
-def read_active_run(task_root: Path, work_item_id: int, dispatched_at: datetime | None) -> dict | None:
+def read_bound_run(task_root: Path, work_item_id: int, dispatched_at: datetime | None) -> dict | None:
     try:
         record = json.loads(state_path(task_root).read_text())
         started = datetime.fromisoformat(record["started_at"])
         if (record.get("version") != 1 or record.get("task_key") != task_root.name
                 or record.get("work_item_id") != work_item_id or not record.get("run_id")
-                or record.get("state") not in {"running", "waiting_for_resource"}
+                or record.get("state") not in {"running", "waiting_for_resource", "finished"}
                 or started.tzinfo is None or dispatched_at is None or started < dispatched_at
-                or not runner_is_alive(record.get("runner_pid"), task_root.name)
                 or record.get("source_sha") != source_sha(task_root)):
             return None
         return record
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
         return None
+
+
+def read_active_run(task_root: Path, work_item_id: int, dispatched_at: datetime | None) -> dict | None:
+    record = read_bound_run(task_root, work_item_id, dispatched_at)
+    if (record is None or record["state"] == "finished"
+            or not runner_is_alive(record.get("runner_pid"), task_root.name)):
+        return None
+    return record
 
 
 def write_state(path: Path, record: dict) -> None:
@@ -77,6 +84,7 @@ def main(argv=None) -> int:
     parser.add_argument("--run-id")
     parser.add_argument("--pid", type=int)
     parser.add_argument("--phase")
+    parser.add_argument("--step")
     parser.add_argument("--resource")
     parser.add_argument("--lock-dir")
     parser.add_argument("--exit-code", type=int)
@@ -113,6 +121,9 @@ def main(argv=None) -> int:
             record["state"] = "running"
             if args.phase:
                 record["phase"] = args.phase
+                record.pop("step", None)
+            if args.step:
+                record["step"] = args.step
     record["updated_at"] = now
     write_state(path, record)
     if args.action == "start":

@@ -28,7 +28,6 @@ fi
 TEST_LOG="$SDD_IOS_VERIFICATION_LOGS_PATH/test-without-building.log"
 RESULT_BUNDLE="$SDD_IOS_XCRESULT_ROOT/test-without-building.xcresult"
 
-rm -rf "$RESULT_BUNDLE"
 echo "⏳ Running tests without rebuilding on device: $TESTING_DEVICE_ID..."
 XCODEBUILD_CMD=(
   xcodebuild
@@ -46,10 +45,15 @@ XCODEBUILD_CMD+=(
 )
 
 run_tests_without_building() {
+  verification_ios_run_state running --step xcodebuild
   "${XCODEBUILD_CMD[@]}" >"$TEST_LOG" 2>&1
 }
 
 run_locked_tests_without_building() {
+  # Invalidate prior evidence before any preparation or simulator wait.
+  : >"$TEST_LOG"
+  rm -rf "$RESULT_BUNDLE"
+  verification_ios_run_state running --step prune_derived_data
   verification_prune_ios_derived_data_if_needed "$KEY"
   verification_run_with_ios_simulator_lock "$TESTING_DEVICE_ID" run_tests_without_building
 }

@@ -216,7 +216,8 @@ protection. Repeated completion for a closed coding item must not advance anothe
 
 iOS resource queues need no additional machine settings. Task/simulator lock paths retain their ENV
 configuration. Native execution-state files are task-local runtime artifacts. Restart the existing
-backend after upgrading coordinator code so live-run deferral is active; do not launch a second stack.
+backend after upgrading coordinator code so live-run deferral and completed-run replay protection are
+active; do not launch a second stack.
 
 QA MR-description generation reads stored evidence without requiring device/Appium ENV. Actual E2E
 runs still require the machine configuration above. Documentation-only delivery checks are described
