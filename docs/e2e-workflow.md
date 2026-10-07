@@ -137,9 +137,11 @@ Appium endpoint instead of a framework default. The generic runtime also publish
 FACTORY_E2E_APPIUM_PORT, FACTORY_E2E_APPIUM_URL and FACTORY_E2E_PLATFORM_VERSION to task adapters.
 For dedicated iOS pool sessions, FACTORY_E2E_APPIUM_CAPABILITIES contains a JSON capability object
 with the assigned UDID, WDA/MJPEG ports and derived-data path; shutdownOtherSimulators is disabled.
-The optional pytest_evidence plugin applies these generic Appium capabilities before creating the
-session, overriding stale device/port defaults without importing project configuration. Other adapters
-must apply this object explicitly. Execution tokens {wda_local_port}, {mjpeg_server_port} and
+The optional pytest_evidence plugin applies the assigned endpoint and capabilities before creating
+the session, overriding framework defaults without importing project configuration. A session connection
+failure exits with environment code 2, stopping retries and baseline comparisons. Appium preflight runs
+before app installation. Other adapters must consume the assigned endpoint and capabilities explicitly.
+Execution tokens {wda_local_port}, {mjpeg_server_port} and
 {derived_data_path} are also available for recipes. Never stop another simulator or share a WDA port.
 
 Collection commands write a JSON array of collected identifiers to `{collected}`. Run commands write

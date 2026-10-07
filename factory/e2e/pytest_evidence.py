@@ -3,6 +3,8 @@
 import os
 import json
 import subprocess
+import inspect
+from copy import copy
 from functools import wraps
 
 import pytest
@@ -11,14 +13,22 @@ _reports = []
 
 
 def pytest_configure(config):
-    """Apply only generic Appium resources assigned by the factory's device lease."""
+    """Bind Appium clients to the factory's server and leased device resources."""
     raw = os.environ.get("FACTORY_E2E_APPIUM_CAPABILITIES")
-    if not raw:
+    endpoint = os.environ.get("FACTORY_E2E_APPIUM_URL")
+    if not raw and not endpoint:
         return
     try:
-        assigned = json.loads(raw)
+        assigned = json.loads(raw) if raw else {}
+    except ValueError as exc:
+        raise pytest.UsageError(f"Cannot apply assigned Appium device capabilities: {exc}") from exc
+    try:
         from appium.webdriver.webdriver import WebDriver
-    except (ValueError, ImportError) as exc:
+        from urllib3.exceptions import MaxRetryError, NewConnectionError
+    except ImportError as exc:
+        # The evidence protocol also supports pytest checks without an Appium client.
+        if not raw:
+            return
         raise pytest.UsageError(f"Cannot apply assigned Appium device capabilities: {exc}") from exc
     if not isinstance(assigned, dict):
         raise pytest.UsageError("Assigned Appium device capabilities must be an object")
@@ -28,10 +38,35 @@ def pytest_configure(config):
     def start_session(self, capabilities, *args, **kwargs):
         current = capabilities if isinstance(capabilities, dict) else capabilities.to_capabilities()
         # A test recipe cannot redirect a leased session to another user's device.
-        return original(self, {**current, **assigned}, *args, **kwargs)
+        try:
+            return original(self, {**current, **assigned}, *args, **kwargs)
+        except (MaxRetryError, NewConnectionError) as exc:
+            pytest.exit(f"Appium session connection failed at the factory endpoint {endpoint}: {exc}. "
+                        "Environment recovery is required; stopping without test retries or baseline runs.", returncode=2)
 
     WebDriver.start_session = start_session
     config.add_cleanup(lambda: setattr(WebDriver, "start_session", original))
+    if endpoint:
+        original_init = WebDriver.__init__
+        signature = inspect.signature(original_init)
+
+        @wraps(original_init)
+        def initialize(self, *args, **kwargs):
+            bound = signature.bind(self, *args, **kwargs)
+            bound.arguments["command_executor"] = endpoint
+            client_config = bound.arguments.get("client_config")
+            if client_config is not None:
+                client_config = copy(client_config)
+                client_config.remote_server_addr = endpoint
+                if hasattr(client_config, "direct_connection"):
+                    client_config.direct_connection = False
+                bound.arguments["client_config"] = client_config
+            if "direct_connection" in signature.parameters:
+                bound.arguments["direct_connection"] = False
+            return original_init(*bound.args, **bound.kwargs)
+
+        WebDriver.__init__ = initialize
+        config.add_cleanup(lambda: setattr(WebDriver, "__init__", original_init))
 
 
 def pytest_runtest_logreport(report):

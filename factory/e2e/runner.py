@@ -658,6 +658,10 @@ def verify(task_key, task_root, strategy, machine):
                     selectors = [node for node in picked["collected"] if node not in excluded]
                     if not selectors:
                         continue
+                policy["_appium_log"] = str(lock_root / f"appium-{machine.appium_port}.log")
+                with (lock_root / f"appium-{machine.appium_port}.lock").open("w") as server_lock:
+                    fcntl.flock(server_lock, fcntl.LOCK_EX)
+                    ensure_server(machine, Path(policy["_appium_log"]))
                 if platform == "android":
                     # Register before boot so partially failed starts are also cleaned up.
                     # ExitStack runs this before releasing the device lock.
@@ -666,10 +670,6 @@ def verify(task_key, task_root, strategy, machine):
                     device_scope.callback(finish_ios, selected_machine, verdict)
                 target = device(selected_machine, platform, boot=True)
                 install(selected_machine, platform, app, target)
-                policy["_appium_log"] = str(lock_root / f"appium-{machine.appium_port}.log")
-                with (lock_root / f"appium-{machine.appium_port}.lock").open("w") as server_lock:
-                    fcntl.flock(server_lock, fcntl.LOCK_EX)
-                    ensure_server(machine, Path(policy["_appium_log"]))
                 run = phase(selected_machine, repo, platform, target, app, policy, folder, "run", selectors, fresh=policy["fresh_install"])
                 verdict["receipts"].append(run)
                 latest = run

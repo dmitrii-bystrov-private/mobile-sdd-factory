@@ -537,6 +537,31 @@ class E2EWorkflowTests(unittest.TestCase):
         self.assertEqual("blocked", verdict["result"])
         self.assertEqual("baseline_or_environment_failure", verdict["classifications"][0]["kind"])
 
+    def test_transport_exit_blocks_without_retries_or_baseline_installations(self):
+        self.behavior["run"] = False
+        def phase(*args, **kwargs):
+            receipt = self.fake_phase(*args, **kwargs)
+            if receipt["phase"] == "run":
+                receipt["exit_code"] = 2
+                runner.write_json(Path(receipt["path"]), receipt)
+            return receipt
+        with patch.object(runner, "phase", side_effect=phase):
+            verdict = self.run_gate()
+        self.assertEqual("blocked", verdict["result"])
+        self.assertEqual(["collection", "selection", "run"], [call[0] for call in self.calls])
+        self.assertEqual([], verdict["classifications"])
+        self.assertIn("runner failed before a valid test verdict", verdict["details"])
+
+    def test_shared_server_preflight_failure_does_not_boot_or_install(self):
+        with patch.object(runner, "ensure_server", side_effect=runner.E2EError("Appium unavailable")), \
+                patch.object(runner, "install") as install, \
+                patch.object(runner, "device", return_value={"udid": "test-device", "version": "26.2"}) as device:
+            verdict = self.run_gate()
+        self.assertEqual("blocked", verdict["result"])
+        self.assertEqual("Appium unavailable", verdict["details"])
+        install.assert_not_called()
+        self.assertFalse(any(call.kwargs.get("boot") for call in device.call_args_list))
+
     def test_flaky_retry_still_requires_fresh_full_selection(self):
         self.behavior["run"] = False
         verdict = self.run_gate()

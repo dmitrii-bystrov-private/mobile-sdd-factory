@@ -219,6 +219,10 @@ configuration. Native execution-state files are task-local runtime artifacts. Re
 backend after upgrading coordinator code so live-run deferral and completed-run replay protection are
 active; do not launch a second stack.
 
+After changing machine ENV in ~/.zshrc, run `source ~/.zshrc` in the launch terminal before restarting
+the existing stack. Already-running processes retain their old environment. Restart affected QA roles
+to receive the backend's current pool values; the launcher explicitly clears unconfigured pool ENV.
+
 QA MR-description generation reads stored evidence without requiring device/Appium ENV. Actual E2E
 runs still require the machine configuration above. Documentation-only delivery checks are described
 in [e2e-workflow.md](e2e-workflow.md).

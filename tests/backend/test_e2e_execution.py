@@ -13,6 +13,23 @@ from factory.e2e.config import Machine
 from factory.e2e.execution import E2EPlanError, configurations, selection, support_digests
 
 
+class FakeNewConnectionError(Exception):
+    pass
+
+
+class FakeMaxRetryError(Exception):
+    pass
+
+
+def fake_appium_modules(driver):
+    appium = ModuleType("appium.webdriver.webdriver")
+    appium.WebDriver = driver
+    transport = ModuleType("urllib3.exceptions")
+    transport.NewConnectionError = FakeNewConnectionError
+    transport.MaxRetryError = FakeMaxRetryError
+    return {"appium.webdriver.webdriver": appium, "urllib3.exceptions": transport}
+
+
 class ExecutionRecipeTests(unittest.TestCase):
     def recipe(self):
         return {"e2e": {"platforms": {"ios": {"collection": ["checks"], "tests": ["checks/test_local.py::test_config"],
@@ -131,7 +148,7 @@ sys.exit(0 if result.wasSuccessful() else 1)
         assigned = {"appium:udid": "dedicated", "appium:wdaLocalPort": 8111,
                     "appium:derivedDataPath": "/isolated-wda", "appium:shutdownOtherSimulators": False}
         original = Driver.start_session
-        with patch.dict(sys.modules, {"appium.webdriver.webdriver": module}), patch.dict(os.environ,
+        with patch.dict(sys.modules, fake_appium_modules(Driver)), patch.dict(os.environ,
                 {"FACTORY_E2E_APPIUM_CAPABILITIES": json.dumps(assigned)}):
             pytest_evidence.pytest_configure(SimpleNamespace(add_cleanup=cleanups.append))
             try:
@@ -161,6 +178,106 @@ sys.exit(0 if result.wasSuccessful() else 1)
                 with self.assertRaisesRegex(runner.E2EError, "interrupted by signal"):
                     runner.phase(machine, root, "ios", {"udid": "device"}, None, policy, root, "run", ["opaque-check"])
             kill.assert_called_once_with(child.pid, signal.SIGTERM)
+
+    def test_factory_endpoint_overrides_positional_keyword_and_client_config_defaults(self):
+        from factory.e2e import pytest_evidence
+        class Driver:
+            def __init__(self, command_executor="http://localhost:4723/wd/hub", keep_alive=True,
+                         options=None, direct_connection=True, client_config=None):
+                self.endpoint = command_executor
+                self.options = options
+                self.direct = direct_connection
+                self.client_config = client_config
+                self.caps = self.start_session(options)
+            def start_session(self, capabilities):
+                return capabilities
+        module = ModuleType("appium.webdriver.webdriver")
+        module.WebDriver = Driver
+        cleanups = []
+        original_init, original_start = Driver.__init__, Driver.start_session
+        endpoint = "http://127.0.0.1:4781/wd/hub"
+        client = SimpleNamespace(remote_server_addr="http://localhost:4723/wd/hub", direct_connection=True)
+        with patch.dict(sys.modules, fake_appium_modules(Driver)), patch.dict(os.environ,
+                {"FACTORY_E2E_APPIUM_URL": endpoint, "FACTORY_E2E_APPIUM_CAPABILITIES": '{"appium:udid":"leased"}'}):
+            pytest_evidence.pytest_configure(SimpleNamespace(add_cleanup=cleanups.append))
+            try:
+                options = {"appium:app": "task.app", "appium:udid": "other-device"}
+                for args, kwargs in (((), {}), (("http://localhost:4723/wd/hub",), {}),
+                                     ((), {"command_executor": "http://localhost:4723/wd/hub", "client_config": client})):
+                    driver = Driver(*args, options=options, **kwargs)
+                    self.assertEqual(endpoint, driver.endpoint)
+                    self.assertFalse(driver.direct)
+                    self.assertEqual("leased", driver.caps["appium:udid"])
+                    self.assertEqual("task.app", driver.caps["appium:app"])
+                    self.assertIs(options, driver.options)
+                    if driver.client_config:
+                        self.assertEqual(endpoint, driver.client_config.remote_server_addr)
+                        self.assertFalse(driver.client_config.direct_connection)
+                self.assertEqual("http://localhost:4723/wd/hub", client.remote_server_addr)
+                self.assertTrue(client.direct_connection)
+            finally:
+                for cleanup in reversed(cleanups): cleanup()
+        self.assertIs(original_init, Driver.__init__)
+        self.assertIs(original_start, Driver.start_session)
+
+    def test_appium_connection_failure_stops_pytest_with_environment_exit_code(self):
+        import pytest
+        from factory.e2e import pytest_evidence
+        class Driver:
+            def __init__(self, command_executor="unused"):
+                self.start_session({})
+            def start_session(self, capabilities):
+                raise FakeMaxRetryError("Connection refused")
+        module = ModuleType("appium.webdriver.webdriver")
+        module.WebDriver = Driver
+        cleanups = []
+        with patch.dict(sys.modules, fake_appium_modules(Driver)), patch.dict(os.environ,
+                {"FACTORY_E2E_APPIUM_URL": "http://127.0.0.1:4781/wd/hub", "FACTORY_E2E_APPIUM_CAPABILITIES": "{}"}):
+            pytest_evidence.pytest_configure(SimpleNamespace(add_cleanup=cleanups.append))
+            try:
+                with self.assertRaises(pytest.exit.Exception) as raised:
+                    Driver()
+                self.assertEqual(2, raised.exception.returncode)
+                self.assertIn("http://127.0.0.1:4781", str(raised.exception))
+            finally:
+                for cleanup in reversed(cleanups): cleanup()
+
+    def test_transport_failure_aborts_the_real_pytest_command_before_the_next_check(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for package in ("appium", "appium/webdriver", "urllib3", "checks"):
+                path = root / package
+                path.mkdir(parents=True, exist_ok=True)
+                (path / "__init__.py").write_text("")
+            (root / "urllib3/exceptions.py").write_text(
+                'class MaxRetryError(Exception): pass\nclass NewConnectionError(Exception): pass\n')
+            (root / "appium/webdriver/webdriver.py").write_text(
+                'from urllib3.exceptions import MaxRetryError\n'
+                'class WebDriver:\n'
+                '    def __init__(self, command_executor="old-server"):\n'
+                '        self.start_session({})\n'
+                '    def start_session(self, caps):\n'
+                '        raise MaxRetryError("Connection refused")\n')
+            (root / "checks/test_transport.py").write_text(
+                'from appium.webdriver.webdriver import WebDriver\nfrom pathlib import Path\n'
+                'def test_first_session():\n    WebDriver()\n'
+                'def test_remaining_check():\n    Path("second-check-ran").touch()\n')
+            runner.git(root, "init")
+            runner.git(root, "config", "user.name", "Test")
+            runner.git(root, "config", "user.email", "test@example.invalid")
+            runner.git(root, "add", ".")
+            runner.git(root, "commit", "-m", "Transport fixture")
+            recipe = self.recipe()
+            recipe["e2e"]["platforms"]["ios"]["environment"]["PYTHONPATH"] = "{repo}:{factory_plugin_dir}"
+            policy = {"run_timeout_seconds": 30, "test_timeout_seconds": 10, "_task_root": root,
+                      "_configurations": configurations(recipe)}
+            machine = Machine(root, Path(sys.executable), root, "device", "", "", root, "appium", 4781)
+            receipt = runner.phase(machine, root, "ios", {"udid": "device"}, None,
+                                   policy, root, "run", ["checks/test_transport.py"])
+            self.assertEqual(2, receipt["exit_code"])
+            self.assertFalse(receipt["ok"])
+            self.assertFalse((root / "second-check-ran").exists())
+            self.assertIn("factory endpoint http://127.0.0.1:4781", Path(receipt["log"]).read_text())
 
     def test_cli_interrupt_handler_is_restored_after_a_blocked_gate(self):
         import io
