@@ -446,7 +446,8 @@ def phase(machine, repo, platform, target, app, policy, folder, name, selectors,
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
             if isinstance(exc, subprocess.TimeoutExpired):
-                raise E2EError(f"{platform} {name} timed out; see {log}") from exc
+                limit = "total verification time limit" if "_deadline" in policy else "phase time limit"
+                raise E2EError(f"{platform} {name} timed out: {limit} ({policy['run_timeout_seconds']}s) exhausted; see {log}") from exc
             raise
     results = junit_results(junit) if junit.exists() and not collect else None
     selected = read_json(collection_path) if collect and collection_path.exists() else []
@@ -695,11 +696,13 @@ def verify(task_key, task_root, strategy, machine):
                     verdict["receipts"].append(repeat)
                     if not repeat["ok"]:
                         latest = repeat
-                        failed_nodes = [item["nodeid"] for item in repeat["outcomes"] if item["outcome"] == "failed"]
+                        failed_nodes = [item["nodeid"] for item in repeat["outcomes"] if item["outcome"] != "passed"]
+                        seen = {item["nodeid"] for item in repeat["outcomes"]}
+                        failed_nodes += [node for node in picked["collected"] if node not in excluded and node not in seen]
                         if repeat["exit_code"] == 1:
                             for attempt in range(policy["failure_reruns"]):
                                 latest = phase(selected_machine, repo, platform, target, app, policy, folder,
-                                               f"fresh-run-rerun-{attempt + 1}", selectors, fresh=True)
+                                               f"fresh-run-rerun-{attempt + 1}", list(dict.fromkeys(failed_nodes)) or selectors, fresh=True)
                                 verdict["receipts"].append(latest)
                                 if latest["ok"]:
                                     verdict["classifications"].append({"platform": platform, "kind": "flaky",
@@ -885,16 +888,44 @@ def validate_verdict(task_root, work_item_id, *, allow_documentation_changes=Fal
             and item["ok"] and item.get("app") == run["app"] for item in receipts
         ):
             raise E2EError("Initial test failures have no passing retry")
-        fresh = next((item for item in receipts if item["phase"].startswith("fresh-run") and item["platform"] == run["platform"] and item["ok"]), None)
-        if fresh is None or not fresh.get("fresh_install") or fresh.get("app") != run.get("app") or fresh.get("selectors") != run.get("selectors"):
-            raise E2EError("Missing passing fresh-install run on the same app build")
-        installation = fresh.get("fresh_install_receipt") or {}
-        if not installation.get("application_id") or installation.get("artifact_digest") != run["app"]["artifact_digest"]:
-            raise E2EError("Fresh installation has no matching app receipt")
-        if {item["nodeid"] for item in fresh.get("outcomes", [])} != expected_nodes:
-            raise E2EError("Fresh execution differs from the selected checks")
+        validate_fresh_coverage(receipts, run, expected_nodes, strategy["e2e"]["policy"]["failure_reruns"])
     validate_receipts(verdict)
     return verdict
+
+
+def validate_fresh_coverage(receipts, run, expected_nodes, max_reruns):
+    attempts = [item for item in receipts if item["platform"] == run["platform"]
+                and (item["phase"] == "fresh-run" or item["phase"].startswith("fresh-run-rerun-"))]
+    if (not attempts or attempts[0]["phase"] != "fresh-run"
+            or attempts[0].get("selectors") != run.get("selectors") or len(attempts) > max_reruns + 1):
+        raise E2EError("Missing full fresh-install selection or invalid retry sequence")
+    states = {}
+    for index, receipt in enumerate(attempts):
+        expected_phase = "fresh-run" if index == 0 else f"fresh-run-rerun-{index}"
+        if (receipt["phase"] != expected_phase or not receipt.get("fresh_install")
+                or receipt.get("app") != run.get("app") or receipt.get("device") != run.get("device")
+                or receipt.get("exit_code") not in {0, 1}):
+            raise E2EError("Fresh execution changed the app/device or lacks valid completion")
+        installation = receipt.get("fresh_install_receipt") or {}
+        if not installation.get("application_id") or installation.get("artifact_digest") != run["app"]["artifact_digest"]:
+            raise E2EError("Fresh installation has no matching app receipt")
+        device_id = receipt["device"].get("udid", receipt["device"].get("serial"))
+        if "device_id" in installation and installation["device_id"] != device_id:
+            raise E2EError("Fresh installation receipt names a different device")
+        grouped = {}
+        for outcome in receipt.get("outcomes", []):
+            grouped.setdefault(outcome["nodeid"], []).append(outcome["outcome"])
+        if not grouped or set(grouped) - expected_nodes:
+            raise E2EError("Fresh execution differs from the selected checks")
+        if index and receipt.get("selectors") != run.get("selectors"):
+            # Retain support for earlier complete-selection retries.
+            if set(receipt["selectors"]) != set(grouped):
+                raise E2EError("Fresh retry outcomes differ from its addressed checks")
+        if receipt["ok"] and any(status != "passed" for statuses in grouped.values() for status in statuses):
+            raise E2EError("Passing fresh receipt contains failed or skipped checks")
+        states.update({node: all(status == "passed" for status in statuses) for node, statuses in grouped.items()})
+    if not attempts[-1]["ok"] or set(states) != expected_nodes or not all(states.values()):
+        raise E2EError("Fresh installation has no passing evidence for every selected check")
 
 
 def mr_description(task_key, task_root):

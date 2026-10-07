@@ -346,6 +346,21 @@ sys.exit(0 if result.wasSuccessful() else 1)
         self.assertIn("interrupted", output.getvalue())
         self.assertEqual(handlers, {sig: signal.getsignal(sig) for sig in handlers})
 
+    def test_timeout_diagnostic_identifies_total_gate_budget(self):
+        import subprocess
+        import time
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            machine = Machine(root, Path(sys.executable), root, "device", "", "", root, "appium", 4743)
+            policy = {"run_timeout_seconds": 2400, "test_timeout_seconds": 600, "_task_root": root,
+                      "_deadline": time.monotonic() + 5, "_configurations": configurations(self.recipe())}
+            child = Mock(pid=123456)
+            child.wait.side_effect = [subprocess.TimeoutExpired("pytest", 5), -15]
+            with patch.object(runner.subprocess, "Popen", return_value=child), patch.object(runner.os, "killpg"):
+                with self.assertRaisesRegex(runner.E2EError, "total verification time limit \\(2400s\\) exhausted"):
+                    runner.phase(machine, root, "ios", {"udid": "device"}, None, policy, root, "fresh-run-rerun-1", ["opaque-check"])
+
     def test_qa_launcher_replaces_stale_tmux_pool_environment_and_clears_removed_values(self):
         import subprocess
         from backend.roles.launcher import RoleLauncherManager

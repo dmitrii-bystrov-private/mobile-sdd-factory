@@ -589,6 +589,94 @@ class E2EWorkflowTests(unittest.TestCase):
         self.assertEqual("failed", self.run_gate()["result"])
         self.assertEqual("baseline-1", self.calls[-1][0])
 
+    def test_fresh_retry_keeps_successful_checks_and_reruns_only_failed_checks(self):
+        first, failed = self.node, "tests/ios/test_example.py::test_other"
+        self.platform_nodes = {"ios": [first, failed]}
+        self.phase_failures = {("ios", "fresh-run"): [failed]}
+        self.write_recipe({"platforms": {"ios": {"tests": [first, failed]}}})
+        verdict = self.run_gate()
+        self.assertEqual("passed", verdict["result"])
+        fresh, retry = [receipt for receipt in verdict["receipts"] if receipt["phase"] in {"fresh-run", "fresh-run-rerun-1"}]
+        self.assertEqual([first, failed], fresh["selectors"])
+        self.assertEqual([failed], retry["selectors"])
+        self.assertEqual("passed", fresh["outcomes"][0]["outcome"])
+        self.assertEqual("failed", fresh["outcomes"][1]["outcome"])
+        self.assertEqual("passed", retry["outcomes"][0]["outcome"])
+        self.assertTrue(fresh["fresh_install"] and retry["fresh_install"])
+        self.assertEqual(fresh["app"], retry["app"])
+        self.assertFalse(any(call[0].startswith("baseline") for call in self.calls))
+        runner.validate_verdict(self.task, 123)
+
+    def test_failed_fresh_retry_compares_only_remaining_failure_with_baseline(self):
+        first, failed = self.node, "tests/ios/test_example.py::test_other"
+        self.platform_nodes = {"ios": [first, failed]}
+        self.phase_failures = {("ios", "fresh-run"): [failed], ("ios", "fresh-run-rerun-1"): [failed],
+                               ("ios", "baseline-1"): [failed]}
+        self.write_recipe({"platforms": {"ios": {"tests": [first, failed]}}})
+        verdict = self.run_gate()
+        self.assertEqual("blocked", verdict["result"])
+        self.assertEqual([failed], self.calls[-1][3])
+        self.assertEqual([failed], [item["test"] for item in verdict["classifications"]])
+        self.assertEqual("baseline_or_environment_failure", verdict["classifications"][0]["kind"])
+
+    def test_fresh_retry_includes_checks_not_executed_before_early_exit(self):
+        first, failed, unfinished = self.node, "tests/ios/test_example.py::test_other", "tests/ios/test_example.py::test_last"
+        nodes = [first, failed, unfinished]
+        self.platform_nodes = {"ios": nodes}
+        self.phase_failures = {("ios", "fresh-run"): [failed]}
+        self.write_recipe({"platforms": {"ios": {"tests": nodes}}})
+        original = self.fake_phase
+        def early_exit(machine, repo, platform, target, app, policy, folder, name, selectors, **kwargs):
+            if name == "fresh-run":
+                self.platform_nodes[platform] = [first, failed]
+            try:
+                return original(machine, repo, platform, target, app, policy, folder, name, selectors, **kwargs)
+            finally:
+                self.platform_nodes[platform] = nodes
+        with patch.object(runner, "phase", side_effect=early_exit):
+            verdict = self.run_gate()
+        self.assertEqual("passed", verdict["result"])
+        retry = next(item for item in verdict["receipts"] if item["phase"] == "fresh-run-rerun-1")
+        self.assertEqual([failed, unfinished], retry["selectors"])
+        runner.validate_verdict(self.task, 123)
+
+    def test_partial_fresh_retry_cannot_hide_missing_skipped_or_changed_execution(self):
+        from copy import deepcopy
+        first, failed = self.node, "tests/ios/test_example.py::test_other"
+        self.platform_nodes = {"ios": [first, failed]}
+        self.phase_failures = {("ios", "fresh-run"): [failed]}
+        self.write_recipe({"platforms": {"ios": {"tests": [first, failed]}}})
+        original = self.run_gate()
+        for defect, expected in (("missing", "every selected check"), ("skipped", "failed or skipped"),
+                                 ("app", "changed the app/device"), ("device", "changed the app/device"),
+                                 ("unplanned", "differs from the selected checks"), ("scope", "full fresh-install selection")):
+            with self.subTest(defect=defect):
+                verdict = deepcopy(original)
+                fresh = next(item for item in verdict["receipts"] if item["phase"] == "fresh-run")
+                retry = next(item for item in verdict["receipts"] if item["phase"] == "fresh-run-rerun-1")
+                if defect == "missing": fresh["outcomes"] = [item for item in fresh["outcomes"] if item["nodeid"] != first]
+                elif defect == "skipped": retry["outcomes"][0]["outcome"] = "skipped"
+                elif defect == "app": retry["app"] = dict(retry["app"], artifact_digest="different")
+                elif defect == "device": retry["device"] = {"udid": "different"}
+                elif defect == "unplanned": retry["outcomes"][0]["nodeid"] = "unplanned-check"
+                elif defect == "scope": fresh["selectors"] = [failed]
+                runner.write_json(self.task / "spec/e2e-verdict.json", verdict)
+                with self.assertRaisesRegex(runner.E2EError, expected):
+                    runner.validate_verdict(self.task, 123)
+
+    def test_earlier_full_selection_fresh_retries_remain_valid(self):
+        first, failed = self.node, "tests/ios/test_example.py::test_other"
+        self.platform_nodes = {"ios": [first, failed]}
+        self.phase_failures = {("ios", "fresh-run"): [failed]}
+        self.write_recipe({"platforms": {"ios": {"tests": [first, failed]}}})
+        original = self.fake_phase
+        def legacy_phase(machine, repo, platform, target, app, policy, folder, name, selectors, **kwargs):
+            return original(machine, repo, platform, target, app, policy, folder, name,
+                            [first, failed] if name == "fresh-run-rerun-1" else selectors, **kwargs)
+        with patch.object(runner, "phase", side_effect=legacy_phase):
+            self.assertEqual("passed", self.run_gate()["result"])
+        runner.validate_verdict(self.task, 123)
+
     def test_collection_failure_classification_uses_baseline(self):
         self.behavior["collection"] = False
         self.assertEqual("failed", self.run_gate()["result"])

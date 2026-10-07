@@ -12,6 +12,9 @@ Operator policy lives in the UI Runtime Defaults panel and `.sdd-factory/setting
 `runtime_defaults.e2e_defaults`: include_smoke, fresh_install, max_tests, run_timeout_seconds,
 test_timeout_seconds, failure_reruns. Each verification strategy snapshots these settings.
 The time limit covers the complete verification gate, including collection, retries and comparisons.
+Fresh-run retries select failed, skipped and unfinished checks; successful checks retain their original
+receipts. The full fresh-install pass still selects every required check. Timeout diagnostics name the
+exhausted total gate budget, rather than implying that the reserved device was busy.
 
 Machine paths, device identifiers and local ports live in ENV, configured in the operator's ~/.zshrc:
 
