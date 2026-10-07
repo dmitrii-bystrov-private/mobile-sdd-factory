@@ -115,6 +115,7 @@ export function RuntimeDefaultsPanel({
   const { showToast } = useToast();
   const [defaultRunner, setDefaultRunner] = useState("");
   const [e2eDefaults, setE2eDefaults] = useState<E2EDefaults>({
+    selection_adapter: "project",
     include_smoke: true, fresh_install: true, max_tests: 10,
     run_timeout_seconds: 1800, test_timeout_seconds: 600, failure_reruns: 1,
   });
@@ -217,7 +218,8 @@ export function RuntimeDefaultsPanel({
       nextRoleDefaults[roleName] = inheritedRoleDefault(roleName, resolvedDefaultRunner);
     }
     setDefaultRunner(resolvedDefaultRunner);
-    setE2eDefaults(loadedRuntimeDefaults.e2eDefaults);
+    setE2eDefaults({...loadedRuntimeDefaults.e2eDefaults,
+      selection_adapter: loadedRuntimeDefaults.e2eDefaults.selection_adapter ?? "project"});
     setRoleDefaults(nextRoleDefaults);
     setPolicyDefaults({
       oneshot: {
@@ -340,6 +342,15 @@ export function RuntimeDefaultsPanel({
         <div className="runtime-default-card">
           <strong>QA / E2E verification</strong>
           <p className="form-help">QA tasks run tests on master app builds unless the task selects another build.</p>
+          <label className="form-field">
+            <span>Active test coverage source</span>
+            <select disabled={busy} value={e2eDefaults.selection_adapter}
+              onChange={(event) => setE2eDefaults((current) => ({...current,
+                selection_adapter: event.target.value as E2EDefaults["selection_adapter"]}))}>
+              <option value="project">Project selection command</option>
+              <option value="pytest_testrail">TestRail through the test repository</option>
+            </select>
+          </label>
           {(["include_smoke", "fresh_install"] as const).map((field) => (
             <label className="form-field form-field-checkbox" key={field}>
               <input type="checkbox" disabled={busy} checked={e2eDefaults[field]}

@@ -377,6 +377,7 @@ def execution_environment(machine, repo, platform, target, config, context, app=
                 "FACTORY_E2E_FRESH_INSTALL": "1" if fresh else "0", "FACTORY_E2E_APP_ID": context["application_id"],
                 "FACTORY_E2E_ADB": context["adb"], "FACTORY_E2E_APP": context["app_path"],
                 "FACTORY_E2E_RESULTS": context["results"], "FACTORY_E2E_COLLECTION": context["collected"],
+                "FACTORY_E2E_COLLECTION_METADATA": context.get("collection_metadata", ""),
                 "FACTORY_E2E_DIAGNOSTIC": context.get("diagnostic", "")})
     env.pop("FACTORY_E2E_APPIUM_CAPABILITIES", None)
     if platform == "ios" and machine.ios_pool:
@@ -402,7 +403,7 @@ def junit_results(path):
 
 def execution_context(machine, repo, platform, target, app, policy, folder, name):
     config = policy["_configurations"][platform]
-    context = {"python": str(machine.python), "repo": str(repo), "task_root": str(policy["_task_root"]),
+    context = {"python": str(machine.python), "repo": str(repo), "integration_repo": str(machine.repo), "task_root": str(policy["_task_root"]),
                "platform": platform, "device_id": target.get("udid", target.get("serial", "")),
                "platform_version": target.get("version", ""),
                "application_id": target.get("bundle_id", config.get("application_id", "")),
@@ -413,6 +414,8 @@ def execution_context(machine, repo, platform, target, app, policy, folder, name
                "collected": str(folder / f"{platform}-{name}-collection.json"),
                "diagnostic": str(folder / f"{platform}-{name}-diagnostic.json"),
                "eligibility": str(folder / f"{platform}-{name}-checks.json"),
+               "collection_metadata": str(folder / f"{platform}-{name}-metadata.json"),
+               "selection_metadata": str(folder / f"{platform}-selection-metadata.json"),
                "test_timeout_seconds": str(policy["test_timeout_seconds"])}
     context.update({name: str(target.get(name, "")) for name in
                     ("wda_local_port", "mjpeg_server_port", "derived_data_path")})
@@ -483,6 +486,10 @@ def phase(machine, repo, platform, target, app, policy, folder, name, selectors,
     if timeout <= 0:
         raise E2EError("E2E verification exceeded the configured total time limit")
     env = execution_environment(machine, repo, platform, target, config, context, app, fresh)
+    if collect and policy.get("selection_adapter") == "pytest_testrail":
+        env["PYTHONPATH"] = context["factory_plugin_dir"] + os.pathsep + env.get("PYTHONPATH", "")
+        plugins = [item for item in env.get("PYTEST_PLUGINS", "").split(",") if item]
+        env["PYTEST_PLUGINS"] = ",".join(dict.fromkeys([*plugins, "pytest_evidence"]))
     if fresh and not collect:
         if not app or not context["application_id"]:
             raise E2EError("Fresh installation requires an app and its application identifier")
@@ -516,6 +523,8 @@ def phase(machine, repo, platform, target, app, policy, folder, name, selectors,
                "log_digest": digest(log), "junit_digest": digest(junit) if junit.exists() else None,
                "collection": str(collection_path) if collect else None,
                "collection_digest": digest(collection_path) if collection_path.exists() else None,
+               "metadata_path": context["collection_metadata"] if collect and Path(context["collection_metadata"]).exists() else None,
+               "metadata_digest": digest(Path(context["collection_metadata"])) if collect and Path(context["collection_metadata"]).exists() else None,
                "results_path": str(outcomes_path) if outcomes_path.exists() else None,
                "results_digest": digest(outcomes_path) if outcomes_path.exists() else None,
                "outcomes": outcomes}
@@ -562,6 +571,8 @@ def validate_receipts(verdict):
             if (receipt.get("eligibility_digest") != digest(Path(receipt["eligibility_path"]))
                     or receipt.get("eligibility") != read_json(Path(receipt["eligibility_path"]))):
                 raise E2EError("Active coverage evidence changed after verification")
+        if receipt.get("metadata_path") and receipt.get("metadata_digest") != digest(Path(receipt["metadata_path"])):
+            raise E2EError("Collection metadata changed after verification")
         if receipt.get("results_path"):
             if (receipt.get("results_digest") != digest(Path(receipt["results_path"]))
                     or receipt.get("outcomes") != read_json(Path(receipt["results_path"]))):

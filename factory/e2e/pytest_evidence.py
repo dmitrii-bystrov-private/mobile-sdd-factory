@@ -94,6 +94,11 @@ def pytest_sessionfinish(session, exitstatus):
     if collection and session.config.option.collectonly:
         with open(collection, "w") as handle:
             json.dump([item.nodeid for item in session.items], handle)
+        metadata = os.environ.get("FACTORY_E2E_COLLECTION_METADATA")
+        if metadata:
+            checks = [{"nodeid": item.nodeid, "markers": [
+                {"name": marker.name, "kwargs": marker.kwargs} for marker in item.iter_markers()]} for item in session.items]
+            Path(metadata).write_text(json.dumps({"version": 1, "checks": checks}, default=lambda value: None) + "\n")
 
 
 @pytest.fixture(autouse=True)

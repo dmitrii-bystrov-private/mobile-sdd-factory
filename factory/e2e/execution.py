@@ -38,6 +38,8 @@ def configurations(strategy):
             identifiers(config.get(name, []), name)
         identifiers(config.get("collection"), "collection", required=True)
         commands = config.get("commands")
+        if isinstance(commands, dict) and e2e.get("eligibility_command"):
+            commands["eligibility"] = e2e["eligibility_command"]
         required = ("collect",) if config.get("collection_only") else ("collect", "run")
         if not config.get("collection_only") and (e2e.get("selection_contract") or isinstance(commands, dict) and "eligibility" in commands):
             required += ("eligibility",)

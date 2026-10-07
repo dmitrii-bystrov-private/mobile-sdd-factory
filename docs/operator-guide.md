@@ -102,6 +102,9 @@ fresh installs, selected-test limits, time budgets and failure retries. Machine 
 ENV instead. See [e2e-workflow.md](e2e-workflow.md). Failed test regressions use the correction loop;
 environment failures require recovery. Evidenced baseline failures also allow an explicit operator
 decision. Retry Current Stage starts a new gate after recovery.
+The coverage source setting can select the maintained TestRail adapter, using the configured test
+repository's local client/configuration. Fresh gates receive the adapter automatically; saved
+continuations keep their bound adapter copy and evidence. Verification-cycle retries create a fresh gate.
 New gates validate the selected scenarios against the project's maintained coverage source before
 installing the app. Retired neighbours are excluded with recorded reasons; an inactive required check
 or unavailable source requests strategy recovery. Existing accepted continuations retain their bindings.

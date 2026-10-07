@@ -3,6 +3,9 @@
 This guide describes the supported setup for the current Constellation: Agent Runtime platform.
 
 Use this guide for the backend/UI runtime model.
+QA coverage source is selected in Runtime Defaults. The maintained TestRail adapter uses the existing
+E2E_DIR checkout and E2E_PYTHON client environment, with repository-relative local configuration;
+no company endpoint or SDK version belongs in factory ENV defaults. See [e2e-workflow.md](e2e-workflow.md).
 
 Capacity recovery uses the existing stall-retry cooldown and the role's configured model. It needs no
 additional machine ENV variables or launcher configuration. See [runtime-model.md](runtime-model.md).

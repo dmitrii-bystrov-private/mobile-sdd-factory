@@ -345,6 +345,17 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path, repo_root:
                              if name in previous["e2e"]}
         except (OSError, ValueError, KeyError, TypeError):
             pass
+        policy = load_runtime_defaults(repo_root)["e2e_defaults"]
+        if policy["selection_adapter"] == "pytest_testrail":
+            import shutil
+            relative = "spec/factory-integration/pytest_testrail.py"
+            destination = task_root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(Path(__file__).resolve().parents[2] / "factory/e2e/adapters/pytest_testrail.py", destination)
+            execution["support_files"] = list(dict.fromkeys([*execution.get("support_files", []), relative]))
+            execution["eligibility_command"] = ["{python}", "{task_root}/" + relative,
+                "--integration-repo", "{integration_repo}", "--metadata", "{selection_metadata}",
+                "--output", "{eligibility}", "--platform", "{platform}", "{selectors}"]
         return {
             "task_key": task_key, "platform": "e2e", "mode": "e2e_gate",
             "commands": [f"bash {repo_root / 'scripts/e2e-verify.sh'} {task_key}"],
@@ -353,7 +364,7 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path, repo_root:
             "reason": "Verify the QA test worktree on master app builds unless the task explicitly selects another build.",
             "e2e": {**execution, "selection_contract": 1,
                     "baseline_sha": baseline.stdout.strip() if baseline.returncode == 0 else None,
-                    "policy": load_runtime_defaults(repo_root)["e2e_defaults"]},
+                    "policy": policy},
         }
     platform = detect_verification_platform(task_repo_root)
     changed_files = _read_changed_files(task_root, task_repo_root)

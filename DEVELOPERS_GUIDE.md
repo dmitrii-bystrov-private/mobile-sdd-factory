@@ -203,6 +203,9 @@ configuration or infer test/smoke paths. The optional pytest_evidence plugin imp
 collection/JUnit/outcome protocol without project imports. Legacy gates need fresh contract-version-2 evidence.
 New e2e strategies require a project-owned eligibility command and explicit required checks. The native
 runner records the catalog evidence and excluded candidates, and rejects inactive required checks.
+Settings may select a maintained repository adapter; fresh strategies copy and bind its implementation.
+The TestRail adapter uses the configured repository client and native collection mappings; core execution
+does not know project catalog fields. Native iOS preparation installs manifest-pinned tools before Tuist.
 Setup/teardown failures on both revisions are environment findings, not acceptable failed checks.
 Per-session reentrant serialization protects accept/resume/retry and role-output collection/intake.
 Baseline acceptance restores ownership and persists drained error signatures independently of summary wording.

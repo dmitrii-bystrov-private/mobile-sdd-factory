@@ -10,7 +10,7 @@ normal role lifecycle. The factory never merges the resulting MR.
 
 Operator policy lives in the UI Runtime Defaults panel and `.sdd-factory/settings.local.json`, under
 `runtime_defaults.e2e_defaults`: include_smoke, fresh_install, max_tests, run_timeout_seconds,
-test_timeout_seconds, failure_reruns. Each verification strategy snapshots these settings.
+test_timeout_seconds, failure_reruns, selection_adapter. Each verification strategy snapshots these settings.
 The time limit covers the complete verification gate, including collection, retries and comparisons.
 Fresh-run retries select failed, skipped and unfinished checks; successful checks retain their original
 receipts. The full fresh-install pass still selects every required check. Timeout diagnostics name the
@@ -176,11 +176,32 @@ with the rationale captured in the task/report. At least one platform must run a
 
 ### Active coverage selection
 
-Newly created strategies set `e2e.selection_contract: 1`. Every runtime platform supplies an
-`eligibility` command and `required_tests`: changed/new check identifiers, or an empty list for a
+Newly created strategies set `e2e.selection_contract: 1`. Every runtime platform uses an
+`eligibility` command and supplies `required_tests`: changed/new check identifiers, or an empty list for a
 deletion-only task. Smoke checks remain required when include_smoke is enabled. Neighbours are
 candidates, not automatically required runtime coverage. Being collected or sharing an edited
 file is insufficient to establish that a scenario is maintained.
+
+The Settings coverage source selects `project` (a project-supplied command) or `pytest_testrail`
+(the maintained repository adapter). With pytest_testrail, the factory copies its standalone adapter
+into spec/factory-integration, binds its digest through support_files, and supplies eligibility_command
+in the strategy. The verifier uses that command instead of inventing a client per task. A fresh Retry
+copies the current adapter; an accepted continuation retains the original copy and decisions.
+
+The maintained adapter uses the configured E2E_PYTHON environment's testrail_client.testrail.APIClient
+and reads framework/configs/testrail.cfg relative to E2E_DIR for local URL/auth configuration, plus
+framework/configs/config.ini for project/suite selection. Those
+integration conventions live in the adapter, not in the coordinator or role defaults. It issues only
+GET calls, resolves Automated/platform/product fields from live catalog metadata, and checks the
+project's suite and product-marker selection. A case must be active, Automated, enabled on the selected platform
+and match a selected product marker. Case types/field IDs are discovered rather than pinned in code.
+
+The factory loads the generic pytest evidence plugin for collection with this adapter. It records
+resolved markers and case mappings from the actual task checkout, including parameterized checks;
+the adapter does not infer IDs from the shared master checkout or re-import tests. Collection metadata
+and catalog replies have native receipts and content digests. No external workspace helper is loaded,
+no reporting run is created and no case is updated. SDK versions remain in project dependencies;
+existing E2E_DIR/E2E_PYTHON machine ENV resolves the repository and client environment.
 
 The project's command receives the fully collected candidates through `{selectors}` and writes
 the following report to `{eligibility}` (also available as FACTORY_E2E_ELIGIBILITY):

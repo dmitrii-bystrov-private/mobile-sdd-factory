@@ -118,6 +118,8 @@ verification-strategy.json. Do not add project imports, fixed test paths or proj
 factory code or role defaults. Use generic evidence protocols and digest-bound task-local integration.
 New e2e gates check project-owned active coverage before runtime execution; keep required checks explicit
 and record excluded candidates. Preserve existing gate bindings and operator decisions on continuation.
+Use the configured maintained adapter when supplied; its task-local copy and native collection metadata
+are digest-bound. Keep integration conventions in adapters, outside generic execution and role defaults.
 Map factory device/server context to the project inputs in task data. Setup/teardown failures are not
 acceptance candidates. Serialize operator continuations with collection and preserve the verifier owner.
 Dedicated iOS simulator pools use factory-specific ENV, per-device locks and separate WDA ports/caches.

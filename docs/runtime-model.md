@@ -211,6 +211,8 @@ QA mobile e2e tasks use the same roles and lifecycle, with a factory-owned `e2e_
 leases a free configured iOS pool device through a per-UDID lock, independent of workspace devices.
 It checks project-owned active coverage for new gates before runtime execution. Eligibility receipts bind
 the active selection and preserve excluded neighbours; no project catalog schema is built into the factory.
+Configured repository adapters are copied and digest-bound when a fresh strategy is created.
+The maintained TestRail adapter resolves case mappings from native task collection metadata.
 The same lease covers collection, tests, fresh-install repeats and baseline comparisons. Pool slots
 have distinct WDA/MJPEG ports and derived-data caches. A full pool waits within the gate's existing
 time budget. Only a booted/partially booted leased device is shut down before unlocking it, including

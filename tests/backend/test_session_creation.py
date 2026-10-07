@@ -11350,6 +11350,20 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn(followup_event.event_type, {"jira_subtasks_created", "subtask_implementation_requested"})
         self.assertIn(retried_session.current_stage, {"subtask_creation_requested", "subtask_implementation_requested"})
 
+    def test_native_verification_cycle_retry_gets_fresh_gate_and_strategy(self):
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022FRESHCYCLE")
+        role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)
+        old = self.work_item_repository.create(session_id=session.id, work_type="verification_cycle_review",
+            title="Verification blocked by toolchain", owner_role_id=role.id, status=WorkItemStatus.WAITING_FOR_OPERATOR)
+        self.session_repository.update_stage_and_owner(session.id, current_stage="verification_requested", current_owner=role.role_name)
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        refreshed, event, dispatch = self.coordinator.retry_session(session.id)
+        current = self.coordinator._find_active_work_item_for_current_stage(refreshed)
+        self.assertEqual("verification", current.work_type)
+        self.assertNotEqual(old.id, current.id)
+        strategy = json.loads((Path(self.temp_dir.name)/session.task_key/'spec/verification-strategy.json').read_text())
+        self.assertEqual(current.id, strategy['work_item_id'])
+
     def test_retry_session_picks_latest_operator_pending_item(self) -> None:
         session, _, _, _ = self.coordinator.prepare_task_session("IOS-30022LATEST")
         verifier_role = self.role_repository.get_by_name(session.id, VERIFICATION_COORDINATOR_ROLE)

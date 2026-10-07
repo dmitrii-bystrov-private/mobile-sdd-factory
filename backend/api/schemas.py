@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
+from typing import Literal
 
 
 class SessionPolicyPayload(BaseModel):
@@ -250,6 +251,7 @@ class RuntimeRoleDefaultConfigResponse(BaseModel):
 
 
 class E2EDefaultsPayload(BaseModel):
+    selection_adapter: Literal["project", "pytest_testrail"] = "project"
     include_smoke: bool = True
     fresh_install: bool = True
     max_tests: int = Field(default=10, ge=1)

@@ -112,6 +112,8 @@ JUnit and JSON outcomes. Task-local integration files are digest-bound. No separ
 legacy contract-version-1 evidence and operator decisions require a fresh version-2 gate.
 New runtime gates also require project-owned eligibility evidence for their selected checks; excluded
 candidates cannot satisfy required checks or be presented as passing test execution.
+When e2e.eligibility_command is supplied, the native runner uses the factory-provided adapter;
+its task-local copy, collection metadata and catalog evidence retain content bindings.
 Dedicated iOS pool assignment is native execution context, not an operator requirement choice.
 Use FACTORY_E2E_APPIUM_CAPABILITIES for the leased UDID, WDA/MJPEG ports and derived-data path;
 pytest_evidence applies these automatically. Other adapters must consume the assigned capabilities.

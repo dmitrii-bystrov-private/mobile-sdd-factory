@@ -18,6 +18,7 @@ DEFAULTS = {
     "run_timeout_seconds": 1800,
     "test_timeout_seconds": 600,
     "failure_reruns": 1,
+    "selection_adapter": "project",
 }
 
 
@@ -28,7 +29,10 @@ def normalize_defaults(value: object) -> dict:
     if not isinstance(value, dict) or set(value) - set(DEFAULTS):
         raise ValueError("Invalid e2e settings")
     for name, raw in value.items():
-        if type(DEFAULTS[name]) is bool:
+        if name == "selection_adapter":
+            if not isinstance(raw, str) or raw not in {"project", "pytest_testrail"}:
+                raise ValueError("Unknown e2e selection adapter")
+        elif type(DEFAULTS[name]) is bool:
             if type(raw) is not bool:
                 raise ValueError(f"{name} must be a boolean")
         elif type(raw) is not int or raw < (0 if name == "failure_reruns" else 1):

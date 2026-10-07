@@ -4346,8 +4346,7 @@ class CoordinatorService:
 
         retry_work_type = previous_work_item.work_type
         if (
-            session.task_key.startswith("QA-")
-            and session.current_stage == "verification_requested"
+            session.current_stage == "verification_requested"
             and retry_work_type == "verification_cycle_review"
         ):
             retry_work_type = "verification"

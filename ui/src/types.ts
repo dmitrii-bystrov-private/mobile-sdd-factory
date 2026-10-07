@@ -228,6 +228,7 @@ export type RuntimeRoleDefaultConfig = {
 };
 
 export type E2EDefaults = {
+  selection_adapter: "project" | "pytest_testrail";
   include_smoke: boolean;
   fresh_install: boolean;
   max_tests: number;

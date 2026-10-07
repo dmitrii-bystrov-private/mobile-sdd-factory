@@ -29,6 +29,11 @@ if [[ "$PREPARE_POLICY" == "reuse_if_available" ]] && verification_ios_prepare_m
 fi
 
 echo "⏳ Installing Tuist SPM dependencies..."
+if ! "$MISE_CMD" install >"$SDD_IOS_VERIFICATION_LOGS_PATH/mise-install.log" 2>&1; then
+  echo "❌ PINNED TOOLCHAIN INSTALL FAILED"
+  verification_print_failure_matches "$SDD_IOS_VERIFICATION_LOGS_PATH/mise-install.log" "error|failed|missing"
+  exit 1
+fi
 run_tuist_install() {
   GIT_TERMINAL_PROMPT=0 "$MISE_CMD" exec -- tuist install >"$TUIST_INSTALL_LOG" 2>&1
 }
