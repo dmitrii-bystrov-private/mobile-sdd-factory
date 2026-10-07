@@ -201,6 +201,8 @@ arrays, environment and check identifiers from the task checkout. Project setup 
 support files, bound by content digest. Generic factory execution/evidence code must not import project
 configuration or infer test/smoke paths. The optional pytest_evidence plugin implements the generic
 collection/JUnit/outcome protocol without project imports. Legacy gates need fresh contract-version-2 evidence.
+New e2e strategies require a project-owned eligibility command and explicit required checks. The native
+runner records the catalog evidence and excluded candidates, and rejects inactive required checks.
 Setup/teardown failures on both revisions are environment findings, not acceptable failed checks.
 Per-session reentrant serialization protects accept/resume/retry and role-output collection/intake.
 Baseline acceptance restores ownership and persists drained error signatures independently of summary wording.

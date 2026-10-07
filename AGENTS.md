@@ -116,6 +116,8 @@ and explicit launch flags before reuse; report mismatches without stopping other
 Project commands, environment, collection scope, smoke checks and application IDs are task data in
 verification-strategy.json. Do not add project imports, fixed test paths or project-specific setup to
 factory code or role defaults. Use generic evidence protocols and digest-bound task-local integration.
+New e2e gates check project-owned active coverage before runtime execution; keep required checks explicit
+and record excluded candidates. Preserve existing gate bindings and operator decisions on continuation.
 Map factory device/server context to the project inputs in task data. Setup/teardown failures are not
 acceptance candidates. Serialize operator continuations with collection and preserve the verifier owner.
 Dedicated iOS simulator pools use factory-specific ENV, per-device locks and separate WDA ports/caches.

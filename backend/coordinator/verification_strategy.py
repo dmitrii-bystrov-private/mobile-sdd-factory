@@ -351,7 +351,8 @@ def build_verification_strategy(*, task_key: str, workdir_root: Path, repo_root:
             "phases": ["collection", "run", "fresh-run"],
             "reporting": {"final_verification_path": str(task_root / 'spec/final-verification.md')},
             "reason": "Verify the QA test worktree on master app builds unless the task explicitly selects another build.",
-            "e2e": {**execution, "baseline_sha": baseline.stdout.strip() if baseline.returncode == 0 else None,
+            "e2e": {**execution, "selection_contract": 1,
+                    "baseline_sha": baseline.stdout.strip() if baseline.returncode == 0 else None,
                     "policy": load_runtime_defaults(repo_root)["e2e_defaults"]},
         }
     platform = detect_verification_platform(task_repo_root)

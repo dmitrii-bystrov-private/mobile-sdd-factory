@@ -25,6 +25,8 @@ def configurations(strategy):
     if not isinstance(e2e, dict):
         raise E2EPlanError("verification-strategy.json e2e must be an object")
     platforms = e2e.get("platforms")
+    if "selection_contract" in e2e and (type(e2e["selection_contract"]) is not int or e2e["selection_contract"] != 1):
+        raise E2EPlanError("Unsupported active check selection contract")
     if not isinstance(platforms, dict) or not platforms or set(platforms) - {"ios", "android"}:
         raise E2EPlanError("Complete verification-strategy.json e2e.platforms from the task checkout before verification")
     for platform, config in platforms.items():
@@ -32,11 +34,15 @@ def configurations(strategy):
             raise E2EPlanError(f"Invalid execution recipe for {platform}")
         if "collection_only" in config and type(config["collection_only"]) is not bool:
             raise E2EPlanError("collection_only must be a boolean")
-        for name in ("tests", "smoke_tests", "removed_tests"):
+        for name in ("tests", "smoke_tests", "removed_tests", "required_tests"):
             identifiers(config.get(name, []), name)
         identifiers(config.get("collection"), "collection", required=True)
         commands = config.get("commands")
         required = ("collect",) if config.get("collection_only") else ("collect", "run")
+        if not config.get("collection_only") and (e2e.get("selection_contract") or isinstance(commands, dict) and "eligibility" in commands):
+            required += ("eligibility",)
+            if "required_tests" not in config:
+                raise E2EPlanError("Declare required_tests for changed/new checks; use an empty list for deletion-only scope")
         if not isinstance(commands, dict) or any(not isinstance(commands.get(name), list) or not commands[name]
                 or any(not isinstance(arg, str) or not arg for arg in commands[name])
                 or commands[name].count("{selectors}") != 1 for name in required):

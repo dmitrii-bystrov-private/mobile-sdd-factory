@@ -107,9 +107,11 @@ policy. Add an `e2e.platforms` execution recipe; there is no separate e2e plan a
       "ios": {
         "collection": ["checks"],
         "tests": ["checks/test_feature.py::test_retained_scenario"],
+        "required_tests": [],
         "smoke_tests": ["checks/test_smoke.py::test_basic_flow"],
         "removed_tests": ["checks/test_feature.py::test_removed_scenario"],
         "commands": {
+          "eligibility": ["{python}", "{task_root}/spec/select_active.py", "--output", "{eligibility}", "{selectors}"],
           "collect": ["{python}", "-m", "pytest", "-p", "pytest_evidence", "--collect-only", "-q", "{selectors}"],
           "run": ["{python}", "-m", "pytest", "-p", "pytest_evidence", "--junitxml={junit}", "--timeout={test_timeout_seconds}", "{selectors}"]
         },
@@ -117,7 +119,8 @@ policy. Add an `e2e.platforms` execution recipe; there is no separate e2e plan a
         "unset_environment": ["PYTEST_ADDOPTS"]
       }
     },
-    "support_files": []
+    "selection_contract": 1,
+    "support_files": ["spec/select_active.py"]
   }
 }
 ```
@@ -133,7 +136,7 @@ environment failure. A project wrapper may normalize its framework's exit codes 
 One whole `{selectors}` argument expands into the current check list. Other supported tokens are
 `{python}`, `{repo}`, `{task_root}`, `{platform}`, `{device_id}`, `{platform_version}`, `{application_id}`,
 `{app_path}`, `{appium_port}`, `{android_sdk}`, `{adb}`, `{factory_plugin_dir}`, `{test_timeout_seconds}`,
-`{junit}`, `{collected}` and `{results}`. Environment values use the same tokens. Machine paths and
+`{junit}`, `{collected}`, `{results}` and `{eligibility}`. Environment values use the same tokens. Machine paths and
 device/port values come from configured ENV; runtime-discovered versions come from the device.
 Map these values to the project's own device/server inputs. Confirm that its client uses the supplied
 Appium endpoint instead of a framework default. The generic runtime also publishes
@@ -170,6 +173,56 @@ Select changed/new tests and neighbours; deletion tasks select retained scenario
 every removed test. Shared page-object changes require collection/import checks on both platforms.
 collection_only is appropriate for a platform whose runtime behavior is preserved by a bounded change,
 with the rationale captured in the task/report. At least one platform must run actual tests.
+
+### Active coverage selection
+
+Newly created strategies set `e2e.selection_contract: 1`. Every runtime platform supplies an
+`eligibility` command and `required_tests`: changed/new check identifiers, or an empty list for a
+deletion-only task. Smoke checks remain required when include_smoke is enabled. Neighbours are
+candidates, not automatically required runtime coverage. Being collected or sharing an edited
+file is insufficient to establish that a scenario is maintained.
+
+The project's command receives the fully collected candidates through `{selectors}` and writes
+the following report to `{eligibility}` (also available as FACTORY_E2E_ELIGIBILITY):
+
+```json
+{
+  "version": 1,
+  "source": "https://test-catalog.example/project",
+  "checked_at": "2026-10-07T12:00:00Z",
+  "checks": [
+    {"nodeid": "checks/test_feature.py::test_retained_scenario", "eligible": true, "reason": "Active automated scenario for the selected platform"},
+    {"nodeid": "checks/test_feature.py::test_old_scenario", "eligible": false, "reason": "Retired scenario"}
+  ]
+}
+```
+
+Resolve the authoritative coverage source from the current project, including its normal CI
+selection. If it uses an external test catalog, check case deletion, automation type, product
+and platform eligibility through that project's integration. The factory does not know catalog
+fields, case IDs, archive directories or project markers. These belong to the task-local adapter
+and are bound through support_files; existing project commands are bound through the source SHA.
+Do not invent catalog status, read external workspace files at runtime or expose credentials in
+the strategy, report or logs. Local credential/config paths remain machine ENV; tool versions
+remain dependency data. A local maintained coverage source is valid when the project uses it.
+
+The native runner executes eligibility before app installation, requires a fresh timestamp and
+an explained result for every candidate, and runs only eligible identifiers. Missing/unavailable
+sources, malformed evidence and inactive required/smoke checks request strategy preparation
+recovery; no unfiltered fallback or silent removal of required checks is allowed. Parametrized
+required checks retain every collected parameter case. Exclusions and their reasons remain in
+the report, separately from baseline failures and operator acceptances. At least one active
+runtime check must remain, and max_tests applies to that active selection.
+
+Collection/import checks and removed_tests checks still cover the supplied collection scope,
+including retired scenarios when needed to prove deletion. They do not boot the device.
+An instruction to preserve a source file does not make every test in it runtime coverage.
+If task requirements conflict with the factory's mandatory device-run policy, present the
+conflict to the operator; do not rewrite scope or suppress the required gate.
+
+Eligibility evidence is immutable and digest-bound with the execution receipts. Delivery validates
+that actual outcomes cover the eligible selection. Existing strategies without selection_contract
+retain their original behavior and operator decisions; a fresh retry enables the new contract.
 
 Master app builds are the default. Related app issue links alone do not change this default. Only an
 explicit task/operator build selection adds `app: {"path": "absolute artifact path", "sha": "source SHA"}`
@@ -221,8 +274,9 @@ restores the verifier as owner and records drained runtime-error signatures, so 
 worker message cannot reopen the accepted gate even if its wording differs from the native summary.
 
 The runner executes the supplied collection command, checks removed identifiers against collection,
-collects selected scenarios and enforces max_tests, then installs the selected app on the reserved device
-and executes the supplied run command. With include_smoke enabled, the worker must provide smoke_tests;
+collects candidate scenarios, checks project-owned active coverage and enforces max_tests, then installs
+the selected app on the reserved device and executes the supplied run command. With include_smoke enabled,
+the worker must provide smoke_tests;
 the factory adds those identifiers to the selection. Successful selected tests run
 again after fresh installation. Zero executed/passing tests cannot produce a passed verdict. An
 operator may explicitly accept all selected baseline failures only when actual failed task/baseline

@@ -11,6 +11,7 @@ from unittest.mock import patch
 from factory.e2e import runner
 from factory.e2e.config import Machine
 from factory.e2e.execution import E2EPlanError, configurations, selection, support_digests
+from factory.e2e.selection import eligible_checks
 
 
 class FakeNewConnectionError(Exception):
@@ -78,6 +79,28 @@ class ExecutionRecipeTests(unittest.TestCase):
         del config["smoke_tests"]
         with self.assertRaises(E2EPlanError):
             selection(config, "ios", {"include_smoke": True})
+
+    def test_catalog_selection_checks_parameters_smoke_and_complete_evidence(self):
+        report = {"version": 1, "source": "catalog://project", "checked_at": "2026-10-07T12:00:00Z",
+                  "checks": [{"nodeid": "changed[a]", "eligible": True, "reason": "active"},
+                             {"nodeid": "changed[b]", "eligible": True, "reason": "active"},
+                             {"nodeid": "neighbour", "eligible": False, "reason": "retired"},
+                             {"nodeid": "smoke", "eligible": True, "reason": "active"}]}
+        candidates = [item["nodeid"] for item in report["checks"]]
+        config = {"required_tests": ["changed"], "smoke_tests": ["smoke"]}
+        self.assertEqual(["changed[a]", "changed[b]", "smoke"],
+                         eligible_checks(report, candidates, config, {"include_smoke": True}))
+        for index in (0, 3):
+            with self.subTest(required=index):
+                modified = json.loads(json.dumps(report))
+                modified["checks"][index]["eligible"] = False
+                with self.assertRaisesRegex(E2EPlanError, "Required check"):
+                    eligible_checks(modified, candidates, config, {"include_smoke": True})
+        for checks in (report["checks"][:-1], report["checks"] + [report["checks"][0]],
+                       report["checks"] + [{"nodeid": "foreign", "eligible": True, "reason": "active"}]):
+            with self.subTest(checks=checks):
+                with self.assertRaisesRegex(E2EPlanError, "exactly"):
+                    eligible_checks(dict(report, checks=checks), candidates, config, {"include_smoke": True})
 
     def test_non_pytest_command_runs_after_factory_fresh_install_with_task_app_id(self):
         with tempfile.TemporaryDirectory() as directory:

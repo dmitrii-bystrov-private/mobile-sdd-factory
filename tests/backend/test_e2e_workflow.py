@@ -3,6 +3,7 @@ from dataclasses import replace
 import io
 import json
 import os
+import sys
 from pathlib import Path
 import tempfile
 import unittest
@@ -56,8 +57,10 @@ class E2EWorkflowTests(unittest.TestCase):
         self.strategy, _ = materialize_verification_strategy(
             task_key=self.key, workdir_root=self.root, repo_root=self.root, work_item_id=123,
         )
+        # Existing bound gates retain their pre-catalog evidence/decisions.
+        self.strategy["e2e"].pop("selection_contract")
         self.write_recipe({"platforms": {"ios": {"tests": [self.node]}}})
-        self.machine = Machine(self.repo, Path("python"), self.root, "test-device", "test-avd",
+        self.machine = Machine(self.repo, Path(sys.executable), self.root, "test-device", "test-avd",
                                "emulator-5584", self.root, "appium", 4743)
         app_path = self.root / "app.app"
         app_path.mkdir()
@@ -129,6 +132,8 @@ class E2EWorkflowTests(unittest.TestCase):
                 config.setdefault("collection", [f"tests/{platform}"])
                 config.setdefault("commands", {"collect": ["{python}", "-m", "pytest", "{selectors}"],
                                                "run": ["{python}", "-m", "pytest", "{selectors}"]})
+                config.setdefault("required_tests", [])
+                config["commands"].setdefault("eligibility", self.catalog_command())
                 if platform == "android":
                     config.setdefault("application_id", "example.test.app")
                 if isinstance(recipe, dict) and "removed_tests" in recipe:
@@ -387,7 +392,82 @@ class E2EWorkflowTests(unittest.TestCase):
             repo_root=self.root, work_item_id=999)
         self.assertEqual(previous, strategy["e2e"]["platforms"])
         self.assertEqual(999, strategy["work_item_id"])
+        self.assertEqual(1, strategy["e2e"]["selection_contract"])
         self.assertFalse((self.task / "spec/e2e-plan.json").exists())
+
+    @staticmethod
+    def catalog_command(inactive=()):
+        return ["{python}", "-c",
+            "import sys,json; from datetime import datetime,timezone; "
+            "from pathlib import Path; "
+            "Path(sys.argv[1]).write_text(json.dumps({'version':1,'source':'fixture://active-coverage',"
+            "'checked_at':datetime.now(timezone.utc).isoformat(),'checks':["
+            "{'nodeid':n,'eligible':n not in json.loads(sys.argv[2]),'reason':'catalog state'} "
+            "for n in sys.argv[3:]]}))", "{eligibility}", json.dumps(list(inactive)), "{selectors}"]
+
+    def enable_active_selection(self, inactive=()):
+        config = self.strategy["e2e"]["platforms"]["ios"]
+        config["required_tests"] = [self.node]
+        config["commands"]["eligibility"] = self.catalog_command(inactive)
+        self.strategy["e2e"]["selection_contract"] = 1
+        runner.write_json(self.task / "spec/verification-strategy.json", self.strategy)
+
+    def test_inactive_neighbour_is_recorded_and_never_run_on_task_or_baseline(self):
+        retired = "tests/ios/test_example.py::test_retired"
+        self.platform_nodes = {"ios": [self.node, retired]}
+        self.phase_failures = {}
+        self.strategy["e2e"]["platforms"]["ios"]["tests"] = [self.node, retired]
+        self.strategy["e2e"]["policy"]["max_tests"] = 1
+        self.enable_active_selection([retired])
+        verdict = self.run_gate()
+        self.assertEqual("passed", verdict["result"], verdict.get("details"))
+        self.assertEqual([self.node], verdict["scope"]["ios"]["selected"])
+        self.assertEqual(retired, verdict["selection_exclusions"]["ios"][0]["nodeid"])
+        executions = [call for call in self.calls if call[0] in {"run", "fresh-run"}]
+        self.assertEqual([[self.node], [self.node]], [call[3] for call in executions])
+        runner.validate_verdict(self.task, self.strategy["work_item_id"])
+        checked = next(r for r in verdict["receipts"] if r["phase"] == "eligibility")
+        Path(checked["eligibility_path"]).write_text("{}")
+        with self.assertRaisesRegex(E2EError, "Active coverage evidence changed"):
+            runner.validate_verdict(self.task, self.strategy["work_item_id"])
+
+    def test_required_inactive_check_blocks_preparation_without_runtime_execution(self):
+        self.enable_active_selection([self.node])
+        verdict = self.run_gate()
+        self.assertEqual("blocked", verdict["result"])
+        self.assertEqual("execution_recipe", verdict["failure_origin"])
+        self.assertIn("Required check is missing or inactive", verdict["details"])
+        self.assertFalse(any(call[0] in {"run", "fresh-run", "baseline-1"} for call in self.calls))
+        runner.install.assert_not_called()
+
+    def test_catalog_failure_has_no_unfiltered_fallback(self):
+        self.enable_active_selection()
+        self.strategy["e2e"]["platforms"]["ios"]["commands"]["eligibility"] = [
+            "{python}", "-c", "raise SystemExit(2)", "{selectors}"]
+        runner.write_json(self.task / "spec/verification-strategy.json", self.strategy)
+        verdict = self.run_gate()
+        self.assertEqual("blocked", verdict["result"])
+        self.assertIn("no unfiltered fallback", verdict["details"])
+        runner.install.assert_not_called()
+
+    def test_new_gate_cannot_bypass_active_selection_preparation(self):
+        self.strategy["e2e"]["selection_contract"] = 1
+        del self.strategy["e2e"]["platforms"]["ios"]["required_tests"]
+        runner.write_json(self.task / "spec/verification-strategy.json", self.strategy)
+        verdict = self.run_gate()
+        self.assertEqual("execution_recipe", verdict["failure_origin"])
+        self.assertIn("required_tests", verdict["details"])
+        self.assertEqual([], self.calls)
+
+    def test_existing_gate_without_catalog_recipe_retains_its_bound_contract(self):
+        config = self.strategy["e2e"]["platforms"]["ios"]
+        del config["commands"]["eligibility"]
+        del config["required_tests"]
+        runner.write_json(self.task / "spec/verification-strategy.json", self.strategy)
+        with patch.object(runner, "check_selection") as check:
+            self.assertEqual("passed", self.run_gate()["result"])
+        check.assert_not_called()
+        runner.validate_verdict(self.task, self.strategy["work_item_id"])
 
     def test_receipt_cannot_claim_success_for_unselected_checks(self):
         verdict = self.run_gate()
@@ -1195,8 +1275,15 @@ class E2EWorkflowTests(unittest.TestCase):
 
     def ios_pool(self):
         self.machine = replace(self.machine, ios_pool=("sim-a", "sim-b", "sim-c"), ios_wda_root=self.root / "wda")
-        self.stack.enter_context(patch.object(runner, "device", side_effect=lambda machine, platform, **kw:
-            {"udid": machine.ios_udid, "version": "26.2"}))
+        def target(machine, platform, **kw):
+            if platform != "ios":
+                return {"serial": machine.android_serial, "version": "26.2"}
+            slot = machine.ios_pool.index(machine.ios_udid)
+            return {"udid": machine.ios_udid, "version": "26.2",
+                    "wda_local_port": machine.ios_wda_port_base + slot,
+                    "mjpeg_server_port": machine.ios_mjpeg_port_base + slot,
+                    "derived_data_path": str(machine.ios_wda_root / machine.ios_udid)}
+        self.stack.enter_context(patch.object(runner, "device", side_effect=target))
 
     def test_ios_pool_bypasses_workspace_lock_and_shuts_down_only_its_leased_device(self):
         import fcntl
@@ -1229,7 +1316,10 @@ class E2EWorkflowTests(unittest.TestCase):
                 if failure == "boot":
                     def boot(machine, platform, *, boot=False):
                         if boot: raise E2EError("simulator boot timed out")
-                        return {"udid": machine.ios_udid, "version": "26.2"}
+                        return {"udid": machine.ios_udid, "version": "26.2",
+                                "wda_local_port": machine.ios_wda_port_base,
+                                "mjpeg_server_port": machine.ios_mjpeg_port_base,
+                                "derived_data_path": str(machine.ios_wda_root / machine.ios_udid)}
                     stack.enter_context(patch.object(runner, "device", side_effect=boot))
                 elif failure in {"timeout", "interrupt"}:
                     def phase(*args, **kwargs):

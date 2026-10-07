@@ -206,6 +206,8 @@ lock acquisition by owner ancestry and leave other live owners alone.
 
 QA mobile e2e tasks use the same roles and lifecycle, with a factory-owned `e2e_gate` strategy. The runner
 leases a free configured iOS pool device through a per-UDID lock, independent of workspace devices.
+It checks project-owned active coverage for new gates before runtime execution. Eligibility receipts bind
+the active selection and preserve excluded neighbours; no project catalog schema is built into the factory.
 The same lease covers collection, tests, fresh-install repeats and baseline comparisons. Pool slots
 have distinct WDA/MJPEG ports and derived-data caches. A full pool waits within the gate's existing
 time budget. Only a booted/partially booted leased device is shut down before unlocking it, including

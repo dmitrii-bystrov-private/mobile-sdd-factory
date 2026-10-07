@@ -26,6 +26,7 @@ import xml.etree.ElementTree as ET
 
 from factory.e2e.config import E2EError, Machine
 from factory.e2e.execution import CONTRACT_VERSION, E2EPlanError, command, configurations, render, selection, support_digests
+from factory.e2e.selection import eligible_checks
 
 ROOT = Path(__file__).resolve().parents[2]
 CHROMEDRIVER_FEATURE = "uiautomator2:chromedriver_autodownload"
@@ -399,11 +400,7 @@ def junit_results(path):
     return results
 
 
-def phase(machine, repo, platform, target, app, policy, folder, name, selectors, *, collect=False, fresh=False):
-    log, junit = folder / f"{platform}-{name}.log", folder / f"{platform}-{name}.xml"
-    outcomes_path = folder / f"{platform}-{name}-outcomes.json"
-    collection_path = folder / f"{platform}-{name}-collection.json"
-    diagnostic_path = folder / f"{platform}-{name}-diagnostic.json"
+def execution_context(machine, repo, platform, target, app, policy, folder, name):
     config = policy["_configurations"][platform]
     context = {"python": str(machine.python), "repo": str(repo), "task_root": str(policy["_task_root"]),
                "platform": platform, "device_id": target.get("udid", target.get("serial", "")),
@@ -411,11 +408,75 @@ def phase(machine, repo, platform, target, app, policy, folder, name, selectors,
                "application_id": target.get("bundle_id", config.get("application_id", "")),
                "app_path": (app or {}).get("path", ""), "appium_port": str(machine.appium_port),
                "android_sdk": str(machine.android_sdk), "adb": target.get("adb", ""),
-               "factory_plugin_dir": str(Path(__file__).parent), "junit": str(junit),
-               "results": str(outcomes_path), "collected": str(collection_path), "diagnostic": str(diagnostic_path),
+               "factory_plugin_dir": str(Path(__file__).parent), "junit": str(folder / f"{platform}-{name}.xml"),
+               "results": str(folder / f"{platform}-{name}-outcomes.json"),
+               "collected": str(folder / f"{platform}-{name}-collection.json"),
+               "diagnostic": str(folder / f"{platform}-{name}-diagnostic.json"),
+               "eligibility": str(folder / f"{platform}-{name}-checks.json"),
                "test_timeout_seconds": str(policy["test_timeout_seconds"])}
     context.update({name: str(target.get(name, "")) for name in
                     ("wda_local_port", "mjpeg_server_port", "derived_data_path")})
+    return context
+
+
+def run_command(argv, repo, env, log, timeout, policy, platform, name):
+    with log.open("w") as handle:
+        process = subprocess.Popen(argv, cwd=repo, env=env,
+                                   stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            return process.wait(timeout=timeout)
+        except BaseException as exc:
+            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            if isinstance(exc, subprocess.TimeoutExpired):
+                limit = "total verification time limit" if "_deadline" in policy else "phase time limit"
+                raise E2EError(f"{platform} {name} timed out: {limit} ({policy['run_timeout_seconds']}s) exhausted; see {log}") from exc
+            raise
+
+
+def check_selection(machine, repo, platform, target, app, policy, folder, candidates):
+    """Execute the bound project's catalog adapter before installing or running apps."""
+    config = policy["_configurations"][platform]
+    context = execution_context(machine, repo, platform, target, app, policy, folder, "eligibility")
+    log, path = folder / f"{platform}-eligibility.log", Path(context["eligibility"])
+    started = datetime.now(timezone.utc)
+    timeout = policy.get("_deadline", time.monotonic() + policy["run_timeout_seconds"]) - time.monotonic()
+    if timeout <= 0:
+        raise E2EError("E2E verification exceeded the configured total time limit")
+    env = execution_environment(machine, repo, platform, target, config, context, app)
+    env["FACTORY_E2E_ELIGIBILITY"] = str(path)
+    code = run_command(command(config, "eligibility", candidates, context), repo, env, log, timeout, policy, platform, "eligibility")
+    if code != 0:
+        raise E2EPlanError(f"Project active coverage could not be checked; no unfiltered fallback is allowed. See {log}")
+    try:
+        report = read_json(path)
+        active = eligible_checks(report, candidates, config, policy)
+        checked = datetime.fromisoformat(report["checked_at"].replace("Z", "+00:00"))
+        if not started.timestamp() - 1 <= checked.timestamp() <= datetime.now(timezone.utc).timestamp() + 1:
+            raise E2EPlanError("Project active coverage must be checked during the current selection command")
+    except E2EError as exc:
+        raise E2EPlanError(f"{exc} Selection evidence: {path}; log: {log}") from exc
+    receipt = {"phase": "eligibility", "platform": platform, "source": source(repo), "app": app, "device": target,
+               "selectors": candidates, "collected": active, "exit_code": code, "ok": True,
+               "log": str(log), "log_digest": digest(log), "junit_digest": None, "results": None,
+               "eligibility_path": str(path), "eligibility_digest": digest(path), "eligibility": report}
+    file = folder / f"{platform}-eligibility.json"
+    write_json(file, receipt)
+    receipt["path"] = str(file)
+    return receipt
+
+
+def phase(machine, repo, platform, target, app, policy, folder, name, selectors, *, collect=False, fresh=False):
+    log, junit = folder / f"{platform}-{name}.log", folder / f"{platform}-{name}.xml"
+    outcomes_path = folder / f"{platform}-{name}-outcomes.json"
+    collection_path = folder / f"{platform}-{name}-collection.json"
+    diagnostic_path = folder / f"{platform}-{name}-diagnostic.json"
+    config = policy["_configurations"][platform]
+    context = execution_context(machine, repo, platform, target, app, policy, folder, name)
     argv = command(config, "collect" if collect else "run", selectors, context)
     started = time.monotonic()
     timeout = min(policy["run_timeout_seconds"], policy.get("_deadline", started + policy["run_timeout_seconds"]) - started)
@@ -433,22 +494,7 @@ def phase(machine, repo, platform, target, app, policy, folder, name, selectors,
         timeout = min(policy["run_timeout_seconds"], policy.get("_deadline", started + policy["run_timeout_seconds"]) - time.monotonic())
         if timeout <= 0:
             raise E2EError("E2E verification exceeded the configured total time limit during fresh installation")
-    with log.open("w") as handle:
-        process = subprocess.Popen(argv, cwd=repo, env=env,
-                                   stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
-        try:
-            code = process.wait(timeout=timeout)
-        except BaseException as exc:
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            if isinstance(exc, subprocess.TimeoutExpired):
-                limit = "total verification time limit" if "_deadline" in policy else "phase time limit"
-                raise E2EError(f"{platform} {name} timed out: {limit} ({policy['run_timeout_seconds']}s) exhausted; see {log}") from exc
-            raise
+    code = run_command(argv, repo, env, log, timeout, policy, platform, name)
     results = junit_results(junit) if junit.exists() and not collect else None
     selected = read_json(collection_path) if collect and collection_path.exists() else []
     if not isinstance(selected, list) or any(not isinstance(node, str) or not node for node in selected):
@@ -512,6 +558,10 @@ def validate_receipts(verdict):
             if (receipt.get("collection_digest") != digest(Path(receipt["collection"]))
                     or receipt.get("collected") != read_json(Path(receipt["collection"]))):
                 raise E2EError("Collection evidence changed after verification")
+        if receipt.get("eligibility_path"):
+            if (receipt.get("eligibility_digest") != digest(Path(receipt["eligibility_path"]))
+                    or receipt.get("eligibility") != read_json(Path(receipt["eligibility_path"]))):
+                raise E2EError("Active coverage evidence changed after verification")
         if receipt.get("results_path"):
             if (receipt.get("results_digest") != digest(Path(receipt["results_path"]))
                     or receipt.get("outcomes") != read_json(Path(receipt["results_path"]))):
@@ -654,17 +704,27 @@ def verify(task_key, task_root, strategy, machine):
                 selectors = selection(config, platform, policy, repo)
                 picked = phase(selected_machine, repo, platform, target, app, policy, folder, "selection", selectors, collect=True)
                 verdict["receipts"].append(picked)
-                if not picked["ok"] or len(picked["collected"]) > policy["max_tests"]:
-                    raise E2EPlanError("Selected test count is zero, invalid, or exceeds the configured limit")
+                if not picked["ok"]:
+                    raise E2EPlanError("Selected test count is zero or invalid")
+                selected = picked["collected"]
+                if "eligibility" in config["commands"]:
+                    checked = check_selection(selected_machine, repo, platform, target, app, policy, folder, selected)
+                    verdict["receipts"].append(checked)
+                    selected = checked["collected"]
+                    verdict.setdefault("selection_exclusions", {})[platform] = [
+                        item for item in checked["eligibility"]["checks"] if not item["eligible"]]
+                    selectors = selected
+                if not selected or len(selected) > policy["max_tests"]:
+                    raise E2EPlanError("No active checks selected, or active check count exceeds the configured limit")
                 excluded = {item["test"] for item in exceptions}
-                if excluded - set(picked["collected"]):
+                if excluded - set(selected):
                     raise E2EError("Accepted scenario no longer belongs to the selected test scope")
                 for accepted_app in accepted_apps:
                     if accepted_app != app:
                         raise E2EError("App build changed after the operator decision; run a new verification gate")
-                verdict["scope"][platform] = {"selected": picked["collected"], "accepted": sorted(excluded)}
+                verdict["scope"][platform] = {"selected": selected, "accepted": sorted(excluded)}
                 if excluded:
-                    selectors = [node for node in picked["collected"] if node not in excluded]
+                    selectors = [node for node in selected if node not in excluded]
                     if not selectors:
                         continue
                 policy["_appium_log"] = str(lock_root / f"appium-{machine.appium_port}.log")
@@ -698,7 +758,7 @@ def verify(task_key, task_root, strategy, machine):
                         latest = repeat
                         failed_nodes = [item["nodeid"] for item in repeat["outcomes"] if item["outcome"] != "passed"]
                         seen = {item["nodeid"] for item in repeat["outcomes"]}
-                        failed_nodes += [node for node in picked["collected"] if node not in excluded and node not in seen]
+                        failed_nodes += [node for node in selected if node not in excluded and node not in seen]
                         if repeat["exit_code"] == 1:
                             for attempt in range(policy["failure_reruns"]):
                                 latest = phase(selected_machine, repo, platform, target, app, policy, folder,
@@ -759,6 +819,11 @@ def verify(task_key, task_root, strategy, machine):
                 report.append(f"- {finding['platform']}: {finding['kind']}; {finding.get('test', 'selected scenarios')}; evidence: {finding['evidence']}")
                 if finding.get("baseline_evidence"):
                     report.append(f"  Baseline evidence: {finding['baseline_evidence']}")
+        if any(verdict.get("selection_exclusions", {}).values()):
+            report += ["", "## Candidates outside active coverage", ""]
+            for platform, exclusions in verdict["selection_exclusions"].items():
+                for item in exclusions:
+                    report.append(f"- {platform}: {item['nodeid']}; {item['reason']}")
         if verdict.get("accepted_findings"):
             report += ["", "## Baseline failures accepted by the operator", "",
                        "These scenarios did not pass. The operator accepted them for this gate only; all other selected checks remain required.", ""]
@@ -820,6 +885,21 @@ def describe_verdict(verdict):
     return {"summary": summary, "details": "\n\n".join(paragraphs) or verdict.get("details") or "See the verification report for individual test results."}
 
 
+def bound_selection(receipts, platform, picked, config, policy):
+    if "eligibility" not in config["commands"]:
+        return picked["collected"]
+    checks = [item for item in receipts if item["platform"] == platform and item["phase"] == "eligibility"]
+    if (len(checks) != 1 or not checks[0].get("ok") or checks[0].get("exit_code") != 0
+            or checks[0].get("selectors") != picked["collected"]
+            or checks[0].get("app") != picked.get("app")
+            or not checks[0].get("eligibility_path")):
+        raise E2EError("Missing bound active coverage selection")
+    active = eligible_checks(checks[0].get("eligibility"), picked["collected"], config, policy)
+    if checks[0].get("collected") != active or not active or len(active) > policy["max_tests"]:
+        raise E2EError("Active coverage differs from the execution selection")
+    return active
+
+
 def validate_verdict(task_root, work_item_id, *, allow_documentation_changes=False):
     verdict = read_json(task_root / "spec/e2e-verdict.json")
     if verdict.get("work_item_id") != work_item_id:
@@ -842,10 +922,12 @@ def validate_verdict(task_root, work_item_id, *, allow_documentation_changes=Fal
         raise E2EError("E2E success requires actual test runs")
     platform_configs = configurations(strategy)
     expected_runs = {platform for platform, value in platform_configs.items() if not value.get("collection_only")}
+    active_scopes = {}
     for platform in expected_runs:
         picked = next((item for item in receipts if item["platform"] == platform and item["phase"] == "selection" and item["ok"]), None)
         if picked is None or picked["selectors"] != selection(platform_configs[platform], platform, strategy["e2e"]["policy"]):
             raise E2EError("Missing bound check selection")
+        active_scopes[platform] = bound_selection(receipts, platform, picked, platform_configs[platform], strategy["e2e"]["policy"])
     for platform in list(expected_runs):
         exceptions = {item["test"] for item in accepted if item["platform"] == platform}
         if not exceptions:
@@ -859,7 +941,7 @@ def validate_verdict(task_root, work_item_id, *, allow_documentation_changes=Fal
                             if receipt["path"] == finding["evidence"])
             if picked.get("app") != original.get("app"):
                 raise E2EError("Accepted verification must retain the original app build")
-        selected = set(picked["collected"])
+        selected = set(active_scopes[platform])
         if not selected or exceptions - selected:
             raise E2EError("Accepted findings differ from the selected scenarios")
         remaining = selected - exceptions
@@ -880,7 +962,7 @@ def validate_verdict(task_root, work_item_id, *, allow_documentation_changes=Fal
             raise E2EError("Continued verification must retain the selected app build")
         if not run.get("app") or not run["app"].get("artifact_digest"):
             raise E2EError("An actual run needs an identified app artifact")
-        expected_nodes = set(picked["collected"]) - {finding["test"] for finding in accepted if finding["platform"] == run["platform"]}
+        expected_nodes = set(active_scopes[run["platform"]]) - {finding["test"] for finding in accepted if finding["platform"] == run["platform"]}
         if {item["nodeid"] for item in run.get("outcomes", [])} != expected_nodes:
             raise E2EError("Actual execution differs from the selected checks")
         if not run["ok"] and not any(

@@ -102,6 +102,9 @@ fresh installs, selected-test limits, time budgets and failure retries. Machine 
 ENV instead. See [e2e-workflow.md](e2e-workflow.md). Failed test regressions use the correction loop;
 environment failures require recovery. Evidenced baseline failures also allow an explicit operator
 decision. Retry Current Stage starts a new gate after recovery.
+New gates validate the selected scenarios against the project's maintained coverage source before
+installing the app. Retired neighbours are excluded with recorded reasons; an inactive required check
+or unavailable source requests strategy recovery. Existing accepted continuations retain their bindings.
 QA native verdicts govern this routing even when a worker submits a blocked-cycle outcome. A legacy
 "Verification cycle resolution" item can also be retried after recovery; retry replaces it with a fresh
 verification work item and strategy.
