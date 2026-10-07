@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 
-TERMINAL_SUBTASK_STATUSES = frozenset({"ready for test", "resolved", "released"})
+TERMINAL_SUBTASK_STATUSES = frozenset({"readyfortest", "resolved", "released", "done", "closed", "wontdo", "cancelled", "canceled"})
+
+
+def is_terminal_subtask_status(status: str) -> bool:
+    return re.sub(r"[^a-z0-9]", "", status.lower()) in TERMINAL_SUBTASK_STATUSES
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +54,7 @@ def unresolved_subtasks(subtasks: list[SnapshotSubtask]) -> list[SnapshotSubtask
     return [
         subtask
         for subtask in subtasks
-        if subtask.status.strip().lower() not in TERMINAL_SUBTASK_STATUSES
+        if not is_terminal_subtask_status(subtask.status)
     ]
 
 
@@ -57,5 +62,5 @@ def completed_subtasks(subtasks: list[SnapshotSubtask]) -> list[SnapshotSubtask]
     return [
         subtask
         for subtask in subtasks
-        if subtask.status.strip().lower() in TERMINAL_SUBTASK_STATUSES
+        if is_terminal_subtask_status(subtask.status)
     ]

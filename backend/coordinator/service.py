@@ -658,6 +658,7 @@ class CoordinatorService:
                     event.event_type == "session_escalated_to_operator"
                     or event.event_type == "role_runtime_error_reported"
                     or event.event_type == "git_commit_failed"
+                    or event.event_type == "subtask_transition_failed"
                 )
             ):
                 blocker_event = event
@@ -708,6 +709,15 @@ class CoordinatorService:
         review_family, review_lane = self._interactive_review_context(source_event.payload)
         if source_event.event_type == "git_commit_failed":
             return self._git_commit_failed_interactive_summary(session, source_event)
+        if source_event.event_type == "subtask_transition_failed":
+            return {
+                "available": True, "role_name": None, "current_stage": session.current_stage,
+                "summary": "Subtask Jira transition failed",
+                "details": source_event.payload.get("details") or "Retry the Jira checkpoint after resolving the transition error.",
+                "source_event_type": source_event.event_type, "source_reason": source_event.event_type,
+                "review_family": None, "review_lane": None, "needs_operator_input": False,
+                "resume_strategy": "retry_current_stage",
+            }
 
         details = source_event.payload.get("details")
         if not str(details or "").strip() and source_event.payload.get("reason") == "spec_verification_blocked":
@@ -4118,7 +4128,7 @@ class CoordinatorService:
 
         latest_blocker = self._latest_event_by_type(
             session.id,
-            {"session_escalated_to_operator", "role_runtime_error_reported", "git_commit_failed"},
+            {"session_escalated_to_operator", "role_runtime_error_reported", "git_commit_failed", "subtask_transition_failed"},
         )
         if (
             latest_blocker is not None
@@ -4208,6 +4218,8 @@ class CoordinatorService:
 
         if latest_blocker is not None and latest_blocker.event_type == "git_commit_failed":
             return self._retry_git_commit_failed_session(session, latest_blocker)
+        if latest_blocker is not None and latest_blocker.event_type == "subtask_transition_failed":
+            return self._retry_subtask_transition_failed_session(session, latest_blocker)
 
         previous_work_item = self._find_operator_pending_work_item(session.id)
         if previous_work_item is None:
@@ -4312,6 +4324,39 @@ class CoordinatorService:
             "Resubmit only the terminal outcome for the current routed work item using the deterministic writer helper. "
             "Reuse the work you already completed, preserve the same outcome, do not use manual files or fallback scripts, and stop immediately after the helper succeeds."
         )
+
+    def _retry_subtask_transition_failed_session(self, session: Session, blocker_event: Event) -> tuple[Session, Event, Event]:
+        pending = {}
+        for event in self.event_repository.list_for_session(session.id):
+            key = event.payload.get("subtask_key")
+            if event.event_type == "subtask_transition_failed" and isinstance(key, str):
+                pending[key] = event
+            elif event.event_type == "subtask_transition_completed":
+                pending.pop(key, None)
+        if not pending:
+            raise IntakeError(f"Session {session.id} has no pending subtask Jira checkpoint")
+        items = []
+        for key in pending:
+            item = self._latest_completed_subtask_work_item(session.id, key)
+            if item is None:
+                raise IntakeError(f"No completed implementation checkpoint for subtask {key}")
+            items.append((key, item))
+        retried = self._append_event(
+            session_id=session.id, event_type="session_retried_by_operator", producer_type="operator",
+            payload={"retry_mode": "subtask_transition_failed", "subtask_keys": list(pending),
+                     "blocked_event_id": blocker_event.id, "current_stage": session.current_stage},
+        )
+        # Keep the session parked until all Jira checkpoints and snapshot refresh finish.
+        # Resume from committed work; never rerun implementation or create another commit.
+        for key, item in items[:-1]:
+            session, failed = self._complete_subtask_in_jira(session=session, subtask_key=key)
+            if failed is not None:
+                return session, retried, failed
+        key, item = items[-1]
+        updated, followup = self._continue_after_subtask_checkpoint(
+            session=session, source_event=retried, active_item=item, parsed_subtask=self._parse_subtask_work_item_title(item.title),
+        )
+        return updated, retried, followup
 
     def _retry_git_commit_failed_session(self, session: Session, blocker_event: Event) -> tuple[Session, Event, Event]:
         context = str(blocker_event.payload.get("context") or "").strip()
@@ -5351,6 +5396,10 @@ class CoordinatorService:
         if active_item is None or active_item.work_type != "subtask_implementation":
             raise IntakeError("No active subtask implementation work item found for the session")
 
+        self._append_event(
+            session_id=session.id, event_type="subtask_checkpoint_started", producer_type="coordinator",
+            payload={"work_item_id": active_item.id, "source_event_id": source_event.id},
+        )
         self.work_item_repository.update_status(active_item.id, WorkItemStatus.COMPLETED)
         parsed_subtask = self._parse_subtask_work_item_title(active_item.title)
         subtask_context = (
@@ -5423,6 +5472,10 @@ class CoordinatorService:
                 current_owner=IMPLEMENTER_ROLE,
             )
             session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            self._append_event(
+                session_id=session.id, event_type="subtask_checkpoint_completed", producer_type="coordinator",
+                payload={"work_item_id": active_item.id},
+            )
             self._dispatch_role_work(
                 session=session,
                 role=implementer_role,
@@ -5447,6 +5500,10 @@ class CoordinatorService:
                 },
             )
 
+        self._append_event(
+            session_id=session.id, event_type="subtask_checkpoint_completed", producer_type="coordinator",
+            payload={"work_item_id": active_item.id},
+        )
         return self._advance_after_coding_completion(
             session=session,
             source_event=source_event,
@@ -5519,6 +5576,8 @@ class CoordinatorService:
                     "returncode": result.returncode,
                     "current_stage": session.current_stage,
                     "status": session.status.value,
+                    "details": self._snapshot_failure_details(result.stderr, result.stdout)
+                    or f"Jira transition for {subtask_key} exited with code {result.returncode}.",
                 },
             )
             return session, event
@@ -8371,6 +8430,10 @@ class CoordinatorService:
         return task_keys
 
     def _reconcile_session_dispatch(self, session: Session) -> bool:
+        if session.current_stage == "subtask_implementation_requested":
+            checkpoint = self._latest_event_by_type(session.id, {"subtask_checkpoint_started", "subtask_checkpoint_completed"})
+            if checkpoint is not None and checkpoint.event_type == "subtask_checkpoint_started":
+                return False
         if session.current_owner is None:
             return False
 

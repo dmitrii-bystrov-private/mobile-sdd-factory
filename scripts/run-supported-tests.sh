@@ -67,6 +67,9 @@ run_step "Shell regression: snapshot errors" \
 run_step "Shell regression: QA e2e routing" \
   bash scripts/tests/test_e2e_routing.sh
 
+run_step "Shell regression: QA subtask lifecycle" \
+  bash scripts/tests/test_complete_qa_subtask.sh
+
 run_step "Shell regression: iOS verification resource queue" \
   bash scripts/tests/test_ios_verification_queue.sh
 

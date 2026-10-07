@@ -161,6 +161,9 @@ Previously deferred responses cannot be replayed after completion to block or pa
 must inspect the final command output and submit fresh evidence. Cache pruning can precede testing;
 the native run's preparation step and terminal exit govern progress, not a log success marker alone.
 Retry starts a new work item; a delayed response for the closed gate cannot pass it or request code fixes.
+If a subtask Jira transition fails after its implementation was committed, retry resumes that checkpoint,
+refreshes the subtask snapshot and routes the next open subtask without another commit or implementation.
+Closed/cancelled subtasks keep their Jira status. The next assignment waits for the preceding checkpoint.
 QA documentation corrections after successful E2E verification do not require another run when only
 committed regular documentation files changed. MR handoff validates this and keeps the original report.
 If it fails, the Recovery card shows the MR-description error. Changes to execution inputs require

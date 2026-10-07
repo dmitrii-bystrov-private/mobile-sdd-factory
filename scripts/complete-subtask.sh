@@ -28,6 +28,13 @@ if [[ "$KEY" == QA-* ]]; then
     echo "Already done: $KEY is in $current_status"
     exit 0
   fi
+  if [[ "$(twg_jira_status_token "$current_status")" == "todoqa" ]]; then
+    twg_jira_transition_to_first_available_status "$transition_json" "$KEY" "IN PROGRESS QA" >/dev/null
+    current_status="IN PROGRESS QA"
+  fi
+  if [[ "$(twg_jira_status_token "$current_status")" == "inprogressqa" ]]; then
+    twg_jira_transition_to_first_available_status "$transition_json" "$KEY" "CODE REVIEW QA" >/dev/null
+  fi
   actual_target="$(twg_jira_transition_to_first_available_status "$transition_json" "$KEY" "Done")"
   echo "Done: $KEY -> $actual_target"
   exit 0

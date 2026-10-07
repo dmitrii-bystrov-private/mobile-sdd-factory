@@ -125,7 +125,7 @@ twg_jira_status_is_resolved_or_later() {
   local status_token
   status_token="$(twg_jira_status_token "$1")"
   case "$status_token" in
-    resolved|released|done|closed)
+    resolved|released|done|closed|wontdo|cancelled|canceled)
       return 0
       ;;
     *)

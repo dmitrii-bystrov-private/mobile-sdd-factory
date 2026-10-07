@@ -2006,6 +2006,78 @@ class SessionCreationTests(unittest.TestCase):
         self.assertNotEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
         self.assertIsNotNone(next_event)
 
+    def test_subtask_transition_retry_uses_committed_work_and_discovers_new_snapshot_scope(self) -> None:
+        key = "QA-90001"
+        session, _, _ = self.coordinator.create_task_session(
+            key, workflow_profile="oneshot", policy={"review_policy": "disabled", "doc_harvest_policy": "disabled"})
+        role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        for subtask in ("QA-90002", "QA-90003"):
+            self.work_item_repository.create(
+                session_id=session.id, work_type="subtask_implementation", owner_role_id=role.id,
+                title=f"Subtask implementation for {subtask}: Completed work", status=WorkItemStatus.COMPLETED)
+            self.event_repository.append(
+                session_id=session.id, event_type="subtask_transition_failed", producer_type="coordinator",
+                payload={"subtask_key": subtask, "current_stage": "subtask_implementation_requested",
+                         "details": "Done transition is unavailable"})
+        self.session_repository.update_stage_and_owner(session.id, current_stage="subtask_implementation_requested", current_owner=None)
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        self.snapshot_adapter.set_statuses_output(key, """# Statuses
+| Key | Type | Title | Status |
+| --- | --- | --- | --- |
+| QA-90001 | Story | Parent | CODE REVIEW QA |
+| QA-90002 | Sub-task | Implemented fix | Done |
+| QA-90003 | Sub-task | Cancelled by operator | Won’t Do |
+| QA-90004 | Sub-task | New follow-up | TO DO QA |
+""")
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+        self.assertTrue(summary["available"])
+        self.assertEqual("retry_current_stage", summary["resume_strategy"])
+        self.assertIn("Done transition is unavailable", summary["details"])
+        before = list(self.gitlab_adapter.commit_requests)
+        updated, event, followup = self.coordinator.retry_session(session.id)
+        self.assertEqual("subtask_transition_failed", event.payload["retry_mode"])
+        self.assertEqual(["QA-90002", "QA-90003"], self.jira_adapter.completed_subtasks)
+        self.assertEqual(before, self.gitlab_adapter.commit_requests)
+        self.assertEqual(SessionStatus.ACTIVE, updated.status)
+        self.assertEqual("QA-90004", followup.payload["subtask_key"])
+        active = self.coordinator._find_active_work_item_for_role(session.id, role.id)
+        self.assertIn("QA-90004", active.title)
+
+    def test_subtask_jira_checkpoint_prevents_next_assignment_until_snapshot_is_refreshed(self) -> None:
+        key = "QA-90011"
+        session, _, _ = self.coordinator.create_task_session(
+            key, workflow_profile="oneshot", policy={"review_policy": "disabled", "doc_harvest_policy": "disabled"})
+        role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        current = self.work_item_repository.create(
+            session_id=session.id, work_type="subtask_implementation", owner_role_id=role.id,
+            title="Subtask implementation for QA-90012: First", status=WorkItemStatus.ASSIGNED)
+        queued = self.work_item_repository.create(
+            session_id=session.id, work_type="subtask_implementation", owner_role_id=None,
+            title="Subtask implementation for QA-90013: Second", status=WorkItemStatus.UNASSIGNED)
+        session = self.session_repository.update_stage_and_owner(
+            session.id, current_stage="subtask_implementation_requested", current_owner=role.role_name)
+        session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        def assert_parked():
+            live = self.session_repository.get_by_id(session.id)
+            self.assertFalse(self.coordinator._reconcile_session_dispatch(live))
+            self.assertEqual(WorkItemStatus.UNASSIGNED, self.work_item_repository.get_by_id(queued.id).status)
+        original = self.jira_adapter.complete_subtask
+        def complete(subtask):
+            assert_parked()
+            return original(subtask)
+        original_snapshot = self.snapshot_adapter.run
+        def snapshot(task):
+            assert_parked()
+            return original_snapshot(task)
+        with patch.object(self.jira_adapter, "complete_subtask", side_effect=complete), \
+                patch.object(self.snapshot_adapter, "run", side_effect=snapshot):
+            updated, _, followup = self.coordinator.handle_role_output(
+                session.id, role.role_name, "completed",
+                {"work_item_id": current.id, "subtask_key": "QA-90012", "summary": "Implemented"})
+        self.assertEqual("subtask_implementation_requested", updated.current_stage)
+        self.assertEqual("QA-90013", followup.payload["subtask_key"])
+        self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(queued.id).status)
+
     def test_create_task_session_creates_role_workspaces(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30000W",
