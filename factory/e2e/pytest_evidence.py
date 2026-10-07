@@ -6,6 +6,7 @@ import subprocess
 import inspect
 from copy import copy
 from functools import wraps
+from pathlib import Path
 
 import pytest
 
@@ -37,6 +38,15 @@ def pytest_configure(config):
     @wraps(original)
     def start_session(self, capabilities, *args, **kwargs):
         current = capabilities if isinstance(capabilities, dict) else capabilities.to_capabilities()
+        expected = os.environ.get("FACTORY_E2E_PLATFORM")
+        requested = str(current.get("platformName", "")).lower()
+        if expected and requested != expected:
+            details = (f"Appium client requested platform {requested or '(missing)'}, but the factory gate "
+                       f"selected {expected}. Map the project's platform input in the execution recipe before session creation.")
+            diagnostic = os.environ.get("FACTORY_E2E_DIAGNOSTIC")
+            if diagnostic:
+                Path(diagnostic).write_text(json.dumps({"origin": "execution_recipe", "details": details}) + "\n")
+            pytest.exit(details, returncode=2)
         # A test recipe cannot redirect a leased session to another user's device.
         try:
             return original(self, {**current, **assigned}, *args, **kwargs)

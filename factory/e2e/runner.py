@@ -375,7 +375,8 @@ def execution_environment(machine, repo, platform, target, config, context, app=
                 "FACTORY_E2E_APPIUM_URL": f"http://127.0.0.1:{context['appium_port']}/wd/hub",
                 "FACTORY_E2E_FRESH_INSTALL": "1" if fresh else "0", "FACTORY_E2E_APP_ID": context["application_id"],
                 "FACTORY_E2E_ADB": context["adb"], "FACTORY_E2E_APP": context["app_path"],
-                "FACTORY_E2E_RESULTS": context["results"], "FACTORY_E2E_COLLECTION": context["collected"]})
+                "FACTORY_E2E_RESULTS": context["results"], "FACTORY_E2E_COLLECTION": context["collected"],
+                "FACTORY_E2E_DIAGNOSTIC": context.get("diagnostic", "")})
     env.pop("FACTORY_E2E_APPIUM_CAPABILITIES", None)
     if platform == "ios" and machine.ios_pool:
         env["FACTORY_E2E_APPIUM_CAPABILITIES"] = json.dumps({
@@ -402,6 +403,7 @@ def phase(machine, repo, platform, target, app, policy, folder, name, selectors,
     log, junit = folder / f"{platform}-{name}.log", folder / f"{platform}-{name}.xml"
     outcomes_path = folder / f"{platform}-{name}-outcomes.json"
     collection_path = folder / f"{platform}-{name}-collection.json"
+    diagnostic_path = folder / f"{platform}-{name}-diagnostic.json"
     config = policy["_configurations"][platform]
     context = {"python": str(machine.python), "repo": str(repo), "task_root": str(policy["_task_root"]),
                "platform": platform, "device_id": target.get("udid", target.get("serial", "")),
@@ -410,7 +412,7 @@ def phase(machine, repo, platform, target, app, policy, folder, name, selectors,
                "app_path": (app or {}).get("path", ""), "appium_port": str(machine.appium_port),
                "android_sdk": str(machine.android_sdk), "adb": target.get("adb", ""),
                "factory_plugin_dir": str(Path(__file__).parent), "junit": str(junit),
-               "results": str(outcomes_path), "collected": str(collection_path),
+               "results": str(outcomes_path), "collected": str(collection_path), "diagnostic": str(diagnostic_path),
                "test_timeout_seconds": str(policy["test_timeout_seconds"])}
     context.update({name: str(target.get(name, "")) for name in
                     ("wda_local_port", "mjpeg_server_port", "derived_data_path")})
@@ -473,6 +475,12 @@ def phase(machine, repo, platform, target, app, policy, folder, name, selectors,
     file = folder / f"{platform}-{name}.json"
     write_json(file, receipt)
     receipt["path"] = str(file)
+    if diagnostic_path.exists():
+        diagnostic = read_json(diagnostic_path)
+        if (isinstance(diagnostic, dict) and diagnostic.get("origin") == "execution_recipe"
+                and isinstance(diagnostic.get("details"), str) and diagnostic["details"]):
+            raise E2EPlanError(f"{diagnostic['details']} Evidence: {file}; log: {log}")
+        raise E2EError(f"Invalid execution diagnostic; see {diagnostic_path}")
     return receipt
 
 

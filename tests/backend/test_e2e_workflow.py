@@ -552,6 +552,20 @@ class E2EWorkflowTests(unittest.TestCase):
         self.assertEqual([], verdict["classifications"])
         self.assertIn("runner failed before a valid test verdict", verdict["details"])
 
+    def test_platform_recipe_failure_requests_preparation_without_retry_or_baseline(self):
+        original = self.fake_phase
+        def phase(*args, **kwargs):
+            receipt = original(*args, **kwargs)
+            if receipt["phase"] == "run":
+                raise runner.E2EPlanError("Client requested Android while the gate selected iOS")
+            return receipt
+        with patch.object(runner, "phase", side_effect=phase):
+            verdict = self.run_gate()
+        self.assertEqual("blocked", verdict["result"])
+        self.assertEqual("execution_recipe", verdict["failure_origin"])
+        self.assertEqual(["collection", "selection", "run"], [call[0] for call in self.calls])
+        self.assertEqual("E2E execution strategy needs correction", runner.describe_verdict(verdict)["summary"])
+
     def test_shared_server_preflight_failure_does_not_boot_or_install(self):
         with patch.object(runner, "ensure_server", side_effect=runner.E2EError("Appium unavailable")), \
                 patch.object(runner, "install") as install, \

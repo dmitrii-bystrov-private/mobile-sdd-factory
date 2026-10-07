@@ -141,6 +141,9 @@ The optional pytest_evidence plugin applies the assigned endpoint and capabiliti
 the session, overriding framework defaults without importing project configuration. A session connection
 failure exits with environment code 2, stopping retries and baseline comparisons. Appium preflight runs
 before app installation. Other adapters must consume the assigned endpoint and capabilities explicitly.
+The pytest adapter rejects an Appium platformName that differs from the selected platform before any
+session request. This requires execution-recipe preparation, with native diagnostic evidence in
+FACTORY_E2E_DIAGNOSTIC; fix the project's platform input rather than comparing baseline tests.
 Execution tokens {wda_local_port}, {mjpeg_server_port} and
 {derived_data_path} are also available for recipes. Never stop another simulator or share a WDA port.
 

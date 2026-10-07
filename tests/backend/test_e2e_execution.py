@@ -242,6 +242,60 @@ sys.exit(0 if result.wasSuccessful() else 1)
             finally:
                 for cleanup in reversed(cleanups): cleanup()
 
+    def test_platform_mismatch_is_reported_before_any_appium_request(self):
+        import pytest
+        from factory.e2e import pytest_evidence
+        calls = []
+        class Driver:
+            def start_session(self, capabilities):
+                calls.append(capabilities)
+                return capabilities
+        with tempfile.TemporaryDirectory() as directory:
+            diagnostic = Path(directory) / "diagnostic.json"
+            cleanups = []
+            with patch.dict(sys.modules, fake_appium_modules(Driver)), patch.dict(os.environ, {
+                "FACTORY_E2E_PLATFORM": "ios", "FACTORY_E2E_APPIUM_CAPABILITIES": '{"appium:udid":"leased"}',
+                "FACTORY_E2E_DIAGNOSTIC": str(diagnostic), "FACTORY_E2E_APPIUM_URL": "",
+            }):
+                pytest_evidence.pytest_configure(SimpleNamespace(add_cleanup=cleanups.append))
+                try:
+                    for caps in ({"platformName": "Android"}, {}):
+                        with self.assertRaises(pytest.exit.Exception) as raised:
+                            Driver().start_session(caps)
+                        self.assertEqual(2, raised.exception.returncode)
+                        self.assertEqual([], calls)
+                        self.assertEqual("execution_recipe", json.loads(diagnostic.read_text())["origin"])
+                    diagnostic.unlink()
+                    self.assertEqual("leased", Driver().start_session({"platformName": "iOS"})["appium:udid"])
+                    self.assertEqual(1, len(calls))
+                    self.assertFalse(diagnostic.exists())
+                finally:
+                    for cleanup in reversed(cleanups): cleanup()
+
+    def test_native_recipe_diagnostic_keeps_receipt_and_requests_preparation_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "diagnose.py"
+            script.write_text('import json,os\n'
+                              'with open(os.environ["FACTORY_E2E_DIAGNOSTIC"],"w") as out:\n'
+                              '    json.dump({"origin":"execution_recipe","details":"Client requested Android for iOS gate"},out)\n'
+                              'raise SystemExit(2)\n')
+            runner.git(root, "init")
+            runner.git(root, "config", "user.name", "Test")
+            runner.git(root, "config", "user.email", "test@example.invalid")
+            runner.git(root, "add", ".")
+            runner.git(root, "commit", "-m", "Diagnostic fixture")
+            config = {"commands": {"run": ["{python}", "{repo}/diagnose.py", "{selectors}"]}}
+            policy = {"run_timeout_seconds": 10, "test_timeout_seconds": 10, "_task_root": root,
+                      "_configurations": {"ios": config}}
+            machine = Machine(root, Path(sys.executable), root, "device", "", "", root, "appium", 4743)
+            from factory.e2e.execution import E2EPlanError
+            with self.assertRaisesRegex(E2EPlanError, "Client requested Android for iOS gate"):
+                runner.phase(machine, root, "ios", {"udid": "device"}, None, policy, root, "run", ["opaque-check"])
+            receipt = json.loads((root / "ios-run.json").read_text())
+            self.assertEqual(2, receipt["exit_code"])
+            self.assertFalse(receipt["ok"])
+
     def test_transport_failure_aborts_the_real_pytest_command_before_the_next_check(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -255,7 +309,7 @@ sys.exit(0 if result.wasSuccessful() else 1)
                 'from urllib3.exceptions import MaxRetryError\n'
                 'class WebDriver:\n'
                 '    def __init__(self, command_executor="old-server"):\n'
-                '        self.start_session({})\n'
+                '        self.start_session({"platformName":"iOS"})\n'
                 '    def start_session(self, caps):\n'
                 '        raise MaxRetryError("Connection refused")\n')
             (root / "checks/test_transport.py").write_text(
