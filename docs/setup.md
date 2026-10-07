@@ -91,7 +91,14 @@ When it is not set, the verification scripts auto-detect a single `.xcworkspace`
 `SDD_IOS_DEFAULT_SCHEME` is used when the generated verification strategy does not provide a preferred scheme.
 `IOS_RUN_DEVICE_ID` is used by the operator UI manual iOS launch action. It is separate from the verification simulator so manual app inspection does not have to share the test runner destination. If unset, the launch helper falls back to `TESTING_DEVICE_ID`. Manual launches reuse the task-local iOS verification DerivedData cache and keep it until the task is cleaned up.
 
-`IOS_MIN_FREE_DISK_GB` controls automatic task-local iOS DerivedData pruning before build, test, and manual launch operations. The default is `50`. When free space on `$SDD_WORKDIR` drops below the threshold, older sibling task caches are removed while the current task and active iOS task locks are preserved. Set `IOS_DERIVED_DATA_PRUNE_ENABLED=0` to disable pruning.
+`IOS_MIN_FREE_DISK_GB` controls automatic task-local iOS DerivedData pruning; the default is `50`.
+The shared check runs before preparing verification files, snapshot creation and result delivery, and
+periodically through backend persistence activity, in addition to build/test/launch checks.
+The backend check is throttled to once per minute, with a cross-process cleanup lock. Only older
+sibling DerivedData caches with known low-priority statuses are eligible. Current tasks, live iOS
+locks and unfinished factory sessions are protected; logs, xcresult evidence and source checkouts are retained.
+Background/client checks use local status snapshots and skip unknown statuses. An insufficient cleanup
+does not authorize deleting protected caches. Set `IOS_DERIVED_DATA_PRUNE_ENABLED=0` to disable pruning.
 
 `REVIEW_MESSAGE_CACHE_TTL_SECONDS` controls when cached MR review message previews become stale. The default is `600`; stale previews are shown immediately and refreshed in the background by the operator UI.
 

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
+from factory.disk_space import DiskSpaceGuard, disk_space_failure
 
 from backend.api.routes_artifacts import router as artifacts_router
 from backend.api.routes_events import router as events_router
@@ -25,6 +28,21 @@ def create_app() -> FastAPI:
     )
     dependencies = build_dependencies()
     app.state.dependencies = dependencies
+
+    @app.middleware("http")
+    async def recover_disk_pressure(request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as error:
+            if not disk_space_failure(error):
+                raise
+            # The failed mutation is never replayed here; the caller controls retry.
+            config = dependencies.config
+            guard = DiskSpaceGuard(config.workdir_root, config.repo_root, config.database_path)
+            await run_in_threadpool(guard.check, force=True)
+            return JSONResponse(status_code=503, content={"detail":
+                "Not enough disk space to persist this operation. Low-priority task caches were checked. Free disk space, then retry the same operation."})
+
     loop_runner = getattr(dependencies, "loop_runner", None)
     if loop_runner is not None and hasattr(loop_runner, "start"):
         loop_runner.start()

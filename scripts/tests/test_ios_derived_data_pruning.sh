@@ -89,6 +89,7 @@ test -d "$LOCKED_DD"
 test -d "$PROTECTED_DEV_DD"
 test -d "$PROTECTED_TEST_DD"
 test ! -d "$REMOVE_DD"
+test ! -d "$(verification_ios_task_lock_dir "$REMOVE_KEY")"
 test -d "$FRESH_DD"
 grep -q "Skipping active iOS task cache: $LOCKED_KEY" "$WORKDIR/prune.stdout"
 grep -q "Skipping active-work iOS task cache: $PROTECTED_DEV_KEY (In Progress)" "$WORKDIR/prune.stdout"
@@ -97,3 +98,21 @@ grep -q "Removed iOS DerivedData cache for $REMOVE_KEY" "$WORKDIR/prune.stdout"
 grep -q "Disk space target reached: 60GB free" "$WORKDIR/prune.stdout"
 
 echo "ios derived data pruning test passed"
+
+# Backend/client checks use only local status evidence and protect unfinished factory sessions.
+mkdir -p "$REMOVE_DD"
+printf '| Task | Title | Type | Status |\n| %s | task | Story | Code review |\n' "$REMOVE_KEY" > "$SDD_WORKDIR/$REMOVE_KEY/statuses.md"
+printf '| Task | Title | Type | Status |\n| %s | task | Story | Code review |\n' "$FRESH_KEY" > "$SDD_WORKDIR/$FRESH_KEY/statuses.md"
+cat >"$WORKDIR/twg" <<'EOF'
+#!/usr/bin/env bash
+echo 'local cleanup must not call Jira' >&2
+exit 99
+EOF
+verification_prune_ios_derived_data_if_needed "$CURRENT_KEY" local "$FRESH_KEY" >"$WORKDIR/local-prune.stdout"
+test ! -d "$REMOVE_DD"
+test -d "$FRESH_DD"
+test -d "$PROTECTED_DEV_DD"
+test -d "$CURRENT_DD"
+grep -q "Skipping active factory task cache: $FRESH_KEY" "$WORKDIR/local-prune.stdout"
+grep -q "Skipping iOS cache with unknown task status: $PROTECTED_DEV_KEY" "$WORKDIR/local-prune.stdout"
+echo "local disk pressure pruning test passed"

@@ -241,6 +241,16 @@ export function InteractiveStatePanel({
         </div>
       ) : null}
 
+      {interactiveStateSummary.resumeStrategy === "retry_current_stage" && !isE2EEnvironmentRecovery && !isProtocolViolation ? (
+        <div className="interactive-recovery-footer">
+          <p className="form-help">Resolve the reported environment problem, then retry the current stage.</p>
+          <button className="action-button" type="button" disabled={busy}
+            onClick={() => { void runRecoveryAction(() => apiClient.retrySession(sessionId), "Retrying current stage…"); }}>
+            Retry current stage
+          </button>
+        </div>
+      ) : null}
+
       {interactiveStateSummary.needsOperatorInput ? (
         <form className="followup-form interactive-reply-form interactive-reply-form-plain" onSubmit={(event) => void handleRuntimeInput(event)}>
           <label className="form-field">

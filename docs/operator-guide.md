@@ -152,6 +152,9 @@ Per-session overrides in the session creation form only affect the session being
 ## Recovery Actions
 
 Use recovery actions only when the workflow is blocked, paused, or failed at a specific operational seam.
+Disk-full failures during preparation or result delivery show a recovery card with `Retry current stage`.
+Claude's decorated error markers are consumed even when terminal transcript writes fail. Free disk space
+before retrying; cache cleanup preserves active tasks and the original verification evidence.
 Repeated implementer completion for a closed work item is ignored and does not need operator input.
 The current correction stays active and still goes through its required review.
 An iOS verification waiting for another task's simulator stays active and reports the resource owner.

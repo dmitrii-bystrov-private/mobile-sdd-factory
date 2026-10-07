@@ -19,6 +19,7 @@ from backend.api.schemas import (
 )
 from backend.coordinator.intake import IntakeError
 from backend.dependencies import AppDependencies
+from factory.disk_space import disk_space_failure
 
 router = APIRouter(prefix="/roles", tags=["roles"])
 
@@ -111,8 +112,9 @@ def submit_role_result(
         raise HTTPException(
             status_code=503,
             detail=(
-                "Transient backend persistence failure while accepting the terminal role result. "
-                "Retry the same write-result helper call."
+                "Not enough disk space to persist the terminal result. Free disk space, then retry the same write-result helper call."
+                if disk_space_failure(exc) else
+                "Transient backend persistence failure while accepting the terminal role result. Retry the same write-result helper call."
             ),
         ) from exc
 

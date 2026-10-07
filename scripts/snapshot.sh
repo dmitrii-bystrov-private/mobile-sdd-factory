@@ -278,6 +278,9 @@ echo "Snapshot: $PARENT_KEY  platform=$PLATFORM  workdir=$SDD_WORKDIR"
 # Stage 1: Retrieve Jira data
 # ---------------------------------------------------------------------------
 
+if [[ -x "$SCRIPT_DIR/../.venv/bin/python" ]]; then
+  "$SCRIPT_DIR/../.venv/bin/python" "$SCRIPT_DIR/../factory/disk_space.py" --task-key "$PARENT_KEY"
+fi
 TMPDIR_JIRA="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_JIRA"' EXIT
 

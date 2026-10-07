@@ -63,6 +63,7 @@ from backend.tools.ios_app_launcher import IOSAppLauncher
 from backend.tools.jira_adapter import JiraAdapter
 from backend.tools.snapshot_adapter import SnapshotAdapter
 from backend.tools.command_runner import CommandResult
+from factory.disk_space import disk_space_failure
 
 
 _CLOSED_JIRA_STATUSES = {"resolved", "done", "closed", "cancelled"}
@@ -728,6 +729,11 @@ class CoordinatorService:
         summary = source_event.payload.get("summary") or source_reason
         role_name = source_event.payload.get("role_name")
         needs_operator_input = self._payload_truthy(source_event.payload.get("needs_operator_input"))
+        resume_strategy = source_event.payload.get("resume_strategy")
+        if source_reason == "runtime_error" and disk_space_failure(f"{summary} {details}"):
+            summary = "Disk space recovery required"
+            needs_operator_input = False
+            resume_strategy = "retry_current_stage"
         e2e_decision = None
         if session.task_key.startswith("QA-") and (source_reason == "e2e_environment" or (
             source_reason == "runtime_error" and role_name == VERIFICATION_COORDINATOR_ROLE
@@ -755,7 +761,7 @@ class CoordinatorService:
             "review_family": review_family,
             "review_lane": review_lane,
             "needs_operator_input": needs_operator_input,
-            "resume_strategy": source_event.payload.get("resume_strategy"),
+            "resume_strategy": resume_strategy,
             "implement_now_count": implement_now_count,
             "tech_debt_candidate_count": tech_debt_candidate_count,
             "e2e_decision": e2e_decision,
@@ -7851,7 +7857,7 @@ class CoordinatorService:
 
     def _line_marker_type(self, line: str) -> str | None:
         normalized = line.lstrip()
-        if normalized.startswith("• "):
+        if normalized.startswith(("• ", "⏺ ")):
             normalized = normalized[2:].lstrip()
         if normalized.startswith("SDD_OUTPUT:"):
             return "output"
@@ -8024,6 +8030,8 @@ class CoordinatorService:
         role: Role,
         payload: dict,
     ) -> Session:
+        if disk_space_failure(f"{payload.get('summary', '')} {payload.get('details', '')}"):
+            payload = dict(payload, needs_operator_input=False, resume_strategy="retry_current_stage")
         if self._defer_running_ios_verification(session, role, payload, "error"):
             return session
         native_outcome = self._native_e2e_runtime_error_outcome(session, role)

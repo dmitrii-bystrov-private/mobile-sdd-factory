@@ -28,6 +28,7 @@ from backend.tools.gitlab_adapter import GitLabAdapter
 from backend.tools.ios_app_launcher import IOSAppLauncher
 from backend.tools.jira_adapter import JiraAdapter
 from backend.tools.snapshot_adapter import SnapshotAdapter
+from factory.disk_space import DiskSpaceGuard
 
 
 def _project_socket_root(config: AppConfig):
@@ -60,7 +61,8 @@ def build_dependencies() -> AppDependencies:
     """Build the root dependency graph for the backend process."""
 
     config = load_config()
-    database = Database(config.database_path)
+    space_guard = DiskSpaceGuard(config.workdir_root, config.repo_root, config.database_path)
+    database = Database(config.database_path, None if config.use_fake_adapters else space_guard.check)
     database.initialize()
 
     session_repository = SessionRepository(database)

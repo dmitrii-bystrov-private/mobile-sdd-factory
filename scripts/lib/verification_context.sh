@@ -22,6 +22,7 @@ verification_is_ios_repo() {
 
 verification_prepare_ios_context() {
   local key="$1"
+  verification_check_disk_space "$key"
   local context_root="${SDD_WORKDIR}/${key}/tmp/verification/ios"
   export SDD_IOS_VERIFICATION_CONTEXT_ROOT="$context_root"
   export SDD_IOS_DERIVED_DATA_PATH="$context_root/derived-data"
@@ -51,6 +52,7 @@ verification_prepare_ios_launch_context() {
 
 verification_prepare_android_context() {
   local key="$1"
+  verification_check_disk_space "$key"
   local context_root="${SDD_WORKDIR}/${key}/tmp/verification/android"
   export SDD_ANDROID_VERIFICATION_CONTEXT_ROOT="$context_root"
   export SDD_ANDROID_GRADLE_USER_HOME="$context_root/gradle-user-home"
@@ -306,12 +308,35 @@ verification_status_protects_ios_derived_data() {
   esac
 }
 
+verification_check_disk_space() {
+  local key="${1:-}"
+  local python="${VERIFICATION_CONTEXT_LIB_DIR}/../../.venv/bin/python"
+  if [[ -x "$python" ]]; then
+    "$python" "${VERIFICATION_CONTEXT_LIB_DIR}/../../factory/disk_space.py" --task-key "$key"
+  fi
+}
+
 verification_ios_derived_data_protected_by_status() {
   local key="$1"
+  local mode="${2:-live}"
   local status=""
 
-  if status="$(verification_snapshot_status_for_task "$key" 2>/dev/null)" && verification_status_protects_ios_derived_data "$status"; then
-    echo "  Skipping active-work iOS task cache: $key ($status)"
+  if status="$(verification_snapshot_status_for_task "$key" 2>/dev/null)"; then
+    if verification_status_protects_ios_derived_data "$status"; then
+      echo "  Skipping active-work iOS task cache: $key ($status)"
+      return 0
+    fi
+    if [[ "$mode" == local ]]; then
+      local token
+      token="$(twg_jira_status_token "$status")"
+      case "$token" in
+        todo|backlog|codereview|resolved|done|closed|cancelled|canceled|wontdo) return 1 ;;
+        *) echo "  Skipping iOS cache without a known low-priority status: $key ($status)"; return 0 ;;
+      esac
+    fi
+  fi
+  if [[ "$mode" == local ]]; then
+    echo "  Skipping iOS cache with unknown task status: $key"
     return 0
   fi
 
@@ -327,6 +352,12 @@ verification_ios_derived_data_protected_by_status() {
 
 verification_prune_ios_derived_data_if_needed() {
   local current_key="$1"
+  local mode="${2:-live}"
+  local protected=()
+  if (( $# > 2 )); then
+    shift 2
+    protected=("$@")
+  fi
 
   if [[ "${IOS_DERIVED_DATA_PRUNE_ENABLED:-1}" == "0" ]]; then
     return 0
@@ -355,22 +386,34 @@ verification_prune_ios_derived_data_if_needed() {
 
   local current_path="${SDD_WORKDIR}/${current_key}/tmp/verification/ios/derived-data"
   local candidates=()
-  local derived_data_path
-  while IFS= read -r derived_data_path; do
+  local derived_data_path task_root_path
+  while IFS= read -r task_root_path; do
+    derived_data_path="$task_root_path/tmp/verification/ios/derived-data"
     [[ -d "$derived_data_path" ]] || continue
     [[ "$derived_data_path" != "$current_path" ]] || continue
     local task_key
     task_key="$(verification_ios_derived_data_task_key "$derived_data_path")"
     [[ -n "$task_key" ]] || continue
+    local protected_key protected_task=0
+    for protected_key in "${protected[@]-}"; do
+      if [[ "$task_key" == "$protected_key" ]]; then
+        protected_task=1
+        break
+      fi
+    done
+    if [[ "$protected_task" == 1 ]]; then
+      echo "  Skipping active factory task cache: $task_key"
+      continue
+    fi
     if verification_ios_task_lock_is_active "$task_key"; then
       echo "  Skipping active iOS task cache: $task_key"
       continue
     fi
-    if verification_ios_derived_data_protected_by_status "$task_key"; then
+    if verification_ios_derived_data_protected_by_status "$task_key" "$mode"; then
       continue
     fi
     candidates+=("$(verification_path_mtime "$derived_data_path") $derived_data_path")
-  done < <(find "$SDD_WORKDIR" -path "*/tmp/verification/ios/derived-data" -type d -print 2>/dev/null)
+  done < <(find "$SDD_WORKDIR" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null)
 
   if [[ "${#candidates[@]}" -eq 0 ]]; then
     echo "⚠️  No removable sibling iOS DerivedData caches found."
@@ -385,7 +428,23 @@ verification_prune_ios_derived_data_if_needed() {
     [[ -d "$derived_data_path" ]] || continue
     local task_key
     task_key="$(verification_ios_derived_data_task_key "$derived_data_path")"
-    rm -rf "$derived_data_path"
+    if verification_ios_task_lock_is_active "$task_key"; then
+      echo "  Skipping newly active iOS task cache: $task_key"
+      continue
+    fi
+    local cache_lock
+    cache_lock="$(verification_ios_task_lock_dir "$task_key")"
+    mkdir -p "$(dirname "$cache_lock")"
+    if ! mkdir "$cache_lock" 2>/dev/null; then
+      echo "  Skipping concurrently acquired iOS task cache: $task_key"
+      continue
+    fi
+    printf '%s\n' "${BASHPID-$$}" > "$cache_lock/owner.pid"
+    if ! rm -rf "$derived_data_path"; then
+      rm -rf "$cache_lock"
+      return 1
+    fi
+    rm -rf "$cache_lock"
     removed_any=1
     echo "  Removed iOS DerivedData cache for $task_key"
 

@@ -2271,6 +2271,15 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual(503, captured.exception.status_code)
         self.assertIn("Transient backend persistence failure", str(captured.exception.detail))
 
+    def test_submit_role_result_route_identifies_disk_full(self) -> None:
+        with patch.object(self.dependencies.coordinator_service, "submit_role_result_document",
+                          side_effect=sqlite3.OperationalError("database or disk is full")):
+            with self.assertRaises(HTTPException) as captured:
+                submit_role_result(SubmitRoleResultRequest(output_type="completed", payload={"work_item_id": 999}),
+                                   dependencies=self.dependencies)
+        self.assertEqual(503, captured.exception.status_code)
+        self.assertIn("disk space", captured.exception.detail)
+
     def test_poll_session_output_route_collects_all_role_chunks(self) -> None:
         prepare_response = __import__("backend.api.routes_sessions", fromlist=["prepare_session"]).prepare_session(
             PrepareSessionRequest(task_key="IOS-40008"),

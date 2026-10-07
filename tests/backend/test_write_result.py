@@ -413,6 +413,49 @@ class WriteResultScriptTests(unittest.TestCase):
             self.assertIn("SDD_RESULT_INGRESS_ERROR", result.stderr)
             self.assertFalse(output_path.exists())
 
+    def test_shell_disk_full_does_not_send_a_request_with_an_empty_payload_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="implementer")
+            bin_dir = Path(temp_dir) / 'bin'
+            bin_dir.mkdir()
+            temporary = bin_dir / 'mktemp'
+            temporary.write_text('#!/usr/bin/env bash\necho "mktemp: No space left on device" >&2\nexit 1\n')
+            temporary.chmod(0o755)
+            curl = bin_dir / 'curl'
+            marker = Path(temp_dir) / 'curl-called'
+            curl.write_text('#!/usr/bin/env bash\ntouch "$CURL_CALLED"\nexit 1\n')
+            curl.chmod(0o755)
+            env.update(PATH=str(bin_dir) + ':' + env['PATH'], CURL_CALLED=str(marker))
+            env.pop('SDD_WORKDIR', None)
+            result = subprocess.run(['bash', str(SHELL_SCRIPT_PATH), '--work-item-id', str(work_item_id), '--summary', 'done'],
+                                    env=env, cwd=REPO_ROOT, text=True, capture_output=True)
+            self.assertEqual(10, result.returncode)
+            self.assertIn('No space left on device', result.stderr)
+            self.assertFalse(marker.exists())
+            self.assertFalse(output_path.exists())
+
+    def test_shell_5xx_then_disk_full_keeps_transport_exit_and_cleans_temporaries(self) -> None:
+        import shutil
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env, output_path, work_item_id = self._create_context(temp_dir, role_name="implementer")
+            bin_dir = Path(temp_dir) / 'bin'
+            bin_dir.mkdir()
+            marker = Path(temp_dir) / 'curl-calls'
+            env.update(REAL_MKTEMP=shutil.which('mktemp'), CURL_CALLED=str(marker), SDD_RESULT_INGRESS_RETRY_DELAY_SECONDS='0')
+            (bin_dir / 'mktemp').write_text('#!/usr/bin/env bash\nif [[ -f "$CURL_CALLED" ]]; then echo "No space left on device" >&2; exit 1; fi\nexec "$REAL_MKTEMP" "$@"\n')
+            (bin_dir / 'curl').write_text('#!/usr/bin/env bash\nprintf "called\\n" >> "$CURL_CALLED"\nprintf 503\n')
+            for command in ('mktemp', 'curl'):
+                (bin_dir / command).chmod(0o755)
+            env['PATH'] = str(bin_dir) + ':' + env['PATH']
+            env.pop('SDD_WORKDIR', None)
+            result = subprocess.run(['bash', str(SHELL_SCRIPT_PATH), '--work-item-id', str(work_item_id), '--summary', 'done'],
+                                    env=env, cwd=REPO_ROOT, text=True, capture_output=True)
+            self.assertEqual(10, result.returncode, result.stderr)
+            self.assertIn('No space left on device', result.stderr)
+            self.assertNotIn('unbound variable', result.stderr)
+            self.assertEqual(['called'], marker.read_text().splitlines())
+            self.assertFalse(output_path.exists())
+
     def test_removed_bug_fixer_role_is_not_supported(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             env, output_path, work_item_id = self._create_context(temp_dir, role_name="bug-fixer")

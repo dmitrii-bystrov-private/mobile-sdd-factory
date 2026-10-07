@@ -1642,6 +1642,42 @@ class SessionCreationTests(unittest.TestCase):
         self.assertTrue(summary["needs_operator_input"])
         self.assertIsNone(summary["resume_strategy"])
 
+    def test_claude_disk_error_becomes_recovery_instead_of_silent_active_session(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009DISK")
+        role = self.role_repository.get_by_name(session.id, "implementer")
+        item = next(item for item in self.work_item_repository.list_for_session(session.id)
+                    if item.work_type == "implementation" and item.status.value == "assigned")
+        self.session_backend.simulate_output(role.runtime_handle,
+            '⏺ SDD_ERROR: ' + json.dumps({"summary": "Result delivery failed: disk full",
+                "details": "mktemp: No space left on device", "needs_operator_input": True, "work_item_id": item.id}))
+        session, _, count = self.coordinator.collect_role_output(session.id, "implementer")
+        self.assertEqual(1, count)
+        self.assertEqual("waiting_for_operator", session.status.value)
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+        self.assertEqual("Disk space recovery required", summary["summary"])
+        self.assertFalse(summary["needs_operator_input"])
+        self.assertEqual("retry_current_stage", summary["resume_strategy"])
+        session, _, dispatch = self.coordinator.retry_session(session.id)
+        self.assertEqual("active", session.status.value)
+        self.assertEqual("implementer", session.current_owner)
+        self.assertNotEqual(item.id, dispatch.payload["work_item_id"])
+
+    def test_historical_disk_delivery_error_offers_retry_without_rewriting_event(self) -> None:
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30009OLDDISK")
+        role = self.role_repository.get_by_name(session.id, "implementer")
+        self.session_backend.simulate_output(role.runtime_handle,
+            'SDD_ERROR: {"summary":"Result delivery failed","details":"verification failed due to no disk space","needs_operator_input":false}')
+        self.coordinator.collect_role_output(session.id, "implementer")
+        event = self.event_repository.latest_for_session_by_type(session.id, {"session_escalated_to_operator"})
+        # Existing records do not have the new recovery field.
+        payload = dict(event.payload)
+        payload.pop("resume_strategy", None)
+        self.coordinator._append_event(session_id=session.id, event_type="session_escalated_to_operator",
+            producer_type="coordinator", payload=payload)
+        summary = self.coordinator.get_interactive_state_summary(session.id)
+        self.assertEqual("retry_current_stage", summary["resume_strategy"])
+        self.assertFalse(summary["needs_operator_input"])
+
     def test_get_interactive_state_summary_clears_after_operator_runtime_input(self) -> None:
         session, _, _ = self.coordinator.create_task_session(
             "IOS-30004",

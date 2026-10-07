@@ -41,13 +41,16 @@ for arg in "$@"; do
 done
 
 submit_via_ingress() {
+  if [[ -n "${SDD_WORKDIR:-}" && -x "$REPO_ROOT/.venv/bin/python" ]]; then
+    "$REPO_ROOT/.venv/bin/python" "$REPO_ROOT/factory/disk_space.py"
+  fi
   local py
   py="$(python_cmd)" || return 1
-  local payload_file
-  payload_file="$(mktemp)"
-  local response_file
-  response_file="$(mktemp)"
-  trap 'rm -f "${payload_file}" "${response_file}"' RETURN
+  local payload_file=""
+  local response_file=""
+  trap 'rm -f "${payload_file:-}" "${response_file:-}"' RETURN
+  payload_file="$(mktemp)" || return 10
+  response_file="$(mktemp)" || { rm -f "$payload_file"; return 10; }
   PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}" "${py}" - "$@" >"${payload_file}" <<'PY'
 import json
 import sys

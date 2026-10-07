@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
-from typing import Iterator
+from typing import Callable, Iterator
 
 
 class Database:
@@ -14,12 +14,15 @@ class Database:
     _CONNECT_TIMEOUT_SECONDS = 30.0
     _BUSY_TIMEOUT_MILLISECONDS = 30000
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, space_check: Callable[[], None] | None = None) -> None:
         self.path = path
+        self.space_check = space_check
         self.migrations_dir = Path(__file__).resolve().parent / "migrations"
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
+        if self.space_check is not None:
+            self.space_check()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(
             self.path,
