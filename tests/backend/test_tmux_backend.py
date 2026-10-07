@@ -120,6 +120,24 @@ class AutomaticConfirmationTests(unittest.TestCase):
 
 
 class TmuxBackendTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+    def test_failed_launcher_retains_exit_evidence_and_is_not_alive(self):
+        with tempfile.TemporaryDirectory() as root:
+            backend = TmuxSessionBackend(mode="tmux", runtime_root=Path(root))
+            session = backend.create_task_session("IOS-50020LAUNCHFAIL")
+            self.addCleanup(backend.stop_session, session)
+            script = Path(root) / "launch-role.sh"
+            script.write_text('#!/usr/bin/env bash\nprintf "Invalid MCP configuration\\n"\nexit 7\n')
+            script.chmod(0o755)
+            role = backend.spawn_role(session, "implementer", start_directory=Path(root), launch_command=[str(script)])
+            deadline = time.monotonic() + 5
+            while backend.is_role_alive(role) and time.monotonic() < deadline:
+                time.sleep(.05)
+            self.assertFalse(backend.is_role_alive(role))
+            details = backend.get_role_exit_details(role)
+            self.assertIn("code 7", details)
+            self.assertIn("Invalid MCP configuration", details)
+
     def test_tmux_launcher_submit_progress_waits_before_retry(self) -> None:
         wait_seconds = (
             TmuxSessionBackend._LAUNCHER_SUBMIT_PROGRESS_RETRIES
@@ -413,7 +431,8 @@ class TmuxBackendTests(unittest.TestCase):
             def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
                 self.calls.append(args)
                 if args[:2] == ("list-panes", "-t"):
-                    return subprocess.CompletedProcess(["tmux", *args], 0, "0: [220x60]\n", "")
+                    output = "0\n" if args[-2:] == ("-F", "#{pane_dead}") else "0: [220x60]\n"
+                    return subprocess.CompletedProcess(["tmux", *args], 0, output, "")
                 return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
 
         backend = FakeTmuxBackend()
@@ -691,6 +710,16 @@ class TmuxBackendTests(unittest.TestCase):
         backend.tmux_role_ready[role.role_id] = True
 
         self.assertFalse(backend.launcher_role_ready(role))
+
+    def test_resumed_claude_completed_startup_turn_is_ready_for_routed_work(self):
+        backend = TmuxSessionBackend(mode="tmux")
+        role = RuntimeRoleHandle(role_id="sdd-IOS-50013:implementer", session_id="sdd-IOS-50013", backend_name="tmux")
+        backend.tmux_interactive_driver_enabled[role.role_id] = True
+        backend.tmux_role_ready[role.role_id] = True
+        pane = "❯ Read RESUME_CONTEXT.json\n⏺ Ready for current work.\n✻ Crunched for 4s · done\n" \
+               "──── implementer:CHECKPOINT-PROBE-CLAUDE ─\n❯ \n────\n[Sonnet] implementer\n⏵⏵ auto mode on\n"
+        with patch.object(backend, "_tmux", return_value=subprocess.CompletedProcess([], 0, pane, "")):
+            self.assertTrue(backend.launcher_role_ready(role))
 
     def test_tmux_launcher_dispatch_token_visible_ignores_line_wrap(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):
@@ -1824,7 +1853,8 @@ class TmuxBackendTests(unittest.TestCase):
             def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
                 self.calls.append(args)
                 if args[:2] == ("list-panes", "-t"):
-                    return subprocess.CompletedProcess(["tmux", *args], 0, "0: [220x60]\n", "")
+                    output = "0\n" if args[-2:] == ("-F", "#{pane_dead}") else "0: [220x60]\n"
+                    return subprocess.CompletedProcess(["tmux", *args], 0, output, "")
                 return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
 
         backend = FakeTmuxBackend()
@@ -1860,7 +1890,8 @@ class TmuxBackendTests(unittest.TestCase):
             def _tmux(self, socket_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
                 self.calls.append(args)
                 if args[:2] == ("list-panes", "-t"):
-                    return subprocess.CompletedProcess(["tmux", *args], 0, "0: [220x60]\n", "")
+                    output = "0\n" if args[-2:] == ("-F", "#{pane_dead}") else "0: [220x60]\n"
+                    return subprocess.CompletedProcess(["tmux", *args], 0, output, "")
                 return subprocess.CompletedProcess(["tmux", *args], 0, "", "")
 
         backend = FakeTmuxBackend()

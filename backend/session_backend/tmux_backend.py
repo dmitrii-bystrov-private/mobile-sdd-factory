@@ -147,6 +147,8 @@ class TmuxSessionBackend(SessionBackend):
         normalized = self._normalize_terminal_text(stripped)
         if "─" in stripped and re.search(r"\b[a-z0-9-]+:[A-Z]+-\d+\b", stripped):
             return True
+        if re.fullmatch(r"─+\s+[a-z0-9-]+:\S+(?:\s+─+)?", stripped, re.IGNORECASE):
+            return True
         return (
             "context " in normalized
             or "weekly " in normalized
@@ -353,6 +355,9 @@ class TmuxSessionBackend(SessionBackend):
             start_directory.mkdir(parents=True, exist_ok=True)
         if self._effective_mode == "tmux":
             socket_path = self._socket_path(session.session_id)
+            retained = self._tmux(socket_path, "set-option", "-g", "remain-on-exit", "failed")
+            if retained.returncode:
+                raise RuntimeError(retained.stderr or "Could not retain failed launcher diagnostics")
             self._kill_tmux_windows_by_name(socket_path, session.session_id, role_window)
             args = [
                 "new-window",
@@ -568,8 +573,11 @@ class TmuxSessionBackend(SessionBackend):
         if current.returncode == 0:
             normalized = self._normalize_terminal_text(current.stdout)
             prompt_tail = self._latest_interactive_prompt_tail(normalized) or normalized
+            idle = self._extract_terminal_idle_signature(current.stdout)
+            completed_turn = bool(idle and self._RUNNER_FINAL_DURATION_RE.search(idle)
+                                  and "esc to interrupt" not in prompt_tail)
             if (
-                self._contains_runner_status_signal(normalized)
+                (self._contains_runner_status_signal(normalized) and not completed_turn)
                 or self._contains_runner_working_signal(normalized)
                 or "messages to be submitted after next tool call" in normalized
                 or self._contains_generic_selection_blocker(prompt_tail)
@@ -807,9 +815,20 @@ class TmuxSessionBackend(SessionBackend):
     def is_role_alive(self, role: RuntimeRoleHandle) -> bool:
         if self._effective_mode == "tmux":
             socket_path = self._socket_path(role.session_id)
-            result = self._tmux(socket_path, "list-panes", "-t", role.role_id)
-            return result.returncode == 0
+            result = self._tmux(socket_path, "list-panes", "-t", role.role_id, "-F", "#{pane_dead}")
+            return result.returncode == 0 and any(line.strip() == "0" for line in result.stdout.splitlines())
         return role.role_id in self.pending_outputs or role.role_id in self.sent_inputs or role.role_id in self.last_spawn_commands
+
+    def get_role_exit_details(self, role: RuntimeRoleHandle) -> str | None:
+        if self._effective_mode != "tmux":
+            return None
+        socket = self._socket_path(role.session_id)
+        state = self._tmux(socket, "list-panes", "-t", role.role_id, "-F", "#{pane_dead} #{pane_dead_status}")
+        if state.returncode or not state.stdout.strip().startswith("1 "):
+            return None
+        output = self._tmux(socket, "capture-pane", "-p", "-S", "-25", "-t", role.role_id)
+        details = self._strip_terminal_control_sequences(output.stdout).strip() if not output.returncode else ""
+        return f"Worker process exited with code {state.stdout.strip().split()[-1]}.\n{details}".strip()
 
     def can_suspend_role(self, role: RuntimeRoleHandle) -> bool:
         if self._effective_mode != "tmux":

@@ -2421,6 +2421,7 @@ class SessionCreationTests(unittest.TestCase):
         self.assertIn(identity, arguments)
         self.assertIn('sonnet', arguments)
         self.assertTrue(any('RESUME_CONTEXT.json' in argument for argument in arguments))
+        self.assertEqual('--', arguments[-2])
         context = json.loads((workspace / 'RESUME_CONTEXT.json').read_text())
         self.assertEqual("Keep the recorded fundamental rule", context['operator_event_history'][-1]['payload']['operator_reply'])
 
@@ -11640,6 +11641,50 @@ class SessionCreationTests(unittest.TestCase):
         events = self.event_repository.list_for_session(session.id)
         self.assertTrue(any(item.event_type == "runtime_role_auto_recovery_failed" for item in events))
         self.assertTrue(any(item.event_type == "session_escalated_to_operator" for item in events))
+
+    def test_second_worker_exit_after_recovery_preserves_work_and_offers_retry(self):
+        backend = AutoRecoveryRecordingBackend()
+        self.coordinator.session_backend = backend
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004SECONDFAIL")
+        role = self.role_repository.get_by_name(session.id, "implementer")
+        item = self.coordinator._find_active_work_item_for_role(session.id, role.id)
+        backend.mark_dead(role.runtime_handle)
+        self.coordinator.run_loop_once()
+        recovered = self.role_repository.get_by_name(session.id, "implementer")
+        backend.mark_dead(recovered.runtime_handle)
+        backend.get_role_exit_details = lambda handle: "Worker process exited with code 1. Invalid MCP configuration"
+        self.coordinator.run_loop_once()
+        state = self.session_repository.get_by_id(session.id)
+        self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, state.status)
+        self.assertEqual(RoleStatus.FAILED, self.role_repository.get_by_name(session.id, "implementer").status)
+        self.assertEqual("waiting_for_operator", self.work_item_repository.get_by_id(item.id).status.value)
+        event = self.event_repository.latest_for_session_by_type(session.id, {"session_escalated_to_operator"})
+        self.assertEqual(item.id, event.payload["work_item_id"])
+        self.assertEqual("retry_current_stage", event.payload["resume_strategy"])
+        self.assertIn("Invalid MCP", event.payload["details"])
+
+    def test_previous_work_recovery_does_not_block_new_followup_on_same_handle(self):
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004NEWFOLLOWUP")
+        role = self.role_repository.get_by_name(session.id, "implementer")
+        old = self.coordinator._find_active_work_item_for_role(session.id, role.id)
+        self.coordinator._append_event(session_id=session.id, event_type="runtime_role_auto_recovery_attempted",
+            producer_type="coordinator", payload={"role_name": role.role_name, "dead_runtime_handle": role.runtime_handle,
+                "runtime_handle": role.runtime_handle, "work_item_id": old.id})
+        self.assertTrue(self.coordinator._auto_recovery_already_attempted(session.id, role.role_name, role.runtime_handle))
+        self.work_item_repository.update_status(old.id, WorkItemStatus.COMPLETED)
+        self.work_item_repository.create(session_id=session.id, work_type="implementation", title="New followup",
+            owner_role_id=role.id, status=WorkItemStatus.ASSIGNED)
+        self.assertFalse(self.coordinator._auto_recovery_already_attempted(session.id, role.role_name, role.runtime_handle))
+
+    def test_manual_restart_resets_recovery_for_the_current_work(self):
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004MANUALRECOVERY")
+        role = self.role_repository.get_by_name(session.id, "implementer")
+        item = self.coordinator._find_active_work_item_for_role(session.id, role.id)
+        self.coordinator._append_event(session_id=session.id, event_type="runtime_role_auto_recovery_attempted",
+            producer_type="coordinator", payload={"role_name": role.role_name, "dead_runtime_handle": role.runtime_handle,
+                "work_item_id": item.id})
+        self.coordinator.restart_runtime_role(session.id, role.role_name)
+        self.assertFalse(self.coordinator._auto_recovery_already_attempted(session.id, role.role_name, role.runtime_handle))
 
 
 if __name__ == "__main__":

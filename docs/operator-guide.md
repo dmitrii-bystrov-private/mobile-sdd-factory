@@ -159,6 +159,8 @@ Completed sessions automatically stop idle agents after saving their conversatio
 Their task files, reports and operator decisions remain available. Follow-up wakes the needed role;
 manual runtime wake has a grace period before automatic sleep. Active work and pending assignments
 are preserved; ambiguous or missing history defers sleep instead of losing context.
+If a resumed worker exits again after automatic recovery, its launcher diagnostics remain available
+and Recovery offers Retry current stage. The saved conversation and pending work remain bound to the task.
 Disk-full failures during preparation or result delivery show a recovery card with `Retry current stage`.
 Claude's decorated error markers are consumed even when terminal transcript writes fail. Free disk space
 before retrying; cache cleanup preserves active tasks and the original verification evidence.

@@ -109,14 +109,14 @@ case "$launcher_name" in
     if [[ "$resume_mode" == "native" ]]; then
       [[ -n "$native_session_id" ]] || { echo "Missing bound Claude session ID" >&2; exit 1; }
       if [[ -n "$resume_prompt" ]]; then
-        exec claude --resume "$native_session_id" "${args[@]}" "$resume_prompt"
+        exec claude --resume "$native_session_id" "${args[@]}" -- "$resume_prompt"
       fi
       exec claude --resume "$native_session_id" "${args[@]}"
     fi
     if [[ -n "$native_session_id" ]]; then
       args+=("--session-id" "$native_session_id")
     fi
-    if [[ -n "$resume_prompt" ]]; then exec claude "${args[@]}" "$resume_prompt"; fi
+    if [[ -n "$resume_prompt" ]]; then exec claude "${args[@]}" -- "$resume_prompt"; fi
     exec claude "${args[@]}"
     ;;
   codex)

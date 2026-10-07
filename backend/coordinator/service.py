@@ -3550,7 +3550,11 @@ class CoordinatorService:
             return session
 
         if self._auto_recovery_already_attempted(session.id, role.role_name, role.runtime_handle):
-            return session
+            details = "The worker exited again after automatic recovery; its current work item was not completed."
+            exit_probe = getattr(self.session_backend, "get_role_exit_details", None)
+            if callable(exit_probe):
+                details = exit_probe(runtime_role) or details
+            return self._fail_owner_runtime_recovery(session, role, details)
 
         return self._attempt_dead_owner_runtime_recovery(session, role)
 
@@ -3586,7 +3590,12 @@ class CoordinatorService:
         return session
 
     def _auto_recovery_already_attempted(self, session_id: int, role_name: str, dead_runtime_handle: str) -> bool:
+        role = self.role_repository.get_by_name(session_id, role_name)
+        item = self._find_active_work_item_for_role(session_id, role.id) if role is not None else None
         for event in reversed(self.event_repository.list_for_session(session_id)):
+            if event.event_type in {"runtime_role_restarted_by_operator", "runtime_session_restarted_by_operator"}:
+                if event.event_type == "runtime_session_restarted_by_operator" or event.payload.get("role_name") == role_name:
+                    return False
             if event.event_type not in {
                 "runtime_role_auto_recovery_attempted",
                 "runtime_role_auto_recovery_failed",
@@ -3594,9 +3603,26 @@ class CoordinatorService:
                 continue
             if event.payload.get("role_name") != role_name:
                 continue
-            if event.payload.get("dead_runtime_handle") == dead_runtime_handle:
+            if item is not None:
+                recorded_item = event.payload.get("work_item_id")
+                if recorded_item is not None and recorded_item != item.id:
+                    continue
+                if recorded_item is None and ((item.source_event_id is not None and event.id < item.source_event_id)
+                        or str(event.created_at) < str(item.created_at)):
+                    continue
+            if dead_runtime_handle in {event.payload.get("dead_runtime_handle"), event.payload.get("runtime_handle")}:
                 return True
         return False
+
+    def _fail_owner_runtime_recovery(self, session: Session, role: Role, details: str) -> Session:
+        item = self._find_active_work_item_for_role(session.id, role.id)
+        self.role_repository.update_status(role.id, RoleStatus.FAILED)
+        self._append_event(session_id=session.id, event_type="runtime_role_auto_recovery_failed",
+            producer_type="coordinator", payload={"role_name": role.role_name, "dead_runtime_handle": role.runtime_handle,
+                "current_stage": session.current_stage, "work_item_id": item.id if item else None, "error": details})
+        return self._escalate_runtime_error(session, role, {"summary": "Worker could not resume",
+            "details": details, "needs_operator_input": False, "resume_strategy": "retry_current_stage",
+            "work_item_id": item.id if item else None})
 
     def _attempt_dead_owner_runtime_recovery(self, session: Session, role: Role) -> Session:
         dead_runtime_handle = role.runtime_handle
@@ -3611,38 +3637,7 @@ class CoordinatorService:
                 resume_mode=self._preferred_runtime_resume_mode((session.role_config or {}).get(role.role_name)),
             )
         except Exception as exc:
-            self.role_repository.update_status(role.id, RoleStatus.FAILED)
-            self._append_event(
-                session_id=session.id,
-                event_type="runtime_role_auto_recovery_failed",
-                producer_type="coordinator",
-                payload={
-                    "role_name": role.role_name,
-                    "dead_runtime_handle": dead_runtime_handle,
-                    "error": str(exc),
-                    "current_stage": session.current_stage,
-                },
-            )
-            self.work_item_repository.mark_assigned_as_waiting_for_operator(session.id)
-            session = self.session_repository.update_stage_and_owner(
-                session.id,
-                current_stage=session.current_stage,
-                current_owner=None,
-            )
-            session = self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
-            self._append_event(
-                session_id=session.id,
-                event_type="session_escalated_to_operator",
-                producer_type="coordinator",
-                payload={
-                    "reason": "runtime_recovery_failed",
-                    "role_name": role.role_name,
-                    "summary": "automatic runtime recovery failed",
-                    "details": str(exc),
-                    "current_stage": session.current_stage,
-                },
-            )
-            return session
+            return self._fail_owner_runtime_recovery(session, role, str(exc))
 
         role = self.role_repository.update_runtime(
             role.id,
@@ -3651,6 +3646,7 @@ class CoordinatorService:
             status=RoleStatus.RUNNING,
         )
         session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+        item = self._find_active_work_item_for_role(session.id, role.id)
         self._append_event(
             session_id=session.id,
             event_type=recovery_event_type,
@@ -3660,6 +3656,7 @@ class CoordinatorService:
                 "dead_runtime_handle": dead_runtime_handle,
                 "runtime_handle": role.runtime_handle,
                 "current_stage": session.current_stage,
+                "work_item_id": item.id if item else None,
             },
         )
         self._reactivate_restarted_owner_work(session, role)

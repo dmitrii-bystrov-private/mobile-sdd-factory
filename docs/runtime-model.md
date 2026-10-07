@@ -85,6 +85,9 @@ all roles remain live. Manual wake has the same grace period.
 Follow-up dispatch wakes only the needed role, resumes the bound conversation (without selecting the
 latest unrelated chat), and writes RESUME_CONTEXT.json from current factory state. HYDRATION.json
 governs current work IDs; historical decisions retain their original evidence/scope bindings.
+Launcher prompt arguments are separated from variadic CLI options. Failed tmux launchers retain their
+terminal and exit status. One automatic recovery is scoped to the current work item; a second exit
+requests Recovery with the current assignment preserved. Manual restart starts a new recovery attempt.
 
 This supports:
 
