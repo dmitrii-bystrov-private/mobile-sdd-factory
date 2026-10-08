@@ -2174,6 +2174,70 @@ class SessionCreationTests(unittest.TestCase):
         self.assertNotEqual(SessionStatus.WAITING_FOR_OPERATOR, updated_session.status)
         self.assertIsNotNone(next_event)
 
+    def test_retry_coding_checkpoint_commit_preserves_result_and_next_gate(self) -> None:
+        cases = [
+            ("implementation", "implementation_requested", "verification_requested"),
+            ("followup_implementation", "qa_reopen_requested", "verification_requested"),
+            ("convention_review_correction", "convention_review_correction_requested", "convention_review_requested"),
+            ("requirements_review_correction", "requirements_review_correction_requested", "convention_review_requested"),
+            ("verification_correction", "verification_correction_requested", "verification_requested"),
+            ("documentation_review_correction", "documentation_review_correction_requested", "documentation_review_requested"),
+        ]
+        for index, (work_type, stage, next_stage) in enumerate(cases):
+            with self.subTest(work_type=work_type):
+                key = f"IOS-30004CODINGCOMMIT{index}"
+                self.coordinator.create_task_session(key, workflow_profile="oneshot", policy={"review_policy":
+                    "enabled" if work_type in {"convention_review_correction", "requirements_review_correction"} else "disabled"})
+                session, _, _, _ = self.coordinator.prepare_task_session(key)
+                role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+                for prior in self.work_item_repository.list_for_session(session.id):
+                    self.work_item_repository.update_status(prior.id, WorkItemStatus.COMPLETED)
+                item = self.work_item_repository.create(session_id=session.id, work_type=work_type,
+                    title="Completed coding pass", owner_role_id=role.id, status=WorkItemStatus.ASSIGNED)
+                self.session_repository.update_stage_and_owner(session.id, current_stage=stage, current_owner=IMPLEMENTER_ROLE)
+                failure = CommandResult(command=["commit-task-state"], returncode=128, stdout="", stderr="index.lock exists")
+                success = CommandResult(command=["commit-task-state"], returncode=0, stdout="Committed", stderr="")
+                with patch.object(self.gitlab_adapter, "commit_task_state", side_effect=[failure, failure, success]) as commit:
+                    self.coordinator.submit_role_result_document(document={"output_type": "completed",
+                        "payload": {"work_item_id": item.id, "summary": "Coding pass completed"}})
+                    before = self.work_item_repository.list_for_session(session.id)
+                    failed_again, _, failed_event = self.coordinator.retry_session(session.id)
+                    self.assertEqual(SessionStatus.WAITING_FOR_OPERATOR, failed_again.status)
+                    self.assertEqual("git_commit_failed", failed_event.event_type)
+                    self.assertEqual(item.id, failed_event.payload["work_item_id"])
+                    self.assertEqual(len(before), len(self.work_item_repository.list_for_session(session.id)))
+                    updated, retried, _ = self.coordinator.retry_session(session.id)
+                    self.assertEqual(3, commit.call_count)
+                self.assertEqual("git_commit_failed", retried.payload["retry_mode"])
+                self.assertEqual(next_stage, updated.current_stage)
+                self.assertEqual(SessionStatus.ACTIVE, updated.status)
+                self.assertEqual(WorkItemStatus.COMPLETED, self.work_item_repository.get_by_id(item.id).status)
+                self.assertFalse(any(event.event_type == "role_input_dispatched" and event.payload.get("work_item_id") == item.id
+                    for event in self.event_repository.list_for_session(session.id)))
+
+    def test_retry_coding_checkpoint_rejects_mismatched_work_item_and_accepts_legacy_binding(self) -> None:
+        self.coordinator.create_task_session("IOS-30004COMMITBINDING", workflow_profile="oneshot", policy={"review_policy": "enabled"})
+        session, _, _, _ = self.coordinator.prepare_task_session("IOS-30004COMMITBINDING")
+        role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+        for prior in self.work_item_repository.list_for_session(session.id):
+            self.work_item_repository.update_status(prior.id, WorkItemStatus.COMPLETED)
+        item = self.work_item_repository.create(session_id=session.id, work_type="convention_review_correction",
+            title="Completed correction", owner_role_id=role.id, status=WorkItemStatus.COMPLETED)
+        self.session_repository.update_stage_and_owner(session.id, current_stage="convention_review_correction_requested", current_owner=None)
+        self.session_repository.update_status(session.id, SessionStatus.WAITING_FOR_OPERATOR)
+        self.event_repository.append(session_id=session.id, event_type="implementation_completed", producer_type="role",
+            payload={"work_item_id": item.id, "summary": "Correction completed"})
+        payload = {"context": "convention review fixes", "work_item_id": item.id + 1,
+            "current_stage": "convention_review_correction_requested"}
+        self.event_repository.append(session_id=session.id, event_type="git_commit_failed", producer_type="coordinator", payload=payload)
+        with self.assertRaisesRegex(IntakeError, "matching completed coding checkpoint"):
+            self.coordinator.retry_session(session.id)
+        self.assertEqual([], self.gitlab_adapter.commit_requests)
+        payload.pop("work_item_id")
+        self.event_repository.append(session_id=session.id, event_type="git_commit_failed", producer_type="coordinator", payload=payload)
+        updated, _, _ = self.coordinator.retry_session(session.id)
+        self.assertEqual("convention_review_requested", updated.current_stage)
+
     def test_subtask_transition_retry_uses_committed_work_and_discovers_new_snapshot_scope(self) -> None:
         key = "QA-90001"
         session, _, _ = self.coordinator.create_task_session(

@@ -4466,9 +4466,21 @@ class CoordinatorService:
         context = str(blocker_event.payload.get("context") or "").strip()
         subtask_match = re.fullmatch(r"subtask\s+([A-Z]+-\d+)", context)
         if subtask_match is None:
-            raise IntakeError(
-                f"Session {session.id} cannot retry git commit failure for context {context or '<empty>'}"
-            )
+            completion = next((event for event in reversed(self.event_repository.list_for_session(session.id))
+                if event.event_type == "implementation_completed" and event.id < blocker_event.id), None)
+            item = self._coding_work_item_from_completion_event(session, completion) if completion is not None else None
+            if (item is None or item.status != WorkItemStatus.COMPLETED
+                    or item.work_type != _ACTIVE_WORK_TYPE_BY_STAGE.get(session.current_stage)
+                    or self._commit_context_for_work_type(item.work_type) != context
+                    or blocker_event.payload.get("work_item_id") not in {None, item.id}
+                    or blocker_event.payload.get("current_stage") != session.current_stage):
+                raise IntakeError(f"Session {session.id} has no matching completed coding checkpoint for context {context or '<empty>'}")
+            session = self.session_repository.update_status(session.id, SessionStatus.ACTIVE)
+            retried = self._append_event(session_id=session.id, event_type="session_retried_by_operator", producer_type="operator",
+                payload={"retry_mode": "git_commit_failed", "commit_context": context,
+                         "blocked_event_id": blocker_event.id, "work_item_id": item.id, "current_stage": session.current_stage})
+            updated, followup = self._handle_implementation_completed(session, completion)
+            return updated, retried, followup
         subtask_key = subtask_match.group(1)
         active_item = self._latest_completed_subtask_work_item(session.id, subtask_key)
         if active_item is None:
@@ -5712,6 +5724,7 @@ class CoordinatorService:
         session, commit_event = self._commit_task_state(
             session,
             self._commit_context_for_work_type(active_item.work_type),
+            work_item_id=active_item.id,
         )
         if commit_event is not None:
             return session, commit_event
@@ -5792,6 +5805,7 @@ class CoordinatorService:
         self,
         session: Session,
         context: str | None,
+        work_item_id: int | None = None,
     ) -> tuple[Session, Event | None]:
         if self.gitlab_adapter is None or self.artifacts_root is None:
             return session, None
@@ -5850,6 +5864,7 @@ class CoordinatorService:
                 payload={
                     "task_key": session.task_key,
                     "context": context,
+                    "work_item_id": work_item_id,
                     "returncode": result.returncode,
                     "current_stage": session.current_stage,
                     "status": session.status.value,

@@ -71,6 +71,8 @@ The reply continues the same work item; the agent must still deliver its termina
 the factory helper. A text update in the terminal does not advance the workflow. Idle recovery
 reminds the agent of the current item and submission requirement.
 Use `Resume Session` or `Retry Current Stage` only for recovery-style blockers after the underlying problem has been fixed.
+For a failed coding checkpoint commit, Retry repeats the commit and resumes the next review or
+verification step from the accepted result. It does not rerun the completed implementation.
 
 ## Runtime Visibility
 
