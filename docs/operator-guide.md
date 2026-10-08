@@ -67,6 +67,9 @@ Typical cases:
 When this happens the session moves to `waiting_for_operator`.
 
 If the interactive state explicitly requires a direct reply in the same live role session, use `Send Runtime Input`.
+The reply continues the same work item; the agent must still deliver its terminal result through
+the factory helper. A text update in the terminal does not advance the workflow. Idle recovery
+reminds the agent of the current item and submission requirement.
 Use `Resume Session` or `Retry Current Stage` only for recovery-style blockers after the underlying problem has been fixed.
 
 ## Runtime Visibility

@@ -258,6 +258,12 @@ can retry after the existing cooldown for the same work item; the coordinator's 
 still suppresses repeated generic idle pokes. Historical capacity text during active work does not
 trigger recovery. `runtime_role_stall_poked` records the recovery reason and current work item.
 
+Live operator replies retain the active work item and include its ID, stage and terminal submission
+requirement. Idle recovery reads the latest hydration and asks for continued work or a protocol
+result instead of sending a bare dot when a routed item is bound. It preserves the routed payload,
+does not restart running commands, and never turns a conversational completion into a verdict.
+Replies to escalated launcher selection or confirmation menus retain their literal input.
+
 The platform supports:
 
 - pause / resume

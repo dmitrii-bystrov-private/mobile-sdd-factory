@@ -994,10 +994,11 @@ class SessionCreationTests(unittest.TestCase):
         self.assertEqual("operator_runtime_input_sent", event.event_type)
         self.assertEqual("active", updated_session.status.value)
         self.assertEqual("implementer", updated_session.current_owner)
-        self.assertEqual(
-            ["1"],
-            self.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
-        )
+        reply = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1]
+        self.assertIn("Operator answer: 1.", reply)
+        self.assertIn(f"Current work item: {event.payload['work_item_id']};", reply)
+        self.assertIn("stage: implementation_requested", reply)
+        self.assertIn(f"write-result.sh --work-item-id {event.payload['work_item_id']}", reply)
         self.assertEqual("1", event.payload.get("operator_reply"))
         self.assertEqual("implementation_requested", event.payload.get("continuation_stage"))
 
@@ -1042,6 +1043,58 @@ class SessionCreationTests(unittest.TestCase):
             "Use class-style screen keys; the snake_case values are not authoritative.",
             event.payload.get("operator_reply"),
         )
+        reply = self.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1]
+        self.assertIn(f"Current work item: {work_item.id};", reply)
+        self.assertIn(f"write-result.sh --work-item-id {work_item.id}", reply)
+
+    def test_correction_operator_reply_requires_terminal_result_and_recovers_dead_implementer(self) -> None:
+        for dead in [False, True]:
+            with self.subTest(dead=dead):
+                task_key = f"IOS-30002CORREPLY{int(dead)}"
+                session, _, _, _ = self.coordinator.prepare_task_session(task_key)
+                role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+                for item in self.work_item_repository.list_for_session(session.id):
+                    self.work_item_repository.update_status(item.id, WorkItemStatus.COMPLETED)
+                item = self.work_item_repository.create(session_id=session.id, work_type="verification_correction",
+                    title="Verification correction", owner_role_id=role.id, status=WorkItemStatus.ASSIGNED)
+                session = self.session_repository.update_stage_and_owner(session.id,
+                    current_stage="verification_correction_requested", current_owner=IMPLEMENTER_ROLE)
+                self.coordinator.submit_role_result_document(document={"output_type": "failed", "payload": {
+                    "work_item_id": item.id, "summary": "Choose a recovery action", "details": "Environment needs recovery",
+                    "needs_operator_input": True}})
+                if dead:
+                    self.session_backend.stop_role(RuntimeRoleHandle(role_id=role.runtime_handle,
+                        session_id=self.coordinator._runtime_session_id_for_role(role, session), backend_name=role.runtime_backend))
+                self.coordinator.send_operator_runtime_input(session.id, "Apply the environment recovery and continue.")
+                role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+                reply = self.session_backend.get_sent_inputs(role.runtime_handle)[-1]
+                if dead:
+                    self.assertIn(f"Routed work item: {item.id}.", reply)
+                else:
+                    self.assertIn(f"write-result.sh --work-item-id {item.id}", reply)
+                self.session_backend.simulate_output(role.runtime_handle, "Recovery finished. Build and tests passed.")
+                self.coordinator.collect_role_output(session.id, IMPLEMENTER_ROLE)
+                self.assertEqual("verification_correction_requested", self.session_repository.get_by_id(session.id).current_stage)
+                self.assertEqual(WorkItemStatus.ASSIGNED, self.work_item_repository.get_by_id(item.id).status)
+                updated, _, mapped, _, ignored = self.coordinator.submit_role_result_document(document={
+                    "output_type": "completed", "payload": {"work_item_id": item.id, "summary": "Environment recovery completed"}})
+                self.assertFalse(ignored)
+                self.assertEqual("implementation_completed", mapped)
+                self.assertEqual("verification_requested", updated.current_stage)
+                self.assertEqual(VERIFICATION_COORDINATOR_ROLE, updated.current_owner)
+                self.assertEqual(WorkItemStatus.COMPLETED, self.work_item_repository.get_by_id(item.id).status)
+
+    def test_launcher_menu_operator_reply_preserves_literal_selection(self) -> None:
+        for summary in ["interactive selection required", "interactive confirmation required"]:
+            with self.subTest(summary=summary):
+                key = "IOS-30002MENU" + str(len(summary))
+                session, _, _, _ = self.coordinator.prepare_task_session(key)
+                role = self.role_repository.get_by_name(session.id, IMPLEMENTER_ROLE)
+                self.session_backend.simulate_output(role.runtime_handle, "SDD_ERROR: " + json.dumps({
+                    "summary": summary, "details": "launcher-backed role requested explicit input", "needs_operator_input": True}))
+                self.coordinator.collect_role_output(session.id, IMPLEMENTER_ROLE)
+                self.coordinator.send_operator_runtime_input(session.id, "2")
+                self.assertEqual("2", self.session_backend.get_sent_inputs(role.runtime_handle)[-1])
 
     def test_operator_reply_rejects_waiting_card_echo(self) -> None:
         session, _, _ = self.coordinator.create_task_session(

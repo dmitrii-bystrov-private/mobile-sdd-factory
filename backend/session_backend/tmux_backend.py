@@ -689,16 +689,17 @@ class TmuxSessionBackend(SessionBackend):
                 return None
 
         socket_path = self._socket_path(role.session_id)
+        poke_text = "." if model_capacity_blocked else self._idle_recovery_message(role)
         if self.tmux_interactive_driver_enabled.get(role.role_id, False):
             self._write_tmux_launcher_input(
                 role.role_id,
                 socket_path,
                 role.role_id,
-                ".",
+                poke_text,
                 source="stall_poke",
             )
         else:
-            result = self._tmux(socket_path, "send-keys", "-t", role.role_id, ".", "Enter")
+            result = self._tmux(socket_path, "send-keys", "-t", role.role_id, poke_text, "Enter")
             if result.returncode != 0:
                 raise RuntimeError(result.stderr or result.stdout or "Failed to poke stalled tmux role")
 
@@ -709,9 +710,34 @@ class TmuxSessionBackend(SessionBackend):
             "stalled_seconds": round(stalled_seconds, 3),
             "threshold_seconds": self.tmux_stall_poke_threshold_seconds,
             "terminal_idle_signature_length": len(signature),
-            "poke_text": ".",
+            "poke_text": poke_text,
             "recovery_reason": "model_capacity" if model_capacity_blocked else "terminal_idle",
         }
+
+    def _idle_recovery_message(self, role: RuntimeRoleHandle) -> str:
+        workspace = self.role_working_directories.get(role.role_id)
+        if workspace is None:
+            return "."
+        try:
+            hydration = json.loads((workspace / "HYDRATION.json").read_text())
+        except (OSError, ValueError):
+            return "."
+        if not isinstance(hydration, dict):
+            return "."
+        work_item_id = hydration.get("work_item_id")
+        stage = hydration.get("current_stage")
+        if (type(work_item_id) is not int or work_item_id <= 0 or not isinstance(stage, str) or not stage
+                or hydration.get("role_name") != role.role_id.split(":", 1)[-1]):
+            return "."
+        return (
+            f"Factory is still awaiting the result for current work item {work_item_id}, stage {stage}. "
+            "Read HYDRATION.json and AGENTS.md and continue this routed work, applying recorded operator decisions. "
+            "If a command is still running, poll its existing terminal instead of starting it again. "
+            "If the work is finished, submit its appropriate terminal result through "
+            f"scripts/write-result.sh --work-item-id {work_item_id} and observe exit 0. "
+            "If a blocker remains, report it through the prescribed protocol. "
+            "A conversational update does not deliver a factory result; do not replay an earlier work item's result."
+        )
 
     def model_capacity_blocked(self, snapshot: str) -> bool:
         signature = self._extract_terminal_idle_signature(snapshot)

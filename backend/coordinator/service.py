@@ -3816,6 +3816,7 @@ class CoordinatorService:
                 return event
         return None
 
+    @_serialize_session_transition
     def send_operator_runtime_input(self, session_id: int, text: str) -> tuple[Session, Event]:
         session = self._get_session_or_raise(session_id)
         if session.status != SessionStatus.WAITING_FOR_OPERATOR:
@@ -3900,13 +3901,19 @@ class CoordinatorService:
                 },
                 force_redispatch=True,
             )
-        elif role.role_name in PERSISTENT_SESSION_ROLES:
-            self.session_backend.send_input(runtime_role, text)
         else:
             if self.session_backend.is_role_alive(runtime_role):
+                blocker = self.event_repository.latest_for_session_by_type_and_payload(
+                    session_id=session.id,
+                    event_type="session_escalated_to_operator",
+                    payload_matches={"role_name": role.role_name, "current_stage": session.current_stage},
+                )
+                launcher_selection = (blocker is not None and blocker.payload.get("work_item_id") in {None, work_item.id}
+                    and blocker.payload.get("reason") == "runtime_error"
+                    and blocker.payload.get("summary") in {"interactive selection required", "interactive confirmation required"})
                 self.session_backend.send_input(
                     runtime_role,
-                    self._operator_reply_live_message(text),
+                    text if launcher_selection else self._operator_reply_live_message(text, work_item, session.current_stage),
                 )
             else:
                 instruction = self._stage_instruction(
@@ -4014,11 +4021,17 @@ class CoordinatorService:
             "verification_cycle_review",
         }
 
-    def _operator_reply_live_message(self, text: str) -> str:
-        normalized_reply = " ".join(str(text).split()).strip()
-        if not normalized_reply:
-            normalized_reply = "[empty reply]"
-        return f"Operator answer: {normalized_reply}."
+    def _operator_reply_live_message(self, text: str, work_item: WorkItem, stage: str) -> str:
+        normalized_reply = " ".join(text.split()).strip() or "[empty reply]"
+        return (
+            f"Operator answer: {normalized_reply}. Current work item: {work_item.id}; stage: {stage}. "
+            "Apply this recorded decision to the same routed work item. Read HYDRATION.json and AGENTS.md; "
+            "do not reuse an earlier result or treat this as a separate chat request. "
+            "Continue any running command through its existing terminal; do not start duplicate work. "
+            "When this work item reaches its outcome, submit the appropriate terminal result through "
+            f"scripts/write-result.sh --work-item-id {work_item.id} and observe exit 0. "
+            "A conversational update does not deliver a factory result."
+        )
 
     def _resume_paused_session(self, session: Session) -> tuple[Session, Event, Event]:
         if session.current_owner is None:

@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import os
 import shutil
 import subprocess
@@ -455,6 +456,43 @@ class TmuxBackendTests(unittest.TestCase):
         assert result is not None
         self.assertEqual(".", result["poke_text"])
         self.assertIn(("send-keys", "-t", role.role_id, ".", "Enter"), backend.calls)
+
+    def test_idle_recovery_requests_result_for_latest_bound_work_without_overwriting_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            workspace = Path(root)
+            backend = TmuxSessionBackend(mode="recording", runtime_root=workspace)
+            backend._effective_mode = "tmux"
+            role = RuntimeRoleHandle(role_id="sdd-IOS-50010:implementer", session_id="sdd-IOS-50010", backend_name="tmux")
+            backend.role_working_directories[role.role_id] = workspace
+            backend.tmux_interactive_driver_enabled[role.role_id] = True
+            backend.tmux_stall_poke_threshold_seconds = 30
+            (workspace / "ROUTED_WORK.md").write_text("Original correction instructions")
+            for item in [11, 12]:
+                (workspace / "HYDRATION.json").write_text(json.dumps({"work_item_id": item,
+                    "role_name": "implementer", "current_stage": "verification_correction_requested"}))
+                snapshot = "Done.\n✻ Crunched for 5s\n\n❯\n"
+                backend.tmux_activity_signatures[role.role_id] = backend._extract_terminal_idle_signature(snapshot)
+                backend.tmux_activity_updated_at[role.role_id] = time.monotonic() - 31
+                backend.tmux_last_stall_poke_at.pop(role.role_id, None)
+                with patch.object(backend, "_restore_tmux_role_metadata_if_needed"), \
+                        patch.object(backend, "is_role_alive", return_value=True), \
+                        patch.object(backend, "_write_tmux_launcher_input") as send:
+                    result = backend.maybe_poke_stalled_role(role, snapshot=snapshot)
+                self.assertIn(f"write-result.sh --work-item-id {item}", result["poke_text"])
+                self.assertEqual(result["poke_text"], send.call_args.args[3])
+                self.assertIn("existing terminal", result["poke_text"])
+                self.assertEqual("Original correction instructions", (workspace / "ROUTED_WORK.md").read_text())
+
+    def test_idle_recovery_does_not_use_invalid_or_foreign_hydration(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            workspace = Path(root)
+            backend = TmuxSessionBackend(mode="recording", runtime_root=workspace)
+            role = RuntimeRoleHandle(role_id="sdd-IOS-50010:implementer", session_id="sdd-IOS-50010", backend_name="tmux")
+            backend.role_working_directories[role.role_id] = workspace
+            for hydration in [[], {"work_item_id": True}, {"work_item_id": 11,
+                    "role_name": "convention-reviewer", "current_stage": "verification_correction_requested"}]:
+                (workspace / "HYDRATION.json").write_text(json.dumps(hydration))
+                self.assertEqual(".", backend._idle_recovery_message(role))
 
     def test_tmux_mode_sets_explicit_session_size_with_env_override(self) -> None:
         class FakeTmuxBackend(TmuxSessionBackend):

@@ -2541,10 +2541,10 @@ class SessionApiTests(unittest.TestCase):
         self.assertEqual("operator_runtime_input_sent", response.event_type)
         self.assertEqual("active", response.session.status)
         self.assertEqual("implementer", response.session.current_owner)
-        self.assertEqual(
-            ["1"],
-            self.dependencies.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1:],
-        )
+        reply = self.dependencies.session_backend.get_sent_inputs(implementer_role.runtime_handle)[-1]
+        self.assertIn("Operator answer: 1.", reply)
+        self.assertIn(f"Current work item: {active_item.id};", reply)
+        self.assertIn(f"write-result.sh --work-item-id {active_item.id}", reply)
 
     def test_send_runtime_input_route_sends_live_reply_to_alive_one_shot_role(self) -> None:
         session, _, _ = self.dependencies.coordinator_service.create_task_session(
