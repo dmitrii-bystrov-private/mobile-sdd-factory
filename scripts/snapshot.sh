@@ -8,6 +8,8 @@ source "$SCRIPT_DIR/adf-to-md.sh"
 source "$SCRIPT_DIR/snapshot-formatters.sh"
 # shellcheck source=scripts/twg-utils.sh
 source "$SCRIPT_DIR/twg-utils.sh"
+# shellcheck source=scripts/lib/ios_dependencies.sh
+source "$SCRIPT_DIR/lib/ios_dependencies.sh"
 
 # snapshot.sh — Prepare a Jira workspace: snapshot artifacts + git worktree.
 #
@@ -490,7 +492,7 @@ if [[ "$PLATFORM" == "ios" ]] && $WORKTREE_CREATED; then
   echo "  mise install: OK"
 
   # 3. tuist install (resolves SPM dependencies for this worktree)
-  if ! (cd "$WORKTREE_PATH" && GIT_TERMINAL_PROMPT=0 "$MISE_CMD" exec -- tuist install); then
+  if ! ios_install_locked_dependencies "$WORKTREE_PATH" "$MISE_CMD"; then
     err "iOS bootstrap: 'tuist install' failed in $WORKTREE_PATH"
     exit 1
   fi

@@ -16,7 +16,8 @@ TASK_ROOT="$WORKDIR/$KEY"
 REPO_DIR="$TASK_ROOT/repo"
 SPEC_DIR="$TASK_ROOT/spec"
 TOOLS_DIR="$REPO_DIR/Tools/buildscripts"
-mkdir -p "$REPO_DIR" "$SPEC_DIR" "$TOOLS_DIR"
+mkdir -p "$REPO_DIR/Tuist" "$SPEC_DIR" "$TOOLS_DIR"
+printf '{"pins":[],"version":3}\n' >"$REPO_DIR/Tuist/Package.resolved"
 
 cat >"$TOOLS_DIR/load-tuist-env.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -81,6 +82,8 @@ elif expr == '.mode // ""':
     out(payload.get("mode", ""))
 elif expr == '.head // ""':
     out(payload.get("head", ""))
+elif expr == '.dependency_resolution // ""':
+    out(payload.get("dependency_resolution", ""))
 else:
     raise SystemExit(f"unsupported jq expr: {expr}")
 EOF
@@ -114,7 +117,11 @@ cat >"$REPO_DIR/bin/mise" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s|LOADED_TUIST_ENV=%s\n' "\$*" "\${LOADED_TUIST_ENV:-}" >>"$MISE_LOG"
-if [[ "\$*" == "exec -- tuist install" && ! -f "$MISE_FAIL_ONCE_MARKER" ]]; then
+if [[ "\$*" == "exec -- tuist install --force-resolved-versions" && "\${MOCK_TUIST_LOCKFILE_STATE:-}" == "stale" ]]; then
+  echo "error: \${MOCK_TUIST_LOCKFILE_STATE} Package.resolved; automatic resolution is disabled" >&2
+  exit 33
+fi
+if [[ "\$*" == "exec -- tuist install --force-resolved-versions" && ! -f "$MISE_FAIL_ONCE_MARKER" ]]; then
   touch "$MISE_FAIL_ONCE_MARKER"
   echo "error: Failed to find credentials for 'https://github.com' in keychain: status -128" >&2
   exit 1
@@ -145,7 +152,7 @@ cat >"$SPEC_DIR/verification-strategy.json" <<'EOF'
 EOF
 
 bash "$REPO_ROOT/scripts/ios-prepare.sh" "$KEY" >"$WORKDIR/prepare.stdout"
-if [[ "$(grep -c 'exec -- tuist install|LOADED_TUIST_ENV=1' "$MISE_LOG")" -ne 2 ]]; then
+if [[ "$(grep -c '^exec -- tuist install --force-resolved-versions|LOADED_TUIST_ENV=1$' "$MISE_LOG")" -ne 2 ]]; then
   echo "tuist install should retry once after headless keychain failure" >&2
   cat "$MISE_LOG" >&2
   exit 1
@@ -166,6 +173,49 @@ if [[ "$(wc -l <"$MISE_LOG" | tr -d ' ')" != "$mise_line_count" ]]; then
   cat "$MISE_LOG" >&2
   exit 1
 fi
+
+cat >"$TASK_ROOT/tmp/verification/ios/prepare.marker.json" <<'EOF'
+{"policy":"reuse_if_available","head":"abc123"}
+EOF
+bash "$REPO_ROOT/scripts/ios-prepare.sh" "$KEY" >"$WORKDIR/prepare-unlocked-marker.stdout"
+grep -q 'IOS PREPARE SUCCEEDED' "$WORKDIR/prepare-unlocked-marker.stdout"
+if [[ "$(wc -l <"$MISE_LOG" | tr -d ' ')" -le "$mise_line_count" ]]; then
+  echo "prepare should refresh a same-head marker created without strict dependency installation" >&2
+  exit 1
+fi
+mise_line_count="$(wc -l <"$MISE_LOG" | tr -d ' ')"
+
+for lockfile_state in missing stale; do
+  rm -f "$TASK_ROOT/tmp/verification/ios/prepare.marker.json"
+  : >"$MISE_LOG"
+  expected_installs=1
+  if [[ "$lockfile_state" == "missing" ]]; then
+    rm -f "$REPO_DIR/Tuist/Package.resolved"
+    expected_installs=0
+  else
+    printf '{"pins":[],"version":3}\n' >"$REPO_DIR/Tuist/Package.resolved"
+  fi
+  if MOCK_TUIST_LOCKFILE_STATE="$lockfile_state" bash "$REPO_ROOT/scripts/ios-prepare.sh" "$KEY" >"$WORKDIR/prepare-$lockfile_state.stdout"; then
+    echo "prepare should fail for a $lockfile_state lockfile" >&2
+    exit 1
+  fi
+  grep -q 'TUIST INSTALL FAILED' "$WORKDIR/prepare-$lockfile_state.stdout"
+  grep -qi "$lockfile_state.*Package.resolved" "$WORKDIR/prepare-$lockfile_state.stdout"
+  if [[ "$(grep -c '^exec -- tuist install' "$MISE_LOG" || true)" -ne "$expected_installs" ]] ||
+     grep -q 'tuist generate' "$MISE_LOG" ||
+     [[ -f "$TASK_ROOT/tmp/verification/ios/prepare.marker.json" ]]; then
+    echo "lockfile failure must stop before generation or a success marker, without fallback" >&2
+    cat "$MISE_LOG" >&2
+    exit 1
+  fi
+  if [[ "$expected_installs" -eq 1 ]]; then
+    grep -q '^exec -- tuist install --force-resolved-versions|LOADED_TUIST_ENV=1$' "$MISE_LOG"
+  fi
+done
+
+: >"$MISE_LOG"
+bash "$REPO_ROOT/scripts/ios-prepare.sh" "$KEY" >"$WORKDIR/prepare-restored-lockfile.stdout"
+mise_line_count="$(wc -l <"$MISE_LOG" | tr -d ' ')"
 
 cat >"$TASK_ROOT/tmp/verification/ios/prepare.marker.json" <<'EOF'
 {"policy":"reuse_if_available","head":"old-head-before-merge"}

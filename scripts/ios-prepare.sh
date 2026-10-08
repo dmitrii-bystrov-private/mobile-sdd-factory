@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/verification_context.sh
 source "$SCRIPT_DIR/lib/verification_context.sh"
+# shellcheck source=scripts/lib/ios_dependencies.sh
+source "$SCRIPT_DIR/lib/ios_dependencies.sh"
 
 KEY="${1:?Usage: ios-prepare.sh <TASK-KEY>}"
 REPO_DIR="$(verification_resolve_repo_dir "$KEY")"
@@ -35,7 +37,7 @@ if ! "$MISE_CMD" install >"$SDD_IOS_VERIFICATION_LOGS_PATH/mise-install.log" 2>&
   exit 1
 fi
 run_tuist_install() {
-  GIT_TERMINAL_PROMPT=0 "$MISE_CMD" exec -- tuist install >"$TUIST_INSTALL_LOG" 2>&1
+  ios_install_locked_dependencies "$REPO_DIR" "$MISE_CMD" >"$TUIST_INSTALL_LOG" 2>&1
 }
 
 if ! run_tuist_install; then
@@ -63,7 +65,7 @@ if ! "$MISE_CMD" exec -- tuist generate --no-open >"$TUIST_LOG" 2>&1; then
 fi
 
 cat >"$PREPARE_MARKER" <<EOF
-{"policy":"$PREPARE_POLICY","head":"$CURRENT_HEAD"}
+{"policy":"$PREPARE_POLICY","head":"$CURRENT_HEAD","dependency_resolution":"locked"}
 EOF
 
 echo "✅ IOS PREPARE SUCCEEDED"

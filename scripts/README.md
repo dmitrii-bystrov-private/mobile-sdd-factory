@@ -74,7 +74,7 @@ bash scripts/snapshot.sh <PARENT-KEY>
 1. Fetches Jira data (parent + subtasks) and renders ADF descriptions/comments to Markdown.
 2. Creates a git worktree at `$SDD_WORKDIR/<KEY>/repo/` on `feature/<KEY>` (or `bugfix/<KEY>` for Bug type). Skips creation if the worktree already exists.
 3. Runs platform bootstrap for new worktrees:
-   - **iOS** (`IOS_DIR`): seeds repo-local `.mise` and Tuist SPM cache (`Tuist/.build`) with APFS copy-on-write when available, then runs `mise trust`, `mise install`, `tuist install`, and `tuist generate`.
+   - **iOS** (`IOS_DIR`): seeds repo-local `.mise` and Tuist SPM cache (`Tuist/.build`) with APFS copy-on-write when available, then runs `mise trust`, `mise install`, `tuist install --force-resolved-versions`, and `tuist generate`.
    - **Android** (`ANDROID_DIR`): seeds `.gradle` with APFS copy-on-write when available, symlinks `local.properties`, then runs `./gradlew clean`.
 4. Transitions the task to **In Progress** when currently in **To Do**. Stories and Bugs use `twg` to fill empty `Dev finish date` with today's date and empty `Story Points` first, then perform the transition. Set `SDD_JIRA_FILL_TRANSITION_FIELDS=0` to skip the field fill.
 5. Writes snapshot artifacts:
@@ -91,6 +91,14 @@ $SDD_WORKDIR/<PARENT-KEY>/
 ```
 
 Safe to re-run — worktree and bootstrap are skipped if the worktree already exists; snapshot files are overwritten with fresh Jira data.
+
+New iOS worktree bootstrap and `ios-prepare.sh` require a valid committed `Tuist/Package.resolved`.
+Missing or incompatible lockfiles stop preparation before generation; there is no unrestricted-resolution fallback.
+The existing headless keychain retry also uses strict installation. Preparation reuse requires both the task HEAD
+and a marker recording locked dependency resolution; older markers are refreshed once.
+For an intentional dependency change, run `./bin/mise exec -- tuist install` in the task repository to refresh
+the lockfile, or `./bin/mise exec -- tuist install --update` to update versions within manifest constraints.
+Review and commit the manifest/lockfile diff before resuming factory verification.
 
 Exit codes: `0` = success, `1` = fatal error, `2` = partial success (some subtask retrievals failed).
 

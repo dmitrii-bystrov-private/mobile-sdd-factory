@@ -511,7 +511,11 @@ verification_ios_prepare_marker_matches_head() {
 
   local marker_head
   marker_head="$(jq -r '.head // ""' "$marker_path" 2>/dev/null || echo "")"
-  [[ -n "$marker_head" && "$marker_head" == "$current_head" ]]
+  [[ -n "$marker_head" && "$marker_head" == "$current_head" ]] || return 1
+
+  local dependency_resolution
+  dependency_resolution="$(jq -r '.dependency_resolution // ""' "$marker_path" 2>/dev/null || echo "")"
+  [[ "$dependency_resolution" == "locked" ]]
 }
 
 verification_ios_scheme() {

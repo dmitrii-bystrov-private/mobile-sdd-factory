@@ -158,6 +158,7 @@ case "\${1:-}" in
         if [[ "\$arg" == "$MOCK_WORKDIR/"*"/repo" ]]; then
           mkdir -p "\$arg/Tuist"
           cp -R "$MOCK_IOS_DIR/bin" "\$arg/bin"
+          cp "$MOCK_IOS_DIR/Tuist/Package.resolved" "\$arg/Tuist/Package.resolved" 2>/dev/null || true
           cp "$MOCK_IOS_DIR/.env.local" "\$arg/.env.local"
           exit 0
         fi
@@ -576,12 +577,17 @@ cp "$FIXTURES/subtask_IOS-102_core.json"   "$MOCK_FIXTURES/IOS-102_core.json"
 cp "$FIXTURES/subtask_IOS-102_comments.json" "$MOCK_FIXTURES/IOS-102_comments.json"
 
 printf 'seed\n' > "$MOCK_IOS_DIR/Tuist/.build/cache/source.txt"
+printf '{"pins":[],"version":3}\n' > "$MOCK_IOS_DIR/Tuist/Package.resolved"
 printf 'TOKEN=fixture\n' > "$MOCK_IOS_DIR/.env.local"
 MISE_LOG="$TMP_ROOT/mise.log"
 cat > "$MOCK_IOS_DIR/bin/mise" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "\$*" >>"$MISE_LOG"
+if [[ "\$*" == "exec -- tuist install --force-resolved-versions" && "\${MOCK_TUIST_LOCKFILE_STATE:-}" == "stale" ]]; then
+  echo "error: \${MOCK_TUIST_LOCKFILE_STATE} Package.resolved; automatic resolution is disabled" >&2
+  exit 33
+fi
 exit 0
 EOF
 chmod +x "$MOCK_IOS_DIR/bin/mise"
@@ -605,7 +611,7 @@ fi
 assert_file_exists "iOS bootstrap: Tuist cache seeded" "$MOCK_WORKDIR/IOS-100/repo/Tuist/.build/cache/source.txt"
 grep -q '^trust$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: mise trust ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: mise trust missing"; (( FAIL++ )) || true; }
 grep -q '^install$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: mise install ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: mise install missing"; (( FAIL++ )) || true; }
-grep -q '^exec -- tuist install$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: tuist install ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: tuist install missing"; (( FAIL++ )) || true; }
+grep -q '^exec -- tuist install --force-resolved-versions$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: locked tuist install ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: locked tuist install missing"; (( FAIL++ )) || true; }
 grep -q '^exec -- tuist generate --no-open$' "$MISE_LOG" && echo "  PASS  iOS bootstrap: tuist generate ran" && (( PASS++ )) || { echo "  FAIL  iOS bootstrap: tuist generate missing"; (( FAIL++ )) || true; }
 if grep -q "worktree add $MOCK_WORKDIR/IOS-100/repo -b feature/IOS-100 origin/master" "$GIT_LOG"; then
   echo "  PASS  iOS bootstrap: new branch starts from origin/master"
@@ -622,6 +628,41 @@ else
   echo "  PASS  iOS bootstrap: no pod install"
   (( PASS++ )) || true
 fi
+
+for lockfile_state in missing stale; do
+  rm -rf "$MOCK_WORKDIR/IOS-100/repo"
+  : >"$MISE_LOG"
+  expected_installs=1
+  if [[ "$lockfile_state" == "missing" ]]; then
+    rm -f "$MOCK_IOS_DIR/Tuist/Package.resolved"
+    expected_installs=0
+  else
+    printf '{"pins":[],"version":3}\n' > "$MOCK_IOS_DIR/Tuist/Package.resolved"
+  fi
+  ACTUAL_EXIT=0
+  PATH="$MOCK_BIN:$PATH" SDD_WORKDIR="$MOCK_WORKDIR" IOS_DIR="$MOCK_IOS_DIR" \
+    MOCK_TUIST_LOCKFILE_STATE="$lockfile_state" \
+    bash "$SNAPSHOT" IOS-100 >"$TMP_ROOT/snapshot-$lockfile_state.stdout" 2>"$STDERR" || ACTUAL_EXIT=$?
+  if [[ "$ACTUAL_EXIT" -eq 1 ]]; then
+    echo "  PASS  iOS bootstrap: $lockfile_state lockfile fails"
+    (( PASS++ )) || true
+  else
+    echo "  FAIL  iOS bootstrap: $lockfile_state lockfile expected exit 1, got $ACTUAL_EXIT"
+    (( FAIL++ )) || true
+  fi
+  assert_stderr_contains "iOS bootstrap: $lockfile_state lockfile error is retained" "[Mm]issing.*Package.resolved\|stale.*Package.resolved" "$STDERR"
+  if [[ "$(grep -c '^exec -- tuist install' "$MISE_LOG" || true)" -eq "$expected_installs" ]] &&
+     ! grep -q 'tuist generate' "$MISE_LOG"; then
+    echo "  PASS  iOS bootstrap: $lockfile_state lockfile stops before generation without fallback"
+    (( PASS++ )) || true
+  else
+    echo "  FAIL  iOS bootstrap: $lockfile_state lockfile must stop before generation without fallback"
+    (( FAIL++ )) || true
+  fi
+  if [[ "$expected_installs" -eq 1 ]]; then
+    assert_file_contains "iOS bootstrap: stale lockfile uses strict installation" '^exec -- tuist install --force-resolved-versions$' "$MISE_LOG"
+  fi
+done
 
 rm -f "$STDERR"
 rm -rf "$TMP_ROOT"
